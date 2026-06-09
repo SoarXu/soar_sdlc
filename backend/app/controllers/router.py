@@ -12,12 +12,14 @@ from app.controllers import (
     task_controller,
     test_case_controller,
     test_run_controller,
+    user_controller,
 )
 
 
 api_router = APIRouter()
 api_router.include_router(health_controller.router, tags=["health"])
 api_router.include_router(auth_controller.router, prefix="/auth", tags=["auth"])
+api_router.include_router(user_controller.router, prefix="/users", tags=["users"])
 api_router.include_router(dashboard_controller.router, prefix="/dashboard", tags=["dashboard"])
 api_router.include_router(program_controller.router, prefix="/programs", tags=["programs"])
 api_router.include_router(project_controller.router, prefix="/projects", tags=["projects"])

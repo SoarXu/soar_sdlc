@@ -24,6 +24,10 @@ export function updateTestRunCase(id, payload) {
   return http.patch(`/test-run-cases/${id}`, payload)
 }
 
+export function fetchTestRunCases() {
+  return http.get('/test-run-cases')
+}
+
 export function createBugFromTestRunCase(id, payload) {
   return http.post(`/test-run-cases/${id}/bugs`, payload)
 }

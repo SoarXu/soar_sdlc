@@ -6,6 +6,7 @@ from app.services.bug_service import create_bug_from_test_run_case
 from app.services.test_run_service import (
     create_test_run,
     delete_test_run,
+    list_test_run_cases,
     list_test_runs,
     select_test_cases,
     update_test_run,
@@ -54,6 +55,11 @@ def select_cases(test_run_id: int, payload: SelectTestCasesRequest, db: Session 
 @router.patch("/test-run-cases/{run_case_id}", response_model=TestRunCaseRead)
 def patch_test_run_case(run_case_id: int, payload: TestRunCaseUpdate, db: Session = Depends(get_db)):
     return update_test_run_case(db, run_case_id, payload)
+
+
+@router.get("/test-run-cases", response_model=list[TestRunCaseRead])
+def get_test_run_cases(db: Session = Depends(get_db)):
+    return list_test_run_cases(db)
 
 
 @router.post("/test-run-cases/{run_case_id}/bugs", response_model=BugRead)

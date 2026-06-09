@@ -3,7 +3,7 @@
     <div class="page-head">
       <div>
         <h1>迭代</h1>
-        <p>维护迭代计划、周期、负责人和目标，数据通过后端接口落库。</p>
+        <p>维护迭代计划、周期、负责人和目标，关联项目和负责人以名称选择。</p>
       </div>
       <el-button type="primary" @click="openCreate">新增迭代</el-button>
     </div>
@@ -12,8 +12,8 @@
       <el-table v-loading="loading" :data="iterations" stripe>
         <el-table-column prop="id" label="ID" width="80" />
         <el-table-column prop="name" label="迭代名称" min-width="180" />
-        <el-table-column prop="project_id" label="项目 ID" width="110" />
-        <el-table-column prop="owner_id" label="负责人 ID" width="120" />
+        <el-table-column label="项目" width="180"><template #default="{ row }">{{ labelById(projects, row.project_id) }}</template></el-table-column>
+        <el-table-column label="负责人" width="150"><template #default="{ row }">{{ userLabel(users, row.owner_id) }}</template></el-table-column>
         <el-table-column prop="start_date" label="开始日期" width="130" />
         <el-table-column prop="end_date" label="结束日期" width="130" />
         <el-table-column prop="status" label="状态" width="120" />
@@ -32,8 +32,16 @@
       <el-form label-position="top">
         <el-form-item label="迭代名称" required><el-input v-model="form.name" /></el-form-item>
         <div class="form-grid">
-          <el-form-item label="项目 ID" required><el-input-number v-model="form.project_id" :min="1" /></el-form-item>
-          <el-form-item label="负责人 ID"><el-input-number v-model="form.owner_id" :min="1" /></el-form-item>
+          <el-form-item label="项目" required>
+            <el-select v-model="form.project_id" filterable placeholder="请选择项目">
+              <el-option v-for="project in projects" :key="project.id" :label="project.name" :value="project.id" />
+            </el-select>
+          </el-form-item>
+          <el-form-item label="负责人">
+            <el-select v-model="form.owner_id" clearable filterable placeholder="请选择负责人">
+              <el-option v-for="user in users" :key="user.id" :label="user.full_name" :value="user.id" />
+            </el-select>
+          </el-form-item>
           <el-form-item label="开始日期"><el-date-picker v-model="form.start_date" value-format="YYYY-MM-DD" type="date" /></el-form-item>
           <el-form-item label="结束日期"><el-date-picker v-model="form.end_date" value-format="YYYY-MM-DD" type="date" /></el-form-item>
         </div>
@@ -58,45 +66,31 @@
 <script setup>
 import { onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
-
 import { createIteration, deleteIteration, fetchIterations, updateIteration } from '../api/iterations'
+import { fetchProjects } from '../api/projects'
+import { fetchUsers } from '../api/users'
+import { labelById, userLabel } from '../utils/referenceLabels'
 
 const loading = ref(false)
 const saving = ref(false)
 const dialogVisible = ref(false)
 const editingId = ref(null)
 const iterations = ref([])
+const projects = ref([])
+const users = ref([])
 const form = reactive({ project_id: null, name: '', owner_id: null, start_date: null, end_date: null, status: 'planning', goal: '' })
 
-function resetForm() {
-  Object.assign(form, { project_id: null, name: '', owner_id: null, start_date: null, end_date: null, status: 'planning', goal: '' })
-}
+function resetForm() { Object.assign(form, { project_id: null, name: '', owner_id: null, start_date: null, end_date: null, status: 'planning', goal: '' }) }
+function openCreate() { editingId.value = null; resetForm(); dialogVisible.value = true }
+function openEdit(row) { editingId.value = row.id; Object.assign(form, { ...row, goal: row.goal || '' }); dialogVisible.value = true }
 
-function openCreate() {
-  editingId.value = null
-  resetForm()
-  dialogVisible.value = true
-}
-
-function openEdit(row) {
-  editingId.value = row.id
-  Object.assign(form, {
-    project_id: row.project_id,
-    name: row.name,
-    owner_id: row.owner_id,
-    start_date: row.start_date,
-    end_date: row.end_date,
-    status: row.status,
-    goal: row.goal || ''
-  })
-  dialogVisible.value = true
-}
-
-async function loadIterations() {
+async function loadData() {
   loading.value = true
   try {
-    const { data } = await fetchIterations()
-    iterations.value = data
+    const [iterationRes, projectRes, userRes] = await Promise.all([fetchIterations(), fetchProjects(), fetchUsers()])
+    iterations.value = iterationRes.data
+    projects.value = projectRes.data
+    users.value = userRes.data
   } catch {
     ElMessage.error('迭代列表加载失败')
   } finally {
@@ -105,26 +99,19 @@ async function loadIterations() {
 }
 
 async function submitIteration() {
-  if (!form.project_id || !form.name.trim()) {
-    ElMessage.warning('请填写项目 ID 和迭代名称')
-    return
-  }
+  if (!form.project_id || !form.name.trim()) return ElMessage.warning('请选择项目并填写迭代名称')
   saving.value = true
   try {
     const payload = { ...form, owner_id: form.owner_id || null }
     if (editingId.value) await updateIteration(editingId.value, payload)
     else await createIteration(payload)
     dialogVisible.value = false
-    await loadIterations()
+    await loadData()
   } finally {
     saving.value = false
   }
 }
 
-async function removeIteration(id) {
-  await deleteIteration(id)
-  await loadIterations()
-}
-
-onMounted(loadIterations)
+async function removeIteration(id) { await deleteIteration(id); await loadData() }
+onMounted(loadData)
 </script>

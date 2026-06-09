@@ -66,6 +66,10 @@ def test_test_run_selects_cases_and_records_execution_result(client: TestClient)
     assert executed.status_code == 200
     assert executed.json()["result"] == "failed"
 
+    listed = client.get("/api/v1/test-run-cases")
+    assert listed.status_code == 200
+    assert any(item["id"] == run_case["id"] for item in listed.json())
+
 
 def test_failed_test_result_can_create_bug_with_requirement_owner(client: TestClient):
     project_id = _create_project(client)

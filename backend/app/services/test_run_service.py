@@ -67,6 +67,10 @@ def update_test_run_case(db: Session, run_case_id: int, payload: TestRunCaseUpda
     return run_case
 
 
+def list_test_run_cases(db: Session) -> list[TestRunCase]:
+    return db.query(TestRunCase).order_by(TestRunCase.id.desc()).all()
+
+
 def _get_active_test_run(db: Session, test_run_id: int) -> TestRun:
     test_run = db.query(TestRun).filter(TestRun.id == test_run_id, TestRun.delete_time.is_(None)).first()
     if not test_run:

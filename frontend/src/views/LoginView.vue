@@ -3,7 +3,7 @@
     <el-card class="login-card">
       <h1>智享生物</h1>
       <p class="login-subtitle">intellective bio</p>
-      <p>使用演示账号登录：admin / admin123</p>
+      <p class="login-hint">使用初始化账号登录：admin / admin123</p>
       <el-form label-position="top" @submit.prevent="handleLogin">
         <el-form-item label="账号">
           <el-input v-model="form.username" />
@@ -39,7 +39,7 @@ async function handleLogin() {
     ElMessage.success('登录成功')
     router.push('/')
   } catch (error) {
-    ElMessage.error('登录失败，请确认后端服务已启动')
+    ElMessage.error('登录失败，请确认账号密码和后端服务状态')
   } finally {
     loading.value = false
   }

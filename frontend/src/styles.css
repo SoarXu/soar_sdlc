@@ -136,7 +136,7 @@ body {
 
 .metrics {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 10px;
   margin-bottom: 12px;
 }
@@ -171,4 +171,15 @@ body {
   margin-top: -8px;
   color: #687789;
   text-transform: lowercase;
+}
+
+.login-hint {
+  color: #687789;
+  font-size: 13px;
+}
+
+.form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0 12px;
 }

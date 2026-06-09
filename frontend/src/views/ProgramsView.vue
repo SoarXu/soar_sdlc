@@ -37,7 +37,7 @@
           <template #default="{ row }">{{ row.is_long_term ? '长期' : row.planned_end_date }}</template>
         </el-table-column>
         <el-table-column label="状态" min-width="90">
-          <template #default="{ row }">{{ row.nodeType === 'program' ? statusLabel(row.status) : row.status }}</template>
+          <template #default="{ row }">{{ statusLabel(row) }}</template>
         </el-table-column>
         <el-table-column label="操作" width="230" fixed="right">
           <template #default="{ row }">
@@ -110,6 +110,12 @@ const editingId = ref(null)
 const programTree = ref([])
 const statusOptions = ref([])
 const users = ref([])
+const projectStatusOptions = [
+  { label: '规划中', value: 'planning' },
+  { label: '进行中', value: 'active' },
+  { label: '已暂停', value: 'paused' },
+  { label: '已关闭', value: 'closed' }
+]
 const form = reactive({
   parent_id: null,
   name: '',
@@ -128,8 +134,9 @@ const dialogTitle = computed(() => {
 
 const treeRows = computed(() => programTree.value.map(toTreeRow))
 
-function statusLabel(value) {
-  return statusOptions.value.find((option) => option.value === value)?.label || value
+function statusLabel(row) {
+  const options = row.nodeType === 'program' ? statusOptions.value : projectStatusOptions
+  return options.find((option) => option.value === row.status)?.label || row.status || '-'
 }
 
 function toTreeRow(node) {

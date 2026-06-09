@@ -20,7 +20,9 @@
         </el-table-column>
         <el-table-column prop="start_date" label="开始日期" width="130" />
         <el-table-column prop="end_date" label="结束日期" width="130" />
-        <el-table-column prop="status" label="状态" width="110" />
+        <el-table-column label="状态" width="110">
+          <template #default="{ row }">{{ projectStatusLabel(row.status) }}</template>
+        </el-table-column>
         <el-table-column label="操作" width="160" fixed="right">
           <template #default="{ row }">
             <el-button link type="primary" @click="openEdit(row)">编辑</el-button>
@@ -51,8 +53,7 @@
         </div>
         <el-form-item label="状态">
           <el-select v-model="form.status">
-            <el-option label="启用" value="active" />
-            <el-option label="关闭" value="closed" />
+            <el-option v-for="option in projectStatusOptions" :key="option.value" :label="option.label" :value="option.value" />
           </el-select>
         </el-form-item>
         <el-form-item label="描述"><el-input v-model="form.description" type="textarea" :rows="3" /></el-form-item>
@@ -82,6 +83,16 @@ const projects = ref([])
 const programs = ref([])
 const users = ref([])
 const form = reactive({ program_id: null, name: '', owner_id: null, start_date: null, end_date: null, status: 'active', description: '' })
+const projectStatusOptions = [
+  { label: '规划中', value: 'planning' },
+  { label: '进行中', value: 'active' },
+  { label: '已暂停', value: 'paused' },
+  { label: '已关闭', value: 'closed' }
+]
+
+function projectStatusLabel(value) {
+  return projectStatusOptions.find((option) => option.value === value)?.label || value || '-'
+}
 
 function resetForm() {
   Object.assign(form, { program_id: null, name: '', owner_id: null, start_date: null, end_date: null, status: 'active', description: '' })

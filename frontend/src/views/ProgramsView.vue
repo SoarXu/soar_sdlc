@@ -15,25 +15,26 @@
         row-key="treeKey"
         default-expand-all
         stripe
+        show-overflow-tooltip
         :tree-props="{ children: 'children' }"
       >
-        <el-table-column prop="name" label="名称" min-width="240">
+        <el-table-column prop="name" label="名称" min-width="180">
           <template #default="{ row }">
             <span :class="{ 'project-row-name': row.nodeType === 'project' }">{{ row.name }}</span>
           </template>
         </el-table-column>
-        <el-table-column label="类型" width="110">
+        <el-table-column label="类型" min-width="90">
           <template #default="{ row }">
             <el-tag v-if="row.nodeType === 'program'" type="primary">项目集</el-tag>
             <el-tag v-else type="success">项目</el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="负责人" width="150">
+        <el-table-column label="负责人" min-width="120">
           <template #default="{ row }">{{ userLabel(users, row.owner_id) }}</template>
         </el-table-column>
-        <el-table-column prop="department" label="部门" width="140" />
-        <el-table-column prop="status" label="状态" width="110" />
-        <el-table-column label="操作" width="230" fixed="right">
+        <el-table-column prop="department" label="部门" min-width="110" />
+        <el-table-column prop="status" label="状态" min-width="90" />
+        <el-table-column label="操作" min-width="200">
           <template #default="{ row }">
             <template v-if="row.nodeType === 'program'">
               <el-button link type="primary" @click="openEdit(row)">编辑</el-button>

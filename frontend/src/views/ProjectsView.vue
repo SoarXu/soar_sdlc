@@ -11,7 +11,11 @@
     <el-card shadow="never">
       <el-table v-loading="loading" :data="projects" stripe>
         <el-table-column prop="id" label="ID" width="90" />
-        <el-table-column prop="name" label="项目名称" min-width="180" />
+        <el-table-column label="项目名称" min-width="180">
+          <template #default="{ row }">
+            <router-link class="table-link" :to="`/projects/${row.id}`">{{ row.name }}</router-link>
+          </template>
+        </el-table-column>
         <el-table-column label="所属项目集" width="180">
           <template #default="{ row }">{{ labelById(programs, row.program_id) }}</template>
         </el-table-column>

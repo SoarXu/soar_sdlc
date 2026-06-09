@@ -72,6 +72,11 @@ def test_project_crud_uses_prd_fields(client: TestClient):
     assert created.json()["name"] == name
     assert "owner_id" in created.json()
 
+    detail = client.get(f"/api/v1/projects/{project_id}")
+    assert detail.status_code == 200
+    assert detail.json()["id"] == project_id
+    assert detail.json()["name"] == name
+
     updated = client.patch(f"/api/v1/projects/{project_id}", json={"description": "已更新"})
     assert updated.status_code == 200
     assert updated.json()["description"] == "已更新"

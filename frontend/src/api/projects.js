@@ -4,6 +4,10 @@ export function fetchProjects() {
   return http.get('/projects')
 }
 
+export function fetchProject(id) {
+  return http.get(`/projects/${id}`)
+}
+
 export function createProject(payload) {
   return http.post('/projects', payload)
 }

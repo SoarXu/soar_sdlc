@@ -11,6 +11,10 @@ def list_projects(db: Session) -> list[Project]:
     return db.query(Project).filter(Project.delete_time.is_(None)).order_by(Project.id.desc()).all()
 
 
+def get_project(db: Session, project_id: int) -> Project:
+    return _get_active_project(db, project_id)
+
+
 def create_project(db: Session, payload: ProjectCreate) -> Project:
     project = Project(**payload.model_dump())
     db.add(project)

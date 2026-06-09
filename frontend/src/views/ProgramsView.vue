@@ -28,9 +28,6 @@
             <el-tag v-else type="success">项目</el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="上级项目集" width="180">
-          <template #default="{ row }">{{ row.nodeType === 'program' ? labelById(programs, row.parent_id) : labelById(programs, row.program_id) }}</template>
-        </el-table-column>
         <el-table-column label="负责人" width="150">
           <template #default="{ row }">{{ userLabel(users, row.owner_id) }}</template>
         </el-table-column>
@@ -55,11 +52,6 @@
 
     <el-dialog v-model="dialogVisible" :title="dialogTitle" width="520px">
       <el-form label-position="top">
-        <el-form-item label="上级项目集">
-          <el-select v-model="form.parent_id" clearable filterable placeholder="无上级项目集">
-            <el-option v-for="program in programs" :key="program.id" :label="program.name" :value="program.id" />
-          </el-select>
-        </el-form-item>
         <el-form-item label="项目集名称" required><el-input v-model="form.name" /></el-form-item>
         <el-form-item label="负责人">
           <el-select v-model="form.owner_id" clearable filterable placeholder="请选择负责人">
@@ -87,15 +79,14 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 
-import { createProgram, deleteProgram, fetchProgramTree, fetchPrograms, updateProgram } from '../api/programs'
+import { createProgram, deleteProgram, fetchProgramTree, updateProgram } from '../api/programs'
 import { fetchUsers } from '../api/users'
-import { labelById, userLabel } from '../utils/referenceLabels'
+import { userLabel } from '../utils/referenceLabels'
 
 const loading = ref(false)
 const saving = ref(false)
 const dialogVisible = ref(false)
 const editingId = ref(null)
-const programs = ref([])
 const programTree = ref([])
 const users = ref([])
 const form = reactive({ parent_id: null, name: '', owner_id: null, department: '', status: 'active', description: '' })
@@ -151,9 +142,8 @@ function openEdit(row) {
 async function loadData() {
   loading.value = true
   try {
-    const [treeRes, programRes, userRes] = await Promise.all([fetchProgramTree(), fetchPrograms(), fetchUsers()])
+    const [treeRes, userRes] = await Promise.all([fetchProgramTree(), fetchUsers()])
     programTree.value = treeRes.data
-    programs.value = programRes.data
     users.value = userRes.data
   } catch {
     ElMessage.error('项目集树加载失败')

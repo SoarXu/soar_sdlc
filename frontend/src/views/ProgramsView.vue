@@ -11,7 +11,7 @@
     <el-card shadow="never">
       <el-table
         v-loading="loading"
-        :data="treeRows"
+        :data="pagedTreeRows"
         row-key="treeKey"
         default-expand-all
         stripe
@@ -54,6 +54,15 @@
           </template>
         </el-table-column>
       </el-table>
+      <div class="table-pagination">
+        <el-pagination
+          v-model:current-page="treePage"
+          v-model:page-size="treePageSize"
+          :page-sizes="treePageSizes"
+          :total="treeTotal"
+          layout="total, sizes, prev, pager, next, jumper"
+        />
+      </div>
     </el-card>
 
     <el-dialog v-model="dialogVisible" :title="dialogTitle" width="520px">
@@ -102,6 +111,7 @@ import { ElMessage } from 'element-plus'
 import { createProgram, deleteProgram, fetchProgramStatusOptions, fetchProgramTree, updateProgram } from '../api/programs'
 import { fetchUsers } from '../api/users'
 import { userLabel } from '../utils/referenceLabels'
+import { usePagination } from '../utils/usePagination'
 
 const loading = ref(false)
 const saving = ref(false)
@@ -133,6 +143,13 @@ const dialogTitle = computed(() => {
 })
 
 const treeRows = computed(() => programTree.value.map(toTreeRow))
+const {
+  page: treePage,
+  pageSize: treePageSize,
+  pageSizes: treePageSizes,
+  total: treeTotal,
+  pagedItems: pagedTreeRows
+} = usePagination(treeRows)
 
 function statusLabel(row) {
   const options = row.nodeType === 'program' ? statusOptions.value : projectStatusOptions

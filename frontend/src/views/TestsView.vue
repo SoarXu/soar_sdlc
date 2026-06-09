@@ -11,7 +11,7 @@
     <el-tabs v-model="activeTab">
       <el-tab-pane label="用例库" name="cases">
         <el-card shadow="never">
-          <el-table v-loading="loading" :data="testCases" stripe>
+          <el-table v-loading="loading" :data="pagedTestCases" stripe>
             <el-table-column prop="id" label="ID" width="80" />
             <el-table-column prop="title" label="用例标题" min-width="220" />
             <el-table-column label="项目" width="170"><template #default="{ row }">{{ labelById(projects, row.project_id) }}</template></el-table-column>
@@ -23,11 +23,20 @@
               <template #default="{ row }"><el-button link type="primary" @click="openCaseEdit(row)">编辑</el-button><el-popconfirm title="确认删除该用例？" @confirm="removeCase(row.id)"><template #reference><el-button link type="danger">删除</el-button></template></el-popconfirm></template>
             </el-table-column>
           </el-table>
+          <div class="table-pagination">
+            <el-pagination
+              v-model:current-page="casePage"
+              v-model:page-size="casePageSize"
+              :page-sizes="casePageSizes"
+              :total="caseTotal"
+              layout="total, sizes, prev, pager, next, jumper"
+            />
+          </div>
         </el-card>
       </el-tab-pane>
       <el-tab-pane label="测试单" name="runs">
         <el-card shadow="never">
-          <el-table v-loading="loading" :data="testRuns" stripe>
+          <el-table v-loading="loading" :data="pagedTestRuns" stripe>
             <el-table-column prop="id" label="ID" width="80" />
             <el-table-column prop="name" label="测试单名称" min-width="220" />
             <el-table-column label="项目" width="170"><template #default="{ row }">{{ labelById(projects, row.project_id) }}</template></el-table-column>
@@ -38,6 +47,15 @@
               <template #default="{ row }"><el-button link type="primary" @click="openRunEdit(row)">编辑</el-button><el-button link type="success" @click="openSelectCases(row)">选用例</el-button><el-button link type="warning" @click="openExecution">记录结果</el-button><el-popconfirm title="确认删除该测试单？" @confirm="removeRun(row.id)"><template #reference><el-button link type="danger">删除</el-button></template></el-popconfirm></template>
             </el-table-column>
           </el-table>
+          <div class="table-pagination">
+            <el-pagination
+              v-model:current-page="runPage"
+              v-model:page-size="runPageSize"
+              :page-sizes="runPageSizes"
+              :total="runTotal"
+              layout="total, sizes, prev, pager, next, jumper"
+            />
+          </div>
         </el-card>
       </el-tab-pane>
     </el-tabs>
@@ -103,9 +121,24 @@ import { createTestCase, deleteTestCase, fetchTestCases, updateTestCase } from '
 import { createBugFromTestRunCase, createTestRun, deleteTestRun, fetchTestRunCases, fetchTestRuns, selectTestCases, updateTestRun, updateTestRunCase } from '../api/testRuns'
 import { fetchUsers } from '../api/users'
 import { labelById, userLabel } from '../utils/referenceLabels'
+import { usePagination } from '../utils/usePagination'
 
 const activeTab = ref('cases'), saving = ref(false), loading = ref(false)
 const testCases = ref([]), testRuns = ref([]), testRunCases = ref([]), projects = ref([]), requirements = ref([]), iterations = ref([]), users = ref([])
+const {
+  page: casePage,
+  pageSize: casePageSize,
+  pageSizes: casePageSizes,
+  total: caseTotal,
+  pagedItems: pagedTestCases
+} = usePagination(testCases)
+const {
+  page: runPage,
+  pageSize: runPageSize,
+  pageSizes: runPageSizes,
+  total: runTotal,
+  pagedItems: pagedTestRuns
+} = usePagination(testRuns)
 const caseDialogVisible = ref(false), runDialogVisible = ref(false), selectDialogVisible = ref(false), executionDialogVisible = ref(false)
 const editingCaseId = ref(null), editingRunId = ref(null), selectedRunId = ref(null)
 const caseForm = reactive({ project_id: null, requirement_id: null, title: '', case_type: '', priority: 'medium', default_tester_id: null, precondition: '', expected_result: '', status: 'active' })

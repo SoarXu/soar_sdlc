@@ -9,7 +9,7 @@
     </div>
 
     <el-card shadow="never">
-      <el-table v-loading="loading" :data="bugs" stripe>
+      <el-table v-loading="loading" :data="pagedBugs" stripe>
         <el-table-column prop="id" label="ID" width="80" />
         <el-table-column prop="title" label="Bug 标题" min-width="220" />
         <el-table-column label="项目" width="170"><template #default="{ row }">{{ labelById(projects, row.project_id) }}</template></el-table-column>
@@ -22,6 +22,15 @@
           <template #default="{ row }"><el-button link type="primary" @click="openEdit(row)">编辑</el-button><el-popconfirm title="确认删除该 Bug？" @confirm="removeBug(row.id)"><template #reference><el-button link type="danger">删除</el-button></template></el-popconfirm></template>
         </el-table-column>
       </el-table>
+      <div class="table-pagination">
+        <el-pagination
+          v-model:current-page="bugPage"
+          v-model:page-size="bugPageSize"
+          :page-sizes="bugPageSizes"
+          :total="bugTotal"
+          layout="total, sizes, prev, pager, next, jumper"
+        />
+      </div>
     </el-card>
 
     <el-dialog v-model="dialogVisible" :title="editingId ? '编辑 Bug' : '新增 Bug'" width="700px">
@@ -61,9 +70,17 @@ import { fetchTestCases } from '../api/testCases'
 import { fetchTestRuns } from '../api/testRuns'
 import { fetchUsers } from '../api/users'
 import { labelById, userLabel } from '../utils/referenceLabels'
+import { usePagination } from '../utils/usePagination'
 
 const loading = ref(false), saving = ref(false), dialogVisible = ref(false), editingId = ref(null)
 const bugs = ref([]), projects = ref([]), requirements = ref([]), tasks = ref([]), testCases = ref([]), testRuns = ref([]), users = ref([])
+const {
+  page: bugPage,
+  pageSize: bugPageSize,
+  pageSizes: bugPageSizes,
+  total: bugTotal,
+  pagedItems: pagedBugs
+} = usePagination(bugs)
 const form = reactive({ project_id: null, requirement_id: null, task_id: null, test_case_id: null, test_run_id: null, title: '', severity: 'medium', priority: 'medium', owner_id: null, reporter_id: null, reproduce_steps: '', expected_result: '', actual_result: '', status: 'open' })
 
 function resetForm() { Object.assign(form, { project_id: null, requirement_id: null, task_id: null, test_case_id: null, test_run_id: null, title: '', severity: 'medium', priority: 'medium', owner_id: null, reporter_id: null, reproduce_steps: '', expected_result: '', actual_result: '', status: 'open' }) }

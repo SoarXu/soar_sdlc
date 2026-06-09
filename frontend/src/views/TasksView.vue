@@ -9,7 +9,7 @@
     </div>
 
     <el-card shadow="never">
-      <el-table v-loading="loading" :data="tasks" stripe>
+      <el-table v-loading="loading" :data="pagedTasks" stripe>
         <el-table-column prop="id" label="ID" width="80" />
         <el-table-column prop="title" label="任务标题" min-width="220" />
         <el-table-column label="项目" width="180"><template #default="{ row }">{{ labelById(projects, row.project_id) }}</template></el-table-column>
@@ -27,6 +27,15 @@
           </template>
         </el-table-column>
       </el-table>
+      <div class="table-pagination">
+        <el-pagination
+          v-model:current-page="taskPage"
+          v-model:page-size="taskPageSize"
+          :page-sizes="taskPageSizes"
+          :total="taskTotal"
+          layout="total, sizes, prev, pager, next, jumper"
+        />
+      </div>
     </el-card>
 
     <el-dialog v-model="dialogVisible" :title="editingId ? '编辑任务' : '新增任务'" width="620px">
@@ -72,6 +81,7 @@ import { fetchRequirements } from '../api/requirements'
 import { createTask, deleteTask, fetchTasks, updateTask } from '../api/tasks'
 import { fetchUsers } from '../api/users'
 import { labelById, userLabel } from '../utils/referenceLabels'
+import { usePagination } from '../utils/usePagination'
 
 const loading = ref(false)
 const saving = ref(false)
@@ -81,6 +91,13 @@ const tasks = ref([])
 const projects = ref([])
 const requirements = ref([])
 const users = ref([])
+const {
+  page: taskPage,
+  pageSize: taskPageSize,
+  pageSizes: taskPageSizes,
+  total: taskTotal,
+  pagedItems: pagedTasks
+} = usePagination(tasks)
 const form = reactive({ project_id: null, requirement_id: null, title: '', task_type: '', priority: 'medium', owner_id: null, estimated_hours: null, actual_hours: null, due_date: null, status: 'todo', description: '' })
 
 function resetForm() { Object.assign(form, { project_id: null, requirement_id: null, title: '', task_type: '', priority: 'medium', owner_id: null, estimated_hours: null, actual_hours: null, due_date: null, status: 'todo', description: '' }) }

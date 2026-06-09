@@ -9,7 +9,7 @@
     </div>
 
     <el-card shadow="never">
-      <el-table v-loading="loading" :data="requirements" stripe>
+      <el-table v-loading="loading" :data="pagedRequirements" stripe>
         <el-table-column prop="id" label="ID" width="80" />
         <el-table-column prop="title" label="需求标题" min-width="220" />
         <el-table-column label="项目" width="180"><template #default="{ row }">{{ labelById(projects, row.project_id) }}</template></el-table-column>
@@ -28,6 +28,15 @@
           </template>
         </el-table-column>
       </el-table>
+      <div class="table-pagination">
+        <el-pagination
+          v-model:current-page="requirementPage"
+          v-model:page-size="requirementPageSize"
+          :page-sizes="requirementPageSizes"
+          :total="requirementTotal"
+          layout="total, sizes, prev, pager, next, jumper"
+        />
+      </div>
     </el-card>
 
     <el-dialog v-model="dialogVisible" :title="editingId ? '编辑需求' : '新增需求'" width="640px">
@@ -98,6 +107,7 @@ import { fetchProjects } from '../api/projects'
 import { createRequirement, deleteRequirement, fetchRequirements, generateTask, updateRequirement } from '../api/requirements'
 import { fetchUsers } from '../api/users'
 import { labelById, userLabel } from '../utils/referenceLabels'
+import { usePagination } from '../utils/usePagination'
 
 const loading = ref(false)
 const saving = ref(false)
@@ -109,6 +119,13 @@ const requirements = ref([])
 const projects = ref([])
 const iterations = ref([])
 const users = ref([])
+const {
+  page: requirementPage,
+  pageSize: requirementPageSize,
+  pageSizes: requirementPageSizes,
+  total: requirementTotal,
+  pagedItems: pagedRequirements
+} = usePagination(requirements)
 const form = reactive({ project_id: null, iteration_id: null, title: '', requirement_type: '', priority: 'medium', owner_id: null, proposer_id: null, status: 'draft', review_status: 'not_required', description: '', acceptance_criteria: '', source_reviewed: false })
 const generateForm = reactive({ title: '', task_type: '', description: '' })
 

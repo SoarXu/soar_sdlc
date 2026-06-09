@@ -9,7 +9,7 @@
     </div>
 
     <el-card shadow="never">
-      <el-table v-loading="loading" :data="projects" stripe>
+      <el-table v-loading="loading" :data="pagedProjects" stripe>
         <el-table-column prop="id" label="ID" width="90" />
         <el-table-column label="项目名称" min-width="180">
           <template #default="{ row }">
@@ -36,6 +36,15 @@
           </template>
         </el-table-column>
       </el-table>
+      <div class="table-pagination">
+        <el-pagination
+          v-model:current-page="projectPage"
+          v-model:page-size="projectPageSize"
+          :page-sizes="projectPageSizes"
+          :total="projectTotal"
+          layout="total, sizes, prev, pager, next, jumper"
+        />
+      </div>
     </el-card>
 
     <el-dialog v-model="dialogVisible" :title="editingId ? '编辑项目' : '新增项目'" width="560px">
@@ -78,6 +87,7 @@ import { fetchPrograms } from '../api/programs'
 import { createProject, deleteProject, fetchProjects, updateProject } from '../api/projects'
 import { fetchUsers } from '../api/users'
 import { labelById, userLabel } from '../utils/referenceLabels'
+import { usePagination } from '../utils/usePagination'
 
 const loading = ref(false)
 const saving = ref(false)
@@ -86,6 +96,13 @@ const editingId = ref(null)
 const projects = ref([])
 const programs = ref([])
 const users = ref([])
+const {
+  page: projectPage,
+  pageSize: projectPageSize,
+  pageSizes: projectPageSizes,
+  total: projectTotal,
+  pagedItems: pagedProjects
+} = usePagination(projects)
 const form = reactive({ program_id: null, name: '', owner_id: null, start_date: null, end_date: null, status: 'active', description: '' })
 const projectStatusOptions = [
   { label: '规划中', value: 'planning' },

@@ -9,7 +9,7 @@
     </div>
 
     <el-card shadow="never">
-      <el-table v-loading="loading" :data="iterations" stripe>
+      <el-table v-loading="loading" :data="pagedIterations" stripe>
         <el-table-column prop="id" label="ID" width="80" />
         <el-table-column prop="name" label="迭代名称" min-width="180" />
         <el-table-column label="项目" width="180"><template #default="{ row }">{{ labelById(projects, row.project_id) }}</template></el-table-column>
@@ -26,6 +26,15 @@
           </template>
         </el-table-column>
       </el-table>
+      <div class="table-pagination">
+        <el-pagination
+          v-model:current-page="iterationPage"
+          v-model:page-size="iterationPageSize"
+          :page-sizes="iterationPageSizes"
+          :total="iterationTotal"
+          layout="total, sizes, prev, pager, next, jumper"
+        />
+      </div>
     </el-card>
 
     <el-dialog v-model="dialogVisible" :title="editingId ? '编辑迭代' : '新增迭代'" width="560px">
@@ -70,6 +79,7 @@ import { createIteration, deleteIteration, fetchIterations, updateIteration } fr
 import { fetchProjects } from '../api/projects'
 import { fetchUsers } from '../api/users'
 import { labelById, userLabel } from '../utils/referenceLabels'
+import { usePagination } from '../utils/usePagination'
 
 const loading = ref(false)
 const saving = ref(false)
@@ -78,6 +88,13 @@ const editingId = ref(null)
 const iterations = ref([])
 const projects = ref([])
 const users = ref([])
+const {
+  page: iterationPage,
+  pageSize: iterationPageSize,
+  pageSizes: iterationPageSizes,
+  total: iterationTotal,
+  pagedItems: pagedIterations
+} = usePagination(iterations)
 const form = reactive({ project_id: null, name: '', owner_id: null, start_date: null, end_date: null, status: 'planning', goal: '' })
 
 function resetForm() { Object.assign(form, { project_id: null, name: '', owner_id: null, start_date: null, end_date: null, status: 'planning', goal: '' }) }

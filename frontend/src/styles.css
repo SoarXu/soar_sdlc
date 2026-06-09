@@ -261,6 +261,13 @@ body {
   text-decoration: underline;
 }
 
+.table-pagination {
+  display: flex;
+  justify-content: flex-end;
+  padding-top: 12px;
+  overflow-x: auto;
+}
+
 .metrics {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));

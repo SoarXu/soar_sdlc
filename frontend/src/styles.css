@@ -1,0 +1,174 @@
+html,
+body,
+#app {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  min-width: 1280px;
+  overflow: hidden;
+  color: #222f3d;
+  background: #eef2f6;
+  font-family: "Segoe UI", "Microsoft YaHei UI", sans-serif;
+}
+
+.app-shell {
+  display: grid;
+  grid-template-columns: 248px minmax(0, 1fr);
+  grid-template-rows: 48px minmax(0, 1fr);
+  width: 100vw;
+  height: 100vh;
+}
+
+.productbar {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 0 18px 0 16px;
+  color: #f4f8fb;
+  background: linear-gradient(180deg, #0b4f8a, #063b6d);
+}
+
+.product-left,
+.product-right {
+  display: flex;
+  align-items: center;
+}
+
+.product-left,
+.product-right {
+  gap: 14px;
+}
+
+.product-logo {
+  display: inline-grid;
+  place-items: center;
+  width: 34px;
+  height: 32px;
+  border-radius: 4px;
+  color: #ffffff;
+  background: #16845f;
+  font-weight: 900;
+  font-size: 13px;
+}
+
+.product-name {
+  font-size: 16px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.product-subtitle {
+  padding-left: 10px;
+  color: #cfe1ef;
+  font-size: 13px;
+  border-left: 1px solid rgba(255, 255, 255, .2);
+  white-space: nowrap;
+}
+
+.global-search {
+  width: 220px;
+}
+
+.sidebar {
+  grid-column: 1;
+  grid-row: 2;
+  padding: 12px 10px;
+  overflow: auto;
+  background: linear-gradient(180deg, #edf2f7, #dfe7f0);
+  border-right: 1px solid #c9d3df;
+}
+
+.current-project {
+  display: grid;
+  gap: 4px;
+  padding: 12px;
+  margin-bottom: 12px;
+  background: #fff;
+  border: 1px solid #d7dde6;
+  border-radius: 4px;
+}
+
+.current-project span {
+  color: #687789;
+  font-size: 12px;
+}
+
+.side-menu {
+  border-right: 0;
+  background: transparent;
+}
+
+.main {
+  grid-column: 2;
+  grid-row: 2;
+  min-width: 0;
+  padding: 14px 16px 24px;
+  overflow: auto;
+  background: #f3f5f8;
+}
+
+.page-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  min-height: 42px;
+  padding-bottom: 10px;
+  margin-bottom: 12px;
+  border-bottom: 1px solid #d6dde7;
+}
+
+.page-head h1 {
+  margin: 0;
+  font-size: 20px;
+}
+
+.page-head p {
+  margin: 4px 0 0;
+  color: #687789;
+  font-size: 13px;
+}
+
+.metrics {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.metrics .el-card__body {
+  display: grid;
+  gap: 5px;
+  min-height: 76px;
+}
+
+.metrics span {
+  color: #687789;
+  font-size: 13px;
+}
+
+.metrics strong {
+  font-size: 24px;
+}
+
+.login-page {
+  display: grid;
+  place-items: center;
+  min-height: 100%;
+  background: #eef2f6;
+}
+
+.login-card {
+  width: 380px;
+}
+
+.login-subtitle {
+  margin-top: -8px;
+  color: #687789;
+  text-transform: lowercase;
+}

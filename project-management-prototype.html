@@ -1,0 +1,1174 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>轻量项目管理原型</title>
+  <style>
+    :root {
+      --ink: #222f3d;
+      --muted: #687789;
+      --line: #d7dde6;
+      --paper: #eef2f6;
+      --panel: #ffffff;
+      --rail: #edf2f7;
+      --rail-2: #dfe7f0;
+      --header: #0b4f8a;
+      --header-2: #063b6d;
+      --blue: #0b6fb3;
+      --green: #15915f;
+      --orange: #d27a1c;
+      --red: #c64a3b;
+      --yellow: #f0bd2d;
+      --shadow: none;
+    }
+
+    * { box-sizing: border-box; }
+
+    html {
+      width: 100%;
+      height: 100%;
+    }
+
+    body {
+      margin: 0;
+      width: 100%;
+      height: 100%;
+      min-width: 1280px;
+      overflow: hidden;
+      color: var(--ink);
+      background: var(--paper);
+      font-family: "Aptos", "Segoe UI", "Microsoft YaHei UI", sans-serif;
+      letter-spacing: 0;
+    }
+
+    button, input, select {
+      font: inherit;
+    }
+
+    button {
+      border: 0;
+      cursor: pointer;
+    }
+
+    .app {
+      display: grid;
+      grid-template-columns: 248px minmax(0, 1fr) 316px;
+      grid-template-rows: 48px minmax(0, 1fr);
+      width: 100vw;
+      height: 100vh;
+      min-width: 1280px;
+      overflow: hidden;
+    }
+
+    .productbar {
+      grid-column: 1 / -1;
+      grid-row: 1;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 18px;
+      height: 48px;
+      padding: 0 18px 0 16px;
+      color: #f4f8fb;
+      background: linear-gradient(180deg, var(--header), var(--header-2));
+      border-bottom: 1px solid #042f57;
+    }
+
+    .product-left,
+    .product-right {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      min-width: 0;
+    }
+
+    .product-logo {
+      display: inline-grid;
+      place-items: center;
+      width: 32px;
+      height: 32px;
+      border-radius: 4px;
+      color: #08345e;
+      background: #f4c542;
+      font-weight: 900;
+    }
+
+    .product-name {
+      font-size: 16px;
+      font-weight: 700;
+      white-space: nowrap;
+    }
+
+    .product-tabs {
+      display: flex;
+      align-items: center;
+      height: 48px;
+      margin-left: 10px;
+    }
+
+    .product-tabs span {
+      display: inline-flex;
+      align-items: center;
+      height: 48px;
+      padding: 0 12px;
+      color: #cfe1ef;
+      font-size: 13px;
+      border-left: 1px solid rgba(255, 255, 255, .08);
+    }
+
+    .product-tabs .active {
+      color: #fff;
+      background: rgba(255, 255, 255, .12);
+    }
+
+    .global-search {
+      width: 220px;
+      height: 30px;
+      border: 1px solid rgba(255, 255, 255, .28);
+      border-radius: 4px;
+      padding: 0 10px;
+      color: #fff;
+      background: rgba(255, 255, 255, .12);
+      outline: 0;
+    }
+
+    .global-search::placeholder {
+      color: #c8dae8;
+    }
+
+    .top-link {
+      color: #d8e8f3;
+      font-size: 13px;
+      white-space: nowrap;
+    }
+
+    .sidebar {
+      grid-column: 1;
+      grid-row: 2;
+      background: linear-gradient(180deg, var(--rail), var(--rail-2));
+      color: var(--ink);
+      padding: 12px 10px;
+      height: 100%;
+      overflow: auto;
+      border-right: 1px solid #c9d3df;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 8px 8px 12px;
+      background: #fff;
+      border: 1px solid var(--line);
+      border-radius: 4px;
+    }
+
+    .mark {
+      width: 38px;
+      height: 38px;
+      display: grid;
+      place-items: center;
+      color: #fff;
+      font-weight: 900;
+      border-radius: 4px;
+      background: var(--blue);
+    }
+
+    .brand strong {
+      display: block;
+      font-size: 16px;
+    }
+
+    .brand span {
+      display: block;
+      color: var(--muted);
+      font-size: 12px;
+      margin-top: 2px;
+    }
+
+    .nav {
+      display: grid;
+      gap: 2px;
+      margin-top: 12px;
+    }
+
+    .nav button {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      width: 100%;
+      min-height: 36px;
+      padding: 8px 10px;
+      color: #33475b;
+      text-align: left;
+      border-radius: 4px;
+      background: transparent;
+      border: 1px solid transparent;
+    }
+
+    .nav button:hover,
+    .nav button.active {
+      background: #ffffff;
+      color: var(--blue);
+      border-color: #c9d8e7;
+    }
+
+    .nav .ico {
+      width: 22px;
+      height: 22px;
+      display: grid;
+      place-items: center;
+      border-radius: 3px;
+      background: #dfe8f2;
+      font-size: 13px;
+      flex: 0 0 auto;
+    }
+
+    .main {
+      grid-column: 2;
+      grid-row: 2;
+      min-width: 0;
+      padding: 14px 16px 24px;
+      height: 100%;
+      overflow: auto;
+      background: #f3f5f8;
+    }
+
+    .topbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 18px;
+      min-height: 42px;
+      margin-bottom: 12px;
+      padding-bottom: 10px;
+      border-bottom: 1px solid #d6dde7;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: 20px;
+      line-height: 1.2;
+      font-weight: 850;
+    }
+
+    .sub {
+      margin-top: 4px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .toolbar {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+
+    .btn {
+      min-height: 30px;
+      padding: 5px 11px;
+      border-radius: 4px;
+      color: #fff;
+      background: var(--blue);
+      box-shadow: none;
+    }
+
+    .btn.secondary {
+      color: var(--ink);
+      background: #fff;
+      border: 1px solid #b9c5d2;
+      box-shadow: none;
+    }
+
+    .btn.warn { background: var(--orange); }
+    .btn.good { background: var(--green); }
+
+    .grid {
+      display: grid;
+      gap: 10px;
+    }
+
+    .metrics {
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      margin-bottom: 12px;
+    }
+
+    .metric,
+    .panel,
+    .card {
+      background: #ffffff;
+      border: 1px solid var(--line);
+      border-radius: 4px;
+      box-shadow: none;
+    }
+
+    .metric {
+      min-height: 76px;
+      padding: 12px 14px;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .metric::after {
+      display: none;
+    }
+
+    .metric b {
+      display: block;
+      font-size: 24px;
+      margin-top: 5px;
+    }
+
+    .metric span {
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .workspace {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr);
+      gap: 10px;
+    }
+
+    .panel {
+      padding: 12px;
+    }
+
+    .panel-title {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      min-height: 30px;
+      margin-bottom: 10px;
+    }
+
+    .panel-title h2 {
+      margin: 0;
+      font-size: 15px;
+    }
+
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      min-height: 24px;
+      padding: 4px 8px;
+      border-radius: 3px;
+      color: #345;
+      background: #edf1f5;
+      font-size: 12px;
+      white-space: nowrap;
+    }
+
+    .pill.blue { color: #214f9e; background: #e7efff; }
+    .pill.green { color: #087153; background: #e1f6ef; }
+    .pill.orange { color: #97500f; background: #fff0df; }
+    .pill.red { color: #9e2825; background: #ffe7e6; }
+    .pill.dark { color: #fff; background: #315b7e; }
+
+    .project-list {
+      display: grid;
+      gap: 8px;
+    }
+
+    .card {
+      padding: 12px;
+      transition: border-color .16s ease;
+    }
+
+    .card:hover {
+      border-color: #b9c7d8;
+      box-shadow: none;
+    }
+
+    .card-head {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 12px;
+    }
+
+    .card h3 {
+      margin: 0;
+      font-size: 14px;
+    }
+
+    .meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 7px;
+      margin-top: 8px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .progress {
+      height: 8px;
+      overflow: hidden;
+      border-radius: 2px;
+      background: #e6ebf0;
+      margin-top: 10px;
+    }
+
+    .progress i {
+      display: block;
+      height: 100%;
+      width: var(--value);
+      background: var(--blue);
+    }
+
+    .table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+    }
+
+    .table th,
+    .table td {
+      padding: 8px 8px;
+      border-bottom: 1px solid var(--line);
+      text-align: left;
+      vertical-align: middle;
+    }
+
+    .table th {
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 700;
+      background: #f3f6fa;
+    }
+
+    .link-btn {
+      color: var(--blue);
+      background: transparent;
+      padding: 0;
+      font-weight: 700;
+    }
+
+    .kanban {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 10px;
+    }
+
+    .lane {
+      min-height: 300px;
+      padding: 10px;
+      background: #f2f5f8;
+      border: 1px solid #d4dce5;
+      border-radius: 4px;
+    }
+
+    .lane h3 {
+      margin: 0 0 10px;
+      font-size: 14px;
+      color: #3b4855;
+    }
+
+    .task {
+      background: #fff;
+      border: 1px solid #dce3ea;
+      border-left: 4px solid var(--blue);
+      border-radius: 4px;
+      padding: 11px;
+      margin-bottom: 9px;
+    }
+
+    .task strong {
+      display: block;
+      font-size: 13px;
+      margin-bottom: 8px;
+    }
+
+    .rightbar {
+      grid-column: 3;
+      grid-row: 2;
+      background: #f8fafc;
+      border-left: 1px solid #cfd8e3;
+      padding: 14px 12px;
+      height: 100%;
+      position: sticky;
+      top: 0;
+      overflow: auto;
+    }
+
+    .rule {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 10px;
+      align-items: center;
+      padding: 10px 0;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .rule strong {
+      display: block;
+      font-size: 13px;
+    }
+
+    .rule span {
+      display: block;
+      margin-top: 3px;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.35;
+    }
+
+    .switch {
+      width: 42px;
+      height: 24px;
+      padding: 3px;
+      border-radius: 12px;
+      background: #b7c0ca;
+      position: relative;
+    }
+
+    .switch.on {
+      background: var(--green);
+    }
+
+    .switch::after {
+      content: "";
+      display: block;
+      width: 18px;
+      height: 18px;
+      border-radius: 50%;
+      background: #fff;
+      transition: transform .18s ease;
+    }
+
+    .switch.on::after {
+      transform: translateX(18px);
+    }
+
+    .drawer-card {
+      background: #fff;
+      border: 1px solid var(--line);
+      border-radius: 4px;
+      padding: 12px;
+      margin-top: 12px;
+    }
+
+    .field {
+      display: grid;
+      gap: 6px;
+      margin: 10px 0;
+    }
+
+    .field label {
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    .field input,
+    .field select {
+      width: 100%;
+      min-height: 36px;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      padding: 7px 9px;
+      background: #fff;
+      color: var(--ink);
+    }
+
+    .tagbar {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin: 10px 0 12px;
+    }
+
+    .tag {
+      padding: 6px 9px;
+      border: 1px solid #ccd6df;
+      border-radius: 999px;
+      background: #fff;
+      color: #40505d;
+      font-size: 12px;
+    }
+
+    .tag.active {
+      border-color: var(--blue);
+      color: var(--blue);
+      background: #e7efff;
+    }
+
+    .empty {
+      min-height: 280px;
+      display: grid;
+      place-items: center;
+      text-align: center;
+      color: var(--muted);
+      border: 1px dashed #bac5cf;
+      border-radius: 8px;
+      background: rgba(255, 255, 255, .55);
+      padding: 28px;
+    }
+
+    .modal-backdrop {
+      position: fixed;
+      inset: 0;
+      display: none;
+      place-items: center;
+      background: rgba(18, 25, 32, .46);
+      z-index: 20;
+    }
+
+    .modal-backdrop.show {
+      display: grid;
+    }
+
+    .modal {
+      width: min(460px, calc(100vw - 30px));
+      border-radius: 10px;
+      background: #fff;
+      box-shadow: var(--shadow);
+      padding: 20px;
+    }
+
+    .modal h2 {
+      margin: 0 0 8px;
+      font-size: 19px;
+    }
+
+    .modal p {
+      margin: 0 0 14px;
+      color: var(--muted);
+      line-height: 1.55;
+    }
+
+    .modal-actions {
+      display: flex;
+      justify-content: flex-end;
+      gap: 10px;
+      margin-top: 16px;
+    }
+
+    .toast {
+      position: fixed;
+      left: 50%;
+      bottom: 22px;
+      transform: translateX(-50%) translateY(20px);
+      opacity: 0;
+      pointer-events: none;
+      min-width: 260px;
+      max-width: calc(100vw - 28px);
+      padding: 12px 14px;
+      color: #fff;
+      background: #17202a;
+      border-radius: 8px;
+      box-shadow: var(--shadow);
+      transition: opacity .2s ease, transform .2s ease;
+      z-index: 30;
+      text-align: center;
+      font-size: 13px;
+    }
+
+    .toast.show {
+      opacity: 1;
+      transform: translateX(-50%) translateY(0);
+    }
+
+    .table-wrap {
+      overflow-x: auto;
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <header class="productbar">
+      <div class="product-left">
+        <span class="product-logo">禅</span>
+        <span class="product-name">清流项目管理</span>
+        <div class="product-tabs">
+          <span class="active">项目</span>
+          <span>产品</span>
+          <span>测试</span>
+          <span>文档</span>
+          <span>统计</span>
+          <span>组织</span>
+        </div>
+      </div>
+      <div class="product-right">
+        <input class="global-search" value="" placeholder="搜索需求、任务、Bug">
+        <span class="top-link">消息</span>
+        <span class="top-link">帮助</span>
+        <span class="top-link">陈序</span>
+      </div>
+    </header>
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="mark">PM</div>
+        <div>
+          <strong>数字研发平台</strong>
+          <span>当前项目集 / 六月交付</span>
+        </div>
+      </div>
+      <nav class="nav" id="nav"></nav>
+    </aside>
+
+    <main class="main">
+      <div class="topbar">
+        <div>
+          <h1 id="pageTitle">项目集总览</h1>
+          <div class="sub" id="pageSub">用更少层级管理项目、需求、交付与质量。</div>
+        </div>
+        <div class="toolbar" id="toolbar"></div>
+      </div>
+      <section class="grid metrics" id="metrics"></section>
+      <section class="workspace" id="workspace"></section>
+    </main>
+
+    <aside class="rightbar">
+      <div class="panel-title">
+        <h2>智能规则</h2>
+        <span class="pill green">已启用 5</span>
+      </div>
+      <div id="rules"></div>
+      <div class="drawer-card" id="detailCard"></div>
+    </aside>
+  </div>
+
+  <div class="modal-backdrop" id="ownerModal">
+    <div class="modal">
+      <h2>同步项目负责人</h2>
+      <p id="ownerModalText"></p>
+      <label class="pill blue">
+        <input type="checkbox" id="syncOwner" checked>
+        同步需求和任务负责人
+      </label>
+      <div class="modal-actions">
+        <button class="btn secondary" id="cancelOwner">取消</button>
+        <button class="btn good" id="confirmOwner">确认设置</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+
+  <script>
+    const state = {
+      page: "programs",
+      tag: "全部",
+      pendingOwner: null,
+      people: ["陈序", "林舟", "周然", "许念", "唐宁"],
+      programs: [
+        { id: "PG-01", name: "数字研发平台", owner: "陈序", projects: ["PRJ-ERP", "PRJ-QA"], health: 78 },
+        { id: "PG-02", name: "客户成功套件", owner: "林舟", projects: ["PRJ-CS"], health: 63 }
+      ],
+      projects: [
+        { id: "PRJ-ERP", name: "ERP 升级项目", program: "PG-01", owner: "陈序", iteration: "IT-14", demands: 2, tasks: 3, progress: 68 },
+        { id: "PRJ-QA", name: "质量中台", program: "PG-01", owner: "周然", iteration: "IT-08", demands: 1, tasks: 2, progress: 42 },
+        { id: "PRJ-CS", name: "服务台重构", program: "PG-02", owner: "林舟", iteration: "IT-03", demands: 1, tasks: 1, progress: 55 }
+      ],
+      demands: [
+        { id: "REQ-101", title: "项目负责人自动继承", project: "PRJ-ERP", owner: "陈序", status: "进行中", tasks: ["TASK-201"], cases: ["CASE-01"] },
+        { id: "REQ-102", title: "需求完成前置校验", project: "PRJ-ERP", owner: "陈序", status: "待评审", tasks: ["TASK-202"], cases: ["CASE-02"] },
+        { id: "REQ-201", title: "测试标签检索", project: "PRJ-QA", owner: "周然", status: "进行中", tasks: ["TASK-301"], cases: ["CASE-03"] },
+        { id: "REQ-301", title: "Bug 默认分派", project: "PRJ-CS", owner: "林舟", status: "已完成", tasks: ["TASK-401"], cases: [] }
+      ],
+      tasks: [
+        { id: "TASK-201", title: "负责人同步弹窗", demand: "REQ-101", owner: "陈序", status: "处理中" },
+        { id: "TASK-202", title: "需求状态机规则", demand: "REQ-102", owner: "陈序", status: "待处理" },
+        { id: "TASK-301", title: "用例标签筛选", demand: "REQ-201", owner: "周然", status: "处理中" },
+        { id: "TASK-401", title: "Bug 分派策略", demand: "REQ-301", owner: "林舟", status: "已完成" }
+      ],
+      cases: [
+        { id: "CASE-01", title: "项目负责人首次设置", demand: "REQ-101", tester: "许念", tags: ["回归", "权限"], type: "功能" },
+        { id: "CASE-02", title: "需求未完成任务时禁止完成", demand: "REQ-102", tester: "许念", tags: ["工作流", "阻断"], type: "规则" },
+        { id: "CASE-03", title: "标签组合检索测试用例", demand: "REQ-201", tester: "唐宁", tags: ["检索", "高频"], type: "功能" },
+        { id: "CASE-04", title: "Bug 默认负责人继承需求负责人", demand: "", tester: "许念", tags: ["Bug", "分派"], type: "规则" }
+      ],
+      bugs: [
+        { id: "BUG-11", title: "负责人为空时提示不明确", demand: "REQ-101", owner: "陈序", severity: "中", status: "待修复" },
+        { id: "BUG-12", title: "标签筛选后分页未重置", demand: "REQ-201", owner: "周然", severity: "低", status: "处理中" }
+      ],
+      iterations: [
+        { id: "IT-14", name: "六月交付迭代", project: "PRJ-ERP", demands: ["REQ-101", "REQ-102"], status: "进行中" },
+        { id: "IT-08", name: "质量能力补齐", project: "PRJ-QA", demands: ["REQ-201"], status: "进行中" },
+        { id: "IT-03", name: "服务台首轮", project: "PRJ-CS", demands: ["REQ-301"], status: "可完成" }
+      ],
+      rules: [
+        { id: "owner", name: "负责人继承", text: "需求和任务负责人默认与项目负责人一致", on: true },
+        { id: "demandDone", name: "需求完成前置", text: "需求下任务全部完成后才可完成需求", on: true },
+        { id: "iterationDone", name: "迭代完成前置", text: "迭代关联需求全部完成后才可 finish", on: true },
+        { id: "tester", name: "默认测试人员", text: "新建测试用例默认分配给测试负责人", on: true },
+        { id: "bugOwner", name: "Bug 负责人", text: "测试出的 Bug 默认给相关需求负责人", on: true },
+        { id: "devops", name: "DevOps", text: "先保留入口，不参与当前流程", on: false }
+      ]
+    };
+
+    const navItems = [
+      ["programs", "项目集", "集"],
+      ["projects", "项目", "项"],
+      ["demands", "需求", "需"],
+      ["tasks", "任务", "任"],
+      ["iterations", "迭代", "迭"],
+      ["cases", "用例库", "例"],
+      ["testRuns", "测试单", "测"],
+      ["bugs", "Bug", "缺"],
+      ["workflow", "工作流", "规"],
+      ["devops", "DevOps", "D"]
+    ];
+
+    const pageMeta = {
+      programs: ["项目集总览", "项目集管理多个项目，并观察跨项目健康度。"],
+      projects: ["项目管理", "设置负责人时可智能同步需求和任务负责人。"],
+      demands: ["需求管理", "需求可关联任务和测试用例，并一键生成任务。"],
+      tasks: ["任务看板", "用 Jira 式流转视图跟踪待处理、处理中、已完成。"],
+      iterations: ["迭代管理", "迭代完成受关联需求状态约束。"],
+      cases: ["测试用例库", "集中维护用例，通过标签分类和检索。"],
+      testRuns: ["测试单", "从用例库组织测试执行，发现 Bug 自动带负责人。"],
+      bugs: ["Bug 管理", "Bug 默认负责人可继承相关需求负责人。"],
+      workflow: ["工作流配置", "把团队规则显性化，减少人工提醒。"],
+      devops: ["DevOps", "保留入口，后续接入流水线、制品和发布。"]
+    };
+
+    function $(id) {
+      return document.getElementById(id);
+    }
+
+    function render() {
+      renderNav();
+      renderRules();
+      renderChrome();
+      renderMetrics();
+      renderPage();
+      renderDetail();
+    }
+
+    function renderNav() {
+      $("nav").innerHTML = navItems.map(([id, label, icon]) => `
+        <button class="${state.page === id ? "active" : ""}" onclick="go('${id}')">
+          <span class="ico">${icon}</span><span>${label}</span>
+        </button>
+      `).join("");
+    }
+
+    function renderChrome() {
+      const [title, sub] = pageMeta[state.page];
+      $("pageTitle").textContent = title;
+      $("pageSub").textContent = sub;
+      const actions = {
+        projects: `<button class="btn" onclick="openOwnerModal('PRJ-QA','许念')">设置质量中台负责人</button>`,
+        demands: `<button class="btn" onclick="generateTask('REQ-102')">从 REQ-102 生成任务</button>`,
+        cases: `<button class="btn secondary" onclick="state.tag='工作流'; render()">筛选工作流标签</button>`,
+        workflow: `<button class="btn good" onclick="demoWorkflow()">执行规则演示</button>`
+      };
+      $("toolbar").innerHTML = actions[state.page] || `<button class="btn secondary" onclick="showToast('原型已保留该模块的新增入口')">新增</button>`;
+    }
+
+    function renderMetrics() {
+      const doneTasks = state.tasks.filter(t => t.status === "已完成").length;
+      $("metrics").innerHTML = [
+        ["项目集", state.programs.length, "#6e94d7"],
+        ["需求", state.demands.length, "#0f8f68"],
+        ["任务完成", `${doneTasks}/${state.tasks.length}`, "#f4c84f"],
+        ["未关闭 Bug", state.bugs.filter(b => b.status !== "已关闭").length, "#c3423f"]
+      ].map(([label, value, color]) => `
+        <div class="metric" style="--tone:${color}">
+          <span>${label}</span><b>${value}</b>
+        </div>
+      `).join("");
+    }
+
+    function renderRules() {
+      $("rules").innerHTML = state.rules.map(rule => `
+        <div class="rule">
+          <div><strong>${rule.name}</strong><span>${rule.text}</span></div>
+          <button class="switch ${rule.on ? "on" : ""}" onclick="toggleRule('${rule.id}')" aria-label="切换${rule.name}"></button>
+        </div>
+      `).join("");
+    }
+
+    function renderDetail() {
+      const activeProject = state.projects[0];
+      $("detailCard").innerHTML = `
+        <div class="panel-title"><h2>当前上下文</h2><span class="pill blue">${activeProject.id}</span></div>
+        <div class="field"><label>项目</label><input value="${activeProject.name}" readonly></div>
+        <div class="field"><label>负责人</label><input value="${activeProject.owner}" readonly></div>
+        <div class="field"><label>当前迭代</label><input value="${activeProject.iteration}" readonly></div>
+        <p class="sub">右侧区域用于承载智能提示、工作流规则和详情抽屉，减少在多个页面间跳转。</p>
+      `;
+    }
+
+    function renderPage() {
+      const pages = {
+        programs: renderPrograms,
+        projects: renderProjects,
+        demands: renderDemands,
+        tasks: renderTasks,
+        iterations: renderIterations,
+        cases: renderCases,
+        testRuns: renderTestRuns,
+        bugs: renderBugs,
+        workflow: renderWorkflow,
+        devops: renderDevops
+      };
+      $("workspace").innerHTML = pages[state.page]();
+    }
+
+    function renderPrograms() {
+      return panel("项目集", state.programs.map(program => {
+        const projects = state.projects.filter(p => p.program === program.id);
+        return `
+          <div class="card">
+            <div class="card-head">
+              <div><h3>${program.name}</h3><div class="meta"><span>${program.id}</span><span>负责人 ${program.owner}</span><span>${projects.length} 个项目</span></div></div>
+              <span class="pill green">健康度 ${program.health}%</span>
+            </div>
+            <div class="progress" style="--value:${program.health}%"><i></i></div>
+            <div class="meta">${projects.map(p => `<span class="pill">${p.name}</span>`).join("")}</div>
+          </div>
+        `;
+      }).join(""), "project-list");
+    }
+
+    function renderProjects() {
+      return panel("项目负责人规则演示", state.projects.map(project => `
+        <div class="card">
+          <div class="card-head">
+            <div>
+              <h3>${project.name}</h3>
+              <div class="meta"><span>${project.id}</span><span>负责人 ${project.owner}</span><span>${project.demands} 需求</span><span>${project.tasks} 任务</span></div>
+            </div>
+            <button class="btn secondary" onclick="openOwnerModal('${project.id}','${nextOwner(project.owner)}')">更换负责人</button>
+          </div>
+          <div class="progress" style="--value:${project.progress}%"><i></i></div>
+        </div>
+      `).join(""), "project-list");
+    }
+
+    function renderDemands() {
+      const rows = state.demands.map(d => {
+        const taskCount = state.tasks.filter(t => t.demand === d.id).length;
+        const caseCount = state.cases.filter(c => c.demand === d.id).length;
+        return `
+          <tr>
+            <td><strong>${d.id}</strong></td>
+            <td>${d.title}</td>
+            <td>${projectName(d.project)}</td>
+            <td>${d.owner}</td>
+            <td><span class="pill ${d.status === "已完成" ? "green" : "blue"}">${d.status}</span></td>
+            <td>${taskCount} 个任务 / ${caseCount} 个用例</td>
+            <td><button class="link-btn" onclick="generateTask('${d.id}')">生成任务</button></td>
+          </tr>
+        `;
+      }).join("");
+      return tablePanel("需求列表", rows, ["编号", "标题", "项目", "负责人", "状态", "关联", "操作"]);
+    }
+
+    function renderTasks() {
+      const lanes = ["待处理", "处理中", "已完成"].map(status => `
+        <div class="lane">
+          <h3>${status}</h3>
+          ${state.tasks.filter(t => t.status === status).map(t => `
+            <div class="task">
+              <strong>${t.title}</strong>
+              <div class="meta"><span>${t.id}</span><span>负责人 ${t.owner}</span><span>关联 ${t.demand}</span></div>
+              ${status !== "已完成" ? `<button class="link-btn" onclick="moveTask('${t.id}')">推进状态</button>` : ""}
+            </div>
+          `).join("") || `<div class="empty">暂无任务</div>`}
+        </div>
+      `).join("");
+      return panel("任务看板", `<div class="kanban">${lanes}</div>`);
+    }
+
+    function renderIterations() {
+      return panel("迭代完成校验", state.iterations.map(it => {
+        const demands = it.demands.map(id => state.demands.find(d => d.id === id));
+        const allDone = demands.every(d => d.status === "已完成");
+        return `
+          <div class="card">
+            <div class="card-head">
+              <div><h3>${it.name}</h3><div class="meta"><span>${it.id}</span><span>${projectName(it.project)}</span><span>${demands.length} 个需求</span></div></div>
+              <button class="btn ${allDone ? "good" : "warn"}" onclick="finishIteration('${it.id}')">Finish</button>
+            </div>
+            <div class="meta">${demands.map(d => `<span class="pill ${d.status === "已完成" ? "green" : "orange"}">${d.id} ${d.status}</span>`).join("")}</div>
+          </div>
+        `;
+      }).join(""), "project-list");
+    }
+
+    function renderCases() {
+      const tags = ["全部", ...new Set(state.cases.flatMap(c => c.tags))];
+      const filtered = state.tag === "全部" ? state.cases : state.cases.filter(c => c.tags.includes(state.tag));
+      return `
+        <section class="panel">
+          <div class="panel-title"><h2>标签检索</h2><span class="pill">${filtered.length} 条</span></div>
+          <div class="tagbar">${tags.map(tag => `<button class="tag ${state.tag === tag ? "active" : ""}" onclick="state.tag='${tag}'; render()">${tag}</button>`).join("")}</div>
+          <div class="table-wrap">
+            <table class="table">
+              <thead><tr><th>编号</th><th>用例</th><th>类型</th><th>关联需求</th><th>测试人员</th><th>标签</th></tr></thead>
+              <tbody>${filtered.map(c => `<tr><td><strong>${c.id}</strong></td><td>${c.title}</td><td>${c.type}</td><td>${c.demand || "未关联"}</td><td>${c.tester}</td><td>${c.tags.map(t => `<span class="pill">${t}</span>`).join(" ")}</td></tr>`).join("")}</tbody>
+            </table>
+          </div>
+        </section>
+      `;
+    }
+
+    function renderTestRuns() {
+      return panel("测试单草图", `
+        <div class="card">
+          <div class="card-head">
+            <div><h3>TR-202606 回归测试单</h3><div class="meta"><span>包含 CASE-01 / CASE-02 / CASE-04</span><span>默认测试人员 许念</span></div></div>
+            <button class="btn warn" onclick="createBugFromCase()">记录 Bug</button>
+          </div>
+          <p class="sub">测试执行中发现 Bug 时，负责人按“相关需求负责人”规则自动带出。</p>
+        </div>
+      `);
+    }
+
+    function renderBugs() {
+      const rows = state.bugs.map(b => `<tr><td><strong>${b.id}</strong></td><td>${b.title}</td><td>${b.demand}</td><td>${b.owner}</td><td><span class="pill red">${b.severity}</span></td><td>${b.status}</td></tr>`).join("");
+      return tablePanel("Bug 列表", rows, ["编号", "标题", "关联需求", "负责人", "严重级别", "状态"]);
+    }
+
+    function renderWorkflow() {
+      return panel("规则设计器", `
+        <div class="card">
+          <h3>默认负责人策略</h3>
+          <div class="meta"><span class="pill green">项目负责人 -> 需求负责人</span><span class="pill green">需求负责人 -> Bug 负责人</span></div>
+        </div>
+        <div class="card">
+          <h3>完成条件</h3>
+          <div class="meta"><span class="pill orange">任务未完成时阻止需求完成</span><span class="pill orange">需求未完成时阻止迭代 Finish</span></div>
+        </div>
+        <div class="card">
+          <h3>测试规则</h3>
+          <div class="meta"><span class="pill blue">用例默认测试人员</span><span class="pill blue">标签支持分类检索</span></div>
+        </div>
+      `, "project-list");
+    }
+
+    function renderDevops() {
+      return `<div class="empty"><div><h2>DevOps 已保留</h2><p>后续可接入流水线、代码库、制品、发布单和环境部署状态。</p></div></div>`;
+    }
+
+    function panel(title, content, cls = "") {
+      return `<section class="panel"><div class="panel-title"><h2>${title}</h2><span class="pill dark">Prototype</span></div><div class="${cls}">${content}</div></section>`;
+    }
+
+    function tablePanel(title, rows, headers) {
+      return `<section class="panel"><div class="panel-title"><h2>${title}</h2><span class="pill dark">可操作</span></div><div class="table-wrap"><table class="table"><thead><tr>${headers.map(h => `<th>${h}</th>`).join("")}</tr></thead><tbody>${rows}</tbody></table></div></section>`;
+    }
+
+    function go(page) {
+      state.page = page;
+      render();
+    }
+
+    function toggleRule(id) {
+      const rule = state.rules.find(r => r.id === id);
+      rule.on = !rule.on;
+      showToast(`${rule.name}已${rule.on ? "启用" : "停用"}`);
+      render();
+    }
+
+    function nextOwner(owner) {
+      return state.people.find(p => p !== owner) || "陈序";
+    }
+
+    function openOwnerModal(projectId, owner) {
+      const project = state.projects.find(p => p.id === projectId);
+      state.pendingOwner = { projectId, owner };
+      $("ownerModalText").textContent = `${project.name} 下已有 ${project.demands} 个需求和 ${project.tasks} 个任务。是否将负责人同步为 ${owner}？`;
+      $("syncOwner").checked = true;
+      $("ownerModal").classList.add("show");
+    }
+
+    function closeOwnerModal() {
+      $("ownerModal").classList.remove("show");
+      state.pendingOwner = null;
+    }
+
+    function confirmOwner() {
+      const pending = state.pendingOwner;
+      if (!pending) return;
+      const project = state.projects.find(p => p.id === pending.projectId);
+      project.owner = pending.owner;
+      if ($("syncOwner").checked) {
+        state.demands.filter(d => d.project === project.id).forEach(d => d.owner = pending.owner);
+        state.tasks.filter(t => {
+          const demand = state.demands.find(d => d.id === t.demand);
+          return demand && demand.project === project.id;
+        }).forEach(t => t.owner = pending.owner);
+        showToast("项目、需求和任务负责人已同步");
+      } else {
+        showToast("仅更新项目负责人");
+      }
+      closeOwnerModal();
+      render();
+    }
+
+    function generateTask(demandId) {
+      const demand = state.demands.find(d => d.id === demandId);
+      const id = `TASK-${500 + state.tasks.length}`;
+      state.tasks.push({ id, title: `由 ${demandId} 生成的实现任务`, demand: demandId, owner: demand.owner, status: "待处理" });
+      demand.tasks.push(id);
+      showToast(`${id} 已生成，并默认关联 ${demandId}`);
+      state.page = "tasks";
+      render();
+    }
+
+    function moveTask(id) {
+      const task = state.tasks.find(t => t.id === id);
+      task.status = task.status === "待处理" ? "处理中" : "已完成";
+      showToast(`${id} 已推进到 ${task.status}`);
+      render();
+    }
+
+    function finishIteration(id) {
+      const iteration = state.iterations.find(i => i.id === id);
+      const demands = iteration.demands.map(did => state.demands.find(d => d.id === did));
+      const allDone = demands.every(d => d.status === "已完成");
+      if (!allDone && state.rules.find(r => r.id === "iterationDone").on) {
+        showToast("工作流阻止：迭代下仍有关联需求未完成");
+        return;
+      }
+      iteration.status = "已完成";
+      showToast(`${id} 已完成`);
+      render();
+    }
+
+    function createBugFromCase() {
+      const demand = state.demands.find(d => d.id === "REQ-102");
+      const id = `BUG-${20 + state.bugs.length}`;
+      state.bugs.push({ id, title: "测试单中新发现的工作流缺陷", demand: demand.id, owner: demand.owner, severity: "中", status: "待修复" });
+      showToast(`${id} 已创建，负责人默认继承 ${demand.owner}`);
+      state.page = "bugs";
+      render();
+    }
+
+    function demoWorkflow() {
+      showToast("规则演示：请尝试 Finish 六月交付迭代，会被未完成需求阻止");
+      state.page = "iterations";
+      render();
+    }
+
+    function projectName(id) {
+      return (state.projects.find(p => p.id === id) || {}).name || id;
+    }
+
+    let toastTimer;
+    function showToast(text) {
+      clearTimeout(toastTimer);
+      $("toast").textContent = text;
+      $("toast").classList.add("show");
+      toastTimer = setTimeout(() => $("toast").classList.remove("show"), 2200);
+    }
+
+    $("cancelOwner").addEventListener("click", closeOwnerModal);
+    $("confirmOwner").addEventListener("click", confirmOwner);
+    $("ownerModal").addEventListener("click", event => {
+      if (event.target.id === "ownerModal") closeOwnerModal();
+    });
+
+    render();
+  </script>
+</body>
+</html>

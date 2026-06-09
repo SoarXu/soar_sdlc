@@ -1,39 +1,33 @@
-from datetime import date, datetime
+from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict
 
 
-class ProjectBase(BaseModel):
+class ProgramBase(BaseModel):
     name: str
-    program_id: int | None = None
     owner_id: int | None = None
-    start_date: date | None = None
-    end_date: date | None = None
+    department: str | None = None
     status: str = "active"
     description: str | None = None
 
 
-class ProjectCreate(ProjectBase):
+class ProgramCreate(ProgramBase):
     pass
 
 
-class ProjectUpdate(BaseModel):
-    program_id: int | None = None
+class ProgramUpdate(BaseModel):
     name: str | None = None
     owner_id: int | None = None
-    start_date: date | None = None
-    end_date: date | None = None
+    department: str | None = None
     status: str | None = None
     description: str | None = None
-    workflow_config_id: int | None = None
     updater_id: int | None = None
 
 
-class ProjectRead(ProjectBase):
+class ProgramRead(ProgramBase):
     model_config = ConfigDict(from_attributes=True)
 
     id: int
-    workflow_config_id: int | None = None
     creator_id: int | None = None
     updater_id: int | None = None
     create_time: datetime | None = None

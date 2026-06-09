@@ -13,14 +13,16 @@
     </div>
 
     <div class="project-tabs">
-      <el-button
+      <button
         v-for="tab in tabs"
         :key="tab.key"
-        :type="activeTab === tab.key ? 'primary' : 'default'"
+        class="project-tab-button"
+        :class="{ active: activeTab === tab.key }"
+        type="button"
         @click="activeTab = tab.key"
       >
         {{ tab.label }}
-      </el-button>
+      </button>
     </div>
 
     <el-card v-loading="loading" shadow="never">

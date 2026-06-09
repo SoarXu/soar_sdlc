@@ -215,15 +215,10 @@ body {
   color: #ffffff;
   background: transparent;
   border: 0;
-  border-right: 1px solid rgba(255, 255, 255, .34);
   cursor: pointer;
   font: inherit;
   font-size: 16px;
   font-weight: 700;
-}
-
-.project-tab-button:last-child {
-  border-right: 0;
 }
 
 .project-tab-button:hover,

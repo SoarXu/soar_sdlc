@@ -79,8 +79,8 @@ body {
   grid-row: 2;
   padding: 8px 6px;
   overflow: auto;
-  background: #3c4759;
-  border-right: 6px solid #2f3949;
+  background: #1f5fae;
+  border-right: 6px solid #174982;
 }
 
 .current-project {
@@ -107,7 +107,7 @@ body {
   --el-menu-bg-color: transparent;
   --el-menu-text-color: #ffffff;
   --el-menu-active-color: #ffffff;
-  --el-menu-hover-bg-color: rgba(255, 255, 255, .08);
+  --el-menu-hover-bg-color: rgba(255, 255, 255, .14);
 }
 
 .side-menu .el-menu-item {
@@ -132,7 +132,7 @@ body {
 .side-menu .el-menu-item:hover,
 .side-menu .el-menu-item.is-active {
   color: #ffffff;
-  background: #3478f6;
+  background: #3f86ff;
 }
 
 .main {

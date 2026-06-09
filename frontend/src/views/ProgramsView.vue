@@ -40,7 +40,7 @@
           <template #default="{ row }">
             <template v-if="row.nodeType === 'program'">
               <el-button link type="primary" @click="openEdit(row)">编辑</el-button>
-              <el-button link type="success" @click="openCreate(row.id)">新增子项目集</el-button>
+              <el-button link type="success" @click="openCreate(row.id)">新增项目集</el-button>
               <el-popconfirm title="确认删除该项目集？" @confirm="removeProgram(row.id)">
                 <template #reference><el-button link type="danger">删除</el-button></template>
               </el-popconfirm>
@@ -102,7 +102,7 @@ const form = reactive({ parent_id: null, name: '', owner_id: null, department: '
 
 const dialogTitle = computed(() => {
   if (editingId.value) return '编辑项目集'
-  return form.parent_id ? `新增 ${labelById(programs.value, form.parent_id)} 的子项目集` : '新增项目集'
+  return '新增项目集'
 })
 
 const treeRows = computed(() => programTree.value.map(toTreeRow))

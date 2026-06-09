@@ -8,6 +8,10 @@ export function fetchProgramTree() {
   return http.get('/programs/tree')
 }
 
+export function fetchProgramStatusOptions() {
+  return http.get('/programs/status-options')
+}
+
 export function createProgram(payload) {
   return http.post('/programs', payload)
 }

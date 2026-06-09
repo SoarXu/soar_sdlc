@@ -32,8 +32,13 @@
         <el-table-column label="负责人" min-width="120">
           <template #default="{ row }">{{ userLabel(users, row.owner_id) }}</template>
         </el-table-column>
-        <el-table-column prop="department" label="部门" min-width="110" />
-        <el-table-column prop="status" label="状态" min-width="90" />
+        <el-table-column prop="planned_start_date" label="计划开始" min-width="120" />
+        <el-table-column label="计划结束" min-width="120">
+          <template #default="{ row }">{{ row.is_long_term ? '长期' : row.planned_end_date }}</template>
+        </el-table-column>
+        <el-table-column label="状态" min-width="90">
+          <template #default="{ row }">{{ row.nodeType === 'program' ? statusLabel(row.status) : row.status }}</template>
+        </el-table-column>
         <el-table-column label="操作" width="230" fixed="right">
           <template #default="{ row }">
             <template v-if="row.nodeType === 'program'">
@@ -59,11 +64,25 @@
             <el-option v-for="user in users" :key="user.id" :label="user.full_name" :value="user.id" />
           </el-select>
         </el-form-item>
-        <el-form-item label="部门"><el-input v-model="form.department" /></el-form-item>
+        <div class="form-grid">
+          <el-form-item label="计划开始">
+            <el-date-picker v-model="form.planned_start_date" value-format="YYYY-MM-DD" type="date" />
+          </el-form-item>
+          <el-form-item label="计划结束">
+            <div class="end-date-field">
+              <el-checkbox v-model="form.is_long_term">长期</el-checkbox>
+              <el-date-picker
+                v-model="form.planned_end_date"
+                value-format="YYYY-MM-DD"
+                type="date"
+                :disabled="form.is_long_term"
+              />
+            </div>
+          </el-form-item>
+        </div>
         <el-form-item label="状态">
           <el-select v-model="form.status">
-            <el-option label="启用" value="active" />
-            <el-option label="关闭" value="closed" />
+            <el-option v-for="option in statusOptions" :key="option.value" :label="option.label" :value="option.value" />
           </el-select>
         </el-form-item>
         <el-form-item label="描述"><el-input v-model="form.description" type="textarea" :rows="3" /></el-form-item>
@@ -80,7 +99,7 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 
-import { createProgram, deleteProgram, fetchProgramTree, updateProgram } from '../api/programs'
+import { createProgram, deleteProgram, fetchProgramStatusOptions, fetchProgramTree, updateProgram } from '../api/programs'
 import { fetchUsers } from '../api/users'
 import { userLabel } from '../utils/referenceLabels'
 
@@ -89,8 +108,18 @@ const saving = ref(false)
 const dialogVisible = ref(false)
 const editingId = ref(null)
 const programTree = ref([])
+const statusOptions = ref([])
 const users = ref([])
-const form = reactive({ parent_id: null, name: '', owner_id: null, department: '', status: 'active', description: '' })
+const form = reactive({
+  parent_id: null,
+  name: '',
+  owner_id: null,
+  planned_start_date: null,
+  planned_end_date: null,
+  is_long_term: false,
+  status: 'active',
+  description: ''
+})
 
 const dialogTitle = computed(() => {
   if (editingId.value) return '编辑项目集'
@@ -98,6 +127,10 @@ const dialogTitle = computed(() => {
 })
 
 const treeRows = computed(() => programTree.value.map(toTreeRow))
+
+function statusLabel(value) {
+  return statusOptions.value.find((option) => option.value === value)?.label || value
+}
 
 function toTreeRow(node) {
   return {
@@ -118,7 +151,16 @@ function toTreeRow(node) {
 }
 
 function resetForm(parentId = null) {
-  Object.assign(form, { parent_id: parentId, name: '', owner_id: null, department: '', status: 'active', description: '' })
+  Object.assign(form, {
+    parent_id: parentId,
+    name: '',
+    owner_id: null,
+    planned_start_date: null,
+    planned_end_date: null,
+    is_long_term: false,
+    status: 'active',
+    description: ''
+  })
 }
 
 function openCreate(parentId = null) {
@@ -133,7 +175,9 @@ function openEdit(row) {
     parent_id: row.parent_id,
     name: row.name,
     owner_id: row.owner_id,
-    department: row.department || '',
+    planned_start_date: row.planned_start_date || null,
+    planned_end_date: row.planned_end_date || null,
+    is_long_term: Boolean(row.is_long_term),
     status: row.status,
     description: row.description || ''
   })
@@ -143,8 +187,9 @@ function openEdit(row) {
 async function loadData() {
   loading.value = true
   try {
-    const [treeRes, userRes] = await Promise.all([fetchProgramTree(), fetchUsers()])
+    const [treeRes, statusRes, userRes] = await Promise.all([fetchProgramTree(), fetchProgramStatusOptions(), fetchUsers()])
     programTree.value = treeRes.data
+    statusOptions.value = statusRes.data
     users.value = userRes.data
   } catch {
     ElMessage.error('项目集树加载失败')
@@ -157,7 +202,12 @@ async function submitProgram() {
   if (!form.name.trim()) return ElMessage.warning('请填写项目集名称')
   saving.value = true
   try {
-    const payload = { ...form, parent_id: form.parent_id || null, owner_id: form.owner_id || null }
+    const payload = {
+      ...form,
+      parent_id: form.parent_id || null,
+      owner_id: form.owner_id || null,
+      planned_end_date: form.is_long_term ? null : form.planned_end_date
+    }
     if (editingId.value) await updateProgram(editingId.value, payload)
     else await createProgram(payload)
     dialogVisible.value = false

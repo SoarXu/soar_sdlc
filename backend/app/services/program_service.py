@@ -7,9 +7,21 @@ from app.models.program import Program
 from app.models.project import Project
 from app.views.program_view import ProgramCreate, ProgramUpdate
 
+PROGRAM_STATUS_OPTIONS = [
+    {"label": "规划中", "value": "planning"},
+    {"label": "进行中", "value": "active"},
+    {"label": "长期维护", "value": "maintenance"},
+    {"label": "已暂停", "value": "paused"},
+    {"label": "已关闭", "value": "closed"},
+]
+
 
 def list_programs(db: Session) -> list[Program]:
     return db.query(Program).filter(Program.delete_time.is_(None)).order_by(Program.id.desc()).all()
+
+
+def list_program_status_options() -> list[dict[str, str]]:
+    return PROGRAM_STATUS_OPTIONS
 
 
 def list_program_tree(db: Session) -> list[dict]:
@@ -23,6 +35,9 @@ def list_program_tree(db: Session) -> list[dict]:
             "name": program.name,
             "owner_id": program.owner_id,
             "department": program.department,
+            "planned_start_date": program.planned_start_date,
+            "planned_end_date": program.planned_end_date,
+            "is_long_term": program.is_long_term,
             "status": program.status,
             "description": program.description,
             "creator_id": program.creator_id,
@@ -58,7 +73,10 @@ def list_program_tree(db: Session) -> list[dict]:
 
 
 def create_program(db: Session, payload: ProgramCreate) -> Program:
-    program = Program(**payload.model_dump())
+    data = payload.model_dump()
+    if data.get("is_long_term"):
+        data["planned_end_date"] = None
+    program = Program(**data)
     db.add(program)
     db.commit()
     db.refresh(program)
@@ -67,7 +85,10 @@ def create_program(db: Session, payload: ProgramCreate) -> Program:
 
 def update_program(db: Session, program_id: int, payload: ProgramUpdate) -> Program:
     program = _get_active_program(db, program_id)
-    for field, value in payload.model_dump(exclude_unset=True).items():
+    data = payload.model_dump(exclude_unset=True)
+    if data.get("is_long_term"):
+        data["planned_end_date"] = None
+    for field, value in data.items():
         setattr(program, field, value)
     db.commit()
     db.refresh(program)

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 
 from pydantic import BaseModel, ConfigDict
 
@@ -10,6 +10,9 @@ class ProgramBase(BaseModel):
     parent_id: int | None = None
     owner_id: int | None = None
     department: str | None = None
+    planned_start_date: date | None = None
+    planned_end_date: date | None = None
+    is_long_term: bool = False
     status: str = "active"
     description: str | None = None
 
@@ -23,6 +26,9 @@ class ProgramUpdate(BaseModel):
     parent_id: int | None = None
     owner_id: int | None = None
     department: str | None = None
+    planned_start_date: date | None = None
+    planned_end_date: date | None = None
+    is_long_term: bool | None = None
     status: str | None = None
     description: str | None = None
     updater_id: int | None = None
@@ -44,6 +50,11 @@ class ProgramProjectRead(BaseModel):
     name: str
     owner_id: int | None = None
     status: str
+
+
+class ProgramStatusOption(BaseModel):
+    label: str
+    value: str
 
 
 class ProgramTreeRead(ProgramRead):

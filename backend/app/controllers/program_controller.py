@@ -2,8 +2,15 @@ from fastapi import APIRouter, Depends, Response, status
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
-from app.services.program_service import create_program, delete_program, list_program_tree, list_programs, update_program
-from app.views.program_view import ProgramCreate, ProgramRead, ProgramTreeRead, ProgramUpdate
+from app.services.program_service import (
+    create_program,
+    delete_program,
+    list_program_status_options,
+    list_program_tree,
+    list_programs,
+    update_program,
+)
+from app.views.program_view import ProgramCreate, ProgramRead, ProgramStatusOption, ProgramTreeRead, ProgramUpdate
 
 
 router = APIRouter()
@@ -17,6 +24,11 @@ def get_programs(db: Session = Depends(get_db)):
 @router.get("/tree", response_model=list[ProgramTreeRead])
 def get_program_tree(db: Session = Depends(get_db)):
     return list_program_tree(db)
+
+
+@router.get("/status-options", response_model=list[ProgramStatusOption])
+def get_program_status_options():
+    return list_program_status_options()
 
 
 @router.post("", response_model=ProgramRead)

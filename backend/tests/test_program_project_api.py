@@ -11,27 +11,53 @@ def test_program_crud_persists_to_database(client: TestClient):
 
     created = client.post(
         "/api/v1/programs",
-        json={"name": name, "department": "研发中心", "status": "active", "description": "API 创建"},
+        json={
+            "name": name,
+            "status": "active",
+            "planned_start_date": "2026-06-10",
+            "planned_end_date": "2026-12-31",
+            "description": "API 创建",
+        },
     )
     assert created.status_code == 200
-    program_id = created.json()["id"]
+    created_data = created.json()
+    program_id = created_data["id"]
+    assert created_data["planned_start_date"] == "2026-06-10"
+    assert created_data["planned_end_date"] == "2026-12-31"
+    assert created_data["is_long_term"] is False
 
     db = SessionLocal()
     try:
-        stored_name = db.execute(text("select name from programs where id = :id"), {"id": program_id}).scalar_one()
-        assert stored_name == name
+        stored = db.execute(
+            text("select name, planned_start_date, planned_end_date, is_long_term from programs where id = :id"),
+            {"id": program_id},
+        ).one()
+        assert stored.name == name
+        assert str(stored.planned_start_date) == "2026-06-10"
+        assert str(stored.planned_end_date) == "2026-12-31"
+        assert stored.is_long_term == 0
     finally:
         db.close()
 
-    updated = client.patch(f"/api/v1/programs/{program_id}", json={"status": "closed"})
+    updated = client.patch(f"/api/v1/programs/{program_id}", json={"status": "maintenance", "is_long_term": True})
     assert updated.status_code == 200
-    assert updated.json()["status"] == "closed"
+    assert updated.json()["status"] == "maintenance"
+    assert updated.json()["is_long_term"] is True
+    assert updated.json()["planned_end_date"] is None
 
     deleted = client.delete(f"/api/v1/programs/{program_id}")
     assert deleted.status_code == 204
 
     listed = client.get("/api/v1/programs")
     assert all(item["id"] != program_id for item in listed.json())
+
+
+def test_program_status_options_are_served_by_backend(client: TestClient):
+    response = client.get("/api/v1/programs/status-options")
+
+    assert response.status_code == 200
+    options = response.json()
+    assert {"label": "长期维护", "value": "maintenance"} in options
 
 
 def test_project_crud_uses_prd_fields(client: TestClient):

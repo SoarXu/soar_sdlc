@@ -223,6 +223,16 @@ body {
   gap: 0 12px;
 }
 
+.end-date-field {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.end-date-field .el-date-editor {
+  flex: 1;
+}
+
 .project-row-name {
   color: #2f6b3f;
   font-weight: 600;

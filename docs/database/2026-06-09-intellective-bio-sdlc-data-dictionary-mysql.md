@@ -99,9 +99,13 @@
 | 字段 | 类型 | 约束 | 说明 |
 |---|---|---|---|
 | id | BIGINT UNSIGNED | PK, AUTO_INCREMENT | 项目集 ID |
+| parent_id | BIGINT UNSIGNED | NULL | 父项目集 ID |
 | name | VARCHAR(150) | NOT NULL | 项目集名称 |
 | owner_id | BIGINT UNSIGNED | NULL | 负责人 ID |
 | department | VARCHAR(100) | NULL | 所属部门 |
+| planned_start_date | DATE | NULL | 计划开始日期 |
+| planned_end_date | DATE | NULL | 计划结束日期，长期维护项目集为空 |
+| is_long_term | TINYINT(1) | NOT NULL DEFAULT 0 | 是否长期维护 |
 | status | VARCHAR(32) | NOT NULL DEFAULT 'active' | 状态 |
 | description | TEXT | NULL | 描述 |
 | creator_id | BIGINT UNSIGNED | NULL | 创建人 |
@@ -113,6 +117,7 @@
 索引：
 
 - `idx_programs_owner(owner_id)`
+- `idx_programs_parent(parent_id)`
 - `idx_programs_status(status)`
 
 ### 3.2 projects 项目表

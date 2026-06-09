@@ -15,20 +15,43 @@
     </header>
 
     <aside class="sidebar">
-      <div class="current-project">
-        <strong>SDLC 项目管理平台</strong>
-        <span>API-backed / MySQL</span>
-      </div>
       <el-menu router :default-active="$route.path" class="side-menu">
-        <el-menu-item index="/">工作台</el-menu-item>
-        <el-menu-item index="/programs">项目集</el-menu-item>
-        <el-menu-item index="/projects">项目</el-menu-item>
-        <el-menu-item index="/iterations">迭代</el-menu-item>
-        <el-menu-item index="/requirements">需求</el-menu-item>
-        <el-menu-item index="/tasks">任务</el-menu-item>
-        <el-menu-item index="/tests">测试管理</el-menu-item>
-        <el-menu-item index="/bugs">Bug</el-menu-item>
-        <el-menu-item index="/workflow">工作流配置</el-menu-item>
+        <el-menu-item index="/">
+          <el-icon><Grid /></el-icon>
+          <span>工作台</span>
+        </el-menu-item>
+        <el-menu-item index="/programs">
+          <el-icon><Folder /></el-icon>
+          <span>项目集</span>
+        </el-menu-item>
+        <el-menu-item index="/projects">
+          <el-icon><FolderOpened /></el-icon>
+          <span>项目</span>
+        </el-menu-item>
+        <el-menu-item index="/iterations">
+          <el-icon><Timer /></el-icon>
+          <span>迭代</span>
+        </el-menu-item>
+        <el-menu-item index="/requirements">
+          <el-icon><Document /></el-icon>
+          <span>需求</span>
+        </el-menu-item>
+        <el-menu-item index="/tasks">
+          <el-icon><Tickets /></el-icon>
+          <span>任务</span>
+        </el-menu-item>
+        <el-menu-item index="/tests">
+          <el-icon><DataAnalysis /></el-icon>
+          <span>测试管理</span>
+        </el-menu-item>
+        <el-menu-item index="/bugs">
+          <el-icon><Warning /></el-icon>
+          <span>Bug</span>
+        </el-menu-item>
+        <el-menu-item index="/workflow">
+          <el-icon><Setting /></el-icon>
+          <span>工作流配置</span>
+        </el-menu-item>
       </el-menu>
     </aside>
 
@@ -37,3 +60,17 @@
     </main>
   </div>
 </template>
+
+<script setup>
+import {
+  DataAnalysis,
+  Document,
+  Folder,
+  FolderOpened,
+  Grid,
+  Setting,
+  Tickets,
+  Timer,
+  Warning
+} from '@element-plus/icons-vue'
+</script>

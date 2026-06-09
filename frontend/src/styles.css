@@ -16,7 +16,7 @@ body {
 
 .app-shell {
   display: grid;
-  grid-template-columns: 248px minmax(0, 1fr);
+  grid-template-columns: 128px minmax(0, 1fr);
   grid-template-rows: 48px minmax(0, 1fr);
   width: 100vw;
   height: 100vh;
@@ -77,10 +77,10 @@ body {
 .sidebar {
   grid-column: 1;
   grid-row: 2;
-  padding: 12px 10px;
+  padding: 8px 6px;
   overflow: auto;
-  background: linear-gradient(180deg, #edf2f7, #dfe7f0);
-  border-right: 1px solid #c9d3df;
+  background: #3c4759;
+  border-right: 6px solid #2f3949;
 }
 
 .current-project {
@@ -101,6 +101,38 @@ body {
 .side-menu {
   border-right: 0;
   background: transparent;
+}
+
+.side-menu.el-menu {
+  --el-menu-bg-color: transparent;
+  --el-menu-text-color: #ffffff;
+  --el-menu-active-color: #ffffff;
+  --el-menu-hover-bg-color: rgba(255, 255, 255, .08);
+}
+
+.side-menu .el-menu-item {
+  height: 30px;
+  min-width: 0;
+  margin: 0 0 8px;
+  padding: 0 8px !important;
+  color: #ffffff;
+  border-radius: 3px;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 30px;
+}
+
+.side-menu .el-menu-item .el-icon {
+  width: 16px;
+  margin-right: 6px;
+  color: inherit;
+  font-size: 15px;
+}
+
+.side-menu .el-menu-item:hover,
+.side-menu .el-menu-item.is-active {
+  color: #ffffff;
+  background: #3478f6;
 }
 
 .main {

@@ -223,14 +223,22 @@ body {
   gap: 0 12px;
 }
 
+.form-grid .el-form-item {
+  min-width: 0;
+}
+
 .end-date-field {
   display: flex;
   align-items: center;
   gap: 12px;
+  min-width: 0;
+  width: 100%;
 }
 
 .end-date-field .el-date-editor {
   flex: 1;
+  min-width: 0;
+  width: 100%;
 }
 
 .project-row-name {

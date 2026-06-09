@@ -6,9 +6,9 @@
 
 **Architecture:** The backend keeps MVC boundaries: `models/` for SQLAlchemy entities, `views/` for request/response DTOs, `controllers/` for HTTP routes, and `services/` for business rules. The frontend uses Vue3 + Element Plus with one desktop shell, side navigation, dynamic list/form rendering, and module-specific pages. Configuration-heavy features such as form fields and workflow rules are stored in database tables and surfaced through APIs.
 
-**Tech Stack:** Python 3.11+, FastAPI, SQLAlchemy, Alembic, Pydantic, JWT, Vue3, Vite, Pinia, Axios, Element Plus, SQLite for local development.
+**Tech Stack:** Python 3.11, FastAPI, SQLAlchemy, Alembic, Pydantic, JWT, Vue3, Vite, Pinia, Axios, Element Plus, MySQL 8.0.
 
-**Constraints:** The current workspace is not a Git repository, so commit steps are not executable. The current machine has Node/npm but no Python launcher, so backend tests and API boot verification require installing Python 3.11+ first.
+**Constraints:** Development must follow the PRD and the MySQL data dictionary. The workspace is connected to `origin/main`, and every completed code update must be committed. Use `E:\miniconda3\envs\soar_sdlc_py311\python.exe` for backend commands and MySQL `localhost:3306/intellective_bio_sdlc` for local verification.
 
 ---
 

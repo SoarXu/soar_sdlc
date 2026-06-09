@@ -23,6 +23,7 @@
         <el-menu-item index="/">工作台</el-menu-item>
         <el-menu-item index="/programs">项目集</el-menu-item>
         <el-menu-item index="/projects">项目</el-menu-item>
+        <el-menu-item index="/iterations">迭代</el-menu-item>
         <el-menu-item index="/requirements">需求</el-menu-item>
         <el-menu-item index="/tasks">任务</el-menu-item>
         <el-menu-item index="/tests">测试管理</el-menu-item>

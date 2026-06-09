@@ -34,7 +34,7 @@
         </el-table-column>
         <el-table-column prop="department" label="部门" min-width="110" />
         <el-table-column prop="status" label="状态" min-width="90" />
-        <el-table-column label="操作" min-width="200" fixed="right">
+        <el-table-column label="操作" width="190" fixed="right">
           <template #default="{ row }">
             <template v-if="row.nodeType === 'program'">
               <el-button link type="primary" @click="openEdit(row)">编辑</el-button>

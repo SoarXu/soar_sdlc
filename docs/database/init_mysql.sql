@@ -53,6 +53,7 @@ CREATE TABLE IF NOT EXISTS user_roles (
 
 CREATE TABLE IF NOT EXISTS programs (
   id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '项目集 ID',
+  parent_id BIGINT UNSIGNED NULL COMMENT '父项目集 ID',
   name VARCHAR(150) NOT NULL COMMENT '项目集名称',
   owner_id BIGINT UNSIGNED NULL COMMENT '负责人 ID',
   department VARCHAR(100) NULL COMMENT '所属部门',
@@ -64,6 +65,7 @@ CREATE TABLE IF NOT EXISTS programs (
   update_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
   delete_time DATETIME NULL COMMENT '软删除时间',
   PRIMARY KEY (id),
+  KEY idx_programs_parent (parent_id),
   KEY idx_programs_owner (owner_id),
   KEY idx_programs_status (status)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='项目集表';

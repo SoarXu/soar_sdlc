@@ -10,6 +10,7 @@ class Program(Base):
     __tablename__ = "programs"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    parent_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     name: Mapped[str] = mapped_column(String(150))
     owner_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     department: Mapped[str | None] = mapped_column(String(100), nullable=True)

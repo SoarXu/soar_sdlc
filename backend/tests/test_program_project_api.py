@@ -61,3 +61,22 @@ def test_dashboard_summary_reads_database_counts(client: TestClient):
     data = response.json()
     assert {"programs", "projects", "requirements", "tasks", "open_bugs"} <= set(data)
     assert isinstance(data["projects"], int)
+
+
+def test_program_tree_contains_child_programs_and_bound_projects(client: TestClient):
+    parent = client.post("/api/v1/programs", json={"name": f"父项目集-{uuid4().hex[:8]}"}).json()
+    child = client.post(
+        "/api/v1/programs",
+        json={"name": f"子项目集-{uuid4().hex[:8]}", "parent_id": parent["id"]},
+    ).json()
+    project = client.post(
+        "/api/v1/projects",
+        json={"name": f"绑定项目-{uuid4().hex[:8]}", "program_id": child["id"]},
+    ).json()
+
+    response = client.get("/api/v1/programs/tree")
+
+    assert response.status_code == 200
+    parent_node = next(item for item in response.json() if item["id"] == parent["id"])
+    child_node = next(item for item in parent_node["children"] if item["id"] == child["id"])
+    assert any(item["id"] == project["id"] and item["name"] == project["name"] for item in child_node["projects"])

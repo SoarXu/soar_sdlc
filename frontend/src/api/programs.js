@@ -4,6 +4,10 @@ export function fetchPrograms() {
   return http.get('/programs')
 }
 
+export function fetchProgramTree() {
+  return http.get('/programs/tree')
+}
+
 export function createProgram(payload) {
   return http.post('/programs', payload)
 }

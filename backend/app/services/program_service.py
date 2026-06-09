@@ -4,11 +4,57 @@ from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 
 from app.models.program import Program
+from app.models.project import Project
 from app.views.program_view import ProgramCreate, ProgramUpdate
 
 
 def list_programs(db: Session) -> list[Program]:
     return db.query(Program).filter(Program.delete_time.is_(None)).order_by(Program.id.desc()).all()
+
+
+def list_program_tree(db: Session) -> list[dict]:
+    programs = db.query(Program).filter(Program.delete_time.is_(None)).order_by(Program.id.asc()).all()
+    projects = db.query(Project).filter(Project.delete_time.is_(None)).order_by(Project.id.asc()).all()
+
+    nodes = {
+        program.id: {
+            "id": program.id,
+            "parent_id": program.parent_id,
+            "name": program.name,
+            "owner_id": program.owner_id,
+            "department": program.department,
+            "status": program.status,
+            "description": program.description,
+            "creator_id": program.creator_id,
+            "updater_id": program.updater_id,
+            "create_time": program.create_time,
+            "update_time": program.update_time,
+            "delete_time": program.delete_time,
+            "children": [],
+            "projects": [],
+        }
+        for program in programs
+    }
+
+    for project in projects:
+        if project.program_id in nodes:
+            nodes[project.program_id]["projects"].append(
+                {
+                    "id": project.id,
+                    "name": project.name,
+                    "owner_id": project.owner_id,
+                    "status": project.status,
+                }
+            )
+
+    roots = []
+    for program in programs:
+        node = nodes[program.id]
+        if program.parent_id and program.parent_id in nodes:
+            nodes[program.parent_id]["children"].append(node)
+        else:
+            roots.append(node)
+    return roots
 
 
 def create_program(db: Session, payload: ProgramCreate) -> Program:

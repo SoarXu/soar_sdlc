@@ -79,8 +79,8 @@ body {
   grid-row: 2;
   padding: 8px 6px;
   overflow: auto;
-  background: #1f5fae;
-  border-right: 6px solid #174982;
+  background: linear-gradient(180deg, #0b4f8a, #063b6d);
+  border-right: 6px solid #052f57;
 }
 
 .current-project {
@@ -132,7 +132,7 @@ body {
 .side-menu .el-menu-item:hover,
 .side-menu .el-menu-item.is-active {
   color: #ffffff;
-  background: #3f86ff;
+  background: #3478f6;
 }
 
 .main {

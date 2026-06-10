@@ -24,6 +24,7 @@ EXPECTED_TABLES = {
     "custom_field_value",
     "workflow_rules",
     "object_relation",
+    "status_operation_log",
     "notifications",
     "notification_channel_config",
     "notification_delivery_log",

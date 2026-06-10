@@ -500,6 +500,27 @@
 - `idx_relation_target(target_type, target_id)`
 - `idx_relation_type(relation_type)`
 
+### 10.2 status_operation_log 状态操作记录表
+
+| 字段 | 类型 | 约束 | 说明 |
+|---|---|---|---|
+| id | BIGINT UNSIGNED | PK, AUTO_INCREMENT | 记录 ID |
+| object_type | VARCHAR(64) | NOT NULL | 对象类型：program、project |
+| object_id | BIGINT UNSIGNED | NOT NULL | 对象 ID |
+| action | VARCHAR(32) | NOT NULL | start、suspend、close、activate |
+| from_status | VARCHAR(32) | NULL | 操作前状态 |
+| to_status | VARCHAR(32) | NOT NULL | 操作后状态 |
+| effective_time | DATETIME | NOT NULL | 实际完成时间 |
+| remark | TEXT | NULL | 备注 |
+| actor_id | BIGINT UNSIGNED | NULL | 操作人 ID |
+| create_time | DATETIME | NOT NULL DEFAULT CURRENT_TIMESTAMP | 创建时间 |
+
+索引：
+
+- `idx_status_operation_object(object_type, object_id)`
+- `idx_status_operation_time(effective_time)`
+- `idx_status_operation_actor(actor_id)`
+
 ## 11. 通知与钉钉预留
 
 ### 11.1 notifications 站内通知表

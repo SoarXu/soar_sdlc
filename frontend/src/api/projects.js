@@ -16,20 +16,24 @@ export function updateProject(id, payload) {
   return http.patch(`/projects/${id}`, payload)
 }
 
-export function startProject(id) {
-  return http.post(`/projects/${id}/start`)
+export function fetchProjectStatusOperations(id) {
+  return http.get(`/projects/${id}/status-operations`)
 }
 
-export function suspendProject(id) {
-  return http.post(`/projects/${id}/suspend`)
+export function startProject(id, payload = {}) {
+  return http.post(`/projects/${id}/start`, payload)
 }
 
-export function closeProject(id) {
-  return http.post(`/projects/${id}/close`)
+export function suspendProject(id, payload = {}) {
+  return http.post(`/projects/${id}/suspend`, payload)
 }
 
-export function activateProject(id) {
-  return http.post(`/projects/${id}/activate`)
+export function closeProject(id, payload = {}) {
+  return http.post(`/projects/${id}/close`, payload)
+}
+
+export function activateProject(id, payload = {}) {
+  return http.post(`/projects/${id}/activate`, payload)
 }
 
 export function deleteProject(id) {

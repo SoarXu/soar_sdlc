@@ -8,12 +8,14 @@ from app.services.project_service import (
     create_project,
     delete_project,
     get_project,
+    list_project_status_operations,
     list_projects,
     start_project,
     suspend_project,
     update_project,
 )
 from app.views.project_view import ProjectCreate, ProjectRead, ProjectUpdate
+from app.views.status_operation_view import StatusOperationCreate, StatusOperationRead
 
 
 router = APIRouter()
@@ -39,24 +41,29 @@ def patch_project(project_id: int, payload: ProjectUpdate, db: Session = Depends
     return update_project(db, project_id, payload)
 
 
+@router.get("/{project_id}/status-operations", response_model=list[StatusOperationRead])
+def get_project_status_operations(project_id: int, db: Session = Depends(get_db)):
+    return list_project_status_operations(db, project_id)
+
+
 @router.post("/{project_id}/start", response_model=ProjectRead)
-def start_project_status(project_id: int, db: Session = Depends(get_db)):
-    return start_project(db, project_id)
+def start_project_status(project_id: int, payload: StatusOperationCreate | None = None, db: Session = Depends(get_db)):
+    return start_project(db, project_id, payload)
 
 
 @router.post("/{project_id}/suspend", response_model=ProjectRead)
-def suspend_project_status(project_id: int, db: Session = Depends(get_db)):
-    return suspend_project(db, project_id)
+def suspend_project_status(project_id: int, payload: StatusOperationCreate | None = None, db: Session = Depends(get_db)):
+    return suspend_project(db, project_id, payload)
 
 
 @router.post("/{project_id}/close", response_model=ProjectRead)
-def close_project_status(project_id: int, db: Session = Depends(get_db)):
-    return close_project(db, project_id)
+def close_project_status(project_id: int, payload: StatusOperationCreate | None = None, db: Session = Depends(get_db)):
+    return close_project(db, project_id, payload)
 
 
 @router.post("/{project_id}/activate", response_model=ProjectRead)
-def activate_project_status(project_id: int, db: Session = Depends(get_db)):
-    return activate_project(db, project_id)
+def activate_project_status(project_id: int, payload: StatusOperationCreate | None = None, db: Session = Depends(get_db)):
+    return activate_project(db, project_id, payload)
 
 
 @router.delete("/{project_id}", status_code=status.HTTP_204_NO_CONTENT)

@@ -10,6 +10,7 @@ from app.models.program import Program
 from app.models.relation import ObjectRelation
 from app.models.requirement import Requirement
 from app.models.role import Role, UserRole
+from app.models.status_operation import StatusOperationLog
 from app.models.task import Task
 from app.models.test_case import TestCase
 from app.models.test_run import TestRun, TestRunCase
@@ -35,6 +36,7 @@ __all__ = [
     "ProjectMember",
     "Requirement",
     "Role",
+    "StatusOperationLog",
     "Tag",
     "Task",
     "TestCase",

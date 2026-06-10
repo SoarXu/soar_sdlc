@@ -32,10 +32,10 @@
         <el-table-column label="操作" width="260" fixed="right">
           <template #default="{ row }">
             <el-button link type="primary" @click="openEdit(row)">编辑</el-button>
-            <el-button v-if="row.status === 'planning'" link type="success" @click="changeProjectStatus(row.id, 'start')">启动</el-button>
-            <el-button v-if="row.status === 'active'" link type="warning" @click="changeProjectStatus(row.id, 'suspend')">挂起</el-button>
-            <el-button v-if="row.status === 'active'" link type="danger" @click="changeProjectStatus(row.id, 'close')">关闭</el-button>
-            <el-button v-if="row.status === 'closed'" link type="success" @click="changeProjectStatus(row.id, 'activate')">激活</el-button>
+            <el-button v-if="row.status === 'planning' || row.status === 'paused'" link type="success" @click="openStatusDialog(row, 'start')">启动</el-button>
+            <el-button v-if="row.status === 'active'" link type="warning" @click="openStatusDialog(row, 'suspend')">挂起</el-button>
+            <el-button v-if="row.status === 'active' || row.status === 'paused'" link type="danger" @click="openStatusDialog(row, 'close')">关闭</el-button>
+            <el-button v-if="row.status === 'closed'" link type="success" @click="openStatusDialog(row, 'activate')">激活</el-button>
             <el-popconfirm title="确认删除该项目？" @confirm="removeProject(row.id)">
               <template #reference><el-button link type="danger">删除</el-button></template>
             </el-popconfirm>
@@ -82,11 +82,44 @@
         <el-button type="primary" :loading="saving" @click="submitProject">保存</el-button>
       </template>
     </el-dialog>
+
+    <el-dialog v-model="statusDialogVisible" :title="statusDialogTitle" width="760px" class="status-operation-dialog">
+      <el-form label-position="top">
+        <el-form-item label="实际完成" required>
+          <el-date-picker
+            v-model="statusForm.effective_time"
+            type="datetime"
+            value-format="YYYY-MM-DDTHH:mm:ss"
+            format="YYYY-MM-DD HH:mm:ss"
+          />
+        </el-form-item>
+        <el-form-item label="备注">
+          <el-input v-model="statusForm.remark" type="textarea" :rows="5" placeholder="请输入本次操作备注" />
+        </el-form-item>
+      </el-form>
+      <div class="status-history">
+        <div class="status-history-title">历史记录</div>
+        <el-empty v-if="!statusHistory.length" description="暂无历史记录" />
+        <el-timeline v-else>
+          <el-timeline-item v-for="item in statusHistory" :key="item.id" :timestamp="formatDateTime(item.effective_time)">
+            <div>
+              由 <strong>{{ item.actor_name || '系统' }}</strong> {{ statusActionLabel(item.action) }}。
+              <el-tag size="small" effect="plain">{{ projectStatusLabel(item.from_status) }} → {{ projectStatusLabel(item.to_status) }}</el-tag>
+            </div>
+            <div v-if="item.remark" class="status-history-remark">{{ item.remark }}</div>
+          </el-timeline-item>
+        </el-timeline>
+      </div>
+      <template #footer>
+        <el-button @click="statusDialogVisible = false">取消</el-button>
+        <el-button type="primary" :loading="saving" @click="submitStatusOperation">{{ statusConfirmText }}</el-button>
+      </template>
+    </el-dialog>
   </section>
 </template>
 
 <script setup>
-import { onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 
 import { fetchPrograms } from '../api/programs'
@@ -95,6 +128,7 @@ import {
   closeProject,
   createProject,
   deleteProject,
+  fetchProjectStatusOperations,
   fetchProjects,
   startProject,
   suspendProject,
@@ -107,7 +141,11 @@ import { usePagination } from '../utils/usePagination'
 const loading = ref(false)
 const saving = ref(false)
 const dialogVisible = ref(false)
+const statusDialogVisible = ref(false)
 const editingId = ref(null)
+const statusTarget = ref(null)
+const statusAction = ref('')
+const statusHistory = ref([])
 const projects = ref([])
 const programs = ref([])
 const users = ref([])
@@ -125,9 +163,23 @@ const projectStatusOptions = [
   { label: '已挂起', value: 'paused' },
   { label: '已关闭', value: 'closed' }
 ]
+const statusActionOptions = {
+  start: '启动',
+  suspend: '挂起',
+  close: '关闭',
+  activate: '激活'
+}
+const statusForm = reactive({ effective_time: '', remark: '' })
+
+const statusDialogTitle = computed(() => `${statusActionLabel(statusAction.value)}项目 ${statusTarget.value?.name || ''}`)
+const statusConfirmText = computed(() => `${statusActionLabel(statusAction.value)}项目`)
 
 function projectStatusLabel(value) {
   return projectStatusOptions.find((option) => option.value === value)?.label || value || '-'
+}
+
+function statusActionLabel(value) {
+  return statusActionOptions[value] || value || '-'
 }
 
 function resetForm() {
@@ -136,6 +188,30 @@ function resetForm() {
 
 function openCreate() { editingId.value = null; resetForm(); dialogVisible.value = true }
 function openEdit(row) { editingId.value = row.id; Object.assign(form, { ...row, is_long_term: Boolean(row.is_long_term), description: row.description || '' }); dialogVisible.value = true }
+
+function formatDateTime(value) {
+  if (!value) return '-'
+  return value.replace('T', ' ').slice(0, 19)
+}
+
+function currentDateTimeValue() {
+  const now = new Date()
+  const pad = (value) => String(value).padStart(2, '0')
+  return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}T${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`
+}
+
+async function openStatusDialog(row, action) {
+  statusTarget.value = row
+  statusAction.value = action
+  Object.assign(statusForm, { effective_time: currentDateTimeValue(), remark: '' })
+  try {
+    const response = await fetchProjectStatusOperations(row.id)
+    statusHistory.value = response.data
+    statusDialogVisible.value = true
+  } catch {
+    ElMessage.error('状态历史加载失败')
+  }
+}
 
 async function loadData() {
   loading.value = true
@@ -174,10 +250,25 @@ async function changeProjectStatus(id, action) {
     activate: activateProject
   }
   try {
-    await actions[action](id)
+    await actions[action](id, {
+      effective_time: statusForm.effective_time,
+      remark: statusForm.remark
+    })
     await loadData()
   } catch (error) {
     ElMessage.error(error.response?.data?.detail || '项目状态更新失败')
+    throw error
+  }
+}
+
+async function submitStatusOperation() {
+  if (!statusForm.effective_time) return ElMessage.warning('请选择实际完成时间')
+  saving.value = true
+  try {
+    await changeProjectStatus(statusTarget.value.id, statusAction.value)
+    statusDialogVisible.value = false
+  } finally {
+    saving.value = false
   }
 }
 

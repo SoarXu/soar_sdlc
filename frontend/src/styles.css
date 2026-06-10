@@ -358,6 +358,27 @@ body {
   font-size: 13px;
 }
 
+.status-history {
+  border-top: 1px solid #e5eaf3;
+  margin-top: 20px;
+  padding-top: 18px;
+}
+
+.status-history-title {
+  color: #1f2937;
+  font-size: 15px;
+  font-weight: 700;
+  margin-bottom: 14px;
+}
+
+.status-history-remark {
+  background: #f3f6f9;
+  color: #243047;
+  margin-top: 8px;
+  padding: 10px 12px;
+  white-space: pre-wrap;
+}
+
 @media (max-width: 980px) {
   .app-shell {
     grid-template-columns: 104px minmax(0, 1fr);

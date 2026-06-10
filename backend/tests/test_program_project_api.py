@@ -53,6 +53,18 @@ def test_program_crud_persists_to_database(client: TestClient):
     assert suspended.status_code == 200
     assert suspended.json()["status"] == "paused"
 
+    restarted = client.post(
+        f"/api/v1/programs/{program_id}/start",
+        json={"effective_time": "2026-06-10T11:31:59", "remark": "重新启动项目集"},
+    )
+    assert restarted.status_code == 200
+    assert restarted.json()["status"] == "active"
+
+    history = client.get(f"/api/v1/programs/{program_id}/status-operations")
+    assert history.status_code == 200
+    history_data = history.json()
+    assert any(item["action"] == "start" and item["remark"] == "重新启动项目集" for item in history_data)
+
     deleted = client.delete(f"/api/v1/programs/{program_id}")
     assert deleted.status_code == 204
 
@@ -99,6 +111,21 @@ def test_project_crud_uses_prd_fields(client: TestClient):
     assert started.status_code == 200
     assert started.json()["status"] == "active"
 
+    suspended = client.post(
+        f"/api/v1/projects/{project_id}/suspend",
+        json={"effective_time": "2026-06-10T11:32:50", "remark": "阶段性挂起"},
+    )
+    assert suspended.status_code == 200
+    assert suspended.json()["status"] == "paused"
+
+    restarted = client.post(f"/api/v1/projects/{project_id}/start")
+    assert restarted.status_code == 200
+    assert restarted.json()["status"] == "active"
+
+    paused_again = client.post(f"/api/v1/projects/{project_id}/suspend")
+    assert paused_again.status_code == 200
+    assert paused_again.json()["status"] == "paused"
+
     closed = client.post(f"/api/v1/projects/{project_id}/close")
     assert closed.status_code == 200
     assert closed.json()["status"] == "closed"
@@ -106,6 +133,10 @@ def test_project_crud_uses_prd_fields(client: TestClient):
     activated = client.post(f"/api/v1/projects/{project_id}/activate")
     assert activated.status_code == 200
     assert activated.json()["status"] == "active"
+
+    history = client.get(f"/api/v1/projects/{project_id}/status-operations")
+    assert history.status_code == 200
+    assert any(item["action"] == "suspend" and item["remark"] == "阶段性挂起" for item in history.json())
 
     deleted = client.delete(f"/api/v1/projects/{project_id}")
     assert deleted.status_code == 204

@@ -400,6 +400,23 @@ CREATE TABLE IF NOT EXISTS object_relation (
   KEY idx_relation_type (relation_type)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='对象关联表';
 
+CREATE TABLE IF NOT EXISTS status_operation_log (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '记录 ID',
+  object_type VARCHAR(64) NOT NULL COMMENT '对象类型：program、project',
+  object_id BIGINT UNSIGNED NOT NULL COMMENT '对象 ID',
+  action VARCHAR(32) NOT NULL COMMENT '操作：start、suspend、close、activate',
+  from_status VARCHAR(32) NULL COMMENT '操作前状态',
+  to_status VARCHAR(32) NOT NULL COMMENT '操作后状态',
+  effective_time DATETIME NOT NULL COMMENT '实际完成时间',
+  remark TEXT NULL COMMENT '备注',
+  actor_id BIGINT UNSIGNED NULL COMMENT '操作人 ID',
+  create_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  PRIMARY KEY (id),
+  KEY idx_status_operation_object (object_type, object_id),
+  KEY idx_status_operation_time (effective_time),
+  KEY idx_status_operation_actor (actor_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='状态操作记录表';
+
 CREATE TABLE IF NOT EXISTS notifications (
   id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '通知 ID',
   receiver_id BIGINT UNSIGNED NOT NULL COMMENT '接收人 ID',

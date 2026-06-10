@@ -20,20 +20,24 @@ export function updateProgram(id, payload) {
   return http.patch(`/programs/${id}`, payload)
 }
 
-export function startProgram(id) {
-  return http.post(`/programs/${id}/start`)
+export function fetchProgramStatusOperations(id) {
+  return http.get(`/programs/${id}/status-operations`)
 }
 
-export function suspendProgram(id) {
-  return http.post(`/programs/${id}/suspend`)
+export function startProgram(id, payload = {}) {
+  return http.post(`/programs/${id}/start`, payload)
 }
 
-export function closeProgram(id) {
-  return http.post(`/programs/${id}/close`)
+export function suspendProgram(id, payload = {}) {
+  return http.post(`/programs/${id}/suspend`, payload)
 }
 
-export function activateProgram(id) {
-  return http.post(`/programs/${id}/activate`)
+export function closeProgram(id, payload = {}) {
+  return http.post(`/programs/${id}/close`, payload)
+}
+
+export function activateProgram(id, payload = {}) {
+  return http.post(`/programs/${id}/activate`, payload)
 }
 
 export function deleteProgram(id) {

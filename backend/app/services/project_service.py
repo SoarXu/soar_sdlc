@@ -5,7 +5,9 @@ from sqlalchemy.orm import Session
 
 from app.models.program import Program
 from app.models.project import Project
+from app.services.status_operation_service import create_status_operation, list_status_operations
 from app.views.project_view import ProjectCreate, ProjectUpdate
+from app.views.status_operation_view import StatusOperationCreate
 
 
 def list_projects(db: Session) -> list[Project]:
@@ -47,42 +49,87 @@ def delete_project(db: Session, project_id: int) -> None:
     db.commit()
 
 
-def start_project(db: Session, project_id: int) -> Project:
+def start_project(db: Session, project_id: int, payload: StatusOperationCreate | None = None) -> Project:
     project = _get_active_project(db, project_id)
-    _require_status(project.status, {"planning"}, "只有规划中的项目可以启动")
+    _require_status(project.status, {"planning", "paused"}, "只有规划中或已挂起的项目可以启动")
+    from_status = project.status
     project.status = "active"
     _activate_program_tree(db, project.program_id)
+    create_status_operation(
+        db,
+        object_type="project",
+        object_id=project.id,
+        action="start",
+        from_status=from_status,
+        to_status=project.status,
+        payload=payload,
+    )
     db.commit()
     db.refresh(project)
     return project
 
 
-def suspend_project(db: Session, project_id: int) -> Project:
+def suspend_project(db: Session, project_id: int, payload: StatusOperationCreate | None = None) -> Project:
     project = _get_active_project(db, project_id)
     _require_status(project.status, {"active"}, "只有进行中的项目可以挂起")
+    from_status = project.status
     project.status = "paused"
+    create_status_operation(
+        db,
+        object_type="project",
+        object_id=project.id,
+        action="suspend",
+        from_status=from_status,
+        to_status=project.status,
+        payload=payload,
+    )
     db.commit()
     db.refresh(project)
     return project
 
 
-def close_project(db: Session, project_id: int) -> Project:
+def close_project(db: Session, project_id: int, payload: StatusOperationCreate | None = None) -> Project:
     project = _get_active_project(db, project_id)
-    _require_status(project.status, {"active"}, "只有进行中的项目可以关闭")
+    _require_status(project.status, {"active", "paused"}, "只有进行中或已挂起的项目可以关闭")
+    from_status = project.status
     project.status = "closed"
+    create_status_operation(
+        db,
+        object_type="project",
+        object_id=project.id,
+        action="close",
+        from_status=from_status,
+        to_status=project.status,
+        payload=payload,
+    )
     db.commit()
     db.refresh(project)
     return project
 
 
-def activate_project(db: Session, project_id: int) -> Project:
+def activate_project(db: Session, project_id: int, payload: StatusOperationCreate | None = None) -> Project:
     project = _get_active_project(db, project_id)
     _require_status(project.status, {"closed"}, "只有已关闭的项目可以激活")
+    from_status = project.status
     project.status = "active"
     _activate_program_tree(db, project.program_id)
+    create_status_operation(
+        db,
+        object_type="project",
+        object_id=project.id,
+        action="activate",
+        from_status=from_status,
+        to_status=project.status,
+        payload=payload,
+    )
     db.commit()
     db.refresh(project)
     return project
+
+
+def list_project_status_operations(db: Session, project_id: int) -> list[dict]:
+    _get_active_project(db, project_id)
+    return list_status_operations(db, "project", project_id)
 
 
 def _get_active_project(db: Session, project_id: int) -> Project:

@@ -5,7 +5,9 @@ from sqlalchemy.orm import Session
 
 from app.models.program import Program
 from app.models.project import Project
+from app.services.status_operation_service import create_status_operation, list_status_operations
 from app.views.program_view import ProgramCreate, ProgramUpdate
+from app.views.status_operation_view import StatusOperationCreate
 
 PROGRAM_STATUS_OPTIONS = [
     {"label": "规划中", "value": "planning"},
@@ -102,44 +104,89 @@ def delete_program(db: Session, program_id: int) -> None:
     db.commit()
 
 
-def start_program(db: Session, program_id: int) -> Program:
+def start_program(db: Session, program_id: int, payload: StatusOperationCreate | None = None) -> Program:
     program = _get_active_program(db, program_id)
-    _require_status(program.status, {"planning"}, "只有规划中的项目集可以启动")
+    _require_status(program.status, {"planning", "paused"}, "只有规划中或已挂起的项目集可以启动")
+    from_status = program.status
     program.status = "active"
     _activate_ancestor_programs(db, program.parent_id)
+    create_status_operation(
+        db,
+        object_type="program",
+        object_id=program.id,
+        action="start",
+        from_status=from_status,
+        to_status=program.status,
+        payload=payload,
+    )
     db.commit()
     db.refresh(program)
     return program
 
 
-def suspend_program(db: Session, program_id: int) -> Program:
+def suspend_program(db: Session, program_id: int, payload: StatusOperationCreate | None = None) -> Program:
     program = _get_active_program(db, program_id)
     _require_status(program.status, {"active"}, "只有进行中的项目集可以挂起")
+    from_status = program.status
     program.status = "paused"
+    create_status_operation(
+        db,
+        object_type="program",
+        object_id=program.id,
+        action="suspend",
+        from_status=from_status,
+        to_status=program.status,
+        payload=payload,
+    )
     db.commit()
     db.refresh(program)
     return program
 
 
-def close_program(db: Session, program_id: int) -> Program:
+def close_program(db: Session, program_id: int, payload: StatusOperationCreate | None = None) -> Program:
     program = _get_active_program(db, program_id)
-    _require_status(program.status, {"active"}, "只有进行中的项目集可以关闭")
+    _require_status(program.status, {"active", "paused"}, "只有进行中或已挂起的项目集可以关闭")
     if _has_unclosed_children(db, program_id):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="存在子项目集或项目为未关闭状态")
+    from_status = program.status
     program.status = "closed"
+    create_status_operation(
+        db,
+        object_type="program",
+        object_id=program.id,
+        action="close",
+        from_status=from_status,
+        to_status=program.status,
+        payload=payload,
+    )
     db.commit()
     db.refresh(program)
     return program
 
 
-def activate_program(db: Session, program_id: int) -> Program:
+def activate_program(db: Session, program_id: int, payload: StatusOperationCreate | None = None) -> Program:
     program = _get_active_program(db, program_id)
     _require_status(program.status, {"closed"}, "只有已关闭的项目集可以激活")
+    from_status = program.status
     program.status = "active"
     _activate_ancestor_programs(db, program.parent_id)
+    create_status_operation(
+        db,
+        object_type="program",
+        object_id=program.id,
+        action="activate",
+        from_status=from_status,
+        to_status=program.status,
+        payload=payload,
+    )
     db.commit()
     db.refresh(program)
     return program
+
+
+def list_program_status_operations(db: Session, program_id: int) -> list[dict]:
+    _get_active_program(db, program_id)
+    return list_status_operations(db, "program", program_id)
 
 
 def _get_active_program(db: Session, program_id: int) -> Program:

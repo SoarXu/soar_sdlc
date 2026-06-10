@@ -7,6 +7,7 @@ from app.services.program_service import (
     close_program,
     create_program,
     delete_program,
+    list_program_status_operations,
     list_program_status_options,
     list_program_tree,
     list_programs,
@@ -15,6 +16,7 @@ from app.services.program_service import (
     update_program,
 )
 from app.views.program_view import ProgramCreate, ProgramRead, ProgramStatusOption, ProgramTreeRead, ProgramUpdate
+from app.views.status_operation_view import StatusOperationCreate, StatusOperationRead
 
 
 router = APIRouter()
@@ -45,24 +47,29 @@ def patch_program(program_id: int, payload: ProgramUpdate, db: Session = Depends
     return update_program(db, program_id, payload)
 
 
+@router.get("/{program_id}/status-operations", response_model=list[StatusOperationRead])
+def get_program_status_operations(program_id: int, db: Session = Depends(get_db)):
+    return list_program_status_operations(db, program_id)
+
+
 @router.post("/{program_id}/start", response_model=ProgramRead)
-def start_program_status(program_id: int, db: Session = Depends(get_db)):
-    return start_program(db, program_id)
+def start_program_status(program_id: int, payload: StatusOperationCreate | None = None, db: Session = Depends(get_db)):
+    return start_program(db, program_id, payload)
 
 
 @router.post("/{program_id}/suspend", response_model=ProgramRead)
-def suspend_program_status(program_id: int, db: Session = Depends(get_db)):
-    return suspend_program(db, program_id)
+def suspend_program_status(program_id: int, payload: StatusOperationCreate | None = None, db: Session = Depends(get_db)):
+    return suspend_program(db, program_id, payload)
 
 
 @router.post("/{program_id}/close", response_model=ProgramRead)
-def close_program_status(program_id: int, db: Session = Depends(get_db)):
-    return close_program(db, program_id)
+def close_program_status(program_id: int, payload: StatusOperationCreate | None = None, db: Session = Depends(get_db)):
+    return close_program(db, program_id, payload)
 
 
 @router.post("/{program_id}/activate", response_model=ProgramRead)
-def activate_program_status(program_id: int, db: Session = Depends(get_db)):
-    return activate_program(db, program_id)
+def activate_program_status(program_id: int, payload: StatusOperationCreate | None = None, db: Session = Depends(get_db)):
+    return activate_program(db, program_id, payload)
 
 
 @router.delete("/{program_id}", status_code=status.HTTP_204_NO_CONTENT)

@@ -379,6 +379,12 @@ body {
   white-space: pre-wrap;
 }
 
+.project-tab-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 12px;
+}
+
 @media (max-width: 980px) {
   .app-shell {
     grid-template-columns: 104px minmax(0, 1fr);

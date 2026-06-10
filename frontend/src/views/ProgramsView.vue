@@ -62,11 +62,11 @@
               </el-popconfirm>
             </template>
             <template v-else>
+              <el-button link type="primary" @click="openProjectEdit(row.id)">编辑</el-button>
               <el-button v-if="row.status === 'planning'" link type="success" @click="changeProjectStatus(row.id, 'start')">启动</el-button>
               <el-button v-if="row.status === 'active'" link type="warning" @click="changeProjectStatus(row.id, 'suspend')">挂起</el-button>
               <el-button v-if="row.status === 'active'" link type="danger" @click="changeProjectStatus(row.id, 'close')">关闭</el-button>
               <el-button v-if="row.status === 'closed'" link type="success" @click="changeProjectStatus(row.id, 'activate')">激活</el-button>
-              <span class="muted-action">在项目页维护</span>
             </template>
           </template>
         </el-table-column>
@@ -113,6 +113,43 @@
         <el-button type="primary" :loading="saving" @click="submitProgram">保存</el-button>
       </template>
     </el-dialog>
+
+    <el-dialog v-model="projectDialogVisible" title="编辑项目" width="560px">
+      <el-form label-position="top">
+        <el-form-item label="项目名称" required><el-input v-model="projectForm.name" /></el-form-item>
+        <div class="form-grid">
+          <el-form-item label="所属项目集">
+            <el-select v-model="projectForm.program_id" clearable filterable placeholder="请选择项目集">
+              <el-option v-for="program in flatPrograms" :key="program.id" :label="program.name" :value="program.id" />
+            </el-select>
+          </el-form-item>
+          <el-form-item label="负责人">
+            <el-select v-model="projectForm.owner_id" clearable filterable placeholder="请选择负责人">
+              <el-option v-for="user in users" :key="user.id" :label="user.full_name" :value="user.id" />
+            </el-select>
+          </el-form-item>
+          <el-form-item label="开始日期">
+            <el-date-picker v-model="projectForm.start_date" value-format="YYYY-MM-DD" type="date" />
+          </el-form-item>
+          <el-form-item label="结束日期">
+            <div class="end-date-field">
+              <el-checkbox v-model="projectForm.is_long_term">长期</el-checkbox>
+              <el-date-picker
+                v-model="projectForm.end_date"
+                value-format="YYYY-MM-DD"
+                type="date"
+                :disabled="projectForm.is_long_term"
+              />
+            </div>
+          </el-form-item>
+        </div>
+        <el-form-item label="描述"><el-input v-model="projectForm.description" type="textarea" :rows="3" /></el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="projectDialogVisible = false">取消</el-button>
+        <el-button type="primary" :loading="saving" @click="submitProject">保存</el-button>
+      </template>
+    </el-dialog>
   </section>
 </template>
 
@@ -132,7 +169,7 @@ import {
   suspendProgram,
   updateProgram
 } from '../api/programs'
-import { activateProject, closeProject, startProject, suspendProject } from '../api/projects'
+import { activateProject, closeProject, fetchProject, startProject, suspendProject, updateProject } from '../api/projects'
 import { fetchUsers } from '../api/users'
 import { userLabel } from '../utils/referenceLabels'
 import { usePagination } from '../utils/usePagination'
@@ -141,7 +178,9 @@ const router = useRouter()
 const loading = ref(false)
 const saving = ref(false)
 const dialogVisible = ref(false)
+const projectDialogVisible = ref(false)
 const editingId = ref(null)
+const projectEditingId = ref(null)
 const programTree = ref([])
 const statusOptions = ref([])
 const users = ref([])
@@ -161,6 +200,16 @@ const form = reactive({
   status: 'planning',
   description: ''
 })
+const projectForm = reactive({
+  program_id: null,
+  name: '',
+  owner_id: null,
+  start_date: null,
+  end_date: null,
+  is_long_term: false,
+  status: 'planning',
+  description: ''
+})
 
 const dialogTitle = computed(() => {
   if (editingId.value) return '编辑项目集'
@@ -168,6 +217,7 @@ const dialogTitle = computed(() => {
 })
 
 const treeRows = computed(() => programTree.value.map(toTreeRow))
+const flatPrograms = computed(() => flattenPrograms(programTree.value))
 const {
   page: treePage,
   pageSize: treePageSize,
@@ -197,6 +247,13 @@ function toTreeRow(node) {
       }))
     ]
   }
+}
+
+function flattenPrograms(nodes) {
+  return nodes.flatMap((node) => [
+    { id: node.id, name: node.name },
+    ...flattenPrograms(node.children || [])
+  ])
 }
 
 function resetForm(parentId = null) {
@@ -235,6 +292,35 @@ function openEdit(row) {
 
 function goToProject(projectId) {
   router.push({ name: 'project-detail', params: { id: projectId } })
+}
+
+function resetProjectForm() {
+  Object.assign(projectForm, {
+    program_id: null,
+    name: '',
+    owner_id: null,
+    start_date: null,
+    end_date: null,
+    is_long_term: false,
+    status: 'planning',
+    description: ''
+  })
+}
+
+async function openProjectEdit(projectId) {
+  projectEditingId.value = projectId
+  resetProjectForm()
+  try {
+    const response = await fetchProject(projectId)
+    Object.assign(projectForm, {
+      ...response.data,
+      is_long_term: Boolean(response.data.is_long_term),
+      description: response.data.description || ''
+    })
+    projectDialogVisible.value = true
+  } catch {
+    ElMessage.error('项目详情加载失败')
+  }
 }
 
 async function loadData() {
@@ -283,6 +369,25 @@ async function changeProgramStatus(id, action) {
     await loadData()
   } catch (error) {
     ElMessage.error(error.response?.data?.detail || '项目集状态更新失败')
+  }
+}
+
+async function submitProject() {
+  if (!projectForm.name.trim()) return ElMessage.warning('请填写项目名称')
+  saving.value = true
+  try {
+    const payload = {
+      ...projectForm,
+      program_id: projectForm.program_id || null,
+      owner_id: projectForm.owner_id || null,
+      end_date: projectForm.is_long_term ? null : projectForm.end_date
+    }
+    delete payload.status
+    await updateProject(projectEditingId.value, payload)
+    projectDialogVisible.value = false
+    await loadData()
+  } finally {
+    saving.value = false
   }
 }
 

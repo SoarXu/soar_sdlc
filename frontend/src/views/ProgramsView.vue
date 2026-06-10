@@ -20,7 +20,16 @@
       >
         <el-table-column prop="name" label="名称" min-width="180">
           <template #default="{ row }">
-            <span :class="{ 'project-row-name': row.nodeType === 'project' }">{{ row.name }}</span>
+            <el-button
+              v-if="row.nodeType === 'project'"
+              class="project-row-link"
+              link
+              type="primary"
+              @click="goToProject(row.id)"
+            >
+              {{ row.name }}
+            </el-button>
+            <span v-else>{{ row.name }}</span>
           </template>
         </el-table-column>
         <el-table-column label="类型" min-width="90">
@@ -107,12 +116,14 @@
 <script setup>
 import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
+import { useRouter } from 'vue-router'
 
 import { createProgram, deleteProgram, fetchProgramStatusOptions, fetchProgramTree, updateProgram } from '../api/programs'
 import { fetchUsers } from '../api/users'
 import { userLabel } from '../utils/referenceLabels'
 import { usePagination } from '../utils/usePagination'
 
+const router = useRouter()
 const loading = ref(false)
 const saving = ref(false)
 const dialogVisible = ref(false)
@@ -206,6 +217,10 @@ function openEdit(row) {
     description: row.description || ''
   })
   dialogVisible.value = true
+}
+
+function goToProject(projectId) {
+  router.push({ name: 'project-detail', params: { id: projectId } })
 }
 
 async function loadData() {

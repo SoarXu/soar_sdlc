@@ -23,7 +23,9 @@
           <template #default="{ row }">{{ userLabel(users, row.owner_id) }}</template>
         </el-table-column>
         <el-table-column prop="start_date" label="开始日期" width="130" />
-        <el-table-column prop="end_date" label="结束日期" width="130" />
+        <el-table-column label="结束日期" width="130">
+          <template #default="{ row }">{{ row.is_long_term ? '长期' : row.end_date }}</template>
+        </el-table-column>
         <el-table-column label="状态" width="110">
           <template #default="{ row }">{{ projectStatusLabel(row.status) }}</template>
         </el-table-column>
@@ -62,7 +64,12 @@
             </el-select>
           </el-form-item>
           <el-form-item label="开始日期"><el-date-picker v-model="form.start_date" value-format="YYYY-MM-DD" type="date" /></el-form-item>
-          <el-form-item label="结束日期"><el-date-picker v-model="form.end_date" value-format="YYYY-MM-DD" type="date" /></el-form-item>
+          <el-form-item label="结束日期">
+            <div class="end-date-field">
+              <el-checkbox v-model="form.is_long_term">长期</el-checkbox>
+              <el-date-picker v-model="form.end_date" value-format="YYYY-MM-DD" type="date" :disabled="form.is_long_term" />
+            </div>
+          </el-form-item>
         </div>
         <el-form-item label="状态">
           <el-select v-model="form.status">
@@ -103,7 +110,7 @@ const {
   total: projectTotal,
   pagedItems: pagedProjects
 } = usePagination(projects)
-const form = reactive({ program_id: null, name: '', owner_id: null, start_date: null, end_date: null, status: 'active', description: '' })
+const form = reactive({ program_id: null, name: '', owner_id: null, start_date: null, end_date: null, is_long_term: false, status: 'active', description: '' })
 const projectStatusOptions = [
   { label: '规划中', value: 'planning' },
   { label: '进行中', value: 'active' },
@@ -116,11 +123,11 @@ function projectStatusLabel(value) {
 }
 
 function resetForm() {
-  Object.assign(form, { program_id: null, name: '', owner_id: null, start_date: null, end_date: null, status: 'active', description: '' })
+  Object.assign(form, { program_id: null, name: '', owner_id: null, start_date: null, end_date: null, is_long_term: false, status: 'active', description: '' })
 }
 
 function openCreate() { editingId.value = null; resetForm(); dialogVisible.value = true }
-function openEdit(row) { editingId.value = row.id; Object.assign(form, { ...row, description: row.description || '' }); dialogVisible.value = true }
+function openEdit(row) { editingId.value = row.id; Object.assign(form, { ...row, is_long_term: Boolean(row.is_long_term), description: row.description || '' }); dialogVisible.value = true }
 
 async function loadData() {
   loading.value = true
@@ -140,7 +147,7 @@ async function submitProject() {
   if (!form.name.trim()) return ElMessage.warning('请填写项目名称')
   saving.value = true
   try {
-    const payload = { ...form, program_id: form.program_id || null, owner_id: form.owner_id || null }
+    const payload = { ...form, program_id: form.program_id || null, owner_id: form.owner_id || null, end_date: form.is_long_term ? null : form.end_date }
     if (editingId.value) await updateProject(editingId.value, payload)
     else await createProject(payload)
     dialogVisible.value = false

@@ -9,6 +9,7 @@ class ProjectBase(BaseModel):
     owner_id: int | None = None
     start_date: date | None = None
     end_date: date | None = None
+    is_long_term: bool = False
     status: str = "active"
     description: str | None = None
 
@@ -23,6 +24,7 @@ class ProjectUpdate(BaseModel):
     owner_id: int | None = None
     start_date: date | None = None
     end_date: date | None = None
+    is_long_term: bool | None = None
     status: str | None = None
     description: str | None = None
     workflow_config_id: int | None = None

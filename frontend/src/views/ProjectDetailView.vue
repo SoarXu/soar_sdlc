@@ -6,7 +6,7 @@
         <h1>{{ project.name || '项目详情' }}</h1>
         <p>
           {{ labelById(programs, project.program_id) }} · {{ userLabel(users, project.owner_id) }} ·
-          {{ project.start_date || '未设置开始' }} 至 {{ project.end_date || '未设置结束' }}
+          {{ project.start_date || '未设置开始' }} 至 {{ projectEndDateLabel }}
         </p>
       </div>
       <el-tag size="large">{{ projectStatusLabel(project.status) }}</el-tag>
@@ -39,7 +39,7 @@
           <el-descriptions-item label="负责人">{{ userLabel(users, project.owner_id) }}</el-descriptions-item>
           <el-descriptions-item label="状态">{{ projectStatusLabel(project.status) }}</el-descriptions-item>
           <el-descriptions-item label="开始日期">{{ project.start_date || '-' }}</el-descriptions-item>
-          <el-descriptions-item label="结束日期">{{ project.end_date || '-' }}</el-descriptions-item>
+          <el-descriptions-item label="结束日期">{{ projectEndDateLabel }}</el-descriptions-item>
           <el-descriptions-item label="描述" :span="2">{{ project.description || '-' }}</el-descriptions-item>
         </el-descriptions>
       </template>
@@ -90,6 +90,10 @@ const projectStatusOptions = [
 ]
 
 const activeTabLabel = computed(() => tabs.find((tab) => tab.key === activeTab.value)?.label || '')
+const projectEndDateLabel = computed(() => {
+  if (project.value.is_long_term) return '长期'
+  return project.value.end_date || '未设置结束'
+})
 const metrics = computed(() => [
   { key: 'iterations', label: '迭代', value: '-' },
   { key: 'requirements', label: '需求', value: '-' },

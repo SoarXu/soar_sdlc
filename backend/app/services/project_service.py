@@ -16,7 +16,10 @@ def get_project(db: Session, project_id: int) -> Project:
 
 
 def create_project(db: Session, payload: ProjectCreate) -> Project:
-    project = Project(**payload.model_dump())
+    data = payload.model_dump()
+    if data.get("is_long_term"):
+        data["end_date"] = None
+    project = Project(**data)
     db.add(project)
     db.commit()
     db.refresh(project)
@@ -25,7 +28,10 @@ def create_project(db: Session, payload: ProjectCreate) -> Project:
 
 def update_project(db: Session, project_id: int, payload: ProjectUpdate) -> Project:
     project = _get_active_project(db, project_id)
-    for field, value in payload.model_dump(exclude_unset=True).items():
+    data = payload.model_dump(exclude_unset=True)
+    if data.get("is_long_term"):
+        data["end_date"] = None
+    for field, value in data.items():
         setattr(project, field, value)
     db.commit()
     db.refresh(project)

@@ -65,11 +65,13 @@ def test_project_crud_uses_prd_fields(client: TestClient):
 
     created = client.post(
         "/api/v1/projects",
-        json={"name": name, "status": "active", "description": "项目 API 创建"},
+        json={"name": name, "status": "active", "end_date": "2026-12-31", "description": "项目 API 创建"},
     )
     assert created.status_code == 200
     project_id = created.json()["id"]
     assert created.json()["name"] == name
+    assert created.json()["end_date"] == "2026-12-31"
+    assert created.json()["is_long_term"] is False
     assert "owner_id" in created.json()
 
     detail = client.get(f"/api/v1/projects/{project_id}")
@@ -77,9 +79,11 @@ def test_project_crud_uses_prd_fields(client: TestClient):
     assert detail.json()["id"] == project_id
     assert detail.json()["name"] == name
 
-    updated = client.patch(f"/api/v1/projects/{project_id}", json={"description": "已更新"})
+    updated = client.patch(f"/api/v1/projects/{project_id}", json={"description": "已更新", "is_long_term": True})
     assert updated.status_code == 200
     assert updated.json()["description"] == "已更新"
+    assert updated.json()["is_long_term"] is True
+    assert updated.json()["end_date"] is None
 
     deleted = client.delete(f"/api/v1/projects/{project_id}")
     assert deleted.status_code == 204

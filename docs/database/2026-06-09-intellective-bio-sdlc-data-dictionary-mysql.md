@@ -129,7 +129,8 @@
 | name | VARCHAR(150) | NOT NULL | 项目名称 |
 | owner_id | BIGINT UNSIGNED | NULL | 项目负责人 ID |
 | start_date | DATE | NULL | 开始日期 |
-| end_date | DATE | NULL | 结束日期 |
+| end_date | DATE | NULL | 结束日期，长期维护项目为空 |
+| is_long_term | TINYINT(1) | NOT NULL DEFAULT 0 | 是否长期维护 |
 | status | VARCHAR(32) | NOT NULL DEFAULT 'active' | 状态 |
 | description | TEXT | NULL | 描述 |
 | workflow_config_id | BIGINT UNSIGNED | NULL | 项目级工作流配置 ID |

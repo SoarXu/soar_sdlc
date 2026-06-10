@@ -1,6 +1,6 @@
 from datetime import date, datetime
 
-from sqlalchemy import BigInteger, Date, DateTime, String, Text, text
+from sqlalchemy import BigInteger, Boolean, Date, DateTime, String, Text, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.session import Base
@@ -15,6 +15,7 @@ class Project(Base):
     owner_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     start_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     end_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    is_long_term: Mapped[bool] = mapped_column(Boolean, default=False)
     status: Mapped[str] = mapped_column(String(32), default="active")
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     workflow_config_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)

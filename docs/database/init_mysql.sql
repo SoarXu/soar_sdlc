@@ -80,6 +80,7 @@ CREATE TABLE IF NOT EXISTS projects (
   owner_id BIGINT UNSIGNED NULL COMMENT '项目负责人 ID',
   start_date DATE NULL COMMENT '开始日期',
   end_date DATE NULL COMMENT '结束日期',
+  is_long_term TINYINT(1) NOT NULL DEFAULT 0 COMMENT '是否长期维护',
   status VARCHAR(32) NOT NULL DEFAULT 'active' COMMENT '状态',
   description TEXT NULL COMMENT '描述',
   workflow_config_id BIGINT UNSIGNED NULL COMMENT '项目级工作流配置 ID',

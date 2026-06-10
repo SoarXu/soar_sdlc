@@ -11,7 +11,7 @@ from app.views.status_operation_view import StatusOperationCreate
 
 
 def list_projects(db: Session) -> list[Project]:
-    return db.query(Project).filter(Project.delete_time.is_(None)).order_by(Project.id.desc()).all()
+    return db.query(Project).filter(Project.delete_time.is_(None)).order_by(Project.id.asc()).all()
 
 
 def get_project(db: Session, project_id: int) -> Project:
@@ -20,6 +20,11 @@ def get_project(db: Session, project_id: int) -> Project:
 
 def create_project(db: Session, payload: ProjectCreate) -> Project:
     data = payload.model_dump()
+    parent = None
+    if data.get("parent_id"):
+        parent = _get_active_project(db, data["parent_id"])
+        if not data.get("program_id"):
+            data["program_id"] = parent.program_id
     if data.get("is_long_term"):
         data["end_date"] = None
     data["status"] = "planning"
@@ -33,6 +38,12 @@ def create_project(db: Session, payload: ProjectCreate) -> Project:
 def update_project(db: Session, project_id: int, payload: ProjectUpdate) -> Project:
     project = _get_active_project(db, project_id)
     data = payload.model_dump(exclude_unset=True)
+    if data.get("parent_id") == project_id:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="项目不能选择自身作为上级项目")
+    if data.get("parent_id"):
+        parent = _get_active_project(db, data["parent_id"])
+        if _is_project_descendant_of(db, parent, project_id):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="项目不能选择下级项目作为上级项目")
     if data.get("is_long_term"):
         data["end_date"] = None
     data.pop("status", None)
@@ -137,6 +148,21 @@ def _get_active_project(db: Session, project_id: int) -> Project:
     if not project:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
     return project
+
+
+def _is_project_descendant_of(db: Session, project: Project, ancestor_id: int) -> bool:
+    visited: set[int] = set()
+    current = project
+    while current.parent_id:
+        if current.parent_id == ancestor_id:
+            return True
+        if current.parent_id in visited:
+            return False
+        visited.add(current.parent_id)
+        current = db.query(Project).filter(Project.id == current.parent_id, Project.delete_time.is_(None)).first()
+        if current is None:
+            return False
+    return False
 
 
 def _require_status(current_status: str, allowed_statuses: set[str], message: str) -> None:

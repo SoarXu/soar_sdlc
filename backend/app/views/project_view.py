@@ -5,6 +5,7 @@ from pydantic import BaseModel, ConfigDict
 
 class ProjectBase(BaseModel):
     name: str
+    parent_id: int | None = None
     program_id: int | None = None
     owner_id: int | None = None
     start_date: date | None = None
@@ -21,6 +22,7 @@ class ProjectCreate(ProjectBase):
 
 
 class ProjectUpdate(BaseModel):
+    parent_id: int | None = None
     program_id: int | None = None
     name: str | None = None
     owner_id: int | None = None

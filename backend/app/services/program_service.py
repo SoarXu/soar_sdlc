@@ -59,6 +59,7 @@ def list_program_tree(db: Session) -> list[dict]:
             nodes[project.program_id]["projects"].append(
                 {
                     "id": project.id,
+                    "parent_id": project.parent_id,
                     "name": project.name,
                     "owner_id": project.owner_id,
                     "status": project.status,

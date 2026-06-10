@@ -158,6 +158,32 @@ def test_project_crud_uses_prd_fields(client: TestClient):
     assert deleted.status_code == 204
 
 
+def test_project_can_create_child_project_and_inherit_program(client: TestClient):
+    program = client.post("/api/v1/programs", json={"name": f"子项目项目集-{uuid4().hex[:8]}"}).json()
+    parent = client.post(
+        "/api/v1/projects",
+        json={"name": f"父项目-{uuid4().hex[:8]}", "program_id": program["id"]},
+    ).json()
+
+    child_response = client.post(
+        "/api/v1/projects",
+        json={"name": f"子项目-{uuid4().hex[:8]}", "parent_id": parent["id"]},
+    )
+
+    assert child_response.status_code == 200
+    child = child_response.json()
+    assert child["parent_id"] == parent["id"]
+    assert child["program_id"] == program["id"]
+
+    invalid = client.patch(f"/api/v1/projects/{parent['id']}", json={"parent_id": parent["id"]})
+    assert invalid.status_code == 400
+    assert invalid.json()["detail"] == "项目不能选择自身作为上级项目"
+
+    cycle = client.patch(f"/api/v1/projects/{parent['id']}", json={"parent_id": child["id"]})
+    assert cycle.status_code == 400
+    assert cycle.json()["detail"] == "项目不能选择下级项目作为上级项目"
+
+
 def test_dashboard_summary_reads_database_counts(client: TestClient):
     response = client.get("/api/v1/dashboard/summary")
 

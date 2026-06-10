@@ -26,6 +26,9 @@ def ensure_runtime_schema(engine: Engine) -> None:
     if "projects" in table_names:
         columns = {column["name"] for column in inspector.get_columns("projects")}
         with engine.begin() as conn:
+            if "parent_id" not in columns:
+                conn.execute(text("ALTER TABLE projects ADD COLUMN parent_id BIGINT UNSIGNED NULL COMMENT '父项目 ID' AFTER id"))
+                conn.execute(text("CREATE INDEX idx_projects_parent ON projects (parent_id)"))
             if "actual_start_date" not in columns:
                 conn.execute(text("ALTER TABLE projects ADD COLUMN actual_start_date DATE NULL COMMENT '实际开始日期' AFTER end_date"))
             if "actual_end_date" not in columns:

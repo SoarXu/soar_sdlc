@@ -127,6 +127,7 @@
 | 字段 | 类型 | 约束 | 说明 |
 |---|---|---|---|
 | id | BIGINT UNSIGNED | PK, AUTO_INCREMENT | 项目 ID |
+| parent_id | BIGINT UNSIGNED | NULL | 父项目 ID |
 | program_id | BIGINT UNSIGNED | NULL | 所属项目集 ID |
 | name | VARCHAR(150) | NOT NULL | 项目名称 |
 | owner_id | BIGINT UNSIGNED | NULL | 项目负责人 ID |
@@ -147,6 +148,7 @@
 索引：
 
 - `idx_projects_program(program_id)`
+- `idx_projects_parent(parent_id)`
 - `idx_projects_owner(owner_id)`
 - `idx_projects_status(status)`
 

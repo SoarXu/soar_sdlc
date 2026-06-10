@@ -128,6 +128,11 @@
       <el-form label-position="top">
         <el-form-item label="项目名称" required><el-input v-model="projectForm.name" /></el-form-item>
         <div class="form-grid">
+          <el-form-item label="上级项目">
+            <el-select v-model="projectForm.parent_id" clearable filterable placeholder="请选择上级项目">
+              <el-option v-for="item in flatProjects" :key="item.id" :label="item.name" :value="item.id" />
+            </el-select>
+          </el-form-item>
           <el-form-item label="所属项目集">
             <el-select v-model="projectForm.program_id" clearable filterable placeholder="请选择项目集">
               <el-option v-for="program in flatPrograms" :key="program.id" :label="program.name" :value="program.id" />
@@ -272,6 +277,7 @@ const form = reactive({
   description: ''
 })
 const projectForm = reactive({
+  parent_id: null,
   program_id: null,
   name: '',
   owner_id: null,
@@ -295,6 +301,7 @@ const statusConfirmText = computed(() => `${statusActionLabel(statusAction.value
 
 const treeRows = computed(() => programTree.value.map(toTreeRow))
 const flatPrograms = computed(() => flattenPrograms(programTree.value))
+const flatProjects = computed(() => flattenProjects(programTree.value).filter((item) => item.id !== projectEditingId.value))
 const {
   page: treePage,
   pageSize: treePageSize,
@@ -341,6 +348,13 @@ function flattenPrograms(nodes) {
   return nodes.flatMap((node) => [
     { id: node.id, name: node.name },
     ...flattenPrograms(node.children || [])
+  ])
+}
+
+function flattenProjects(nodes) {
+  return nodes.flatMap((node) => [
+    ...(node.projects || []).map((project) => ({ id: project.id, name: project.name })),
+    ...flattenProjects(node.children || [])
   ])
 }
 
@@ -399,6 +413,7 @@ function currentDateTimeValue() {
 
 function resetProjectForm() {
   Object.assign(projectForm, {
+    parent_id: null,
     program_id: null,
     name: '',
     owner_id: null,

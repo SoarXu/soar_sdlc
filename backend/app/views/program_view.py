@@ -50,6 +50,7 @@ class ProgramRead(ProgramBase):
 
 class ProgramProjectRead(BaseModel):
     id: int
+    parent_id: int | None = None
     name: str
     owner_id: int | None = None
     status: str

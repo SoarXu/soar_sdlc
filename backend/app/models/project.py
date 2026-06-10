@@ -10,6 +10,7 @@ class Project(Base):
     __tablename__ = "projects"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, index=True)
+    parent_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     program_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     name: Mapped[str] = mapped_column(String(150), index=True)
     owner_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)

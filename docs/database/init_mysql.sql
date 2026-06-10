@@ -77,6 +77,7 @@ CREATE TABLE IF NOT EXISTS programs (
 
 CREATE TABLE IF NOT EXISTS projects (
   id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '项目 ID',
+  parent_id BIGINT UNSIGNED NULL COMMENT '父项目 ID',
   program_id BIGINT UNSIGNED NULL COMMENT '所属项目集 ID',
   name VARCHAR(150) NOT NULL COMMENT '项目名称',
   owner_id BIGINT UNSIGNED NULL COMMENT '项目负责人 ID',
@@ -94,6 +95,7 @@ CREATE TABLE IF NOT EXISTS projects (
   update_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
   delete_time DATETIME NULL COMMENT '软删除时间',
   PRIMARY KEY (id),
+  KEY idx_projects_parent (parent_id),
   KEY idx_projects_program (program_id),
   KEY idx_projects_owner (owner_id),
   KEY idx_projects_status (status)

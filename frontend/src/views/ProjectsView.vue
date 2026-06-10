@@ -9,7 +9,14 @@
     </div>
 
     <el-card shadow="never">
-      <el-table v-loading="loading" :data="pagedProjects" stripe>
+      <el-table
+        v-loading="loading"
+        :data="pagedProjectTree"
+        row-key="id"
+        stripe
+        default-expand-all
+        :tree-props="{ children: 'children' }"
+      >
         <el-table-column prop="id" label="ID" width="90" />
         <el-table-column label="项目名称" min-width="180">
           <template #default="{ row }">
@@ -31,9 +38,10 @@
         <el-table-column label="状态" width="110">
           <template #default="{ row }">{{ projectStatusLabel(row.status) }}</template>
         </el-table-column>
-        <el-table-column label="操作" width="260" fixed="right">
+        <el-table-column label="操作" width="330" fixed="right">
           <template #default="{ row }">
             <el-button link type="primary" @click="openEdit(row)">编辑</el-button>
+            <el-button link type="success" @click="openCreate(row)">新增项目</el-button>
             <el-button v-if="row.status === 'planning' || row.status === 'paused'" link type="success" @click="openStatusDialog(row, 'start')">启动</el-button>
             <el-button v-if="row.status === 'active'" link type="warning" @click="openStatusDialog(row, 'suspend')">挂起</el-button>
             <el-button v-if="row.status === 'active' || row.status === 'paused'" link type="danger" @click="openStatusDialog(row, 'close')">关闭</el-button>
@@ -59,6 +67,11 @@
       <el-form label-position="top">
         <el-form-item label="项目名称" required><el-input v-model="form.name" /></el-form-item>
         <div class="form-grid">
+          <el-form-item label="上级项目">
+            <el-select v-model="form.parent_id" clearable filterable placeholder="请选择上级项目">
+              <el-option v-for="item in parentProjectOptions" :key="item.id" :label="item.name" :value="item.id" />
+            </el-select>
+          </el-form-item>
           <el-form-item label="所属项目集">
             <el-select v-model="form.program_id" clearable filterable placeholder="请选择项目集">
               <el-option v-for="program in programs" :key="program.id" :label="program.name" :value="program.id" />
@@ -153,14 +166,16 @@ const statusHistory = ref([])
 const projects = ref([])
 const programs = ref([])
 const users = ref([])
+const projectTree = computed(() => buildProjectTree(projects.value))
+const parentProjectOptions = computed(() => projects.value.filter((item) => item.id !== editingId.value))
 const {
   page: projectPage,
   pageSize: projectPageSize,
   pageSizes: projectPageSizes,
   total: projectTotal,
-  pagedItems: pagedProjects
-} = usePagination(projects)
-const form = reactive({ program_id: null, name: '', owner_id: null, start_date: null, end_date: null, actual_start_date: null, actual_end_date: null, is_long_term: false, status: 'planning', description: '' })
+  pagedItems: pagedProjectTree
+} = usePagination(projectTree)
+const form = reactive({ parent_id: null, program_id: null, name: '', owner_id: null, start_date: null, end_date: null, actual_start_date: null, actual_end_date: null, is_long_term: false, status: 'planning', description: '' })
 const projectStatusOptions = [
   { label: '规划中', value: 'planning' },
   { label: '进行中', value: 'active' },
@@ -187,10 +202,29 @@ function statusActionLabel(value) {
 }
 
 function resetForm() {
-  Object.assign(form, { program_id: null, name: '', owner_id: null, start_date: null, end_date: null, actual_start_date: null, actual_end_date: null, is_long_term: false, status: 'planning', description: '' })
+  Object.assign(form, { parent_id: null, program_id: null, name: '', owner_id: null, start_date: null, end_date: null, actual_start_date: null, actual_end_date: null, is_long_term: false, status: 'planning', description: '' })
 }
 
-function openCreate() { editingId.value = null; resetForm(); dialogVisible.value = true }
+function buildProjectTree(items) {
+  const nodes = items.map((item) => ({ ...item, children: [] }))
+  const byId = new Map(nodes.map((item) => [item.id, item]))
+  const roots = []
+  for (const node of nodes) {
+    if (node.parent_id && byId.has(node.parent_id)) byId.get(node.parent_id).children.push(node)
+    else roots.push(node)
+  }
+  return roots
+}
+
+function openCreate(parent = null) {
+  editingId.value = null
+  resetForm()
+  if (parent) {
+    form.parent_id = parent.id
+    form.program_id = parent.program_id || null
+  }
+  dialogVisible.value = true
+}
 function openEdit(row) { editingId.value = row.id; Object.assign(form, { ...row, is_long_term: Boolean(row.is_long_term), description: row.description || '' }); dialogVisible.value = true }
 
 function formatDateTime(value) {

@@ -16,11 +16,19 @@ def ensure_runtime_schema(engine: Engine) -> None:
                 conn.execute(text("ALTER TABLE programs ADD COLUMN planned_start_date DATE NULL COMMENT '计划开始日期' AFTER department"))
             if "planned_end_date" not in columns:
                 conn.execute(text("ALTER TABLE programs ADD COLUMN planned_end_date DATE NULL COMMENT '计划结束日期' AFTER planned_start_date"))
+            if "actual_start_date" not in columns:
+                conn.execute(text("ALTER TABLE programs ADD COLUMN actual_start_date DATE NULL COMMENT '实际开始日期' AFTER planned_end_date"))
+            if "actual_end_date" not in columns:
+                conn.execute(text("ALTER TABLE programs ADD COLUMN actual_end_date DATE NULL COMMENT '实际结束日期' AFTER actual_start_date"))
             if "is_long_term" not in columns:
-                conn.execute(text("ALTER TABLE programs ADD COLUMN is_long_term TINYINT(1) NOT NULL DEFAULT 0 COMMENT '是否长期维护' AFTER planned_end_date"))
+                conn.execute(text("ALTER TABLE programs ADD COLUMN is_long_term TINYINT(1) NOT NULL DEFAULT 0 COMMENT '是否长期维护' AFTER actual_end_date"))
 
     if "projects" in table_names:
         columns = {column["name"] for column in inspector.get_columns("projects")}
         with engine.begin() as conn:
+            if "actual_start_date" not in columns:
+                conn.execute(text("ALTER TABLE projects ADD COLUMN actual_start_date DATE NULL COMMENT '实际开始日期' AFTER end_date"))
+            if "actual_end_date" not in columns:
+                conn.execute(text("ALTER TABLE projects ADD COLUMN actual_end_date DATE NULL COMMENT '实际结束日期' AFTER actual_start_date"))
             if "is_long_term" not in columns:
-                conn.execute(text("ALTER TABLE projects ADD COLUMN is_long_term TINYINT(1) NOT NULL DEFAULT 0 COMMENT '是否长期维护' AFTER end_date"))
+                conn.execute(text("ALTER TABLE projects ADD COLUMN is_long_term TINYINT(1) NOT NULL DEFAULT 0 COMMENT '是否长期维护' AFTER actual_end_date"))

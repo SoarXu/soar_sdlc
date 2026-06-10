@@ -41,10 +41,14 @@
         <el-table-column label="负责人" min-width="120">
           <template #default="{ row }">{{ userLabel(users, row.owner_id) }}</template>
         </el-table-column>
-        <el-table-column prop="planned_start_date" label="计划开始" min-width="120" />
-        <el-table-column label="计划结束" min-width="120">
-          <template #default="{ row }">{{ row.is_long_term ? '长期' : row.planned_end_date }}</template>
+        <el-table-column label="计划开始" min-width="120">
+          <template #default="{ row }">{{ row.nodeType === 'program' ? row.planned_start_date : row.start_date }}</template>
         </el-table-column>
+        <el-table-column label="计划结束" min-width="120">
+          <template #default="{ row }">{{ row.is_long_term ? '长期' : row.nodeType === 'program' ? row.planned_end_date : row.end_date }}</template>
+        </el-table-column>
+        <el-table-column prop="actual_start_date" label="实际开始" min-width="120" />
+        <el-table-column prop="actual_end_date" label="实际结束" min-width="120" />
         <el-table-column label="状态" min-width="90">
           <template #default="{ row }">{{ statusLabel(row) }}</template>
         </el-table-column>
@@ -105,6 +109,12 @@
               />
             </div>
           </el-form-item>
+          <el-form-item label="实际开始">
+            <el-date-picker v-model="form.actual_start_date" value-format="YYYY-MM-DD" type="date" />
+          </el-form-item>
+          <el-form-item label="实际结束">
+            <el-date-picker v-model="form.actual_end_date" value-format="YYYY-MM-DD" type="date" />
+          </el-form-item>
         </div>
         <el-form-item label="描述"><el-input v-model="form.description" type="textarea" :rows="3" /></el-form-item>
       </el-form>
@@ -141,6 +151,12 @@
                 :disabled="projectForm.is_long_term"
               />
             </div>
+          </el-form-item>
+          <el-form-item label="实际开始">
+            <el-date-picker v-model="projectForm.actual_start_date" value-format="YYYY-MM-DD" type="date" />
+          </el-form-item>
+          <el-form-item label="实际结束">
+            <el-date-picker v-model="projectForm.actual_end_date" value-format="YYYY-MM-DD" type="date" />
           </el-form-item>
         </div>
         <el-form-item label="描述"><el-input v-model="projectForm.description" type="textarea" :rows="3" /></el-form-item>
@@ -249,6 +265,8 @@ const form = reactive({
   owner_id: null,
   planned_start_date: null,
   planned_end_date: null,
+  actual_start_date: null,
+  actual_end_date: null,
   is_long_term: false,
   status: 'planning',
   description: ''
@@ -259,6 +277,8 @@ const projectForm = reactive({
   owner_id: null,
   start_date: null,
   end_date: null,
+  actual_start_date: null,
+  actual_end_date: null,
   is_long_term: false,
   status: 'planning',
   description: ''
@@ -331,6 +351,8 @@ function resetForm(parentId = null) {
     owner_id: null,
     planned_start_date: null,
     planned_end_date: null,
+    actual_start_date: null,
+    actual_end_date: null,
     is_long_term: false,
     status: 'planning',
     description: ''
@@ -351,6 +373,8 @@ function openEdit(row) {
     owner_id: row.owner_id,
     planned_start_date: row.planned_start_date || null,
     planned_end_date: row.planned_end_date || null,
+    actual_start_date: row.actual_start_date || null,
+    actual_end_date: row.actual_end_date || null,
     is_long_term: Boolean(row.is_long_term),
     status: row.status,
     description: row.description || ''
@@ -380,6 +404,8 @@ function resetProjectForm() {
     owner_id: null,
     start_date: null,
     end_date: null,
+    actual_start_date: null,
+    actual_end_date: null,
     is_long_term: false,
     status: 'planning',
     description: ''

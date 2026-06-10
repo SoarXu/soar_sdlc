@@ -15,6 +15,8 @@ class Project(Base):
     owner_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     start_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     end_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    actual_start_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    actual_end_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     is_long_term: Mapped[bool] = mapped_column(Boolean, default=False)
     status: Mapped[str] = mapped_column(String(32), default="planning")
     description: Mapped[str | None] = mapped_column(Text, nullable=True)

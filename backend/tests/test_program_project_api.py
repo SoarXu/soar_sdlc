@@ -15,6 +15,8 @@ def test_program_crud_persists_to_database(client: TestClient):
             "name": name,
             "planned_start_date": "2026-06-10",
             "planned_end_date": "2026-12-31",
+            "actual_start_date": "2026-06-11",
+            "actual_end_date": "2026-12-30",
             "description": "API 创建",
         },
     )
@@ -23,27 +25,32 @@ def test_program_crud_persists_to_database(client: TestClient):
     program_id = created_data["id"]
     assert created_data["planned_start_date"] == "2026-06-10"
     assert created_data["planned_end_date"] == "2026-12-31"
+    assert created_data["actual_start_date"] == "2026-06-11"
+    assert created_data["actual_end_date"] == "2026-12-30"
     assert created_data["is_long_term"] is False
     assert created_data["status"] == "planning"
 
     db = SessionLocal()
     try:
         stored = db.execute(
-            text("select name, planned_start_date, planned_end_date, is_long_term from programs where id = :id"),
+            text("select name, planned_start_date, planned_end_date, actual_start_date, actual_end_date, is_long_term from programs where id = :id"),
             {"id": program_id},
         ).one()
         assert stored.name == name
         assert str(stored.planned_start_date) == "2026-06-10"
         assert str(stored.planned_end_date) == "2026-12-31"
+        assert str(stored.actual_start_date) == "2026-06-11"
+        assert str(stored.actual_end_date) == "2026-12-30"
         assert stored.is_long_term == 0
     finally:
         db.close()
 
-    updated = client.patch(f"/api/v1/programs/{program_id}", json={"is_long_term": True})
+    updated = client.patch(f"/api/v1/programs/{program_id}", json={"is_long_term": True, "actual_end_date": "2027-01-10"})
     assert updated.status_code == 200
     assert updated.json()["status"] == "planning"
     assert updated.json()["is_long_term"] is True
     assert updated.json()["planned_end_date"] is None
+    assert updated.json()["actual_end_date"] == "2027-01-10"
 
     started = client.post(f"/api/v1/programs/{program_id}/start")
     assert started.status_code == 200
@@ -86,12 +93,20 @@ def test_project_crud_uses_prd_fields(client: TestClient):
 
     created = client.post(
         "/api/v1/projects",
-        json={"name": name, "end_date": "2026-12-31", "description": "项目 API 创建"},
+        json={
+            "name": name,
+            "end_date": "2026-12-31",
+            "actual_start_date": "2026-07-01",
+            "actual_end_date": "2026-11-30",
+            "description": "项目 API 创建",
+        },
     )
     assert created.status_code == 200
     project_id = created.json()["id"]
     assert created.json()["name"] == name
     assert created.json()["end_date"] == "2026-12-31"
+    assert created.json()["actual_start_date"] == "2026-07-01"
+    assert created.json()["actual_end_date"] == "2026-11-30"
     assert created.json()["is_long_term"] is False
     assert created.json()["status"] == "planning"
     assert "owner_id" in created.json()
@@ -101,11 +116,12 @@ def test_project_crud_uses_prd_fields(client: TestClient):
     assert detail.json()["id"] == project_id
     assert detail.json()["name"] == name
 
-    updated = client.patch(f"/api/v1/projects/{project_id}", json={"description": "已更新", "is_long_term": True})
+    updated = client.patch(f"/api/v1/projects/{project_id}", json={"description": "已更新", "is_long_term": True, "actual_end_date": "2026-12-15"})
     assert updated.status_code == 200
     assert updated.json()["description"] == "已更新"
     assert updated.json()["is_long_term"] is True
     assert updated.json()["end_date"] is None
+    assert updated.json()["actual_end_date"] == "2026-12-15"
 
     started = client.post(f"/api/v1/projects/{project_id}/start")
     assert started.status_code == 200

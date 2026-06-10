@@ -26,6 +26,8 @@
         <el-table-column label="结束日期" width="130">
           <template #default="{ row }">{{ row.is_long_term ? '长期' : row.end_date }}</template>
         </el-table-column>
+        <el-table-column prop="actual_start_date" label="实际开始" width="130" />
+        <el-table-column prop="actual_end_date" label="实际结束" width="130" />
         <el-table-column label="状态" width="110">
           <template #default="{ row }">{{ projectStatusLabel(row.status) }}</template>
         </el-table-column>
@@ -74,6 +76,8 @@
               <el-date-picker v-model="form.end_date" value-format="YYYY-MM-DD" type="date" :disabled="form.is_long_term" />
             </div>
           </el-form-item>
+          <el-form-item label="实际开始"><el-date-picker v-model="form.actual_start_date" value-format="YYYY-MM-DD" type="date" /></el-form-item>
+          <el-form-item label="实际结束"><el-date-picker v-model="form.actual_end_date" value-format="YYYY-MM-DD" type="date" /></el-form-item>
         </div>
         <el-form-item label="描述"><el-input v-model="form.description" type="textarea" :rows="3" /></el-form-item>
       </el-form>
@@ -156,7 +160,7 @@ const {
   total: projectTotal,
   pagedItems: pagedProjects
 } = usePagination(projects)
-const form = reactive({ program_id: null, name: '', owner_id: null, start_date: null, end_date: null, is_long_term: false, status: 'planning', description: '' })
+const form = reactive({ program_id: null, name: '', owner_id: null, start_date: null, end_date: null, actual_start_date: null, actual_end_date: null, is_long_term: false, status: 'planning', description: '' })
 const projectStatusOptions = [
   { label: '规划中', value: 'planning' },
   { label: '进行中', value: 'active' },
@@ -183,7 +187,7 @@ function statusActionLabel(value) {
 }
 
 function resetForm() {
-  Object.assign(form, { program_id: null, name: '', owner_id: null, start_date: null, end_date: null, is_long_term: false, status: 'planning', description: '' })
+  Object.assign(form, { program_id: null, name: '', owner_id: null, start_date: null, end_date: null, actual_start_date: null, actual_end_date: null, is_long_term: false, status: 'planning', description: '' })
 }
 
 function openCreate() { editingId.value = null; resetForm(); dialogVisible.value = true }

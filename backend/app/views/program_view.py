@@ -12,6 +12,8 @@ class ProgramBase(BaseModel):
     department: str | None = None
     planned_start_date: date | None = None
     planned_end_date: date | None = None
+    actual_start_date: date | None = None
+    actual_end_date: date | None = None
     is_long_term: bool = False
     status: str = "planning"
     description: str | None = None
@@ -28,6 +30,8 @@ class ProgramUpdate(BaseModel):
     department: str | None = None
     planned_start_date: date | None = None
     planned_end_date: date | None = None
+    actual_start_date: date | None = None
+    actual_end_date: date | None = None
     is_long_term: bool | None = None
     description: str | None = None
     updater_id: int | None = None
@@ -49,6 +53,11 @@ class ProgramProjectRead(BaseModel):
     name: str
     owner_id: int | None = None
     status: str
+    start_date: date | None = None
+    end_date: date | None = None
+    actual_start_date: date | None = None
+    actual_end_date: date | None = None
+    is_long_term: bool = False
 
 
 class ProgramStatusOption(BaseModel):

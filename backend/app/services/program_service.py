@@ -38,6 +38,8 @@ def list_program_tree(db: Session) -> list[dict]:
             "department": program.department,
             "planned_start_date": program.planned_start_date,
             "planned_end_date": program.planned_end_date,
+            "actual_start_date": program.actual_start_date,
+            "actual_end_date": program.actual_end_date,
             "is_long_term": program.is_long_term,
             "status": program.status,
             "description": program.description,
@@ -60,6 +62,11 @@ def list_program_tree(db: Session) -> list[dict]:
                     "name": project.name,
                     "owner_id": project.owner_id,
                     "status": project.status,
+                    "start_date": project.start_date,
+                    "end_date": project.end_date,
+                    "actual_start_date": project.actual_start_date,
+                    "actual_end_date": project.actual_end_date,
+                    "is_long_term": project.is_long_term,
                 }
             )
 

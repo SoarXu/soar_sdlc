@@ -48,16 +48,24 @@
         <el-table-column label="状态" min-width="90">
           <template #default="{ row }">{{ statusLabel(row) }}</template>
         </el-table-column>
-        <el-table-column label="操作" width="230" fixed="right">
+        <el-table-column label="操作" width="330" fixed="right">
           <template #default="{ row }">
             <template v-if="row.nodeType === 'program'">
               <el-button link type="primary" @click="openEdit(row)">编辑</el-button>
+              <el-button v-if="row.status === 'planning'" link type="success" @click="changeProgramStatus(row.id, 'start')">启动</el-button>
+              <el-button v-if="row.status === 'active'" link type="warning" @click="changeProgramStatus(row.id, 'suspend')">挂起</el-button>
+              <el-button v-if="row.status === 'active'" link type="danger" @click="changeProgramStatus(row.id, 'close')">关闭</el-button>
+              <el-button v-if="row.status === 'closed'" link type="success" @click="changeProgramStatus(row.id, 'activate')">激活</el-button>
               <el-button link type="success" @click="openCreate(row.id)">新增项目集</el-button>
               <el-popconfirm title="确认删除该项目集？" @confirm="removeProgram(row.id)">
                 <template #reference><el-button link type="danger">删除</el-button></template>
               </el-popconfirm>
             </template>
             <template v-else>
+              <el-button v-if="row.status === 'planning'" link type="success" @click="changeProjectStatus(row.id, 'start')">启动</el-button>
+              <el-button v-if="row.status === 'active'" link type="warning" @click="changeProjectStatus(row.id, 'suspend')">挂起</el-button>
+              <el-button v-if="row.status === 'active'" link type="danger" @click="changeProjectStatus(row.id, 'close')">关闭</el-button>
+              <el-button v-if="row.status === 'closed'" link type="success" @click="changeProjectStatus(row.id, 'activate')">激活</el-button>
               <span class="muted-action">在项目页维护</span>
             </template>
           </template>
@@ -98,11 +106,6 @@
             </div>
           </el-form-item>
         </div>
-        <el-form-item label="状态">
-          <el-select v-model="form.status">
-            <el-option v-for="option in statusOptions" :key="option.value" :label="option.label" :value="option.value" />
-          </el-select>
-        </el-form-item>
         <el-form-item label="描述"><el-input v-model="form.description" type="textarea" :rows="3" /></el-form-item>
       </el-form>
       <template #footer>
@@ -118,7 +121,18 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { useRouter } from 'vue-router'
 
-import { createProgram, deleteProgram, fetchProgramStatusOptions, fetchProgramTree, updateProgram } from '../api/programs'
+import {
+  activateProgram,
+  closeProgram,
+  createProgram,
+  deleteProgram,
+  fetchProgramStatusOptions,
+  fetchProgramTree,
+  startProgram,
+  suspendProgram,
+  updateProgram
+} from '../api/programs'
+import { activateProject, closeProject, startProject, suspendProject } from '../api/projects'
 import { fetchUsers } from '../api/users'
 import { userLabel } from '../utils/referenceLabels'
 import { usePagination } from '../utils/usePagination'
@@ -134,7 +148,7 @@ const users = ref([])
 const projectStatusOptions = [
   { label: '规划中', value: 'planning' },
   { label: '进行中', value: 'active' },
-  { label: '已暂停', value: 'paused' },
+  { label: '已挂起', value: 'paused' },
   { label: '已关闭', value: 'closed' }
 ]
 const form = reactive({
@@ -144,7 +158,7 @@ const form = reactive({
   planned_start_date: null,
   planned_end_date: null,
   is_long_term: false,
-  status: 'active',
+  status: 'planning',
   description: ''
 })
 
@@ -193,7 +207,7 @@ function resetForm(parentId = null) {
     planned_start_date: null,
     planned_end_date: null,
     is_long_term: false,
-    status: 'active',
+    status: 'planning',
     description: ''
   })
 }
@@ -247,12 +261,43 @@ async function submitProgram() {
       owner_id: form.owner_id || null,
       planned_end_date: form.is_long_term ? null : form.planned_end_date
     }
+    delete payload.status
     if (editingId.value) await updateProgram(editingId.value, payload)
     else await createProgram(payload)
     dialogVisible.value = false
     await loadData()
   } finally {
     saving.value = false
+  }
+}
+
+async function changeProgramStatus(id, action) {
+  const actions = {
+    start: startProgram,
+    suspend: suspendProgram,
+    close: closeProgram,
+    activate: activateProgram
+  }
+  try {
+    await actions[action](id)
+    await loadData()
+  } catch (error) {
+    ElMessage.error(error.response?.data?.detail || '项目集状态更新失败')
+  }
+}
+
+async function changeProjectStatus(id, action) {
+  const actions = {
+    start: startProject,
+    suspend: suspendProject,
+    close: closeProject,
+    activate: activateProject
+  }
+  try {
+    await actions[action](id)
+    await loadData()
+  } catch (error) {
+    ElMessage.error(error.response?.data?.detail || '项目状态更新失败')
   }
 }
 

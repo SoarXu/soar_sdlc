@@ -20,6 +20,22 @@ export function updateProgram(id, payload) {
   return http.patch(`/programs/${id}`, payload)
 }
 
+export function startProgram(id) {
+  return http.post(`/programs/${id}/start`)
+}
+
+export function suspendProgram(id) {
+  return http.post(`/programs/${id}/suspend`)
+}
+
+export function closeProgram(id) {
+  return http.post(`/programs/${id}/close`)
+}
+
+export function activateProgram(id) {
+  return http.post(`/programs/${id}/activate`)
+}
+
 export function deleteProgram(id) {
   return http.delete(`/programs/${id}`)
 }

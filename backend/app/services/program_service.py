@@ -10,8 +10,7 @@ from app.views.program_view import ProgramCreate, ProgramUpdate
 PROGRAM_STATUS_OPTIONS = [
     {"label": "规划中", "value": "planning"},
     {"label": "进行中", "value": "active"},
-    {"label": "长期维护", "value": "maintenance"},
-    {"label": "已暂停", "value": "paused"},
+    {"label": "已挂起", "value": "paused"},
     {"label": "已关闭", "value": "closed"},
 ]
 
@@ -76,6 +75,7 @@ def create_program(db: Session, payload: ProgramCreate) -> Program:
     data = payload.model_dump()
     if data.get("is_long_term"):
         data["planned_end_date"] = None
+    data["status"] = "planning"
     program = Program(**data)
     db.add(program)
     db.commit()
@@ -88,6 +88,7 @@ def update_program(db: Session, program_id: int, payload: ProgramUpdate) -> Prog
     data = payload.model_dump(exclude_unset=True)
     if data.get("is_long_term"):
         data["planned_end_date"] = None
+    data.pop("status", None)
     for field, value in data.items():
         setattr(program, field, value)
     db.commit()
@@ -101,8 +102,79 @@ def delete_program(db: Session, program_id: int) -> None:
     db.commit()
 
 
+def start_program(db: Session, program_id: int) -> Program:
+    program = _get_active_program(db, program_id)
+    _require_status(program.status, {"planning"}, "只有规划中的项目集可以启动")
+    program.status = "active"
+    _activate_ancestor_programs(db, program.parent_id)
+    db.commit()
+    db.refresh(program)
+    return program
+
+
+def suspend_program(db: Session, program_id: int) -> Program:
+    program = _get_active_program(db, program_id)
+    _require_status(program.status, {"active"}, "只有进行中的项目集可以挂起")
+    program.status = "paused"
+    db.commit()
+    db.refresh(program)
+    return program
+
+
+def close_program(db: Session, program_id: int) -> Program:
+    program = _get_active_program(db, program_id)
+    _require_status(program.status, {"active"}, "只有进行中的项目集可以关闭")
+    if _has_unclosed_children(db, program_id):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="存在子项目集或项目为未关闭状态")
+    program.status = "closed"
+    db.commit()
+    db.refresh(program)
+    return program
+
+
+def activate_program(db: Session, program_id: int) -> Program:
+    program = _get_active_program(db, program_id)
+    _require_status(program.status, {"closed"}, "只有已关闭的项目集可以激活")
+    program.status = "active"
+    _activate_ancestor_programs(db, program.parent_id)
+    db.commit()
+    db.refresh(program)
+    return program
+
+
 def _get_active_program(db: Session, program_id: int) -> Program:
     program = db.query(Program).filter(Program.id == program_id, Program.delete_time.is_(None)).first()
     if not program:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Program not found")
     return program
+
+
+def _require_status(current_status: str, allowed_statuses: set[str], message: str) -> None:
+    if current_status not in allowed_statuses:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=message)
+
+
+def _activate_ancestor_programs(db: Session, parent_id: int | None) -> None:
+    while parent_id:
+        parent = db.query(Program).filter(Program.id == parent_id, Program.delete_time.is_(None)).first()
+        if not parent:
+            return
+        if parent.status != "active":
+            parent.status = "active"
+        parent_id = parent.parent_id
+
+
+def _has_unclosed_children(db: Session, program_id: int) -> bool:
+    child_programs = db.query(Program).filter(Program.parent_id == program_id, Program.delete_time.is_(None)).all()
+    if any(child.status != "closed" for child in child_programs):
+        return True
+    for child in child_programs:
+        if _has_unclosed_children(db, child.id):
+            return True
+
+    return (
+        db.query(Project)
+        .filter(Project.program_id == program_id, Project.delete_time.is_(None), Project.status != "closed")
+        .first()
+        is not None
+    )

@@ -13,7 +13,6 @@ def test_program_crud_persists_to_database(client: TestClient):
         "/api/v1/programs",
         json={
             "name": name,
-            "status": "active",
             "planned_start_date": "2026-06-10",
             "planned_end_date": "2026-12-31",
             "description": "API 创建",
@@ -25,6 +24,7 @@ def test_program_crud_persists_to_database(client: TestClient):
     assert created_data["planned_start_date"] == "2026-06-10"
     assert created_data["planned_end_date"] == "2026-12-31"
     assert created_data["is_long_term"] is False
+    assert created_data["status"] == "planning"
 
     db = SessionLocal()
     try:
@@ -39,11 +39,19 @@ def test_program_crud_persists_to_database(client: TestClient):
     finally:
         db.close()
 
-    updated = client.patch(f"/api/v1/programs/{program_id}", json={"status": "maintenance", "is_long_term": True})
+    updated = client.patch(f"/api/v1/programs/{program_id}", json={"is_long_term": True})
     assert updated.status_code == 200
-    assert updated.json()["status"] == "maintenance"
+    assert updated.json()["status"] == "planning"
     assert updated.json()["is_long_term"] is True
     assert updated.json()["planned_end_date"] is None
+
+    started = client.post(f"/api/v1/programs/{program_id}/start")
+    assert started.status_code == 200
+    assert started.json()["status"] == "active"
+
+    suspended = client.post(f"/api/v1/programs/{program_id}/suspend")
+    assert suspended.status_code == 200
+    assert suspended.json()["status"] == "paused"
 
     deleted = client.delete(f"/api/v1/programs/{program_id}")
     assert deleted.status_code == 204
@@ -57,7 +65,8 @@ def test_program_status_options_are_served_by_backend(client: TestClient):
 
     assert response.status_code == 200
     options = response.json()
-    assert {"label": "长期维护", "value": "maintenance"} in options
+    assert {"label": "已挂起", "value": "paused"} in options
+    assert {"label": "长期维护", "value": "maintenance"} not in options
 
 
 def test_project_crud_uses_prd_fields(client: TestClient):
@@ -65,13 +74,14 @@ def test_project_crud_uses_prd_fields(client: TestClient):
 
     created = client.post(
         "/api/v1/projects",
-        json={"name": name, "status": "active", "end_date": "2026-12-31", "description": "项目 API 创建"},
+        json={"name": name, "end_date": "2026-12-31", "description": "项目 API 创建"},
     )
     assert created.status_code == 200
     project_id = created.json()["id"]
     assert created.json()["name"] == name
     assert created.json()["end_date"] == "2026-12-31"
     assert created.json()["is_long_term"] is False
+    assert created.json()["status"] == "planning"
     assert "owner_id" in created.json()
 
     detail = client.get(f"/api/v1/projects/{project_id}")
@@ -84,6 +94,18 @@ def test_project_crud_uses_prd_fields(client: TestClient):
     assert updated.json()["description"] == "已更新"
     assert updated.json()["is_long_term"] is True
     assert updated.json()["end_date"] is None
+
+    started = client.post(f"/api/v1/projects/{project_id}/start")
+    assert started.status_code == 200
+    assert started.json()["status"] == "active"
+
+    closed = client.post(f"/api/v1/projects/{project_id}/close")
+    assert closed.status_code == 200
+    assert closed.json()["status"] == "closed"
+
+    activated = client.post(f"/api/v1/projects/{project_id}/activate")
+    assert activated.status_code == 200
+    assert activated.json()["status"] == "active"
 
     deleted = client.delete(f"/api/v1/projects/{project_id}")
     assert deleted.status_code == 204
@@ -115,3 +137,40 @@ def test_program_tree_contains_child_programs_and_bound_projects(client: TestCli
     parent_node = next(item for item in response.json() if item["id"] == parent["id"])
     child_node = next(item for item in parent_node["children"] if item["id"] == child["id"])
     assert any(item["id"] == project["id"] and item["name"] == project["name"] for item in child_node["projects"])
+
+
+def test_project_start_activates_parent_program(client: TestClient):
+    program = client.post("/api/v1/programs", json={"name": f"同步项目集-{uuid4().hex[:8]}"}).json()
+    project = client.post(
+        "/api/v1/projects",
+        json={"name": f"同步项目-{uuid4().hex[:8]}", "program_id": program["id"]},
+    ).json()
+
+    response = client.post(f"/api/v1/projects/{project['id']}/start")
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "active"
+    programs = client.get("/api/v1/programs").json()
+    synced_program = next(item for item in programs if item["id"] == program["id"])
+    assert synced_program["status"] == "active"
+
+
+def test_closing_program_blocks_when_descendants_are_not_closed(client: TestClient):
+    parent = client.post("/api/v1/programs", json={"name": f"关闭父项目集-{uuid4().hex[:8]}"}).json()
+    child = client.post(
+        "/api/v1/programs",
+        json={"name": f"关闭子项目集-{uuid4().hex[:8]}", "parent_id": parent["id"]},
+    ).json()
+    client.post(f"/api/v1/programs/{parent['id']}/start")
+
+    blocked = client.post(f"/api/v1/programs/{parent['id']}/close")
+
+    assert blocked.status_code == 400
+    assert blocked.json()["detail"] == "存在子项目集或项目为未关闭状态"
+
+    client.post(f"/api/v1/programs/{child['id']}/start")
+    client.post(f"/api/v1/programs/{child['id']}/close")
+    closed = client.post(f"/api/v1/programs/{parent['id']}/close")
+
+    assert closed.status_code == 200
+    assert closed.json()["status"] == "closed"

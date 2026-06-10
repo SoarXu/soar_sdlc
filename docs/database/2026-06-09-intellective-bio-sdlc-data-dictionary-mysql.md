@@ -106,7 +106,7 @@
 | planned_start_date | DATE | NULL | 计划开始日期 |
 | planned_end_date | DATE | NULL | 计划结束日期，长期维护项目集为空 |
 | is_long_term | TINYINT(1) | NOT NULL DEFAULT 0 | 是否长期维护 |
-| status | VARCHAR(32) | NOT NULL DEFAULT 'active' | 状态 |
+| status | VARCHAR(32) | NOT NULL DEFAULT 'planning' | 状态：planning、active、paused、closed |
 | description | TEXT | NULL | 描述 |
 | creator_id | BIGINT UNSIGNED | NULL | 创建人 |
 | updater_id | BIGINT UNSIGNED | NULL | 更新人 |
@@ -131,7 +131,7 @@
 | start_date | DATE | NULL | 开始日期 |
 | end_date | DATE | NULL | 结束日期，长期维护项目为空 |
 | is_long_term | TINYINT(1) | NOT NULL DEFAULT 0 | 是否长期维护 |
-| status | VARCHAR(32) | NOT NULL DEFAULT 'active' | 状态 |
+| status | VARCHAR(32) | NOT NULL DEFAULT 'planning' | 状态：planning、active、paused、closed |
 | description | TEXT | NULL | 描述 |
 | workflow_config_id | BIGINT UNSIGNED | NULL | 项目级工作流配置 ID |
 | creator_id | BIGINT UNSIGNED | NULL | 创建人 |
@@ -605,8 +605,8 @@
 
 | 对象 | 状态 |
 |---|---|
-| 项目集 | active、archived |
-| 项目 | active、paused、closed |
+| 项目集 | planning、active、paused、closed |
+| 项目 | planning、active、paused、closed |
 | 迭代 | planning、active、finished、closed |
 | 需求 | draft、active、done、closed |
 | 任务 | todo、doing、done、closed |

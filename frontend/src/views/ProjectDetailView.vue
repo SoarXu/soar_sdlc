@@ -85,7 +85,7 @@ const tabs = [
 const projectStatusOptions = [
   { label: '规划中', value: 'planning' },
   { label: '进行中', value: 'active' },
-  { label: '已暂停', value: 'paused' },
+  { label: '已挂起', value: 'paused' },
   { label: '已关闭', value: 'closed' }
 ]
 

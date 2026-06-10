@@ -13,7 +13,7 @@ class ProgramBase(BaseModel):
     planned_start_date: date | None = None
     planned_end_date: date | None = None
     is_long_term: bool = False
-    status: str = "active"
+    status: str = "planning"
     description: str | None = None
 
 
@@ -29,7 +29,6 @@ class ProgramUpdate(BaseModel):
     planned_start_date: date | None = None
     planned_end_date: date | None = None
     is_long_term: bool | None = None
-    status: str | None = None
     description: str | None = None
     updater_id: int | None = None
 

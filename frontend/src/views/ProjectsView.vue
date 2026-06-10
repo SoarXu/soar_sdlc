@@ -29,9 +29,13 @@
         <el-table-column label="状态" width="110">
           <template #default="{ row }">{{ projectStatusLabel(row.status) }}</template>
         </el-table-column>
-        <el-table-column label="操作" width="160" fixed="right">
+        <el-table-column label="操作" width="260" fixed="right">
           <template #default="{ row }">
             <el-button link type="primary" @click="openEdit(row)">编辑</el-button>
+            <el-button v-if="row.status === 'planning'" link type="success" @click="changeProjectStatus(row.id, 'start')">启动</el-button>
+            <el-button v-if="row.status === 'active'" link type="warning" @click="changeProjectStatus(row.id, 'suspend')">挂起</el-button>
+            <el-button v-if="row.status === 'active'" link type="danger" @click="changeProjectStatus(row.id, 'close')">关闭</el-button>
+            <el-button v-if="row.status === 'closed'" link type="success" @click="changeProjectStatus(row.id, 'activate')">激活</el-button>
             <el-popconfirm title="确认删除该项目？" @confirm="removeProject(row.id)">
               <template #reference><el-button link type="danger">删除</el-button></template>
             </el-popconfirm>
@@ -71,11 +75,6 @@
             </div>
           </el-form-item>
         </div>
-        <el-form-item label="状态">
-          <el-select v-model="form.status">
-            <el-option v-for="option in projectStatusOptions" :key="option.value" :label="option.label" :value="option.value" />
-          </el-select>
-        </el-form-item>
         <el-form-item label="描述"><el-input v-model="form.description" type="textarea" :rows="3" /></el-form-item>
       </el-form>
       <template #footer>
@@ -91,7 +90,16 @@ import { onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 
 import { fetchPrograms } from '../api/programs'
-import { createProject, deleteProject, fetchProjects, updateProject } from '../api/projects'
+import {
+  activateProject,
+  closeProject,
+  createProject,
+  deleteProject,
+  fetchProjects,
+  startProject,
+  suspendProject,
+  updateProject
+} from '../api/projects'
 import { fetchUsers } from '../api/users'
 import { labelById, userLabel } from '../utils/referenceLabels'
 import { usePagination } from '../utils/usePagination'
@@ -110,11 +118,11 @@ const {
   total: projectTotal,
   pagedItems: pagedProjects
 } = usePagination(projects)
-const form = reactive({ program_id: null, name: '', owner_id: null, start_date: null, end_date: null, is_long_term: false, status: 'active', description: '' })
+const form = reactive({ program_id: null, name: '', owner_id: null, start_date: null, end_date: null, is_long_term: false, status: 'planning', description: '' })
 const projectStatusOptions = [
   { label: '规划中', value: 'planning' },
   { label: '进行中', value: 'active' },
-  { label: '已暂停', value: 'paused' },
+  { label: '已挂起', value: 'paused' },
   { label: '已关闭', value: 'closed' }
 ]
 
@@ -123,7 +131,7 @@ function projectStatusLabel(value) {
 }
 
 function resetForm() {
-  Object.assign(form, { program_id: null, name: '', owner_id: null, start_date: null, end_date: null, is_long_term: false, status: 'active', description: '' })
+  Object.assign(form, { program_id: null, name: '', owner_id: null, start_date: null, end_date: null, is_long_term: false, status: 'planning', description: '' })
 }
 
 function openCreate() { editingId.value = null; resetForm(); dialogVisible.value = true }
@@ -148,12 +156,28 @@ async function submitProject() {
   saving.value = true
   try {
     const payload = { ...form, program_id: form.program_id || null, owner_id: form.owner_id || null, end_date: form.is_long_term ? null : form.end_date }
+    delete payload.status
     if (editingId.value) await updateProject(editingId.value, payload)
     else await createProject(payload)
     dialogVisible.value = false
     await loadData()
   } finally {
     saving.value = false
+  }
+}
+
+async function changeProjectStatus(id, action) {
+  const actions = {
+    start: startProject,
+    suspend: suspendProject,
+    close: closeProject,
+    activate: activateProject
+  }
+  try {
+    await actions[action](id)
+    await loadData()
+  } catch (error) {
+    ElMessage.error(error.response?.data?.detail || '项目状态更新失败')
   }
 }
 

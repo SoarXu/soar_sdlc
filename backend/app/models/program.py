@@ -17,7 +17,7 @@ class Program(Base):
     planned_start_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     planned_end_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     is_long_term: Mapped[bool] = mapped_column(Boolean, default=False)
-    status: Mapped[str] = mapped_column(String(32), default="active")
+    status: Mapped[str] = mapped_column(String(32), default="planning")
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     creator_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     updater_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)

@@ -471,6 +471,17 @@ body {
   width: 100% !important;
 }
 
+.table-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  white-space: nowrap;
+}
+
+.table-actions .el-button {
+  margin-left: 0;
+}
+
 .detail-titlebar {
   display: flex;
   flex: 0 0 auto;

@@ -95,11 +95,11 @@
           <el-table-column label="需求标题" min-width="180" show-overflow-tooltip>
             <template #default="{ row }"><router-link class="table-link" :to="`/requirements/${row.id}`">{{ row.title }}</router-link></template>
           </el-table-column>
-          <el-table-column label="迭代" width="160"><template #default="{ row }">{{ labelById(projectIterations, row.iteration_id) }}</template></el-table-column>
-          <el-table-column label="负责人" width="150"><template #default="{ row }">{{ userLabel(users, row.owner_id) }}</template></el-table-column>
+          <el-table-column label="迭代" width="140"><template #default="{ row }">{{ labelById(projectIterations, row.iteration_id) }}</template></el-table-column>
+          <el-table-column label="负责人" width="130"><template #default="{ row }">{{ userLabel(users, row.owner_id) }}</template></el-table-column>
           <el-table-column label="优先级" width="100"><template #default="{ row }"><RequirementPriorityBadge :value="row.priority" /></template></el-table-column>
-          <el-table-column label="评审状态" width="120"><template #default="{ row }">{{ reviewStatusLabel(row.review_status) }}</template></el-table-column>
-          <el-table-column label="状态" width="100">
+          <el-table-column label="评审状态" width="110"><template #default="{ row }">{{ reviewStatusLabel(row.review_status) }}</template></el-table-column>
+          <el-table-column label="状态" width="90">
             <template #default="{ row }">
               <el-tooltip v-if="closeReasonByRequirement[row.id]" :content="closeReasonByRequirement[row.id]" placement="top" raw-content>
                 <span class="status-with-reason">{{ requirementStatusLabel(row.status) }}</span>
@@ -107,14 +107,16 @@
               <span v-else>{{ requirementStatusLabel(row.status) }}</span>
             </template>
           </el-table-column>
-          <el-table-column label="操作" width="280" fixed="right">
+          <el-table-column label="操作" width="360" fixed="right">
             <template #default="{ row }">
+              <div class="table-actions">
               <el-button link type="primary" :disabled="projectClosed" @click="openRequirementEdit(row)">编辑</el-button>
               <el-button v-if="canActivateRequirement(row)" link type="warning" @click="activateRequirementRow(row.id)">激活</el-button>
               <el-button v-if="row.status === 'active'" link type="danger" @click="openRequirementClose(row)">关闭</el-button>
               <el-button link type="success" :disabled="projectClosed" @click="openGenerate(row)">生成任务</el-button>
               <el-button link type="success" :disabled="projectClosed" @click="openCaseCreateForRequirement(row)">建用例</el-button>
               <el-popconfirm title="确认删除该需求？" :disabled="projectClosed" @confirm="removeRequirement(row.id)"><template #reference><el-button link type="danger" :disabled="projectClosed">删除</el-button></template></el-popconfirm>
+              </div>
             </template>
           </el-table-column>
         </el-table>

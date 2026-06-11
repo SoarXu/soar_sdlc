@@ -51,6 +51,17 @@ class TestCaseExecutionCreate(BaseModel):
     steps_result_json: dict | list | None = None
 
 
+class BugFromTestCaseRequest(BaseModel):
+    title: str
+    bug_type: str | None = None
+    severity: str = "3"
+    priority: str = "3"
+    reporter_id: int | None = None
+    reproduce_steps: str | None = None
+    expected_result: str | None = None
+    actual_result: str | None = None
+
+
 class TestCaseExecutionRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

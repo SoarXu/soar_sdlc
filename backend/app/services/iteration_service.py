@@ -4,6 +4,7 @@ from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 
 from app.models.iteration import Iteration, IterationProject
+from app.models.bug import Bug
 from app.models.project import Project
 from app.models.requirement import Requirement
 from app.models.task import Task
@@ -139,6 +140,12 @@ def get_iteration_detail(db: Session, iteration_id: int) -> dict:
         .all()
         if requirement_ids else []
     )
+    bugs = (
+        db.query(Bug)
+        .filter(Bug.deleted == 0, Bug.iteration_id == iteration_id)
+        .order_by(Bug.id.desc())
+        .all()
+    )
     covered_requirement_ids = {case.requirement_id for case in test_cases if case.requirement_id}
     requirement_total = len(requirements)
     closed_requirement_total = len([item for item in requirements if item.status == "closed"])
@@ -148,6 +155,7 @@ def get_iteration_detail(db: Session, iteration_id: int) -> dict:
         "requirements": [_model_to_dict(item) for item in requirements],
         "tasks": [_model_to_dict(item) for item in sorted(tasks_by_id.values(), key=lambda item: item.id, reverse=True)],
         "test_cases": [_model_to_dict(item) for item in test_cases],
+        "bugs": [_model_to_dict(item) for item in bugs],
         "metrics": {
             "requirement_total": requirement_total,
             "closed_requirement_total": closed_requirement_total,

@@ -5,13 +5,15 @@ from pydantic import BaseModel, ConfigDict
 
 class BugBase(BaseModel):
     project_id: int
+    iteration_id: int | None = None
     requirement_id: int | None = None
     task_id: int | None = None
     test_case_id: int | None = None
     test_run_id: int | None = None
     title: str
-    severity: str = "medium"
-    priority: str = "medium"
+    bug_type: str | None = None
+    severity: str = "3"
+    priority: str = "3"
     owner_id: int | None = None
     reporter_id: int | None = None
     reproduce_steps: str | None = None
@@ -26,11 +28,13 @@ class BugCreate(BugBase):
 
 class BugUpdate(BaseModel):
     project_id: int | None = None
+    iteration_id: int | None = None
     requirement_id: int | None = None
     task_id: int | None = None
     test_case_id: int | None = None
     test_run_id: int | None = None
     title: str | None = None
+    bug_type: str | None = None
     severity: str | None = None
     priority: str | None = None
     owner_id: int | None = None
@@ -44,8 +48,9 @@ class BugUpdate(BaseModel):
 
 class BugFromTestRunCaseRequest(BaseModel):
     title: str
-    severity: str = "medium"
-    priority: str = "medium"
+    bug_type: str | None = None
+    severity: str = "3"
+    priority: str = "3"
     reporter_id: int | None = None
     reproduce_steps: str | None = None
     expected_result: str | None = None

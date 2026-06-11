@@ -65,6 +65,11 @@ def ensure_runtime_schema(engine: Engine) -> None:
     _ensure_column(engine, "bugs", "source_project_id",
                    "ALTER TABLE bugs ADD COLUMN source_project_id BIGINT UNSIGNED NULL COMMENT '来源项目 ID' AFTER project_id",
                    "CREATE INDEX idx_bugs_source_project ON bugs (source_project_id)")
+    _ensure_column(engine, "bugs", "iteration_id",
+                   "ALTER TABLE bugs ADD COLUMN iteration_id BIGINT UNSIGNED NULL COMMENT '迭代 ID' AFTER source_project_id",
+                   "CREATE INDEX idx_bugs_iteration ON bugs (iteration_id)")
+    _ensure_column(engine, "bugs", "bug_type",
+                   "ALTER TABLE bugs ADD COLUMN bug_type VARCHAR(64) NULL COMMENT 'Bug 类型' AFTER title")
     _ensure_column(engine, "bugs", "deleted",
                    "ALTER TABLE bugs ADD COLUMN deleted TINYINT(1) NOT NULL DEFAULT 0 COMMENT '是否删除 0否1是' AFTER delete_time")
 

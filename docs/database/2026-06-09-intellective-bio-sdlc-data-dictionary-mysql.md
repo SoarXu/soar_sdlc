@@ -335,13 +335,15 @@
 |---|---|---|---|
 | id | BIGINT UNSIGNED | PK, AUTO_INCREMENT | Bug ID |
 | project_id | BIGINT UNSIGNED | NOT NULL | 所属项目 ID |
+| iteration_id | BIGINT UNSIGNED | NULL | 所属迭代 ID |
 | requirement_id | BIGINT UNSIGNED | NULL | 关联需求 ID |
 | task_id | BIGINT UNSIGNED | NULL | 关联任务 ID |
 | test_case_id | BIGINT UNSIGNED | NULL | 来源用例 ID |
 | test_run_id | BIGINT UNSIGNED | NULL | 来源测试单 ID |
 | title | VARCHAR(255) | NOT NULL | Bug 标题 |
-| severity | VARCHAR(32) | NOT NULL DEFAULT 'medium' | 严重程度 |
-| priority | VARCHAR(32) | NOT NULL DEFAULT 'medium' | 优先级 |
+| bug_type | VARCHAR(64) | NULL | Bug 类型 |
+| severity | VARCHAR(32) | NOT NULL DEFAULT '3' | 严重程度：1 最高，5 最低 |
+| priority | VARCHAR(32) | NOT NULL DEFAULT '3' | 优先级：1 最高，5 最低 |
 | owner_id | BIGINT UNSIGNED | NULL | 负责人 ID |
 | reporter_id | BIGINT UNSIGNED | NULL | 提出人 ID |
 | reproduce_steps | TEXT | NULL | 复现步骤 |
@@ -357,6 +359,7 @@
 索引：
 
 - `idx_bugs_project(project_id)`
+- `idx_bugs_iteration(iteration_id)`
 - `idx_bugs_requirement(requirement_id)`
 - `idx_bugs_task(task_id)`
 - `idx_bugs_owner(owner_id)`
@@ -677,10 +680,25 @@
 
 | 值 | 说明 |
 |---|---|
-| low | 低 |
-| medium | 中 |
-| high | 高 |
-| critical | 严重 |
+| 1 | 最高 |
+| 2 | 高 |
+| 3 | 中 |
+| 4 | 低 |
+| 5 | 最低 |
+
+### 14.4 Bug 类型
+
+| 值 | 说明 |
+|---|---|
+| 代码错误 | 代码错误 |
+| 配置相关 | 配置相关 |
+| 安装部署 | 安装部署 |
+| 安全相关 | 安全相关 |
+| 性能问题 | 性能问题 |
+| 标准规范 | 标准规范 |
+| 测试脚本 | 测试脚本 |
+| 设计缺陷 | 设计缺陷 |
+| 其他 | 其他 |
 
 ## 15. 关系说明
 
@@ -697,6 +715,7 @@
 - `test_run_cases.test_run_id -> test_runs.id`
 - `test_run_cases.test_case_id -> test_cases.id`
 - `bugs.project_id -> projects.id`
+- `bugs.iteration_id -> iterations.id`
 - `bugs.requirement_id -> requirements.id`
 - `bugs.task_id -> tasks.id`
 - `bugs.test_case_id -> test_cases.id`

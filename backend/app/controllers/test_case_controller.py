@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session
 
 from app.db.session import get_db
 from app.services.test_case_service import (
+    create_bug_from_test_case,
     create_test_case,
     create_test_case_execution,
     delete_test_case,
@@ -10,7 +11,15 @@ from app.services.test_case_service import (
     list_test_cases,
     update_test_case,
 )
-from app.views.test_case_view import TestCaseCreate, TestCaseExecutionCreate, TestCaseExecutionRead, TestCaseRead, TestCaseUpdate
+from app.views.bug_view import BugRead
+from app.views.test_case_view import (
+    BugFromTestCaseRequest,
+    TestCaseCreate,
+    TestCaseExecutionCreate,
+    TestCaseExecutionRead,
+    TestCaseRead,
+    TestCaseUpdate,
+)
 
 
 router = APIRouter()
@@ -39,6 +48,11 @@ def get_test_case_executions(test_case_id: int, db: Session = Depends(get_db)):
 @router.post("/{test_case_id}/executions", response_model=TestCaseExecutionRead)
 def post_test_case_execution(test_case_id: int, payload: TestCaseExecutionCreate, db: Session = Depends(get_db)):
     return create_test_case_execution(db, test_case_id, payload)
+
+
+@router.post("/{test_case_id}/bugs", response_model=BugRead)
+def post_bug_from_test_case(test_case_id: int, payload: BugFromTestCaseRequest, db: Session = Depends(get_db)):
+    return create_bug_from_test_case(db, test_case_id, payload)
 
 
 @router.delete("/{test_case_id}", status_code=status.HTTP_204_NO_CONTENT)

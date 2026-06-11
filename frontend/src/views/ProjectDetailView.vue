@@ -70,7 +70,7 @@
           </el-table-column>
           <el-table-column label="迭代" width="160"><template #default="{ row }">{{ labelById(projectIterations, row.iteration_id) }}</template></el-table-column>
           <el-table-column label="负责人" width="150"><template #default="{ row }">{{ userLabel(users, row.owner_id) }}</template></el-table-column>
-          <el-table-column label="优先级" width="100"><template #default="{ row }">{{ requirementPriorityLabel(row.priority) }}</template></el-table-column>
+          <el-table-column label="优先级" width="100"><template #default="{ row }"><RequirementPriorityBadge :value="row.priority" /></template></el-table-column>
           <el-table-column label="评审状态" width="120"><template #default="{ row }">{{ reviewStatusLabel(row.review_status) }}</template></el-table-column>
           <el-table-column label="状态" width="100"><template #default="{ row }">{{ requirementStatusLabel(row.status) }}</template></el-table-column>
           <el-table-column label="操作" width="230" fixed="right">
@@ -163,7 +163,7 @@
     <el-dialog v-model="requirementDialogVisible" :title="editingRequirementId ? '编辑需求' : '新增需求'" width="640px">
       <el-form label-position="top">
         <el-form-item label="需求标题" required><el-input v-model="requirementForm.title" /></el-form-item>
-        <div class="form-grid"><el-form-item label="迭代"><el-select v-model="requirementForm.iteration_id" clearable filterable><el-option v-for="iteration in projectIterations" :key="iteration.id" :label="iteration.name" :value="iteration.id" /></el-select></el-form-item><el-form-item label="负责人"><el-select v-model="requirementForm.owner_id" clearable filterable><el-option v-for="user in users" :key="user.id" :label="user.full_name" :value="user.id" /></el-select></el-form-item><el-form-item label="提出人"><el-select v-model="requirementForm.proposer_id" clearable filterable><el-option v-for="user in users" :key="user.id" :label="user.full_name" :value="user.id" /></el-select></el-form-item><el-form-item label="类型"><el-input v-model="requirementForm.requirement_type" /></el-form-item><el-form-item label="优先级"><el-select v-model="requirementForm.priority"><el-option v-for="option in requirementPriorityOptions" :key="option.value" :label="option.label" :value="option.value" /></el-select></el-form-item><el-form-item label="状态"><el-select v-model="requirementForm.status"><el-option label="草稿" value="draft" /><el-option label="激活" value="active" /><el-option label="完成" value="done" /><el-option label="关闭" value="closed" /></el-select></el-form-item><el-form-item label="评审状态"><el-select v-model="requirementForm.review_status"><el-option label="无需评审" value="not_required" /><el-option label="待评审" value="pending" /><el-option label="已通过" value="approved" /></el-select></el-form-item></div>
+        <div class="form-grid"><el-form-item label="迭代"><el-select v-model="requirementForm.iteration_id" clearable filterable><el-option v-for="iteration in projectIterations" :key="iteration.id" :label="iteration.name" :value="iteration.id" /></el-select></el-form-item><el-form-item label="负责人"><el-select v-model="requirementForm.owner_id" clearable filterable><el-option v-for="user in users" :key="user.id" :label="user.full_name" :value="user.id" /></el-select></el-form-item><el-form-item label="提出人"><el-select v-model="requirementForm.proposer_id" clearable filterable><el-option v-for="user in users" :key="user.id" :label="user.full_name" :value="user.id" /></el-select></el-form-item><el-form-item label="类型"><el-input v-model="requirementForm.requirement_type" /></el-form-item><el-form-item label="优先级"><el-select v-model="requirementForm.priority" class="priority-select"><template #prefix><RequirementPriorityBadge :value="requirementForm.priority" /></template><el-option v-for="option in requirementPriorityOptions" :key="option.value" :label="option.label" :value="option.value"><RequirementPriorityBadge :value="option.value" /></el-option></el-select></el-form-item><el-form-item label="状态"><el-select v-model="requirementForm.status"><el-option label="草稿" value="draft" /><el-option label="激活" value="active" /><el-option label="完成" value="done" /><el-option label="关闭" value="closed" /></el-select></el-form-item><el-form-item label="评审状态"><el-select v-model="requirementForm.review_status"><el-option label="无需评审" value="not_required" /><el-option label="待评审" value="pending" /><el-option label="已通过" value="approved" /></el-select></el-form-item></div>
         <el-form-item label="需求描述"><el-input v-model="requirementForm.description" type="textarea" :rows="3" /></el-form-item>
         <el-form-item label="验收标准"><el-input v-model="requirementForm.acceptance_criteria" type="textarea" :rows="3" /></el-form-item>
       </el-form>
@@ -215,6 +215,7 @@ import { createTask, deleteTask, fetchTasks, updateTask } from '../api/tasks'
 import { createTestCase, deleteTestCase, fetchTestCases, updateTestCase } from '../api/testCases'
 import { createTestRun, deleteTestRun, fetchTestRuns, updateTestRun } from '../api/testRuns'
 import { fetchUsers } from '../api/users'
+import RequirementPriorityBadge from '../components/RequirementPriorityBadge.vue'
 import { labelById, userLabel } from '../utils/referenceLabels'
 
 const route = useRoute()
@@ -274,7 +275,6 @@ const requirementPriorityOptions = [
   { label: '4', value: '4' },
   { label: '5', value: '5' }
 ]
-const legacyRequirementPriorityLabels = { high: '1', medium: '3', low: '5' }
 const legacyRequirementPriorityValues = { high: '1', medium: '3', low: '5' }
 const reviewStatusOptions = [
   { label: '无需评审', value: 'not_required' },
@@ -331,7 +331,6 @@ const bugForm = reactive({ project_id: null, requirement_id: null, task_id: null
 function optionLabel(options, value) { return options.find((option) => option.value === value)?.label || value || '-' }
 function projectStatusLabel(value) { return optionLabel(projectStatusOptions, value) }
 function iterationStatusLabel(value) { return optionLabel(iterationStatusOptions, value) }
-function requirementPriorityLabel(value) { return legacyRequirementPriorityLabels[value] || optionLabel(requirementPriorityOptions, value) }
 function normalizeRequirementPriority(value) { return legacyRequirementPriorityValues[value] || value || '3' }
 function requirementStatusLabel(value) { return optionLabel(requirementStatusOptions, value) }
 function reviewStatusLabel(value) { return optionLabel(reviewStatusOptions, value) }

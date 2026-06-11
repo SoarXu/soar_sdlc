@@ -261,6 +261,48 @@ body {
   text-decoration: underline;
 }
 
+.priority-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  color: var(--priority-color, #5d748a);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1;
+  border: 1px solid var(--priority-color, #5d748a);
+  border-radius: 50%;
+}
+
+.priority-badge--1 {
+  --priority-color: #ff4d1f;
+}
+
+.priority-badge--2 {
+  --priority-color: #ff8a18;
+}
+
+.priority-badge--3 {
+  --priority-color: #2f7cff;
+}
+
+.priority-badge--4 {
+  --priority-color: #5bc0d6;
+}
+
+.priority-badge--5 {
+  --priority-color: #8a98a8;
+}
+
+.priority-select .el-select__selected-item {
+  color: transparent;
+}
+
+.priority-select .el-input__prefix {
+  left: 12px;
+}
+
 .table-pagination {
   display: flex;
   justify-content: flex-end;

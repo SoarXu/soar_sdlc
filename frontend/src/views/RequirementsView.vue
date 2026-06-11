@@ -16,7 +16,7 @@
         <el-table-column label="来源项目" width="180"><template #default="{ row }">{{ labelById(projects, row.source_project_id) }}</template></el-table-column>
         <el-table-column label="迭代" width="160"><template #default="{ row }">{{ labelById(iterations, row.iteration_id) }}</template></el-table-column>
         <el-table-column label="负责人" width="150"><template #default="{ row }">{{ userLabel(users, row.owner_id) }}</template></el-table-column>
-        <el-table-column label="优先级" width="100"><template #default="{ row }">{{ requirementPriorityLabel(row.priority) }}</template></el-table-column>
+        <el-table-column label="优先级" width="100"><template #default="{ row }"><RequirementPriorityBadge :value="row.priority" /></template></el-table-column>
         <el-table-column prop="review_status" label="评审状态" width="120" />
         <el-table-column prop="status" label="状态" width="100" />
         <el-table-column label="操作" width="230" fixed="right">
@@ -73,8 +73,9 @@
         <div class="form-grid">
           <el-form-item label="类型"><el-input v-model="form.requirement_type" /></el-form-item>
           <el-form-item label="优先级">
-            <el-select v-model="form.priority">
-              <el-option v-for="option in requirementPriorityOptions" :key="option.value" :label="option.label" :value="option.value" />
+            <el-select v-model="form.priority" class="priority-select">
+              <template #prefix><RequirementPriorityBadge :value="form.priority" /></template>
+              <el-option v-for="option in requirementPriorityOptions" :key="option.value" :label="option.label" :value="option.value"><RequirementPriorityBadge :value="option.value" /></el-option>
             </el-select>
           </el-form-item>
           <el-form-item label="状态">
@@ -112,6 +113,7 @@ import { fetchIterations } from '../api/iterations'
 import { fetchProjects } from '../api/projects'
 import { createRequirement, deleteRequirement, fetchRequirements, generateTask, updateRequirement } from '../api/requirements'
 import { fetchUsers } from '../api/users'
+import RequirementPriorityBadge from '../components/RequirementPriorityBadge.vue'
 import { labelById, userLabel } from '../utils/referenceLabels'
 import { usePagination } from '../utils/usePagination'
 
@@ -142,10 +144,8 @@ const requirementPriorityOptions = [
   { label: '4', value: '4' },
   { label: '5', value: '5' }
 ]
-const legacyRequirementPriorityLabels = { high: '1', medium: '3', low: '5' }
 const legacyRequirementPriorityValues = { high: '1', medium: '3', low: '5' }
 
-function requirementPriorityLabel(value) { return legacyRequirementPriorityLabels[value] || requirementPriorityOptions.find((option) => option.value === value)?.label || value || '-' }
 function normalizeRequirementPriority(value) { return legacyRequirementPriorityValues[value] || value || '3' }
 function resetForm() { Object.assign(form, { project_id: null, source_project_id: null, iteration_id: null, title: '', requirement_type: '', priority: '3', owner_id: null, proposer_id: null, status: 'draft', review_status: 'not_required', description: '', acceptance_criteria: '', source_reviewed: false }); ownerManuallySet.value = false }
 function openCreate() { editingId.value = null; resetForm(); dialogVisible.value = true }

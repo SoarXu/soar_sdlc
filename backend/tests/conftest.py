@@ -18,6 +18,7 @@ def client() -> TestClient:
 TRACKED_TABLES = [
     "status_operation_log",
     "iteration_projects",
+    "test_case_execution_log",
     "test_run_cases",
     "notification_delivery_log",
     "external_integration_mapping",

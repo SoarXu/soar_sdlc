@@ -75,8 +75,11 @@
           <el-table-column prop="title" label="用例标题" min-width="220" show-overflow-tooltip />
           <el-table-column label="项目" width="180"><template #default="{ row }">{{ labelById(flatProjects, row.project_id) }}</template></el-table-column>
           <el-table-column label="需求" min-width="220"><template #default="{ row }">{{ labelById(requirements, row.requirement_id, 'title') }}</template></el-table-column>
-          <el-table-column prop="case_type" label="类型" width="120" />
-          <el-table-column prop="test_scope" label="适用范围" width="150" />
+          <el-table-column label="类型" width="120"><template #default="{ row }">{{ caseTypeLabel(row.case_type) }}</template></el-table-column>
+          <el-table-column label="适用范围" width="150"><template #default="{ row }">{{ testScopeLabel(row.test_scope) }}</template></el-table-column>
+          <el-table-column label="最近执行时间" width="170"><template #default="{ row }">{{ formatDateTime(row.last_execute_time) }}</template></el-table-column>
+          <el-table-column label="最近结果" width="110"><template #default="{ row }">{{ executionResultLabel(row.last_execute_result) }}</template></el-table-column>
+          <el-table-column label="操作" width="90" fixed="right"><template #default="{ row }"><el-button link type="success" @click="openCaseExecution(row)">执行</el-button></template></el-table-column>
         </el-table>
       </template>
     </el-card>
@@ -102,6 +105,33 @@
       </el-table>
       <template #footer><el-button @click="taskDialogVisible = false">取消</el-button><el-button type="primary" :loading="saving" @click="submitTasks">关联</el-button></template>
     </el-dialog>
+
+    <el-dialog v-model="caseExecutionVisible" :title="`执行用例 ${selectedCase?.title || ''}`" width="980px">
+      <el-form label-position="top">
+        <el-form-item label="执行时间"><el-date-picker v-model="caseExecutionForm.execute_time" type="datetime" value-format="YYYY-MM-DDTHH:mm:ss" /></el-form-item>
+        <el-table :data="caseExecutionForm.steps_result_json" border>
+          <el-table-column prop="step" label="步骤" min-width="220" />
+          <el-table-column prop="expected" label="预期" min-width="220" />
+          <el-table-column label="测试结果" width="140"><template #default="{ row }"><el-select v-model="row.result"><el-option v-for="option in executionResultOptions" :key="option.value" :label="option.label" :value="option.value" /></el-select></template></el-table-column>
+          <el-table-column label="实际情况" min-width="220"><template #default="{ row }"><el-input v-model="row.actual" type="textarea" :rows="1" /></template></el-table-column>
+        </el-table>
+      </el-form>
+      <div class="execution-history">
+        <h3>测试结果</h3>
+        <p>共执行 {{ caseExecutionHistory.length }} 次，失败 {{ failedExecutionCount }} 次</p>
+        <el-collapse>
+          <el-collapse-item v-for="item in caseExecutionHistory" :key="item.id" :title="executionHistoryTitle(item)" :name="item.id">
+            <el-table :data="item.steps_result_json || []" border>
+              <el-table-column prop="step" label="步骤" min-width="220" />
+              <el-table-column prop="expected" label="预期" min-width="220" />
+              <el-table-column label="测试结果" width="120"><template #default="{ row }">{{ executionResultLabel(row.result) }}</template></el-table-column>
+              <el-table-column prop="actual" label="实际情况" min-width="220" />
+            </el-table>
+          </el-collapse-item>
+        </el-collapse>
+      </div>
+      <template #footer><el-button @click="caseExecutionVisible = false">取消</el-button><el-button type="primary" :loading="saving" @click="submitCaseExecution">保存</el-button></template>
+    </el-dialog>
   </section>
 </template>
 
@@ -118,6 +148,7 @@ import {
   unlinkIterationRequirement,
   unlinkIterationTask
 } from '../api/iterations'
+import { executeTestCase, fetchTestCaseExecutions } from '../api/testCases'
 import { fetchUsers } from '../api/users'
 import { labelById, userLabel } from '../utils/referenceLabels'
 
@@ -139,6 +170,10 @@ const selectedRequirementIds = ref([])
 const selectedTaskIds = ref([])
 const requirementDialogVisible = ref(false)
 const taskDialogVisible = ref(false)
+const caseExecutionVisible = ref(false)
+const selectedCase = ref(null)
+const caseExecutionHistory = ref([])
+const caseExecutionForm = ref({ execute_time: '', steps_result_json: [] })
 const tabs = [
   { key: 'overview', label: '概览' },
   { key: 'requirements', label: '需求' },
@@ -163,15 +198,50 @@ const taskStatusOptions = [
   { label: '完成', value: 'done' },
   { label: '关闭', value: 'closed' }
 ]
+const caseTypeOptions = [
+  { label: '接口测试', value: 'api' },
+  { label: '功能测试', value: 'functional' },
+  { label: '安装部署', value: 'deploy' },
+  { label: '配置相关', value: 'config' },
+  { label: '性能测试', value: 'performance' },
+  { label: '安全相关', value: 'security' },
+  { label: '其他', value: 'other' }
+]
+const testScopeOptions = [
+  { label: '单元测试环节', value: 'unit_test' },
+  { label: '功能测试环节', value: 'functional_test' },
+  { label: '集成测试环节', value: 'integration_test' },
+  { label: '系统测试环节', value: 'system_test' },
+  { label: '冒烟测试环节', value: 'smoke_test' },
+  { label: '版本验证环节', value: 'release_verification' }
+]
+const executionResultOptions = [
+  { label: '忽略', value: 'ignored' },
+  { label: '通过', value: 'passed' },
+  { label: '失败', value: 'failed' },
+  { label: '阻塞', value: 'blocked' }
+]
 const flatProjects = computed(() => flattenProjects(projects.value))
 const projectNames = computed(() => (iteration.value.project_ids || []).map(id => labelById(flatProjects.value, id)).join('、') || '-')
+const failedExecutionCount = computed(() => caseExecutionHistory.value.filter((item) => item.result === 'failed').length)
 
 function optionLabel(options, value) { return options.find((option) => option.value === value)?.label || value || '-' }
 function iterationStatusLabel(value) { return optionLabel(iterationStatusOptions, value) }
 function requirementStatusLabel(value) { return optionLabel(requirementStatusOptions, value) }
 function taskStatusLabel(value) { return optionLabel(taskStatusOptions, value) }
+function caseTypeLabel(value) { return optionLabel(caseTypeOptions, value) }
+function testScopeLabel(value) { return optionLabel(testScopeOptions, value) }
+function executionResultLabel(value) { return optionLabel(executionResultOptions, value) }
 function percent(value) { return `${Math.round((value || 0) * 100)}%` }
 function flattenProjects(items) { return items.flatMap((item) => [item, ...flattenProjects(item.children || [])]) }
+function formatDateTime(value) { return value ? new Date(value).toLocaleString('zh-CN', { hour12: false }) : '-' }
+function executionHistoryTitle(item) { return `#${item.id} ${formatDateTime(item.execute_time)}，结果为 ${executionResultLabel(item.result)}` }
+function defaultExecutionTime() {
+  const date = new Date()
+  const pad = (value) => String(value).padStart(2, '0')
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`
+}
+function normalizeCaseSteps(value) { return Array.isArray(value) && value.length ? value.map((item) => ({ step: item.step || '', expected: item.expected || '' })) : [{ step: '', expected: '' }] }
 
 async function loadData() {
   loading.value = true
@@ -226,6 +296,26 @@ async function submitTasks() {
   }
 }
 async function removeTask(taskId) { await unlinkIterationTask(iterationId.value, taskId); await loadData() }
+async function openCaseExecution(row) {
+  selectedCase.value = row
+  caseExecutionForm.value = {
+    execute_time: defaultExecutionTime(),
+    steps_result_json: normalizeCaseSteps(row.steps_json).map((item) => ({ ...item, result: 'passed', actual: '' }))
+  }
+  caseExecutionHistory.value = (await fetchTestCaseExecutions(row.id)).data
+  caseExecutionVisible.value = true
+}
+async function submitCaseExecution() {
+  saving.value = true
+  try {
+    await executeTestCase(selectedCase.value.id, { ...caseExecutionForm.value })
+    caseExecutionHistory.value = (await fetchTestCaseExecutions(selectedCase.value.id)).data
+    await loadData()
+    ElMessage.success('用例执行结果已保存')
+  } finally {
+    saving.value = false
+  }
+}
 
 const ProjectRequirementTree = defineComponent({
   props: {

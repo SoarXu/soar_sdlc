@@ -73,8 +73,29 @@ def ensure_runtime_schema(engine: Engine) -> None:
                    "CREATE INDEX idx_test_cases_source_project ON test_cases (source_project_id)")
     _ensure_column(engine, "test_cases", "test_scope",
                    "ALTER TABLE test_cases ADD COLUMN test_scope VARCHAR(64) NULL COMMENT '适用范围/测试环境' AFTER case_type")
+    _ensure_column(engine, "test_cases", "last_execute_time",
+                   "ALTER TABLE test_cases ADD COLUMN last_execute_time DATETIME NULL COMMENT '最近执行时间' AFTER expected_result")
+    _ensure_column(engine, "test_cases", "last_execute_result",
+                   "ALTER TABLE test_cases ADD COLUMN last_execute_result VARCHAR(32) NULL COMMENT '最近执行结果' AFTER last_execute_time")
     _ensure_column(engine, "test_cases", "deleted",
                    "ALTER TABLE test_cases ADD COLUMN deleted TINYINT(1) NOT NULL DEFAULT 0 COMMENT '是否删除 0否1是' AFTER delete_time")
+
+    inspector3 = inspect(engine)
+    if "test_case_execution_log" not in inspector3.get_table_names():
+        with engine.begin() as conn:
+            conn.execute(text(
+                "CREATE TABLE test_case_execution_log ("
+                "id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,"
+                "test_case_id BIGINT UNSIGNED NOT NULL COMMENT '测试用例 ID',"
+                "executor_id BIGINT UNSIGNED NULL COMMENT '执行人 ID',"
+                "execute_time DATETIME NOT NULL COMMENT '执行时间',"
+                "result VARCHAR(32) NOT NULL COMMENT '执行结果',"
+                "steps_result_json JSON NULL COMMENT '步骤执行结果',"
+                "create_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间'"
+                ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='测试用例执行记录表'"
+            ))
+            conn.execute(text("CREATE INDEX idx_tcel_case ON test_case_execution_log (test_case_id)"))
+            conn.execute(text("CREATE INDEX idx_tcel_execute_time ON test_case_execution_log (execute_time)"))
 
     _ensure_column(engine, "iterations", "deleted",
                    "ALTER TABLE iterations ADD COLUMN deleted TINYINT(1) NOT NULL DEFAULT 0 COMMENT '是否删除 0否1是' AFTER delete_time")

@@ -197,11 +197,12 @@ CREATE TABLE IF NOT EXISTS test_cases (
   title VARCHAR(255) NOT NULL COMMENT '用例标题',
   case_type VARCHAR(64) NULL COMMENT '用例类型',
   test_scope VARCHAR(64) NULL COMMENT '适用范围/测试环境',
-  priority VARCHAR(32) NOT NULL DEFAULT 'medium' COMMENT '优先级',
   default_tester_id BIGINT UNSIGNED NULL COMMENT '默认测试人员',
   precondition TEXT NULL COMMENT '前置条件',
   steps_json JSON NULL COMMENT '测试步骤，结构化 JSON',
   expected_result TEXT NULL COMMENT '预期结果',
+  last_execute_time DATETIME NULL COMMENT '最近执行时间',
+  last_execute_result VARCHAR(32) NULL COMMENT '最近执行结果',
   status VARCHAR(32) NOT NULL DEFAULT 'active' COMMENT '状态',
   creator_id BIGINT UNSIGNED NULL COMMENT '创建人',
   updater_id BIGINT UNSIGNED NULL COMMENT '更新人',
@@ -213,6 +214,19 @@ CREATE TABLE IF NOT EXISTS test_cases (
   KEY idx_test_cases_requirement (requirement_id),
   KEY idx_test_cases_tester (default_tester_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='测试用例表';
+
+CREATE TABLE IF NOT EXISTS test_case_execution_log (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '执行记录 ID',
+  test_case_id BIGINT UNSIGNED NOT NULL COMMENT '测试用例 ID',
+  executor_id BIGINT UNSIGNED NULL COMMENT '执行人 ID',
+  execute_time DATETIME NOT NULL COMMENT '执行时间',
+  result VARCHAR(32) NOT NULL COMMENT '执行结果：ignored、passed、failed、blocked',
+  steps_result_json JSON NULL COMMENT '步骤执行结果',
+  create_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  PRIMARY KEY (id),
+  KEY idx_tcel_case (test_case_id),
+  KEY idx_tcel_execute_time (execute_time)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='测试用例执行记录表';
 
 CREATE TABLE IF NOT EXISTS test_runs (
   id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '测试单 ID',

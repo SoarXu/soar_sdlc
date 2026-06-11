@@ -2,8 +2,15 @@ from fastapi import APIRouter, Depends, Response, status
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
-from app.services.test_case_service import create_test_case, delete_test_case, list_test_cases, update_test_case
-from app.views.test_case_view import TestCaseCreate, TestCaseRead, TestCaseUpdate
+from app.services.test_case_service import (
+    create_test_case,
+    create_test_case_execution,
+    delete_test_case,
+    list_test_case_executions,
+    list_test_cases,
+    update_test_case,
+)
+from app.views.test_case_view import TestCaseCreate, TestCaseExecutionCreate, TestCaseExecutionRead, TestCaseRead, TestCaseUpdate
 
 
 router = APIRouter()
@@ -22,6 +29,16 @@ def post_test_case(payload: TestCaseCreate, db: Session = Depends(get_db)):
 @router.patch("/{test_case_id}", response_model=TestCaseRead)
 def patch_test_case(test_case_id: int, payload: TestCaseUpdate, db: Session = Depends(get_db)):
     return update_test_case(db, test_case_id, payload)
+
+
+@router.get("/{test_case_id}/executions", response_model=list[TestCaseExecutionRead])
+def get_test_case_executions(test_case_id: int, db: Session = Depends(get_db)):
+    return list_test_case_executions(db, test_case_id)
+
+
+@router.post("/{test_case_id}/executions", response_model=TestCaseExecutionRead)
+def post_test_case_execution(test_case_id: int, payload: TestCaseExecutionCreate, db: Session = Depends(get_db)):
+    return create_test_case_execution(db, test_case_id, payload)
 
 
 @router.delete("/{test_case_id}", status_code=status.HTTP_204_NO_CONTENT)

@@ -73,7 +73,11 @@
           </el-form-item>
         </div>
         <div class="form-grid">
-          <el-form-item label="类型"><el-input v-model="form.requirement_type" /></el-form-item>
+          <el-form-item label="类型">
+            <el-select v-model="form.requirement_type">
+              <el-option v-for="option in requirementTypeOptions" :key="option" :label="option" :value="option" />
+            </el-select>
+          </el-form-item>
           <el-form-item label="优先级">
             <el-select v-model="form.priority" class="priority-select">
               <template #prefix><RequirementPriorityBadge :value="form.priority" /></template>
@@ -125,6 +129,7 @@ import { fetchProjects } from '../api/projects'
 import { activateRequirement, closeRequirement, createRequirement, deleteRequirement, fetchRequirements, generateTask, updateRequirement } from '../api/requirements'
 import { fetchUsers } from '../api/users'
 import RequirementPriorityBadge from '../components/RequirementPriorityBadge.vue'
+import { currentUserId } from '../utils/currentUser'
 import { labelById, userLabel } from '../utils/referenceLabels'
 import { usePagination } from '../utils/usePagination'
 
@@ -147,7 +152,7 @@ const {
   total: requirementTotal,
   pagedItems: pagedRequirements
 } = usePagination(requirements)
-const form = reactive({ project_id: null, source_project_id: null, iteration_id: null, title: '', requirement_type: '', priority: '3', owner_id: null, proposer_id: null, status: 'draft', review_status: 'not_required', description: '', acceptance_criteria: '', source_reviewed: false })
+const form = reactive({ project_id: null, source_project_id: null, iteration_id: null, title: '', requirement_type: '功能', priority: '3', owner_id: null, proposer_id: null, status: 'draft', review_status: 'not_required', description: '', acceptance_criteria: '', source_reviewed: false })
 const ownerManuallySet = ref(false)
 const generateForm = reactive({ title: '', task_type: '', description: '' })
 const closeForm = reactive({ reason: '', remark: '' })
@@ -159,6 +164,7 @@ const requirementPriorityOptions = [
   { label: '5', value: '5' }
 ]
 const requirementCloseReasons = ['已完成', '重复', '延期', '不做', '设计如此']
+const requirementTypeOptions = ['功能', '接口', '性能', '安全', '体验', '改进', '其他']
 const legacyRequirementPriorityValues = { high: '1', medium: '3', low: '5' }
 const requirementStatusOptions = [
   { label: '草稿', value: 'draft' },
@@ -172,7 +178,7 @@ function requirementStatusLabel(value) { return requirementStatusOptions.find((o
 function canActivateRequirement(row) { return ['draft', 'closed'].includes(row.status) }
 function apiErrorMessage(error, fallback) { return error?.response?.data?.detail || fallback }
 function showActionError(error, fallback) { ElMessageBox.alert(apiErrorMessage(error, fallback), '提示', { type: 'warning' }) }
-function resetForm() { Object.assign(form, { project_id: null, source_project_id: null, iteration_id: null, title: '', requirement_type: '', priority: '3', owner_id: null, proposer_id: null, status: 'draft', review_status: 'not_required', description: '', acceptance_criteria: '', source_reviewed: false }); ownerManuallySet.value = false }
+function resetForm() { Object.assign(form, { project_id: null, source_project_id: null, iteration_id: null, title: '', requirement_type: '功能', priority: '3', owner_id: null, proposer_id: currentUserId(users.value), status: 'draft', review_status: 'not_required', description: '', acceptance_criteria: '', source_reviewed: false }); ownerManuallySet.value = false }
 function openCreate() { editingId.value = null; resetForm(); dialogVisible.value = true }
 function onSourceProjectChange(projectId) { if (!projectId || ownerManuallySet.value) return; const project = projects.value.find(p => p.id === projectId); if (project && project.owner_id) { form.owner_id = project.owner_id } }
 function onOwnerChange() { ownerManuallySet.value = true }

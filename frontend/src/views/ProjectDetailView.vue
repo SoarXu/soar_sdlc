@@ -25,7 +25,7 @@
       </button>
     </div>
 
-    <el-card v-loading="loading" shadow="never">
+    <el-card v-loading="loading" shadow="never" class="project-detail-card">
       <template v-if="activeTab === 'overview'">
         <div class="metrics project-detail-metrics">
           <el-card v-for="item in metrics" :key="item.key" shadow="never">
@@ -48,9 +48,9 @@
 
       <template v-else-if="activeTab === 'iterations'">
         <div class="project-tab-toolbar"><el-button type="primary" @click="openIterationCreate">新增迭代</el-button></div>
-        <el-table :data="projectIterations" stripe>
+        <el-table :data="projectIterations" stripe width="100%">
           <el-table-column prop="id" label="ID" width="80" />
-          <el-table-column prop="name" label="迭代名称" min-width="180" />
+          <el-table-column prop="name" label="迭代名称" min-width="180" show-overflow-tooltip />
           <el-table-column label="负责人" width="150"><template #default="{ row }">{{ userLabel(users, row.owner_id) }}</template></el-table-column>
           <el-table-column prop="start_date" label="开始日期" width="130" />
           <el-table-column prop="end_date" label="结束日期" width="130" />
@@ -63,9 +63,9 @@
 
       <template v-else-if="activeTab === 'requirements'">
         <div class="project-tab-toolbar"><el-button type="primary" @click="openRequirementCreate">新增需求</el-button></div>
-        <el-table :data="projectRequirements" stripe>
+        <el-table :data="projectRequirements" stripe width="100%">
           <el-table-column prop="id" label="ID" width="80" />
-          <el-table-column label="需求标题" width="160" show-overflow-tooltip>
+          <el-table-column label="需求标题" min-width="180" show-overflow-tooltip>
             <template #default="{ row }"><router-link class="table-link" :to="`/requirements/${row.id}`">{{ row.title }}</router-link></template>
           </el-table-column>
           <el-table-column label="迭代" width="160"><template #default="{ row }">{{ labelById(projectIterations, row.iteration_id) }}</template></el-table-column>
@@ -85,9 +85,9 @@
 
       <template v-else-if="activeTab === 'tasks'">
         <div class="project-tab-toolbar"><el-button type="primary" @click="openTaskCreate">新增任务</el-button></div>
-        <el-table :data="projectTasks" stripe>
+        <el-table :data="projectTasks" stripe width="100%">
           <el-table-column prop="id" label="ID" width="80" />
-          <el-table-column label="任务标题" min-width="220">
+          <el-table-column label="任务标题" min-width="180" show-overflow-tooltip>
             <template #default="{ row }"><router-link class="table-link" :to="`/tasks/${row.id}`">{{ row.title }}</router-link></template>
           </el-table-column>
           <el-table-column label="需求" width="180"><template #default="{ row }">{{ labelById(projectRequirements, row.requirement_id, 'title') }}</template></el-table-column>
@@ -105,9 +105,9 @@
         <el-tabs v-model="testTab">
           <el-tab-pane label="测试用例" name="cases">
             <div class="project-tab-toolbar"><el-button type="primary" @click="openCaseCreate">新增用例</el-button></div>
-            <el-table :data="projectTestCases" stripe>
+            <el-table :data="projectTestCases" stripe width="100%">
               <el-table-column prop="id" label="ID" width="80" />
-              <el-table-column prop="title" label="用例标题" min-width="220" />
+              <el-table-column prop="title" label="用例标题" min-width="180" show-overflow-tooltip />
               <el-table-column label="需求" width="180"><template #default="{ row }">{{ labelById(projectRequirements, row.requirement_id, 'title') }}</template></el-table-column>
               <el-table-column label="默认测试人" width="140"><template #default="{ row }">{{ userLabel(users, row.default_tester_id) }}</template></el-table-column>
               <el-table-column prop="priority" label="优先级" width="100" />
@@ -117,9 +117,9 @@
           </el-tab-pane>
           <el-tab-pane label="测试单" name="runs">
             <div class="project-tab-toolbar"><el-button type="primary" @click="openRunCreate">新增测试单</el-button></div>
-            <el-table :data="projectTestRuns" stripe>
+            <el-table :data="projectTestRuns" stripe width="100%">
               <el-table-column prop="id" label="ID" width="80" />
-              <el-table-column prop="name" label="测试单名称" min-width="220" />
+              <el-table-column prop="name" label="测试单名称" min-width="180" show-overflow-tooltip />
               <el-table-column label="迭代" width="160"><template #default="{ row }">{{ labelById(projectIterations, row.iteration_id) }}</template></el-table-column>
               <el-table-column label="负责人" width="140"><template #default="{ row }">{{ userLabel(users, row.test_owner_id) }}</template></el-table-column>
               <el-table-column label="状态" width="110"><template #default="{ row }">{{ testRunStatusLabel(row.status) }}</template></el-table-column>
@@ -131,9 +131,9 @@
 
       <template v-else-if="activeTab === 'bugs'">
         <div class="project-tab-toolbar"><el-button type="primary" @click="openBugCreate">新增 Bug</el-button></div>
-        <el-table :data="projectBugs" stripe>
+        <el-table :data="projectBugs" stripe width="100%">
           <el-table-column prop="id" label="ID" width="80" />
-          <el-table-column prop="title" label="Bug 标题" min-width="220" />
+          <el-table-column prop="title" label="Bug 标题" min-width="180" show-overflow-tooltip />
           <el-table-column label="需求" width="180"><template #default="{ row }">{{ labelById(projectRequirements, row.requirement_id, 'title') }}</template></el-table-column>
           <el-table-column label="任务" width="180"><template #default="{ row }">{{ labelById(projectTasks, row.task_id, 'title') }}</template></el-table-column>
           <el-table-column label="负责人" width="140"><template #default="{ row }">{{ userLabel(users, row.owner_id) }}</template></el-table-column>

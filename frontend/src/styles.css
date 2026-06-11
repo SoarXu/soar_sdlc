@@ -427,6 +427,13 @@ body {
   margin-bottom: 12px;
 }
 
+.project-detail-card .el-table,
+.project-detail-card .el-table__inner-wrapper,
+.project-detail-card .el-table__header,
+.project-detail-card .el-table__body {
+  width: 100% !important;
+}
+
 .detail-titlebar {
   display: flex;
   align-items: center;

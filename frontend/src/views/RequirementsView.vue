@@ -11,7 +11,7 @@
     <el-card shadow="never">
       <el-table v-loading="loading" :data="pagedRequirements" stripe>
         <el-table-column prop="id" label="ID" width="80" />
-        <el-table-column prop="title" label="需求标题" min-width="220" />
+        <el-table-column prop="title" label="需求标题" width="160" show-overflow-tooltip />
         <el-table-column label="项目" width="180"><template #default="{ row }">{{ labelById(projects, row.project_id) }}</template></el-table-column>
         <el-table-column label="来源项目" width="180"><template #default="{ row }">{{ labelById(projects, row.source_project_id) }}</template></el-table-column>
         <el-table-column label="迭代" width="160"><template #default="{ row }">{{ labelById(iterations, row.iteration_id) }}</template></el-table-column>

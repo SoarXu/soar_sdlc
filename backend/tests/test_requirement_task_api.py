@@ -152,6 +152,34 @@ def test_requirement_close_requires_reason_and_records_history(client: TestClien
     assert history.json()[-1]["remark"] == "已完成上线"
 
 
+def test_closed_requirement_can_be_reactivated_and_records_history(client: TestClient):
+    project_id = _create_project(client)
+    requirement = client.post(
+        "/api/v1/requirements",
+        json={"project_id": project_id, "title": f"重新激活需求-{uuid4().hex[:8]}"},
+    )
+    assert requirement.status_code == 200
+    requirement_id = requirement.json()["id"]
+
+    activated = client.post(f"/api/v1/requirements/{requirement_id}/activate")
+    assert activated.status_code == 200
+    closed = client.post(
+        f"/api/v1/requirements/{requirement_id}/close",
+        json={"reason": "延期", "remark": "暂时关闭"},
+    )
+    assert closed.status_code == 200
+
+    reactivated = client.post(f"/api/v1/requirements/{requirement_id}/activate")
+    assert reactivated.status_code == 200
+    assert reactivated.json()["status"] == "active"
+
+    history = client.get(f"/api/v1/requirements/{requirement_id}/status-operations")
+    assert history.status_code == 200
+    assert [item["action"] for item in history.json()][-3:] == ["activate", "close", "activate"]
+    assert history.json()[-1]["from_status"] == "closed"
+    assert history.json()[-1]["to_status"] == "active"
+
+
 def test_requirement_status_cannot_be_changed_by_form_save(client: TestClient):
     project_id = _create_project(client)
     requirement = client.post(

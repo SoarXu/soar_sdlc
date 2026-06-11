@@ -76,7 +76,7 @@
           <el-table-column label="操作" width="280" fixed="right">
             <template #default="{ row }">
               <el-button link type="primary" @click="openRequirementEdit(row)">编辑</el-button>
-              <el-button v-if="row.status === 'draft'" link type="warning" @click="activateRequirementRow(row.id)">激活</el-button>
+              <el-button v-if="canActivateRequirement(row)" link type="warning" @click="activateRequirementRow(row.id)">激活</el-button>
               <el-button v-if="row.status === 'active'" link type="danger" @click="openRequirementClose(row)">关闭</el-button>
               <el-button link type="success" @click="openGenerate(row)">生成任务</el-button>
               <el-popconfirm title="确认删除该需求？" @confirm="removeRequirement(row.id)"><template #reference><el-button link type="danger">删除</el-button></template></el-popconfirm>
@@ -359,6 +359,7 @@ function taskStatusLabel(value) { return optionLabel(taskStatusOptions, value) }
 function testCaseStatusLabel(value) { return optionLabel(testCaseStatusOptions, value) }
 function testRunStatusLabel(value) { return optionLabel(testRunStatusOptions, value) }
 function bugStatusLabel(value) { return optionLabel(bugStatusOptions, value) }
+function canActivateRequirement(row) { return ['draft', 'closed'].includes(row.status) }
 function resetIterationForm() { Object.assign(iterationForm, { project_ids: [projectId.value], name: '', owner_id: null, start_date: null, end_date: null, status: 'planning', goal: '' }) }
 function resetRequirementForm() { Object.assign(requirementForm, { project_id: projectId.value, iteration_id: null, title: '', requirement_type: '', priority: '3', owner_id: project.value.owner_id || null, proposer_id: null, status: 'draft', review_status: 'not_required', description: '', acceptance_criteria: '', source_reviewed: false }) }
 function resetTaskForm() { Object.assign(taskForm, { project_id: projectId.value, requirement_id: null, title: '', task_type: '', priority: 'medium', owner_id: null, estimated_hours: null, actual_hours: null, due_date: null, status: 'todo', description: '' }) }

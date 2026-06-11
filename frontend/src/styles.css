@@ -403,7 +403,10 @@ body {
 .status-history {
   border-top: 1px solid #e5eaf3;
   margin-top: 20px;
+  max-height: min(360px, 45vh);
+  overflow-y: auto;
   padding-top: 18px;
+  padding-right: 8px;
 }
 
 .status-history-title {
@@ -535,6 +538,9 @@ body {
   display: flex;
   flex-direction: column;
   gap: 10px;
+  max-height: min(420px, 48vh);
+  overflow-y: auto;
+  padding-right: 8px;
 }
 
 .project-history-line {

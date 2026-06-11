@@ -199,11 +199,6 @@
       <template #footer><el-button @click="requirementDialogVisible = false">取消</el-button><el-button type="primary" :loading="saving" @click="submitRequirement">保存</el-button></template>
     </el-dialog>
 
-    <el-dialog v-model="generateVisible" title="从需求生成任务" width="480px">
-      <el-form label-position="top"><el-form-item label="任务标题" required><el-input v-model="generateForm.title" /></el-form-item><el-form-item label="任务类型"><el-input v-model="generateForm.task_type" /></el-form-item><el-form-item label="描述"><el-input v-model="generateForm.description" type="textarea" :rows="3" /></el-form-item></el-form>
-      <template #footer><el-button @click="generateVisible = false">取消</el-button><el-button type="primary" :loading="saving" @click="submitGenerateTask">生成</el-button></template>
-    </el-dialog>
-
     <el-dialog v-model="closeRequirementVisible" title="关闭需求" width="480px">
       <el-form label-position="top">
         <el-form-item label="关闭原因" required>
@@ -224,7 +219,7 @@
     <el-dialog v-model="taskDialogVisible" :title="editingTaskId ? '编辑任务' : '新增任务'" width="620px">
       <el-form label-position="top">
         <el-form-item label="任务标题" required><el-input v-model="taskForm.title" /></el-form-item>
-        <div class="form-grid"><el-form-item label="需求"><el-select v-model="taskForm.requirement_id" clearable filterable><el-option v-for="requirement in projectRequirements" :key="requirement.id" :label="requirement.title" :value="requirement.id" /></el-select></el-form-item><el-form-item label="负责人"><el-select v-model="taskForm.owner_id" clearable filterable><el-option v-for="user in users" :key="user.id" :label="user.full_name" :value="user.id" /></el-select></el-form-item><el-form-item label="类型"><el-input v-model="taskForm.task_type" /></el-form-item><el-form-item label="优先级"><el-select v-model="taskForm.priority"><el-option label="高" value="high" /><el-option label="中" value="medium" /><el-option label="低" value="low" /></el-select></el-form-item><el-form-item label="预计工时"><el-input-number v-model="taskForm.estimated_hours" :min="0" /></el-form-item><el-form-item label="实际工时"><el-input-number v-model="taskForm.actual_hours" :min="0" /></el-form-item><el-form-item label="截止日期"><el-date-picker v-model="taskForm.due_date" value-format="YYYY-MM-DD" type="date" /></el-form-item><el-form-item label="状态"><el-select v-model="taskForm.status"><el-option label="待办" value="todo" /><el-option label="进行中" value="doing" /><el-option label="完成" value="done" /><el-option label="关闭" value="closed" /></el-select></el-form-item></div>
+        <div class="form-grid"><el-form-item label="需求"><el-select v-model="taskForm.requirement_id" clearable filterable @change="onTaskRequirementChange"><el-option v-for="requirement in projectRequirements" :key="requirement.id" :label="requirement.title" :value="requirement.id" /></el-select></el-form-item><el-form-item label="负责人"><el-select v-model="taskForm.owner_id" clearable filterable><el-option v-for="user in users" :key="user.id" :label="user.full_name" :value="user.id" /></el-select></el-form-item><el-form-item label="类型"><el-input v-model="taskForm.task_type" /></el-form-item><el-form-item label="优先级"><el-select v-model="taskForm.priority"><el-option label="高" value="high" /><el-option label="中" value="medium" /><el-option label="低" value="low" /></el-select></el-form-item><el-form-item label="预计工时"><el-input-number v-model="taskForm.estimated_hours" :min="0" /></el-form-item><el-form-item label="实际工时"><el-input-number v-model="taskForm.actual_hours" :min="0" /></el-form-item><el-form-item label="截止日期"><el-date-picker v-model="taskForm.due_date" value-format="YYYY-MM-DD" type="date" /></el-form-item><el-form-item label="状态"><el-select v-model="taskForm.status"><el-option label="待办" value="todo" /><el-option label="进行中" value="doing" /><el-option label="完成" value="done" /><el-option label="关闭" value="closed" /></el-select></el-form-item></div>
         <el-form-item label="描述"><el-input v-model="taskForm.description" type="textarea" :rows="3" /></el-form-item>
       </el-form>
       <template #footer><el-button @click="taskDialogVisible = false">取消</el-button><el-button type="primary" :loading="saving" @click="submitTask">保存</el-button></template>
@@ -270,7 +265,7 @@ import { createBug, deleteBug, fetchBugs, updateBug } from '../api/bugs'
 import { createIteration, deleteIteration, fetchIterations, updateIteration } from '../api/iterations'
 import { fetchPrograms } from '../api/programs'
 import { fetchProject, fetchProjectAuditLogs, fetchProjectStatusOperations } from '../api/projects'
-import { activateRequirement, closeRequirement, createRequirement, deleteRequirement, fetchRequirements, generateTask, updateRequirement } from '../api/requirements'
+import { activateRequirement, closeRequirement, createRequirement, deleteRequirement, fetchRequirements, updateRequirement } from '../api/requirements'
 import { activateTask, closeTask, createTask, deleteTask, fetchTasks, updateTask } from '../api/tasks'
 import { createTestCase, deleteTestCase, fetchTestCases, updateTestCase } from '../api/testCases'
 import { createTestRun, deleteTestRun, fetchTestRuns, updateTestRun } from '../api/testRuns'
@@ -299,9 +294,9 @@ const projectAuditLogs = ref([])
 const projectStatusOperations = ref([])
 const expandedHistory = reactive({})
 
-const iterationDialogVisible = ref(false), requirementDialogVisible = ref(false), generateVisible = ref(false), closeRequirementVisible = ref(false), taskDialogVisible = ref(false), closeTaskVisible = ref(false)
+const iterationDialogVisible = ref(false), requirementDialogVisible = ref(false), closeRequirementVisible = ref(false), taskDialogVisible = ref(false), closeTaskVisible = ref(false)
 const caseDialogVisible = ref(false), runDialogVisible = ref(false), bugDialogVisible = ref(false)
-const editingIterationId = ref(null), editingRequirementId = ref(null), generatingRequirementId = ref(null), closingRequirementId = ref(null), editingTaskId = ref(null)
+const editingIterationId = ref(null), editingRequirementId = ref(null), closingRequirementId = ref(null), editingTaskId = ref(null)
 const closingTaskId = ref(null)
 const editingCaseId = ref(null), editingRunId = ref(null), editingBugId = ref(null)
 
@@ -414,7 +409,6 @@ const projectHistory = computed(() => {
 
 const iterationForm = reactive({ project_ids: [], name: '', owner_id: null, start_date: null, end_date: null, status: 'planning', goal: '' })
 const requirementForm = reactive({ project_id: null, iteration_id: null, title: '', requirement_type: '功能', priority: '3', owner_id: null, proposer_id: null, status: 'draft', review_status: 'not_required', description: '', acceptance_criteria: '', source_reviewed: false })
-const generateForm = reactive({ title: '', task_type: '', description: '' })
 const closeRequirementForm = reactive({ reason: '', remark: '' })
 const taskForm = reactive({ project_id: null, requirement_id: null, title: '', task_type: '', priority: 'medium', owner_id: null, estimated_hours: null, actual_hours: null, due_date: null, status: 'todo', description: '' })
 const closeTaskForm = reactive({ reason: '', remark: '' })
@@ -464,7 +458,7 @@ function projectFieldLabel(field) {
 }
 function resetIterationForm() { Object.assign(iterationForm, { project_ids: [projectId.value], name: '', owner_id: null, start_date: null, end_date: null, status: 'planning', goal: '' }) }
 function resetRequirementForm() { Object.assign(requirementForm, { project_id: projectId.value, iteration_id: null, title: '', requirement_type: '功能', priority: '3', owner_id: project.value.owner_id || null, proposer_id: currentUserId(users.value), status: 'draft', review_status: 'not_required', description: '', acceptance_criteria: '', source_reviewed: false }) }
-function resetTaskForm() { Object.assign(taskForm, { project_id: projectId.value, requirement_id: null, title: '', task_type: '', priority: 'medium', owner_id: null, estimated_hours: null, actual_hours: null, due_date: null, status: 'todo', description: '' }) }
+function resetTaskForm() { Object.assign(taskForm, { project_id: projectId.value, requirement_id: null, title: '', task_type: '', priority: 'medium', owner_id: project.value.owner_id || null, estimated_hours: null, actual_hours: null, due_date: null, status: 'todo', description: '' }) }
 function resetCaseForm() { Object.assign(caseForm, { project_id: projectId.value, requirement_id: null, title: '', case_type: '', priority: 'medium', default_tester_id: null, precondition: '', expected_result: '', status: 'active' }) }
 function resetRunForm() { Object.assign(runForm, { project_id: projectId.value, iteration_id: null, name: '', test_owner_id: null, status: 'planning', remark: '' }) }
 function resetBugForm() { Object.assign(bugForm, { project_id: projectId.value, requirement_id: null, task_id: null, test_case_id: null, test_run_id: null, title: '', severity: 'medium', priority: 'medium', owner_id: null, reporter_id: null, reproduce_steps: '', expected_result: '', actual_result: '', status: 'open' }) }
@@ -473,11 +467,16 @@ function openIterationCreate() { editingIterationId.value = null; resetIteration
 function openIterationEdit(row) { editingIterationId.value = row.id; Object.assign(iterationForm, { ...row, project_ids: row.project_ids || [], goal: row.goal || '' }); iterationDialogVisible.value = true }
 function openRequirementCreate() { editingRequirementId.value = null; resetRequirementForm(); requirementDialogVisible.value = true }
 function openRequirementEdit(row) { editingRequirementId.value = row.id; Object.assign(requirementForm, { ...row, priority: normalizeRequirementPriority(row.priority), requirement_type: row.requirement_type || '', description: row.description || '', acceptance_criteria: row.acceptance_criteria || '' }); requirementDialogVisible.value = true }
-function openGenerate(row) { generatingRequirementId.value = row.id; generateForm.title = row.title; generateForm.task_type = 'development'; generateForm.description = ''; generateVisible.value = true }
+function openGenerate(row) { editingTaskId.value = null; resetTaskForm(); Object.assign(taskForm, { requirement_id: row.id, title: row.title, owner_id: taskOwnerForRequirement(row) }); taskDialogVisible.value = true }
 function openRequirementClose(row) { closingRequirementId.value = row.id; Object.assign(closeRequirementForm, { reason: '', remark: '' }); closeRequirementVisible.value = true }
 function openTaskCreate() { editingTaskId.value = null; resetTaskForm(); taskDialogVisible.value = true }
 function openTaskEdit(row) { editingTaskId.value = row.id; Object.assign(taskForm, { ...row, task_type: row.task_type || '', description: row.description || '' }); taskDialogVisible.value = true }
 function openTaskClose(row) { closingTaskId.value = row.id; Object.assign(closeTaskForm, { reason: '', remark: '' }); closeTaskVisible.value = true }
+function taskOwnerForRequirement(requirement) { return requirement?.owner_id || project.value.owner_id || null }
+function onTaskRequirementChange(requirementId) {
+  const requirement = projectRequirements.value.find((item) => item.id === requirementId)
+  taskForm.owner_id = requirement?.owner_id || project.value.owner_id || null
+}
 function openCaseCreate() { editingCaseId.value = null; resetCaseForm(); caseDialogVisible.value = true }
 function openCaseEdit(row) { editingCaseId.value = row.id; Object.assign(caseForm, { ...row, case_type: row.case_type || '', precondition: row.precondition || '', expected_result: row.expected_result || '' }); caseDialogVisible.value = true }
 function openRunCreate() { editingRunId.value = null; resetRunForm(); runDialogVisible.value = true }
@@ -514,7 +513,6 @@ async function loadData() {
 async function submitIteration() { if (!iterationForm.name.trim()) return ElMessage.warning('请填写迭代名称'); saving.value = true; try { const payload = { ...iterationForm, project_ids: iterationForm.project_ids.length ? iterationForm.project_ids : [projectId.value], owner_id: iterationForm.owner_id || null }; if (editingIterationId.value) await updateIteration(editingIterationId.value, payload); else await createIteration(payload); iterationDialogVisible.value = false; await loadData() } finally { saving.value = false } }
 async function submitRequirement() { if (!requirementForm.title.trim()) return ElMessage.warning('请填写需求标题'); saving.value = true; try { const { status: _status, ...formData } = requirementForm; const payload = { ...formData, project_id: projectId.value, iteration_id: requirementForm.iteration_id || null, owner_id: requirementForm.owner_id || null, proposer_id: requirementForm.proposer_id || null }; if (editingRequirementId.value) await updateRequirement(editingRequirementId.value, payload); else await createRequirement(payload); requirementDialogVisible.value = false; await loadData() } finally { saving.value = false } }
 async function activateRequirementRow(id) { try { await activateRequirement(id); await loadData(); ElMessage.success('需求已激活，关联任务已进入进行中') } catch (error) { showActionError(error, '需求激活失败') } }
-async function submitGenerateTask() { if (!generateForm.title.trim()) return ElMessage.warning('请填写任务标题'); saving.value = true; try { await generateTask(generatingRequirementId.value, { ...generateForm }); generateVisible.value = false; await loadData(); ElMessage.success('任务已生成') } finally { saving.value = false } }
 async function submitRequirementClose() {
   if (!closeRequirementForm.reason) return ElMessage.warning('请选择关闭原因')
   saving.value = true

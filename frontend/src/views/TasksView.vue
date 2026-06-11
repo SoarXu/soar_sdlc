@@ -46,7 +46,7 @@
         <el-form-item label="任务标题" required><el-input v-model="form.title" /></el-form-item>
         <div class="form-grid">
           <el-form-item label="项目" required>
-            <el-select v-model="form.project_id" filterable placeholder="请选择项目">
+            <el-select v-model="form.project_id" filterable placeholder="请选择项目" @change="onProjectChange">
               <el-option v-for="project in projects" :key="project.id" :label="project.name" :value="project.id" />
             </el-select>
           </el-form-item>
@@ -56,8 +56,8 @@
             </el-select>
           </el-form-item>
           <el-form-item label="需求">
-            <el-select v-model="form.requirement_id" clearable filterable placeholder="请选择需求">
-              <el-option v-for="requirement in requirements" :key="requirement.id" :label="requirement.title" :value="requirement.id" />
+            <el-select v-model="form.requirement_id" clearable filterable placeholder="请选择需求" @change="onRequirementChange">
+              <el-option v-for="requirement in availableRequirements" :key="requirement.id" :label="requirement.title" :value="requirement.id" />
             </el-select>
           </el-form-item>
           <el-form-item label="负责人">
@@ -96,7 +96,7 @@
 </template>
 
 <script setup>
-import { onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { fetchProjects } from '../api/projects'
 import { fetchRequirements } from '../api/requirements'
@@ -125,6 +125,10 @@ const {
 const form = reactive({ project_id: null, source_project_id: null, requirement_id: null, title: '', task_type: '', priority: 'medium', owner_id: null, estimated_hours: null, actual_hours: null, due_date: null, status: 'todo', description: '' })
 const closeForm = reactive({ reason: '', remark: '' })
 const ownerManuallySet = ref(false)
+const availableRequirements = computed(() => {
+  if (!form.project_id) return requirements.value
+  return requirements.value.filter((item) => item.project_id === form.project_id)
+})
 const closeReasons = ['已完成', '重复', '延期', '不做', '设计如此']
 const taskStatusOptions = [
   { label: '待办', value: 'todo' },
@@ -143,6 +147,17 @@ function openCreate() { editingId.value = null; resetForm(); dialogVisible.value
 function openEdit(row) { editingId.value = row.id; ownerManuallySet.value = true; Object.assign(form, { ...row, task_type: row.task_type || '', description: row.description || '' }); dialogVisible.value = true }
 function openClose(row) { closingTaskId.value = row.id; Object.assign(closeForm, { reason: '', remark: '' }); closeVisible.value = true }
 function onSourceProjectChange(projectId) { if (!projectId || ownerManuallySet.value) return; const project = projects.value.find(p => p.id === projectId); if (project && project.owner_id) { form.owner_id = project.owner_id } }
+function onProjectChange(projectId) {
+  const requirement = requirements.value.find((item) => item.id === form.requirement_id)
+  if (requirement && requirement.project_id !== projectId) form.requirement_id = null
+  if (!ownerManuallySet.value) form.owner_id = projectOwner(projectId)
+}
+function onRequirementChange(requirementId) {
+  if (ownerManuallySet.value) return
+  const requirement = requirements.value.find((item) => item.id === requirementId)
+  form.owner_id = requirement?.owner_id || projectOwner(form.project_id)
+}
+function projectOwner(projectId) { return projects.value.find((item) => item.id === projectId)?.owner_id || null }
 function onOwnerChange() { ownerManuallySet.value = true }
 
 async function loadData() {

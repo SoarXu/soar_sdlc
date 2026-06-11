@@ -45,9 +45,39 @@
         <div class="project-tab-toolbar"><el-button type="primary" @click="openRequirementLink">关联需求</el-button></div>
         <div v-if="!requirements.length" class="project-tab-placeholder">暂无关联需求</div>
         <div v-else class="iteration-tree-list">
-          <div v-for="project in projects" :key="project.id" class="iteration-project-block">
-            <h3>{{ project.name }}</h3>
-            <ProjectRequirementTree :project="project" :requirements="requirements" :users="users" @remove="removeRequirement" />
+          <div v-for="project in flatProjects" :key="project.id" class="iteration-project-block">
+            <h3 v-if="requirementsByProject(project.id).length">{{ project.name }}</h3>
+            <el-table v-if="requirementsByProject(project.id).length" :data="requirementsByProject(project.id)" stripe width="100%">
+              <el-table-column prop="id" label="ID" width="80" />
+              <el-table-column label="需求标题" min-width="180" show-overflow-tooltip>
+                <template #default="{ row }"><router-link class="table-link" :to="requirementDetailLink(row)">{{ row.title }}</router-link></template>
+              </el-table-column>
+              <el-table-column label="迭代" width="140"><template #default>{{ iteration.name || '-' }}</template></el-table-column>
+              <el-table-column label="负责人" width="130"><template #default="{ row }">{{ userLabel(users, row.owner_id) }}</template></el-table-column>
+              <el-table-column label="优先级" width="100"><template #default="{ row }"><RequirementPriorityBadge :value="row.priority" /></template></el-table-column>
+              <el-table-column label="评审状态" width="110"><template #default="{ row }">{{ reviewStatusLabel(row.review_status) }}</template></el-table-column>
+              <el-table-column label="状态" width="90">
+                <template #default="{ row }">
+                  <el-tooltip v-if="closeReasonByRequirement[row.id]" :content="closeReasonByRequirement[row.id]" placement="top" raw-content>
+                    <span class="status-with-reason">{{ requirementStatusLabel(row.status) }}</span>
+                  </el-tooltip>
+                  <span v-else>{{ requirementStatusLabel(row.status) }}</span>
+                </template>
+              </el-table-column>
+              <el-table-column label="操作" width="420" fixed="right">
+                <template #default="{ row }">
+                  <div class="table-actions">
+                    <el-button link type="primary" @click="goProjectTab(row.project_id, 'requirements')">编辑</el-button>
+                    <el-button v-if="canActivateRequirement(row)" link type="warning" @click="activateRequirementRow(row.id)">激活</el-button>
+                    <el-button v-if="row.status === 'active'" link type="danger" @click="openRequirementClose(row)">关闭</el-button>
+                    <el-button link type="success" @click="goProjectTab(row.project_id, 'requirements')">生成任务</el-button>
+                    <el-button link type="success" @click="goProjectTab(row.project_id, 'tests')">建用例</el-button>
+                    <el-popconfirm title="确认删除该需求？" @confirm="deleteRequirementRow(row.id)"><template #reference><el-button link type="danger">删除</el-button></template></el-popconfirm>
+                    <el-button link type="danger" @click="removeRequirement(row.id)">移除</el-button>
+                  </div>
+                </template>
+              </el-table-column>
+            </el-table>
           </div>
         </div>
       </template>
@@ -63,11 +93,24 @@
             <el-table-column label="负责人" width="140"><template #default="{ row }">{{ userLabel(users, row.owner_id) }}</template></el-table-column>
             <el-table-column prop="actual_hours" label="实际工时" width="110" />
             <el-table-column prop="due_date" label="截止日期" width="130" />
-            <el-table-column label="状态" width="110"><template #default="{ row }">{{ taskStatusLabel(row.status) }}</template></el-table-column>
-            <el-table-column label="操作" width="120" fixed="right">
+            <el-table-column label="状态" width="110">
               <template #default="{ row }">
-                <el-button v-if="row.iteration_id === iterationId" link type="danger" @click="removeTask(row.id)">移除</el-button>
-                <span v-else class="muted-text">需求带入</span>
+                <el-tooltip v-if="closeReasonByTask[row.id]" :content="closeReasonByTask[row.id]" placement="top" raw-content>
+                  <span class="status-with-reason">{{ taskStatusLabel(row.status) }}</span>
+                </el-tooltip>
+                <span v-else>{{ taskStatusLabel(row.status) }}</span>
+              </template>
+            </el-table-column>
+            <el-table-column label="操作" width="300" fixed="right">
+              <template #default="{ row }">
+                <div class="table-actions">
+                  <el-button link type="primary" @click="goProjectTab(row.project_id, 'tasks')">编辑</el-button>
+                  <el-button v-if="canActivateTask(row)" link type="warning" @click="activateTaskRow(row.id)">激活</el-button>
+                  <el-button v-if="row.status !== 'closed'" link type="danger" @click="openTaskClose(row)">关闭</el-button>
+                  <el-popconfirm title="确认删除该任务？" @confirm="deleteTaskRow(row.id)"><template #reference><el-button link type="danger">删除</el-button></template></el-popconfirm>
+                  <el-button v-if="row.iteration_id === iterationId" link type="danger" @click="removeTask(row.id)">移除</el-button>
+                  <span v-else class="muted-text">需求带入</span>
+                </div>
               </template>
             </el-table-column>
           </el-table>
@@ -125,6 +168,30 @@
       <template #footer><el-button @click="taskDialogVisible = false">取消</el-button><el-button type="primary" :loading="saving" @click="submitTasks">关联</el-button></template>
     </el-dialog>
 
+    <el-dialog v-model="closeRequirementVisible" title="关闭需求" width="480px">
+      <el-form label-position="top">
+        <el-form-item label="关闭原因" required>
+          <el-select v-model="closeRequirementForm.reason" placeholder="请选择关闭原因">
+            <el-option v-for="option in requirementCloseReasons" :key="option" :label="option" :value="option" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="备注"><el-input v-model="closeRequirementForm.remark" type="textarea" :rows="3" /></el-form-item>
+      </el-form>
+      <template #footer><el-button @click="closeRequirementVisible = false">取消</el-button><el-button type="primary" :loading="saving" @click="submitRequirementClose">确认关闭</el-button></template>
+    </el-dialog>
+
+    <el-dialog v-model="closeTaskVisible" title="关闭任务" width="480px">
+      <el-form label-position="top">
+        <el-form-item label="关闭原因" required>
+          <el-select v-model="closeTaskForm.reason" placeholder="请选择关闭原因">
+            <el-option v-for="option in taskCloseReasons" :key="option" :label="option" :value="option" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="备注"><el-input v-model="closeTaskForm.remark" type="textarea" :rows="3" /></el-form-item>
+      </el-form>
+      <template #footer><el-button @click="closeTaskVisible = false">取消</el-button><el-button type="primary" :loading="saving" @click="submitTaskClose">确认关闭</el-button></template>
+    </el-dialog>
+
     <el-dialog v-model="caseExecutionVisible" :title="`执行用例 ${selectedCase?.title || ''}`" width="980px">
       <el-form label-position="top">
         <el-form-item label="执行时间"><el-date-picker v-model="caseExecutionForm.execute_time" type="datetime" value-format="YYYY-MM-DDTHH:mm:ss" /></el-form-item>
@@ -169,9 +236,9 @@
 </template>
 
 <script setup>
-import { computed, defineComponent, h, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ElButton, ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   fetchAvailableIterationRequirements,
   fetchAvailableIterationTasks,
@@ -182,6 +249,8 @@ import {
   unlinkIterationTask
 } from '../api/iterations'
 import { createBugFromTestCase, executeTestCase, fetchTestCaseExecutions } from '../api/testCases'
+import { activateRequirement, closeRequirement, deleteRequirement, fetchRequirementStatusOperations } from '../api/requirements'
+import { activateTask, closeTask, deleteTask, fetchTaskStatusOperations } from '../api/tasks'
 import { fetchUsers } from '../api/users'
 import RequirementPriorityBadge from '../components/RequirementPriorityBadge.vue'
 import { labelById, userLabel } from '../utils/referenceLabels'
@@ -206,12 +275,18 @@ const selectedRequirementIds = ref([])
 const selectedTaskIds = ref([])
 const requirementDialogVisible = ref(false)
 const taskDialogVisible = ref(false)
+const closeRequirementVisible = ref(false)
+const closeTaskVisible = ref(false)
+const closingRequirementId = ref(null)
+const closingTaskId = ref(null)
 const caseExecutionVisible = ref(false)
 const caseBugVisible = ref(false)
 const selectedCase = ref(null)
 const bugSourceCase = ref(null)
 const caseExecutionHistory = ref([])
 const caseExecutionForm = ref({ execute_time: '', steps_result_json: [] })
+const closeReasonByRequirement = ref({})
+const closeReasonByTask = ref({})
 const tabs = [
   { key: 'overview', label: '概览' },
   { key: 'requirements', label: '需求' },
@@ -231,6 +306,14 @@ const requirementStatusOptions = [
   { label: '完成', value: 'done' },
   { label: '关闭', value: 'closed' }
 ]
+const reviewStatusOptions = [
+  { label: '无需评审', value: 'not_required' },
+  { label: '待评审', value: 'pending' },
+  { label: '已通过', value: 'approved' },
+  { label: '已拒绝', value: 'rejected' }
+]
+const requirementCloseReasons = ['已完成', '不做', '重复', '延期', '需求变更']
+const taskCloseReasons = ['已完成', '不做', '重复', '需求关闭', '其他']
 const taskStatusOptions = [
   { label: '待办', value: 'todo' },
   { label: '进行中', value: 'doing' },
@@ -276,6 +359,8 @@ const priorityLevelOptions = [
   { label: '⑤ 最低', value: '5' }
 ]
 const caseBugForm = ref({ title: '', bug_type: '代码错误', severity: '3', priority: '3', reproduce_steps: '', actual_result: '' })
+const closeRequirementForm = reactive({ reason: '', remark: '' })
+const closeTaskForm = reactive({ reason: '', remark: '' })
 const flatProjects = computed(() => flattenProjects(projects.value))
 const projectNames = computed(() => (iteration.value.project_ids || []).map(id => labelById(flatProjects.value, id)).join('、') || '-')
 const failedExecutionCount = computed(() => caseExecutionHistory.value.filter((item) => item.result === 'failed').length)
@@ -283,12 +368,16 @@ const failedExecutionCount = computed(() => caseExecutionHistory.value.filter((i
 function optionLabel(options, value) { return options.find((option) => option.value === value)?.label || value || '-' }
 function iterationStatusLabel(value) { return optionLabel(iterationStatusOptions, value) }
 function requirementStatusLabel(value) { return optionLabel(requirementStatusOptions, value) }
+function reviewStatusLabel(value) { return optionLabel(reviewStatusOptions, value) }
 function taskStatusLabel(value) { return optionLabel(taskStatusOptions, value) }
 function bugStatusLabel(value) { return optionLabel(bugStatusOptions, value) }
 function caseTypeLabel(value) { return optionLabel(caseTypeOptions, value) }
 function testScopeLabel(value) { return optionLabel(testScopeOptions, value) }
 function executionResultLabel(value) { return optionLabel(executionResultOptions, value) }
 function canCreateBugFromCase(row) { return ['failed', 'blocked'].includes(row.last_execute_result) }
+function canActivateRequirement(row) { return ['draft', 'closed'].includes(row.status) }
+function canActivateTask(row) { return ['todo', 'closed'].includes(row.status) }
+function requirementsByProject(projectId) { return requirements.value.filter((item) => item.project_id === projectId) }
 function tasksByProject(projectId) { return tasks.value.filter((item) => item.project_id === projectId) }
 function requirementDetailLink(row) { return { name: 'requirement-detail', params: { id: row.id }, query: { from: 'iteration', iterationId: iterationId.value, tab: 'requirements' } } }
 function taskDetailLink(row) { return { name: 'task-detail', params: { id: row.id }, query: { from: 'iteration', iterationId: iterationId.value, tab: 'tasks' } } }
@@ -307,6 +396,9 @@ function setActiveTab(key) {
   activeTab.value = key
   router.replace({ name: 'iteration-detail', params: { id: iterationId.value }, query: { ...route.query, tab: key } })
 }
+function apiErrorMessage(error, fallback) { return error?.response?.data?.detail || fallback }
+function showActionError(error, fallback) { ElMessageBox.alert(apiErrorMessage(error, fallback), '提示', { type: 'warning' }) }
+function goProjectTab(projectId, tab) { router.push({ name: 'project-detail', params: { id: projectId }, query: { tab } }) }
 
 async function loadData() {
   loading.value = true
@@ -320,6 +412,8 @@ async function loadData() {
     bugs.value = detailRes.data.bugs || []
     metrics.value = detailRes.data.metrics
     users.value = userRes.data
+    closeReasonByRequirement.value = await loadCloseReasonMap(requirements.value, fetchRequirementStatusOperations)
+    closeReasonByTask.value = await loadCloseReasonMap(tasks.value, fetchTaskStatusOperations)
   } catch {
     ElMessage.error('迭代详情加载失败')
   } finally {
@@ -344,6 +438,10 @@ async function submitRequirements() {
   }
 }
 async function removeRequirement(requirementId) { await unlinkIterationRequirement(iterationId.value, requirementId); await loadData() }
+async function activateRequirementRow(id) { try { await activateRequirement(id); await loadData(); ElMessage.success('需求已激活') } catch (error) { showActionError(error, '需求激活失败') } }
+function openRequirementClose(row) { closingRequirementId.value = row.id; Object.assign(closeRequirementForm, { reason: '', remark: '' }); closeRequirementVisible.value = true }
+async function submitRequirementClose() { if (!closeRequirementForm.reason) return ElMessage.warning('请选择关闭原因'); saving.value = true; try { await closeRequirement(closingRequirementId.value, { ...closeRequirementForm }); closeRequirementVisible.value = false; await loadData(); ElMessage.success('需求已关闭') } catch (error) { showActionError(error, '需求关闭失败') } finally { saving.value = false } }
+async function deleteRequirementRow(id) { await deleteRequirement(id); await loadData() }
 
 async function openTaskLink() {
   selectedTaskIds.value = []
@@ -362,6 +460,10 @@ async function submitTasks() {
   }
 }
 async function removeTask(taskId) { await unlinkIterationTask(iterationId.value, taskId); await loadData() }
+async function activateTaskRow(id) { try { await activateTask(id); await loadData(); ElMessage.success('任务已激活') } catch (error) { showActionError(error, '任务激活失败') } }
+function openTaskClose(row) { closingTaskId.value = row.id; Object.assign(closeTaskForm, { reason: '', remark: '' }); closeTaskVisible.value = true }
+async function submitTaskClose() { if (!closeTaskForm.reason) return ElMessage.warning('请选择关闭原因'); saving.value = true; try { await closeTask(closingTaskId.value, { ...closeTaskForm }); closeTaskVisible.value = false; await loadData(); ElMessage.success('任务已关闭') } catch (error) { showActionError(error, '任务关闭失败') } finally { saving.value = false } }
+async function deleteTaskRow(id) { await deleteTask(id); await loadData() }
 async function openCaseExecution(row) {
   selectedCase.value = row
   caseExecutionForm.value = {
@@ -411,33 +513,6 @@ async function submitCaseBug() {
   }
 }
 
-const ProjectRequirementTree = defineComponent({
-  props: {
-    project: { type: Object, required: true },
-    requirements: { type: Array, required: true }
-    ,
-    users: { type: Array, required: true }
-  },
-  emits: ['remove'],
-  setup(props, { emit }) {
-    const renderNode = (project, depth = 0) => {
-      const rows = props.requirements.filter((item) => item.project_id === project.id)
-      return h('div', { class: 'iteration-tree-node' }, [
-        depth > 0 ? h('h4', { style: { paddingLeft: `${depth * 18}px` } }, project.name) : null,
-        rows.map((row) => h('div', { class: 'iteration-requirement-row', style: { paddingLeft: `${depth * 18 + 12}px` } }, [
-          h('span', [
-            h('a', { class: 'table-link', href: `#/requirements/${row.id}?from=iteration&iterationId=${iterationId.value}&tab=requirements` }, row.title),
-            h('span', { class: 'muted-text' }, ` · ${userLabel(props.users, row.owner_id)} · ${row.status || '-'}`)
-          ]),
-          h(ElButton, { link: true, type: 'danger', onClick: () => emit('remove', row.id) }, () => '移除')
-        ])),
-        (project.children || []).map((child) => renderNode(child, depth + 1))
-      ])
-    }
-    return () => renderNode(props.project)
-  }
-})
-
 onMounted(loadData)
 watch(() => route.query.tab, (value) => { activeTab.value = normalizeIterationTab(value) })
 
@@ -464,5 +539,17 @@ function buildReproduceText(execution, testCase) {
 function buildActualText(execution) {
   const rows = Array.isArray(execution?.steps_result_json) ? execution.steps_result_json : []
   return rows.map((row) => row.actual).filter(Boolean).join('\n')
+}
+async function loadCloseReasonMap(items, fetcher) {
+  const entries = await Promise.all(items.map(async (item) => {
+    try {
+      const operations = (await fetcher(item.id)).data
+      const closeOperation = operations.find((operation) => operation.action === 'close' && operation.reason)
+      return [item.id, closeOperation?.reason || '']
+    } catch {
+      return [item.id, '']
+    }
+  }))
+  return Object.fromEntries(entries.filter(([, reason]) => reason))
 }
 </script>

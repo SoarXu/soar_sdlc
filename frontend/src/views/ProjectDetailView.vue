@@ -54,7 +54,7 @@
           <el-table-column label="负责人" width="150"><template #default="{ row }">{{ userLabel(users, row.owner_id) }}</template></el-table-column>
           <el-table-column prop="start_date" label="开始日期" width="130" />
           <el-table-column prop="end_date" label="结束日期" width="130" />
-          <el-table-column prop="status" label="状态" width="120" />
+          <el-table-column label="状态" width="120"><template #default="{ row }">{{ iterationStatusLabel(row.status) }}</template></el-table-column>
           <el-table-column label="操作" width="150" fixed="right">
             <template #default="{ row }"><el-button link type="primary" @click="openIterationEdit(row)">编辑</el-button><el-popconfirm title="确认删除该迭代？" @confirm="removeIteration(row.id)"><template #reference><el-button link type="danger">删除</el-button></template></el-popconfirm></template>
           </el-table-column>
@@ -71,8 +71,8 @@
           <el-table-column label="迭代" width="160"><template #default="{ row }">{{ labelById(projectIterations, row.iteration_id) }}</template></el-table-column>
           <el-table-column label="负责人" width="150"><template #default="{ row }">{{ userLabel(users, row.owner_id) }}</template></el-table-column>
           <el-table-column prop="priority" label="优先级" width="100" />
-          <el-table-column prop="review_status" label="评审状态" width="120" />
-          <el-table-column prop="status" label="状态" width="100" />
+          <el-table-column label="评审状态" width="120"><template #default="{ row }">{{ reviewStatusLabel(row.review_status) }}</template></el-table-column>
+          <el-table-column label="状态" width="100"><template #default="{ row }">{{ requirementStatusLabel(row.status) }}</template></el-table-column>
           <el-table-column label="操作" width="230" fixed="right">
             <template #default="{ row }">
               <el-button link type="primary" @click="openRequirementEdit(row)">编辑</el-button>
@@ -94,7 +94,7 @@
           <el-table-column label="负责人" width="150"><template #default="{ row }">{{ userLabel(users, row.owner_id) }}</template></el-table-column>
           <el-table-column prop="actual_hours" label="实际工时" width="110" />
           <el-table-column prop="due_date" label="截止日期" width="130" />
-          <el-table-column prop="status" label="状态" width="110" />
+          <el-table-column label="状态" width="110"><template #default="{ row }">{{ taskStatusLabel(row.status) }}</template></el-table-column>
           <el-table-column label="操作" width="150" fixed="right">
             <template #default="{ row }"><el-button link type="primary" @click="openTaskEdit(row)">编辑</el-button><el-popconfirm title="确认删除该任务？" @confirm="removeTask(row.id)"><template #reference><el-button link type="danger">删除</el-button></template></el-popconfirm></template>
           </el-table-column>
@@ -111,7 +111,7 @@
               <el-table-column label="需求" width="180"><template #default="{ row }">{{ labelById(projectRequirements, row.requirement_id, 'title') }}</template></el-table-column>
               <el-table-column label="默认测试人" width="140"><template #default="{ row }">{{ userLabel(users, row.default_tester_id) }}</template></el-table-column>
               <el-table-column prop="priority" label="优先级" width="100" />
-              <el-table-column prop="status" label="状态" width="100" />
+              <el-table-column label="状态" width="100"><template #default="{ row }">{{ testCaseStatusLabel(row.status) }}</template></el-table-column>
               <el-table-column label="操作" width="150" fixed="right"><template #default="{ row }"><el-button link type="primary" @click="openCaseEdit(row)">编辑</el-button><el-popconfirm title="确认删除该用例？" @confirm="removeCase(row.id)"><template #reference><el-button link type="danger">删除</el-button></template></el-popconfirm></template></el-table-column>
             </el-table>
           </el-tab-pane>
@@ -122,7 +122,7 @@
               <el-table-column prop="name" label="测试单名称" min-width="220" />
               <el-table-column label="迭代" width="160"><template #default="{ row }">{{ labelById(projectIterations, row.iteration_id) }}</template></el-table-column>
               <el-table-column label="负责人" width="140"><template #default="{ row }">{{ userLabel(users, row.test_owner_id) }}</template></el-table-column>
-              <el-table-column prop="status" label="状态" width="110" />
+              <el-table-column label="状态" width="110"><template #default="{ row }">{{ testRunStatusLabel(row.status) }}</template></el-table-column>
               <el-table-column label="操作" width="150" fixed="right"><template #default="{ row }"><el-button link type="primary" @click="openRunEdit(row)">编辑</el-button><el-popconfirm title="确认删除该测试单？" @confirm="removeRun(row.id)"><template #reference><el-button link type="danger">删除</el-button></template></el-popconfirm></template></el-table-column>
             </el-table>
           </el-tab-pane>
@@ -138,7 +138,7 @@
           <el-table-column label="任务" width="180"><template #default="{ row }">{{ labelById(projectTasks, row.task_id, 'title') }}</template></el-table-column>
           <el-table-column label="负责人" width="140"><template #default="{ row }">{{ userLabel(users, row.owner_id) }}</template></el-table-column>
           <el-table-column prop="severity" label="严重程度" width="110" />
-          <el-table-column prop="status" label="状态" width="120" />
+          <el-table-column label="状态" width="120"><template #default="{ row }">{{ bugStatusLabel(row.status) }}</template></el-table-column>
           <el-table-column label="操作" width="150" fixed="right"><template #default="{ row }"><el-button link type="primary" @click="openBugEdit(row)">编辑</el-button><el-popconfirm title="确认删除该 Bug？" @confirm="removeBug(row.id)"><template #reference><el-button link type="danger">删除</el-button></template></el-popconfirm></template></el-table-column>
         </el-table>
       </template>
@@ -255,6 +255,45 @@ const projectStatusOptions = [
   { label: '运维中', value: 'maintenance' },
   { label: '已关闭', value: 'closed' }
 ]
+const iterationStatusOptions = [
+  { label: '规划中', value: 'planning' },
+  { label: '进行中', value: 'active' },
+  { label: '已完成', value: 'finished' },
+  { label: '已关闭', value: 'closed' }
+]
+const requirementStatusOptions = [
+  { label: '草稿', value: 'draft' },
+  { label: '激活', value: 'active' },
+  { label: '完成', value: 'done' },
+  { label: '关闭', value: 'closed' }
+]
+const reviewStatusOptions = [
+  { label: '无需评审', value: 'not_required' },
+  { label: '待评审', value: 'pending' },
+  { label: '已通过', value: 'approved' }
+]
+const taskStatusOptions = [
+  { label: '待办', value: 'todo' },
+  { label: '进行中', value: 'doing' },
+  { label: '完成', value: 'done' },
+  { label: '关闭', value: 'closed' }
+]
+const testCaseStatusOptions = [
+  { label: '启用', value: 'active' },
+  { label: '停用', value: 'inactive' }
+]
+const testRunStatusOptions = [
+  { label: '规划中', value: 'planning' },
+  { label: '执行中', value: 'running' },
+  { label: '完成', value: 'finished' }
+]
+const bugStatusOptions = [
+  { label: '待修复', value: 'open' },
+  { label: '修复中', value: 'fixing' },
+  { label: '待验证', value: 'verifying' },
+  { label: '已关闭', value: 'closed' },
+  { label: '重新打开', value: 'reopened' }
+]
 
 const projectIterations = computed(() => iterations.value.filter((item) => (item.project_ids || []).includes(projectId.value)))
 const projectRequirements = computed(() => requirements.value.filter((item) => item.project_id === projectId.value))
@@ -280,7 +319,15 @@ const caseForm = reactive({ project_id: null, requirement_id: null, title: '', c
 const runForm = reactive({ project_id: null, iteration_id: null, name: '', test_owner_id: null, status: 'planning', remark: '' })
 const bugForm = reactive({ project_id: null, requirement_id: null, task_id: null, test_case_id: null, test_run_id: null, title: '', severity: 'medium', priority: 'medium', owner_id: null, reporter_id: null, reproduce_steps: '', expected_result: '', actual_result: '', status: 'open' })
 
-function projectStatusLabel(value) { return projectStatusOptions.find((option) => option.value === value)?.label || value || '-' }
+function optionLabel(options, value) { return options.find((option) => option.value === value)?.label || value || '-' }
+function projectStatusLabel(value) { return optionLabel(projectStatusOptions, value) }
+function iterationStatusLabel(value) { return optionLabel(iterationStatusOptions, value) }
+function requirementStatusLabel(value) { return optionLabel(requirementStatusOptions, value) }
+function reviewStatusLabel(value) { return optionLabel(reviewStatusOptions, value) }
+function taskStatusLabel(value) { return optionLabel(taskStatusOptions, value) }
+function testCaseStatusLabel(value) { return optionLabel(testCaseStatusOptions, value) }
+function testRunStatusLabel(value) { return optionLabel(testRunStatusOptions, value) }
+function bugStatusLabel(value) { return optionLabel(bugStatusOptions, value) }
 function resetIterationForm() { Object.assign(iterationForm, { project_ids: [projectId.value], name: '', owner_id: null, start_date: null, end_date: null, status: 'planning', goal: '' }) }
 function resetRequirementForm() { Object.assign(requirementForm, { project_id: projectId.value, iteration_id: null, title: '', requirement_type: '', priority: 'medium', owner_id: null, proposer_id: null, status: 'draft', review_status: 'not_required', description: '', acceptance_criteria: '', source_reviewed: false }) }
 function resetTaskForm() { Object.assign(taskForm, { project_id: projectId.value, requirement_id: null, title: '', task_type: '', priority: 'medium', owner_id: null, estimated_hours: null, actual_hours: null, due_date: null, status: 'todo', description: '' }) }

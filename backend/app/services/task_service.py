@@ -1,8 +1,9 @@
-from datetime import datetime
+from datetime import date, datetime
 
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 
+from app.models.audit_log import AuditLog
 from app.models.project import Project
 from app.models.task import Task
 from app.services.status_operation_service import create_status_operation, list_status_operations
@@ -33,8 +34,20 @@ def create_task(db: Session, payload: TaskCreate) -> Task:
 
 def update_task(db: Session, task_id: int, payload: TaskUpdate) -> Task:
     task = _get_active_task(db, task_id)
-    for field, value in payload.model_dump(exclude_unset=True).items():
+    data = payload.model_dump(exclude_unset=True)
+    before_data, after_data = _task_change_data(task, data)
+    for field, value in data.items():
         setattr(task, field, value)
+    if before_data:
+        db.add(
+            AuditLog(
+                action="update",
+                object_type="task",
+                object_id=task.id,
+                before_data=before_data,
+                after_data=after_data,
+            )
+        )
     db.commit()
     db.refresh(task)
     return task
@@ -91,6 +104,16 @@ def list_task_status_operations(db: Session, task_id: int) -> list[dict]:
     return list_status_operations(db, "task", task_id)
 
 
+def list_task_audit_logs(db: Session, task_id: int) -> list[AuditLog]:
+    _get_active_task(db, task_id)
+    return (
+        db.query(AuditLog)
+        .filter(AuditLog.object_type == "task", AuditLog.object_id == task_id)
+        .order_by(AuditLog.create_time.desc(), AuditLog.id.desc())
+        .all()
+    )
+
+
 def delete_task(db: Session, task_id: int) -> None:
     task = _get_active_task(db, task_id)
     task.deleted = 1
@@ -103,6 +126,25 @@ def _get_active_task(db: Session, task_id: int) -> Task:
     if not task:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
     return task
+
+
+def _task_change_data(task: Task, data: dict) -> tuple[dict, dict]:
+    before_data = {}
+    after_data = {}
+    for field, new_value in data.items():
+        old_value = getattr(task, field)
+        old_normalized = _audit_value(old_value)
+        new_normalized = _audit_value(new_value)
+        if old_normalized != new_normalized:
+            before_data[field] = old_normalized
+            after_data[field] = new_normalized
+    return before_data, after_data
+
+
+def _audit_value(value):
+    if isinstance(value, (date, datetime)):
+        return value.isoformat()
+    return value
 
 
 def _ensure_project_open_for_task(db: Session, task: Task) -> None:

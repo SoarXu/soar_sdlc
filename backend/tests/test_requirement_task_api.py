@@ -215,6 +215,39 @@ def test_task_can_be_activated_and_closed_with_history(client: TestClient):
     assert history.json()[-1]["remark"] == "任务取消"
 
 
+def test_task_update_records_only_changed_fields(client: TestClient):
+    project_id = _create_project(client)
+    task = client.post(
+        "/api/v1/tasks",
+        json={
+            "project_id": project_id,
+            "title": f"任务编辑记录-{uuid4().hex[:8]}",
+            "description": "原描述",
+            "priority": "medium",
+        },
+    ).json()
+
+    updated = client.patch(
+        f"/api/v1/tasks/{task['id']}",
+        json={"title": "任务编辑后标题", "description": "原描述", "priority": "high"},
+    )
+    assert updated.status_code == 200
+
+    logs = client.get(f"/api/v1/tasks/{task['id']}/audit-logs")
+    assert logs.status_code == 200
+    data = logs.json()
+    assert len(data) == 1
+    assert data[0]["action"] == "update"
+    assert data[0]["object_type"] == "task"
+    assert data[0]["object_id"] == task["id"]
+    assert data[0]["before_data"] == {"title": task["title"], "priority": "medium"}
+    assert data[0]["after_data"] == {"title": "任务编辑后标题", "priority": "high"}
+
+    unchanged = client.patch(f"/api/v1/tasks/{task['id']}", json={"title": "任务编辑后标题"})
+    assert unchanged.status_code == 200
+    assert len(client.get(f"/api/v1/tasks/{task['id']}/audit-logs").json()) == 1
+
+
 def test_requirement_close_closes_open_linked_tasks_with_same_reason(client: TestClient):
     project_id = _create_project(client)
     requirement = client.post(

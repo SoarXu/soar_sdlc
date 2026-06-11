@@ -28,6 +28,10 @@ export function fetchTaskStatusOperations(id) {
   return http.get(`/tasks/${id}/status-operations`)
 }
 
+export function fetchTaskAuditLogs(id) {
+  return http.get(`/tasks/${id}/audit-logs`)
+}
+
 export function deleteTask(id) {
   return http.delete(`/tasks/${id}`)
 }

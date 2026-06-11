@@ -8,10 +8,12 @@ from app.services.task_service import (
     create_task,
     delete_task,
     get_task,
+    list_task_audit_logs,
     list_task_status_operations,
     list_tasks,
     update_task,
 )
+from app.views.audit_log_view import AuditLogRead
 from app.views.status_operation_view import StatusOperationCreate, StatusOperationRead
 from app.views.task_view import TaskCreate, TaskRead, TaskUpdate
 
@@ -52,6 +54,11 @@ def close_task_status(task_id: int, payload: StatusOperationCreate, db: Session 
 @router.get("/{task_id}/status-operations", response_model=list[StatusOperationRead])
 def get_task_status_operations(task_id: int, db: Session = Depends(get_db)):
     return list_task_status_operations(db, task_id)
+
+
+@router.get("/{task_id}/audit-logs", response_model=list[AuditLogRead])
+def get_task_audit_logs(task_id: int, db: Session = Depends(get_db)):
+    return list_task_audit_logs(db, task_id)
 
 
 @router.delete("/{task_id}", status_code=status.HTTP_204_NO_CONTENT)

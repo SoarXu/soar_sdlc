@@ -257,7 +257,6 @@
 | precondition | TEXT | NULL | 前置条件 |
 | steps_json | JSON | NULL | 测试步骤，结构化 JSON |
 | expected_result | TEXT | NULL | 预期结果 |
-| status | VARCHAR(32) | NOT NULL DEFAULT 'active' | 状态 |
 | creator_id | BIGINT UNSIGNED | NULL | 创建人 |
 | updater_id | BIGINT UNSIGNED | NULL | 更新人 |
 | create_time | DATETIME | NOT NULL | 创建时间 |

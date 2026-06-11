@@ -157,7 +157,6 @@
               <el-table-column label="需求" width="180"><template #default="{ row }">{{ labelById(projectRequirements, row.requirement_id, 'title') }}</template></el-table-column>
               <el-table-column label="默认测试人" width="140"><template #default="{ row }">{{ userLabel(users, row.default_tester_id) }}</template></el-table-column>
               <el-table-column prop="priority" label="优先级" width="100" />
-              <el-table-column label="状态" width="100"><template #default="{ row }">{{ testCaseStatusLabel(row.status) }}</template></el-table-column>
               <el-table-column label="操作" width="150" fixed="right"><template #default="{ row }"><el-button link type="primary" @click="openCaseEdit(row)">编辑</el-button><el-popconfirm title="确认删除该用例？" @confirm="removeCase(row.id)"><template #reference><el-button link type="danger">删除</el-button></template></el-popconfirm></template></el-table-column>
             </el-table>
           </el-tab-pane>
@@ -265,7 +264,6 @@
           <el-form-item label="用例类型"><el-select v-model="caseForm.case_type"><el-option v-for="option in caseTypeOptions" :key="option.value" :label="option.label" :value="option.value" /></el-select></el-form-item>
           <el-form-item label="适用范围"><el-select v-model="caseForm.test_scope"><el-option v-for="option in testScopeOptions" :key="option.value" :label="option.label" :value="option.value" /></el-select></el-form-item>
           <el-form-item label="优先级"><el-select v-model="caseForm.priority"><el-option label="高" value="high" /><el-option label="中" value="medium" /><el-option label="低" value="low" /></el-select></el-form-item>
-          <el-form-item label="状态"><el-select v-model="caseForm.status"><el-option label="启用" value="active" /><el-option label="停用" value="inactive" /></el-select></el-form-item>
         </div>
         <el-form-item label="前置条件"><el-input v-model="caseForm.precondition" type="textarea" :rows="2" /></el-form-item>
         <el-form-item label="用例步骤">
@@ -393,10 +391,6 @@ const taskStatusOptions = [
   { label: '完成', value: 'done' },
   { label: '关闭', value: 'closed' }
 ]
-const testCaseStatusOptions = [
-  { label: '启用', value: 'active' },
-  { label: '停用', value: 'inactive' }
-]
 const caseTypeOptions = [
   { label: '接口测试', value: 'api' },
   { label: '功能测试', value: 'functional' },
@@ -472,7 +466,7 @@ const requirementForm = reactive({ project_id: null, iteration_id: null, title: 
 const closeRequirementForm = reactive({ reason: '', remark: '' })
 const taskForm = reactive({ project_id: null, requirement_id: null, title: '', task_type: '', priority: 'medium', owner_id: null, estimated_hours: null, actual_hours: null, due_date: null, status: 'todo', description: '' })
 const closeTaskForm = reactive({ reason: '', remark: '' })
-const caseForm = reactive({ project_id: null, requirement_id: null, title: '', case_type: 'functional', test_scope: 'functional_test', priority: 'medium', default_tester_id: null, precondition: '', steps_json: [{ step: '', expected: '' }], expected_result: '', status: 'active' })
+const caseForm = reactive({ project_id: null, requirement_id: null, title: '', case_type: 'functional', test_scope: 'functional_test', priority: 'medium', default_tester_id: null, precondition: '', steps_json: [{ step: '', expected: '' }], expected_result: '' })
 const runForm = reactive({ project_id: null, iteration_id: null, name: '', test_owner_id: null, status: 'planning', remark: '' })
 const bugForm = reactive({ project_id: null, requirement_id: null, task_id: null, test_case_id: null, test_run_id: null, title: '', severity: 'medium', priority: 'medium', owner_id: null, reporter_id: null, reproduce_steps: '', expected_result: '', actual_result: '', status: 'open' })
 
@@ -490,7 +484,6 @@ function normalizeRequirementPriority(value) { return legacyRequirementPriorityV
 function requirementStatusLabel(value) { return optionLabel(requirementStatusOptions, value) }
 function reviewStatusLabel(value) { return optionLabel(reviewStatusOptions, value) }
 function taskStatusLabel(value) { return optionLabel(taskStatusOptions, value) }
-function testCaseStatusLabel(value) { return optionLabel(testCaseStatusOptions, value) }
 function testRunStatusLabel(value) { return optionLabel(testRunStatusOptions, value) }
 function bugStatusLabel(value) { return optionLabel(bugStatusOptions, value) }
 function operationActionLabel(value) { return optionLabel([{ label: '启动', value: 'start' }, { label: '挂起', value: 'suspend' }, { label: '关闭', value: 'close' }, { label: '激活', value: 'activate' }, { label: '转运维', value: 'move_to_maintenance' }], value) }
@@ -519,7 +512,7 @@ function projectFieldLabel(field) {
 function resetIterationForm() { Object.assign(iterationForm, { project_ids: [projectId.value], name: '', owner_id: null, start_date: null, end_date: null, status: 'planning', goal: '' }) }
 function resetRequirementForm() { Object.assign(requirementForm, { project_id: projectId.value, iteration_id: null, title: '', requirement_type: '功能', priority: '3', owner_id: project.value.owner_id || null, proposer_id: currentUserId(users.value), status: 'draft', review_status: 'not_required', description: '', acceptance_criteria: '', source_reviewed: false }) }
 function resetTaskForm() { Object.assign(taskForm, { project_id: projectId.value, requirement_id: null, title: '', task_type: '', priority: 'medium', owner_id: project.value.owner_id || null, estimated_hours: null, actual_hours: null, due_date: null, status: 'todo', description: '' }) }
-function resetCaseForm() { Object.assign(caseForm, { project_id: projectId.value, requirement_id: null, title: '', case_type: 'functional', test_scope: 'functional_test', priority: 'medium', default_tester_id: null, precondition: '', steps_json: [{ step: '', expected: '' }], expected_result: '', status: 'active' }) }
+function resetCaseForm() { Object.assign(caseForm, { project_id: projectId.value, requirement_id: null, title: '', case_type: 'functional', test_scope: 'functional_test', priority: 'medium', default_tester_id: null, precondition: '', steps_json: [{ step: '', expected: '' }], expected_result: '' }) }
 function resetRunForm() { Object.assign(runForm, { project_id: projectId.value, iteration_id: null, name: '', test_owner_id: null, status: 'planning', remark: '' }) }
 function resetBugForm() { Object.assign(bugForm, { project_id: projectId.value, requirement_id: null, task_id: null, test_case_id: null, test_run_id: null, title: '', severity: 'medium', priority: 'medium', owner_id: null, reporter_id: null, reproduce_steps: '', expected_result: '', actual_result: '', status: 'open' }) }
 

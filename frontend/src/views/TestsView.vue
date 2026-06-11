@@ -18,7 +18,6 @@
             <el-table-column label="需求" width="180"><template #default="{ row }">{{ labelById(requirements, row.requirement_id, 'title') }}</template></el-table-column>
             <el-table-column label="默认测试人" width="140"><template #default="{ row }">{{ userLabel(users, row.default_tester_id) }}</template></el-table-column>
             <el-table-column prop="priority" label="优先级" width="100" />
-            <el-table-column prop="status" label="状态" width="100" />
             <el-table-column label="操作" width="150" fixed="right">
               <template #default="{ row }"><el-button link type="primary" @click="openCaseEdit(row)">编辑</el-button><el-popconfirm title="确认删除该用例？" @confirm="removeCase(row.id)"><template #reference><el-button link type="danger">删除</el-button></template></el-popconfirm></template>
             </el-table-column>
@@ -69,7 +68,7 @@
           <el-form-item label="默认测试人"><el-select v-model="caseForm.default_tester_id" clearable filterable placeholder="请选择测试人"><el-option v-for="user in users" :key="user.id" :label="user.full_name" :value="user.id" /></el-select></el-form-item>
           <el-form-item label="用例类型"><el-select v-model="caseForm.case_type"><el-option v-for="option in caseTypeOptions" :key="option.value" :label="option.label" :value="option.value" /></el-select></el-form-item>
         </div>
-        <div class="form-grid"><el-form-item label="适用范围"><el-select v-model="caseForm.test_scope"><el-option v-for="option in testScopeOptions" :key="option.value" :label="option.label" :value="option.value" /></el-select></el-form-item><el-form-item label="优先级"><el-select v-model="caseForm.priority"><el-option label="高" value="high" /><el-option label="中" value="medium" /><el-option label="低" value="low" /></el-select></el-form-item><el-form-item label="状态"><el-select v-model="caseForm.status"><el-option label="启用" value="active" /><el-option label="停用" value="inactive" /></el-select></el-form-item></div>
+        <div class="form-grid"><el-form-item label="适用范围"><el-select v-model="caseForm.test_scope"><el-option v-for="option in testScopeOptions" :key="option.value" :label="option.label" :value="option.value" /></el-select></el-form-item><el-form-item label="优先级"><el-select v-model="caseForm.priority"><el-option label="高" value="high" /><el-option label="中" value="medium" /><el-option label="低" value="low" /></el-select></el-form-item></div>
         <el-form-item label="前置条件"><el-input v-model="caseForm.precondition" type="textarea" :rows="2" /></el-form-item>
         <el-form-item label="用例步骤">
           <div class="case-steps-editor">
@@ -168,7 +167,7 @@ const testScopeOptions = [
   { label: '冒烟测试环节', value: 'smoke_test' },
   { label: '版本验证环节', value: 'release_verification' }
 ]
-const caseForm = reactive({ project_id: null, requirement_id: null, title: '', case_type: 'functional', test_scope: 'functional_test', priority: 'medium', default_tester_id: null, precondition: '', steps_json: [{ step: '', expected: '' }], expected_result: '', status: 'active' })
+const caseForm = reactive({ project_id: null, requirement_id: null, title: '', case_type: 'functional', test_scope: 'functional_test', priority: 'medium', default_tester_id: null, precondition: '', steps_json: [{ step: '', expected: '' }], expected_result: '' })
 const runForm = reactive({ project_id: null, iteration_id: null, name: '', test_owner_id: null, status: 'planning', remark: '' })
 const selectForm = reactive({ test_case_ids: [], tester_id: null })
 const executionForm = reactive({ run_case_id: null, result: 'passed', remark: '', bug_title: '' })
@@ -178,7 +177,7 @@ function normalizeCaseSteps(value) { return Array.isArray(value) && value.length
 function addCaseStep() { caseForm.steps_json.push({ step: '', expected: '' }) }
 function removeCaseStep(index) { if (caseForm.steps_json.length > 1) caseForm.steps_json.splice(index, 1) }
 function cleanCaseSteps() { return caseForm.steps_json.filter((item) => item.step.trim() || item.expected.trim()) }
-function openCaseCreate() { editingCaseId.value = null; Object.assign(caseForm, { project_id: null, requirement_id: null, title: '', case_type: 'functional', test_scope: 'functional_test', priority: 'medium', default_tester_id: null, precondition: '', steps_json: [{ step: '', expected: '' }], expected_result: '', status: 'active' }); caseDialogVisible.value = true }
+function openCaseCreate() { editingCaseId.value = null; Object.assign(caseForm, { project_id: null, requirement_id: null, title: '', case_type: 'functional', test_scope: 'functional_test', priority: 'medium', default_tester_id: null, precondition: '', steps_json: [{ step: '', expected: '' }], expected_result: '' }); caseDialogVisible.value = true }
 function openCaseEdit(row) { editingCaseId.value = row.id; Object.assign(caseForm, { ...row, case_type: row.case_type || 'functional', test_scope: row.test_scope || 'functional_test', precondition: row.precondition || '', steps_json: normalizeCaseSteps(row.steps_json), expected_result: row.expected_result || '' }); caseDialogVisible.value = true }
 function openRunCreate() { editingRunId.value = null; Object.assign(runForm, { project_id: null, iteration_id: null, name: '', test_owner_id: null, status: 'planning', remark: '' }); runDialogVisible.value = true }
 function openRunEdit(row) { editingRunId.value = row.id; Object.assign(runForm, { ...row, remark: row.remark || '' }); runDialogVisible.value = true }

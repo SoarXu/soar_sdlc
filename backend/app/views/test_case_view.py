@@ -14,7 +14,6 @@ class TestCaseBase(BaseModel):
     precondition: str | None = None
     steps_json: dict | list | None = None
     expected_result: str | None = None
-    status: str = "active"
 
 
 class TestCaseCreate(TestCaseBase):
@@ -32,7 +31,6 @@ class TestCaseUpdate(BaseModel):
     precondition: str | None = None
     steps_json: dict | list | None = None
     expected_result: str | None = None
-    status: str | None = None
     updater_id: int | None = None
 
 

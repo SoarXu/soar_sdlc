@@ -40,10 +40,12 @@ def test_test_case_crud_uses_prd_fields(client: TestClient):
     assert created.json()["requirement_id"] == requirement_id
     assert created.json()["test_scope"] == "functional_test"
     assert created.json()["steps_json"] == [{"step": "input wrong password", "expected": "show login failure"}]
+    assert "status" not in created.json()
 
-    updated = client.patch(f"/api/v1/test-cases/{case_id}", json={"status": "inactive"})
+    updated = client.patch(f"/api/v1/test-cases/{case_id}", json={"expected_result": "show login failure and retry"})
     assert updated.status_code == 200
-    assert updated.json()["status"] == "inactive"
+    assert updated.json()["expected_result"] == "show login failure and retry"
+    assert "status" not in updated.json()
 
     deleted = client.delete(f"/api/v1/test-cases/{case_id}")
     assert deleted.status_code == 204

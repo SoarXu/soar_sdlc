@@ -385,6 +385,63 @@ body {
   margin-bottom: 12px;
 }
 
+.detail-titlebar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 40px;
+  margin-bottom: 12px;
+}
+
+.detail-titlebar h1 {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  font-size: 18px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.detail-link {
+  color: #2468d8;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.detail-link:hover {
+  text-decoration: underline;
+}
+
+.detail-panel {
+  margin-bottom: 12px;
+}
+
+.detail-sections {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 14px;
+}
+
+.detail-section {
+  min-width: 0;
+}
+
+.detail-section h2 {
+  margin: 0 0 8px;
+  font-size: 15px;
+}
+
+.rich-text {
+  min-height: 88px;
+  padding: 12px;
+  color: #243047;
+  white-space: pre-wrap;
+  background: #f7f9fc;
+  border: 1px solid #e1e7ef;
+}
+
 @media (max-width: 980px) {
   .app-shell {
     grid-template-columns: 104px minmax(0, 1fr);

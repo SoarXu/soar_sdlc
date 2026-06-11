@@ -65,7 +65,9 @@
         <div class="project-tab-toolbar"><el-button type="primary" @click="openRequirementCreate">新增需求</el-button></div>
         <el-table :data="projectRequirements" stripe>
           <el-table-column prop="id" label="ID" width="80" />
-          <el-table-column prop="title" label="需求标题" min-width="220" />
+          <el-table-column label="需求标题" min-width="220">
+            <template #default="{ row }"><router-link class="table-link" :to="`/requirements/${row.id}`">{{ row.title }}</router-link></template>
+          </el-table-column>
           <el-table-column label="迭代" width="160"><template #default="{ row }">{{ labelById(projectIterations, row.iteration_id) }}</template></el-table-column>
           <el-table-column label="负责人" width="150"><template #default="{ row }">{{ userLabel(users, row.owner_id) }}</template></el-table-column>
           <el-table-column prop="priority" label="优先级" width="100" />
@@ -85,7 +87,9 @@
         <div class="project-tab-toolbar"><el-button type="primary" @click="openTaskCreate">新增任务</el-button></div>
         <el-table :data="projectTasks" stripe>
           <el-table-column prop="id" label="ID" width="80" />
-          <el-table-column prop="title" label="任务标题" min-width="220" />
+          <el-table-column label="任务标题" min-width="220">
+            <template #default="{ row }"><router-link class="table-link" :to="`/tasks/${row.id}`">{{ row.title }}</router-link></template>
+          </el-table-column>
           <el-table-column label="需求" width="180"><template #default="{ row }">{{ labelById(projectRequirements, row.requirement_id, 'title') }}</template></el-table-column>
           <el-table-column label="负责人" width="150"><template #default="{ row }">{{ userLabel(users, row.owner_id) }}</template></el-table-column>
           <el-table-column prop="actual_hours" label="实际工时" width="110" />

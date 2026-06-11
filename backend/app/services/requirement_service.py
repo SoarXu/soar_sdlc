@@ -13,6 +13,10 @@ def list_requirements(db: Session) -> list[Requirement]:
     return db.query(Requirement).filter(Requirement.deleted == 0).order_by(Requirement.id.desc()).all()
 
 
+def get_requirement(db: Session, requirement_id: int) -> Requirement:
+    return _get_active_requirement(db, requirement_id)
+
+
 def create_requirement(db: Session, payload: RequirementCreate) -> Requirement:
     data = payload.model_dump()
     if data.get("source_project_id") and not data.get("owner_id"):

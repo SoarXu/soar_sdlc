@@ -4,6 +4,10 @@ export function fetchTasks() {
   return http.get('/tasks')
 }
 
+export function fetchTask(id) {
+  return http.get(`/tasks/${id}`)
+}
+
 export function createTask(payload) {
   return http.post('/tasks', payload)
 }

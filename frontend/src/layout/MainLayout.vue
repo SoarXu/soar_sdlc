@@ -32,14 +32,6 @@
           <el-icon><Timer /></el-icon>
           <span>迭代</span>
         </el-menu-item>
-        <el-menu-item index="/requirements">
-          <el-icon><Document /></el-icon>
-          <span>需求</span>
-        </el-menu-item>
-        <el-menu-item index="/tasks">
-          <el-icon><Tickets /></el-icon>
-          <span>任务</span>
-        </el-menu-item>
         <el-menu-item index="/tests">
           <el-icon><DataAnalysis /></el-icon>
           <span>测试管理</span>
@@ -64,12 +56,10 @@
 <script setup>
 import {
   DataAnalysis,
-  Document,
   Folder,
   FolderOpened,
   Grid,
   Setting,
-  Tickets,
   Timer,
   Warning
 } from '@element-plus/icons-vue'

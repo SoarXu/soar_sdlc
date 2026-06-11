@@ -84,3 +84,25 @@ def test_requirement_and_task_crud_use_prd_fields(client: TestClient):
 
     assert client.delete(f"/api/v1/tasks/{task_id}").status_code == 204
     assert client.delete(f"/api/v1/requirements/{requirement_id}").status_code == 204
+
+
+def test_requirement_and_task_detail_endpoints(client: TestClient):
+    project_id = _create_project(client)
+    requirement = client.post(
+        "/api/v1/requirements",
+        json={"project_id": project_id, "title": f"详情需求-{uuid4().hex[:8]}", "description": "需求详情描述"},
+    ).json()
+    task = client.post(
+        "/api/v1/tasks",
+        json={"project_id": project_id, "requirement_id": requirement["id"], "title": f"详情任务-{uuid4().hex[:8]}"},
+    ).json()
+
+    requirement_detail = client.get(f"/api/v1/requirements/{requirement['id']}")
+    task_detail = client.get(f"/api/v1/tasks/{task['id']}")
+
+    assert requirement_detail.status_code == 200
+    assert requirement_detail.json()["id"] == requirement["id"]
+    assert requirement_detail.json()["title"] == requirement["title"]
+    assert task_detail.status_code == 200
+    assert task_detail.json()["id"] == task["id"]
+    assert task_detail.json()["requirement_id"] == requirement["id"]

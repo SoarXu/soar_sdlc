@@ -12,6 +12,10 @@ def list_tasks(db: Session) -> list[Task]:
     return db.query(Task).filter(Task.deleted == 0).order_by(Task.id.desc()).all()
 
 
+def get_task(db: Session, task_id: int) -> Task:
+    return _get_active_task(db, task_id)
+
+
 def create_task(db: Session, payload: TaskCreate) -> Task:
     data = payload.model_dump()
     if data.get("source_project_id") and not data.get("owner_id"):

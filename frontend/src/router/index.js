@@ -8,7 +8,9 @@ import LoginView from '../views/LoginView.vue'
 import ProgramsView from '../views/ProgramsView.vue'
 import ProjectDetailView from '../views/ProjectDetailView.vue'
 import ProjectsView from '../views/ProjectsView.vue'
+import RequirementDetailView from '../views/RequirementDetailView.vue'
 import RequirementsView from '../views/RequirementsView.vue'
+import TaskDetailView from '../views/TaskDetailView.vue'
 import TasksView from '../views/TasksView.vue'
 import TestsView from '../views/TestsView.vue'
 
@@ -22,6 +24,8 @@ const routes = [
       { path: 'programs', name: 'programs', component: ProgramsView },
       { path: 'projects', name: 'projects', component: ProjectsView },
       { path: 'projects/:id', name: 'project-detail', component: ProjectDetailView },
+      { path: 'requirements/:id', name: 'requirement-detail', component: RequirementDetailView },
+      { path: 'tasks/:id', name: 'task-detail', component: TaskDetailView },
       { path: 'iterations', name: 'iterations', component: IterationsView },
       { path: 'requirements', name: 'requirements', component: RequirementsView },
       { path: 'tasks', name: 'tasks', component: TasksView },

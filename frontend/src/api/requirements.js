@@ -4,6 +4,10 @@ export function fetchRequirements() {
   return http.get('/requirements')
 }
 
+export function fetchRequirement(id) {
+  return http.get(`/requirements/${id}`)
+}
+
 export function createRequirement(payload) {
   return http.post('/requirements', payload)
 }

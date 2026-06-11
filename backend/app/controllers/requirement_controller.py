@@ -6,6 +6,7 @@ from app.services.requirement_service import (
     create_requirement,
     delete_requirement,
     generate_task_from_requirement,
+    get_requirement,
     list_requirements,
     update_requirement,
 )
@@ -19,6 +20,11 @@ router = APIRouter()
 @router.get("", response_model=list[RequirementRead])
 def get_requirements(db: Session = Depends(get_db)):
     return list_requirements(db)
+
+
+@router.get("/{requirement_id}", response_model=RequirementRead)
+def get_requirement_detail(requirement_id: int, db: Session = Depends(get_db)):
+    return get_requirement(db, requirement_id)
 
 
 @router.post("", response_model=RequirementRead)

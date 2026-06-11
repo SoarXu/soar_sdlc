@@ -13,6 +13,7 @@ from app.controllers import (
     test_case_controller,
     test_run_controller,
     user_controller,
+    workflow_controller,
 )
 
 
@@ -29,3 +30,4 @@ api_router.include_router(task_controller.router, prefix="/tasks", tags=["tasks"
 api_router.include_router(test_case_controller.router, prefix="/test-cases", tags=["test-cases"])
 api_router.include_router(test_run_controller.router, tags=["test-runs"])
 api_router.include_router(bug_controller.router, prefix="/bugs", tags=["bugs"])
+api_router.include_router(workflow_controller.router, prefix="/workflow-rules", tags=["workflow-rules"])

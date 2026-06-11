@@ -29,14 +29,17 @@ def test_test_case_crud_uses_prd_fields(client: TestClient):
             "requirement_id": requirement_id,
             "title": "登录失败提示",
             "case_type": "functional",
+            "test_scope": "functional_test",
             "priority": "high",
-            "steps_json": [{"step": "输入错误密码", "expected": "提示登录失败"}],
+            "steps_json": [{"step": "input wrong password", "expected": "show login failure"}],
             "expected_result": "提示登录失败",
         },
     )
     assert created.status_code == 200
     case_id = created.json()["id"]
     assert created.json()["requirement_id"] == requirement_id
+    assert created.json()["test_scope"] == "functional_test"
+    assert created.json()["steps_json"] == [{"step": "input wrong password", "expected": "show login failure"}]
 
     updated = client.patch(f"/api/v1/test-cases/{case_id}", json={"status": "inactive"})
     assert updated.status_code == 200

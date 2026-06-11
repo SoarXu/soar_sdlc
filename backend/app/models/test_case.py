@@ -14,6 +14,7 @@ class TestCase(Base):
     requirement_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     title: Mapped[str] = mapped_column(String(255))
     case_type: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    test_scope: Mapped[str | None] = mapped_column(String(64), nullable=True)
     priority: Mapped[str] = mapped_column(String(32), default="medium")
     default_tester_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     precondition: Mapped[str | None] = mapped_column(Text, nullable=True)

@@ -251,6 +251,7 @@
 | requirement_id | BIGINT UNSIGNED | NULL | 关联需求 ID |
 | title | VARCHAR(255) | NOT NULL | 用例标题 |
 | case_type | VARCHAR(64) | NULL | 用例类型 |
+| test_scope | VARCHAR(64) | NULL | 适用范围/测试环境 |
 | priority | VARCHAR(32) | NOT NULL DEFAULT 'medium' | 优先级 |
 | default_tester_id | BIGINT UNSIGNED | NULL | 默认测试人员 |
 | precondition | TEXT | NULL | 前置条件 |

@@ -60,17 +60,27 @@
       </el-tab-pane>
     </el-tabs>
 
-    <el-dialog v-model="caseDialogVisible" :title="editingCaseId ? '编辑用例' : '新增用例'" width="620px">
+    <el-dialog v-model="caseDialogVisible" :title="editingCaseId ? '编辑用例' : '新增用例'" width="760px">
       <el-form label-position="top">
         <el-form-item label="用例标题" required><el-input v-model="caseForm.title" /></el-form-item>
         <div class="form-grid">
           <el-form-item label="项目"><el-select v-model="caseForm.project_id" clearable filterable placeholder="请选择项目"><el-option v-for="project in projects" :key="project.id" :label="project.name" :value="project.id" /></el-select></el-form-item>
           <el-form-item label="需求"><el-select v-model="caseForm.requirement_id" clearable filterable placeholder="请选择需求"><el-option v-for="requirement in requirements" :key="requirement.id" :label="requirement.title" :value="requirement.id" /></el-select></el-form-item>
           <el-form-item label="默认测试人"><el-select v-model="caseForm.default_tester_id" clearable filterable placeholder="请选择测试人"><el-option v-for="user in users" :key="user.id" :label="user.full_name" :value="user.id" /></el-select></el-form-item>
-          <el-form-item label="类型"><el-input v-model="caseForm.case_type" /></el-form-item>
+          <el-form-item label="用例类型"><el-select v-model="caseForm.case_type"><el-option v-for="option in caseTypeOptions" :key="option.value" :label="option.label" :value="option.value" /></el-select></el-form-item>
         </div>
-        <div class="form-grid"><el-form-item label="优先级"><el-select v-model="caseForm.priority"><el-option label="高" value="high" /><el-option label="中" value="medium" /><el-option label="低" value="low" /></el-select></el-form-item><el-form-item label="状态"><el-select v-model="caseForm.status"><el-option label="启用" value="active" /><el-option label="停用" value="inactive" /></el-select></el-form-item></div>
+        <div class="form-grid"><el-form-item label="适用范围"><el-select v-model="caseForm.test_scope"><el-option v-for="option in testScopeOptions" :key="option.value" :label="option.label" :value="option.value" /></el-select></el-form-item><el-form-item label="优先级"><el-select v-model="caseForm.priority"><el-option label="高" value="high" /><el-option label="中" value="medium" /><el-option label="低" value="low" /></el-select></el-form-item><el-form-item label="状态"><el-select v-model="caseForm.status"><el-option label="启用" value="active" /><el-option label="停用" value="inactive" /></el-select></el-form-item></div>
         <el-form-item label="前置条件"><el-input v-model="caseForm.precondition" type="textarea" :rows="2" /></el-form-item>
+        <el-form-item label="用例步骤">
+          <div class="case-steps-editor">
+            <el-table :data="caseForm.steps_json" border>
+              <el-table-column label="步骤" min-width="260"><template #default="{ row, $index }"><el-input v-model="row.step" :placeholder="`步骤 ${$index + 1}`" /></template></el-table-column>
+              <el-table-column label="预期" min-width="260"><template #default="{ row }"><el-input v-model="row.expected" placeholder="预期结果" /></template></el-table-column>
+              <el-table-column label="操作" width="90"><template #default="{ $index }"><el-button link type="danger" :disabled="caseForm.steps_json.length === 1" @click="removeCaseStep($index)">删除</el-button></template></el-table-column>
+            </el-table>
+            <el-button class="case-step-add" @click="addCaseStep">增加步骤</el-button>
+          </div>
+        </el-form-item>
         <el-form-item label="预期结果"><el-input v-model="caseForm.expected_result" type="textarea" :rows="2" /></el-form-item>
       </el-form>
       <template #footer><el-button @click="caseDialogVisible = false">取消</el-button><el-button type="primary" :loading="saving" @click="submitCase">保存</el-button></template>
@@ -141,14 +151,35 @@ const {
 } = usePagination(testRuns)
 const caseDialogVisible = ref(false), runDialogVisible = ref(false), selectDialogVisible = ref(false), executionDialogVisible = ref(false)
 const editingCaseId = ref(null), editingRunId = ref(null), selectedRunId = ref(null)
-const caseForm = reactive({ project_id: null, requirement_id: null, title: '', case_type: '', priority: 'medium', default_tester_id: null, precondition: '', expected_result: '', status: 'active' })
+const caseTypeOptions = [
+  { label: '接口测试', value: 'api' },
+  { label: '功能测试', value: 'functional' },
+  { label: '安装部署', value: 'deploy' },
+  { label: '配置相关', value: 'config' },
+  { label: '性能测试', value: 'performance' },
+  { label: '安全相关', value: 'security' },
+  { label: '其他', value: 'other' }
+]
+const testScopeOptions = [
+  { label: '单元测试环节', value: 'unit_test' },
+  { label: '功能测试环节', value: 'functional_test' },
+  { label: '集成测试环节', value: 'integration_test' },
+  { label: '系统测试环节', value: 'system_test' },
+  { label: '冒烟测试环节', value: 'smoke_test' },
+  { label: '版本验证环节', value: 'release_verification' }
+]
+const caseForm = reactive({ project_id: null, requirement_id: null, title: '', case_type: 'functional', test_scope: 'functional_test', priority: 'medium', default_tester_id: null, precondition: '', steps_json: [{ step: '', expected: '' }], expected_result: '', status: 'active' })
 const runForm = reactive({ project_id: null, iteration_id: null, name: '', test_owner_id: null, status: 'planning', remark: '' })
 const selectForm = reactive({ test_case_ids: [], tester_id: null })
 const executionForm = reactive({ run_case_id: null, result: 'passed', remark: '', bug_title: '' })
 
 function runCaseLabel(item) { return `${labelById(testRuns.value, item.test_run_id, 'name')} / ${labelById(testCases.value, item.test_case_id, 'title')} / ${item.result}` }
-function openCaseCreate() { editingCaseId.value = null; Object.assign(caseForm, { project_id: null, requirement_id: null, title: '', case_type: '', priority: 'medium', default_tester_id: null, precondition: '', expected_result: '', status: 'active' }); caseDialogVisible.value = true }
-function openCaseEdit(row) { editingCaseId.value = row.id; Object.assign(caseForm, { ...row, case_type: row.case_type || '', precondition: row.precondition || '', expected_result: row.expected_result || '' }); caseDialogVisible.value = true }
+function normalizeCaseSteps(value) { return Array.isArray(value) && value.length ? value.map((item) => ({ step: item.step || '', expected: item.expected || '' })) : [{ step: '', expected: '' }] }
+function addCaseStep() { caseForm.steps_json.push({ step: '', expected: '' }) }
+function removeCaseStep(index) { if (caseForm.steps_json.length > 1) caseForm.steps_json.splice(index, 1) }
+function cleanCaseSteps() { return caseForm.steps_json.filter((item) => item.step.trim() || item.expected.trim()) }
+function openCaseCreate() { editingCaseId.value = null; Object.assign(caseForm, { project_id: null, requirement_id: null, title: '', case_type: 'functional', test_scope: 'functional_test', priority: 'medium', default_tester_id: null, precondition: '', steps_json: [{ step: '', expected: '' }], expected_result: '', status: 'active' }); caseDialogVisible.value = true }
+function openCaseEdit(row) { editingCaseId.value = row.id; Object.assign(caseForm, { ...row, case_type: row.case_type || 'functional', test_scope: row.test_scope || 'functional_test', precondition: row.precondition || '', steps_json: normalizeCaseSteps(row.steps_json), expected_result: row.expected_result || '' }); caseDialogVisible.value = true }
 function openRunCreate() { editingRunId.value = null; Object.assign(runForm, { project_id: null, iteration_id: null, name: '', test_owner_id: null, status: 'planning', remark: '' }); runDialogVisible.value = true }
 function openRunEdit(row) { editingRunId.value = row.id; Object.assign(runForm, { ...row, remark: row.remark || '' }); runDialogVisible.value = true }
 function openSelectCases(row) { selectedRunId.value = row.id; selectForm.test_case_ids = []; selectForm.tester_id = null; selectDialogVisible.value = true }
@@ -162,7 +193,7 @@ async function loadData() {
   } catch { ElMessage.error('测试管理数据加载失败') } finally { loading.value = false }
 }
 async function loadRunCases() { testRunCases.value = (await fetchTestRunCases()).data }
-async function submitCase() { if (!caseForm.title.trim()) return ElMessage.warning('请填写用例标题'); saving.value = true; try { const payload = { ...caseForm, project_id: caseForm.project_id || null, requirement_id: caseForm.requirement_id || null, default_tester_id: caseForm.default_tester_id || null }; if (editingCaseId.value) await updateTestCase(editingCaseId.value, payload); else await createTestCase(payload); caseDialogVisible.value = false; await loadData() } finally { saving.value = false } }
+async function submitCase() { if (!caseForm.title.trim()) return ElMessage.warning('请填写用例标题'); saving.value = true; try { const payload = { ...caseForm, project_id: caseForm.project_id || null, requirement_id: caseForm.requirement_id || null, default_tester_id: caseForm.default_tester_id || null, steps_json: cleanCaseSteps() }; if (editingCaseId.value) await updateTestCase(editingCaseId.value, payload); else await createTestCase(payload); caseDialogVisible.value = false; await loadData() } finally { saving.value = false } }
 async function submitRun() { if (!runForm.project_id || !runForm.name.trim()) return ElMessage.warning('请选择项目并填写测试单名称'); saving.value = true; try { const payload = { ...runForm, iteration_id: runForm.iteration_id || null, test_owner_id: runForm.test_owner_id || null }; if (editingRunId.value) await updateTestRun(editingRunId.value, payload); else await createTestRun(payload); runDialogVisible.value = false; await loadData() } finally { saving.value = false } }
 async function submitSelectCases() { if (!selectForm.test_case_ids.length) return ElMessage.warning('请选择测试用例'); saving.value = true; try { await selectTestCases(selectedRunId.value, { test_case_ids: selectForm.test_case_ids, tester_id: selectForm.tester_id || null }); selectDialogVisible.value = false; await loadData(); ElMessage.success('用例已加入测试单') } finally { saving.value = false } }
 async function submitExecution() { if (!executionForm.run_case_id) return ElMessage.warning('请选择执行记录'); saving.value = true; try { await updateTestRunCase(executionForm.run_case_id, { result: executionForm.result, remark: executionForm.remark }); if (executionForm.result === 'failed' && executionForm.bug_title.trim()) await createBugFromTestRunCase(executionForm.run_case_id, { title: executionForm.bug_title, actual_result: executionForm.remark }); executionDialogVisible.value = false; await loadData(); ElMessage.success('执行结果已保存') } finally { saving.value = false } }

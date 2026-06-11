@@ -8,6 +8,7 @@ class TestCaseBase(BaseModel):
     requirement_id: int | None = None
     title: str
     case_type: str | None = None
+    test_scope: str | None = None
     priority: str = "medium"
     default_tester_id: int | None = None
     precondition: str | None = None
@@ -25,6 +26,7 @@ class TestCaseUpdate(BaseModel):
     requirement_id: int | None = None
     title: str | None = None
     case_type: str | None = None
+    test_scope: str | None = None
     priority: str | None = None
     default_tester_id: int | None = None
     precondition: str | None = None

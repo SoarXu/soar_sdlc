@@ -194,6 +194,7 @@ CREATE TABLE IF NOT EXISTS test_cases (
   requirement_id BIGINT UNSIGNED NULL COMMENT '关联需求 ID',
   title VARCHAR(255) NOT NULL COMMENT '用例标题',
   case_type VARCHAR(64) NULL COMMENT '用例类型',
+  test_scope VARCHAR(64) NULL COMMENT '适用范围/测试环境',
   priority VARCHAR(32) NOT NULL DEFAULT 'medium' COMMENT '优先级',
   default_tester_id BIGINT UNSIGNED NULL COMMENT '默认测试人员',
   precondition TEXT NULL COMMENT '前置条件',

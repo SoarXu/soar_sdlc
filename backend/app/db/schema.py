@@ -68,6 +68,8 @@ def ensure_runtime_schema(engine: Engine) -> None:
     _ensure_column(engine, "test_cases", "source_project_id",
                    "ALTER TABLE test_cases ADD COLUMN source_project_id BIGINT UNSIGNED NULL COMMENT '来源项目 ID' AFTER project_id",
                    "CREATE INDEX idx_test_cases_source_project ON test_cases (source_project_id)")
+    _ensure_column(engine, "test_cases", "test_scope",
+                   "ALTER TABLE test_cases ADD COLUMN test_scope VARCHAR(64) NULL COMMENT '适用范围/测试环境' AFTER case_type")
     _ensure_column(engine, "test_cases", "deleted",
                    "ALTER TABLE test_cases ADD COLUMN deleted TINYINT(1) NOT NULL DEFAULT 0 COMMENT '是否删除 0否1是' AFTER delete_time")
 

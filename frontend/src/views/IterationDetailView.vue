@@ -16,7 +16,7 @@
         class="project-tab-button"
         :class="{ active: activeTab === tab.key }"
         type="button"
-        @click="activeTab = tab.key"
+        @click="setActiveTab(tab.key)"
       >
         {{ tab.label }}
       </button>
@@ -28,6 +28,7 @@
           <el-card shadow="never"><span>需求数</span><strong>{{ metrics.requirement_total || 0 }}</strong></el-card>
           <el-card shadow="never"><span>任务数</span><strong>{{ tasks.length }}</strong></el-card>
           <el-card shadow="never"><span>用例数</span><strong>{{ testCases.length }}</strong></el-card>
+          <el-card shadow="never"><span>Bug 数</span><strong>{{ bugs.length }}</strong></el-card>
           <el-card shadow="never"><span>迭代进度</span><strong>{{ percent(metrics.progress_rate) }}</strong></el-card>
           <el-card shadow="never"><span>测试覆盖率</span><strong>{{ percent(metrics.test_coverage_rate) }}</strong></el-card>
         </div>
@@ -46,30 +47,34 @@
         <div v-else class="iteration-tree-list">
           <div v-for="project in projects" :key="project.id" class="iteration-project-block">
             <h3>{{ project.name }}</h3>
-            <ProjectRequirementTree :project="project" :requirements="requirements" @remove="removeRequirement" />
+            <ProjectRequirementTree :project="project" :requirements="requirements" :users="users" @remove="removeRequirement" />
           </div>
         </div>
       </template>
 
       <template v-else-if="activeTab === 'tasks'">
         <div class="project-tab-toolbar"><el-button type="primary" @click="openTaskLink">关联任务</el-button></div>
-        <el-table :data="tasks" stripe width="100%">
-          <el-table-column prop="id" label="ID" width="80" />
-          <el-table-column prop="title" label="任务标题" min-width="220" show-overflow-tooltip />
-          <el-table-column label="项目" width="180"><template #default="{ row }">{{ labelById(flatProjects, row.project_id) }}</template></el-table-column>
-          <el-table-column label="需求" width="220"><template #default="{ row }">{{ labelById(requirements, row.requirement_id, 'title') }}</template></el-table-column>
-          <el-table-column label="负责人" width="140"><template #default="{ row }">{{ userLabel(users, row.owner_id) }}</template></el-table-column>
-          <el-table-column label="状态" width="110"><template #default="{ row }">{{ taskStatusLabel(row.status) }}</template></el-table-column>
-          <el-table-column label="操作" width="120" fixed="right">
-            <template #default="{ row }">
-              <el-button v-if="row.iteration_id === iterationId" link type="danger" @click="removeTask(row.id)">移除</el-button>
-              <span v-else class="muted-text">需求带入</span>
-            </template>
-          </el-table-column>
-        </el-table>
+        <div v-for="project in flatProjects" :key="project.id" class="iteration-project-block">
+          <h3 v-if="tasksByProject(project.id).length">{{ project.name }}</h3>
+          <el-table v-if="tasksByProject(project.id).length" :data="tasksByProject(project.id)" stripe width="100%">
+            <el-table-column prop="id" label="ID" width="80" />
+            <el-table-column label="任务标题" min-width="180" show-overflow-tooltip><template #default="{ row }"><router-link class="table-link" :to="taskDetailLink(row)">{{ row.title }}</router-link></template></el-table-column>
+            <el-table-column label="需求" width="180"><template #default="{ row }">{{ labelById(requirements, row.requirement_id, 'title') }}</template></el-table-column>
+            <el-table-column label="负责人" width="140"><template #default="{ row }">{{ userLabel(users, row.owner_id) }}</template></el-table-column>
+            <el-table-column prop="actual_hours" label="实际工时" width="110" />
+            <el-table-column prop="due_date" label="截止日期" width="130" />
+            <el-table-column label="状态" width="110"><template #default="{ row }">{{ taskStatusLabel(row.status) }}</template></el-table-column>
+            <el-table-column label="操作" width="120" fixed="right">
+              <template #default="{ row }">
+                <el-button v-if="row.iteration_id === iterationId" link type="danger" @click="removeTask(row.id)">移除</el-button>
+                <span v-else class="muted-text">需求带入</span>
+              </template>
+            </el-table-column>
+          </el-table>
+        </div>
       </template>
 
-      <template v-else>
+      <template v-else-if="activeTab === 'cases'">
         <el-table :data="testCases" stripe width="100%">
           <el-table-column prop="id" label="ID" width="80" />
           <el-table-column prop="title" label="用例标题" min-width="220" show-overflow-tooltip />
@@ -79,7 +84,21 @@
           <el-table-column label="适用范围" width="150"><template #default="{ row }">{{ testScopeLabel(row.test_scope) }}</template></el-table-column>
           <el-table-column label="最近执行时间" width="170"><template #default="{ row }">{{ formatDateTime(row.last_execute_time) }}</template></el-table-column>
           <el-table-column label="最近结果" width="110"><template #default="{ row }">{{ executionResultLabel(row.last_execute_result) }}</template></el-table-column>
-          <el-table-column label="操作" width="90" fixed="right"><template #default="{ row }"><el-button link type="success" @click="openCaseExecution(row)">执行</el-button></template></el-table-column>
+          <el-table-column label="操作" width="150" fixed="right"><template #default="{ row }"><el-button link type="success" @click="openCaseExecution(row)">执行</el-button><el-button link type="warning" :disabled="!canCreateBugFromCase(row)" @click="openCaseBug(row)">提 Bug</el-button></template></el-table-column>
+        </el-table>
+      </template>
+
+      <template v-else-if="activeTab === 'bugs'">
+        <el-table :data="bugs" stripe width="100%">
+          <el-table-column prop="id" label="ID" width="80" />
+          <el-table-column prop="title" label="Bug 标题" min-width="180" show-overflow-tooltip />
+          <el-table-column label="项目" width="180"><template #default="{ row }">{{ labelById(flatProjects, row.project_id) }}</template></el-table-column>
+          <el-table-column label="需求" width="180"><template #default="{ row }">{{ labelById(requirements, row.requirement_id, 'title') }}</template></el-table-column>
+          <el-table-column label="Bug 类型" width="120"><template #default="{ row }">{{ row.bug_type || '-' }}</template></el-table-column>
+          <el-table-column label="严重程度" width="110"><template #default="{ row }"><RequirementPriorityBadge :value="row.severity" /></template></el-table-column>
+          <el-table-column label="优先级" width="110"><template #default="{ row }"><RequirementPriorityBadge :value="row.priority" /></template></el-table-column>
+          <el-table-column label="负责人" width="140"><template #default="{ row }">{{ userLabel(users, row.owner_id) }}</template></el-table-column>
+          <el-table-column label="状态" width="110"><template #default="{ row }">{{ bugStatusLabel(row.status) }}</template></el-table-column>
         </el-table>
       </template>
     </el-card>
@@ -132,12 +151,26 @@
       </div>
       <template #footer><el-button @click="caseExecutionVisible = false">取消</el-button><el-button type="primary" :loading="saving" @click="submitCaseExecution">保存</el-button></template>
     </el-dialog>
+
+    <el-dialog v-model="caseBugVisible" title="提交 Bug" width="820px">
+      <el-form label-position="top">
+        <el-form-item label="Bug 标题" required><el-input v-model="caseBugForm.title" /></el-form-item>
+        <div class="form-grid">
+          <el-form-item label="Bug 类型"><el-select v-model="caseBugForm.bug_type"><el-option v-for="option in bugTypeOptions" :key="option" :label="option" :value="option" /></el-select></el-form-item>
+          <el-form-item label="严重程度"><el-select v-model="caseBugForm.severity"><el-option v-for="option in priorityLevelOptions" :key="option.value" :label="option.label" :value="option.value"><RequirementPriorityBadge :value="option.value" /></el-option></el-select></el-form-item>
+          <el-form-item label="优先级"><el-select v-model="caseBugForm.priority"><el-option v-for="option in priorityLevelOptions" :key="option.value" :label="option.label" :value="option.value"><RequirementPriorityBadge :value="option.value" /></el-option></el-select></el-form-item>
+        </div>
+        <el-form-item label="重现步骤"><el-input v-model="caseBugForm.reproduce_steps" type="textarea" :rows="8" /></el-form-item>
+        <el-form-item label="实际结果"><el-input v-model="caseBugForm.actual_result" type="textarea" :rows="2" /></el-form-item>
+      </el-form>
+      <template #footer><el-button @click="caseBugVisible = false">取消</el-button><el-button type="primary" :loading="saving" @click="submitCaseBug">保存</el-button></template>
+    </el-dialog>
   </section>
 </template>
 
 <script setup>
-import { computed, defineComponent, h, onMounted, ref } from 'vue'
-import { useRoute } from 'vue-router'
+import { computed, defineComponent, h, onMounted, ref, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { ElButton, ElMessage } from 'element-plus'
 import {
   fetchAvailableIterationRequirements,
@@ -148,20 +181,23 @@ import {
   unlinkIterationRequirement,
   unlinkIterationTask
 } from '../api/iterations'
-import { executeTestCase, fetchTestCaseExecutions } from '../api/testCases'
+import { createBugFromTestCase, executeTestCase, fetchTestCaseExecutions } from '../api/testCases'
 import { fetchUsers } from '../api/users'
+import RequirementPriorityBadge from '../components/RequirementPriorityBadge.vue'
 import { labelById, userLabel } from '../utils/referenceLabels'
 
 const route = useRoute()
+const router = useRouter()
 const iterationId = computed(() => Number(route.params.id))
 const loading = ref(false)
 const saving = ref(false)
-const activeTab = ref('overview')
+const activeTab = ref(normalizeIterationTab(route.query.tab))
 const iteration = ref({})
 const projects = ref([])
 const requirements = ref([])
 const tasks = ref([])
 const testCases = ref([])
+const bugs = ref([])
 const metrics = ref({})
 const users = ref([])
 const availableRequirements = ref([])
@@ -171,14 +207,17 @@ const selectedTaskIds = ref([])
 const requirementDialogVisible = ref(false)
 const taskDialogVisible = ref(false)
 const caseExecutionVisible = ref(false)
+const caseBugVisible = ref(false)
 const selectedCase = ref(null)
+const bugSourceCase = ref(null)
 const caseExecutionHistory = ref([])
 const caseExecutionForm = ref({ execute_time: '', steps_result_json: [] })
 const tabs = [
   { key: 'overview', label: '概览' },
   { key: 'requirements', label: '需求' },
   { key: 'tasks', label: '任务' },
-  { key: 'cases', label: '用例' }
+  { key: 'cases', label: '用例' },
+  { key: 'bugs', label: 'Bug' }
 ]
 const iterationStatusOptions = [
   { label: '规划中', value: 'planning' },
@@ -221,6 +260,22 @@ const executionResultOptions = [
   { label: '失败', value: 'failed' },
   { label: '阻塞', value: 'blocked' }
 ]
+const bugStatusOptions = [
+  { label: '待修复', value: 'open' },
+  { label: '修复中', value: 'fixing' },
+  { label: '待验证', value: 'verifying' },
+  { label: '已关闭', value: 'closed' },
+  { label: '重新打开', value: 'reopened' }
+]
+const bugTypeOptions = ['代码错误', '配置相关', '安装部署', '安全相关', '性能问题', '标准规范', '测试脚本', '设计缺陷', '其他']
+const priorityLevelOptions = [
+  { label: '① 最高', value: '1' },
+  { label: '② 高', value: '2' },
+  { label: '③ 中', value: '3' },
+  { label: '④ 低', value: '4' },
+  { label: '⑤ 最低', value: '5' }
+]
+const caseBugForm = ref({ title: '', bug_type: '代码错误', severity: '3', priority: '3', reproduce_steps: '', actual_result: '' })
 const flatProjects = computed(() => flattenProjects(projects.value))
 const projectNames = computed(() => (iteration.value.project_ids || []).map(id => labelById(flatProjects.value, id)).join('、') || '-')
 const failedExecutionCount = computed(() => caseExecutionHistory.value.filter((item) => item.result === 'failed').length)
@@ -229,9 +284,14 @@ function optionLabel(options, value) { return options.find((option) => option.va
 function iterationStatusLabel(value) { return optionLabel(iterationStatusOptions, value) }
 function requirementStatusLabel(value) { return optionLabel(requirementStatusOptions, value) }
 function taskStatusLabel(value) { return optionLabel(taskStatusOptions, value) }
+function bugStatusLabel(value) { return optionLabel(bugStatusOptions, value) }
 function caseTypeLabel(value) { return optionLabel(caseTypeOptions, value) }
 function testScopeLabel(value) { return optionLabel(testScopeOptions, value) }
 function executionResultLabel(value) { return optionLabel(executionResultOptions, value) }
+function canCreateBugFromCase(row) { return ['failed', 'blocked'].includes(row.last_execute_result) }
+function tasksByProject(projectId) { return tasks.value.filter((item) => item.project_id === projectId) }
+function requirementDetailLink(row) { return { name: 'requirement-detail', params: { id: row.id }, query: { from: 'iteration', iterationId: iterationId.value, tab: 'requirements' } } }
+function taskDetailLink(row) { return { name: 'task-detail', params: { id: row.id }, query: { from: 'iteration', iterationId: iterationId.value, tab: 'tasks' } } }
 function percent(value) { return `${Math.round((value || 0) * 100)}%` }
 function flattenProjects(items) { return items.flatMap((item) => [item, ...flattenProjects(item.children || [])]) }
 function formatDateTime(value) { return value ? new Date(value).toLocaleString('zh-CN', { hour12: false }) : '-' }
@@ -242,6 +302,11 @@ function defaultExecutionTime() {
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`
 }
 function normalizeCaseSteps(value) { return Array.isArray(value) && value.length ? value.map((item) => ({ step: item.step || '', expected: item.expected || '' })) : [{ step: '', expected: '' }] }
+function normalizeIterationTab(value) { return ['overview', 'requirements', 'tasks', 'cases', 'bugs'].includes(value) ? value : 'overview' }
+function setActiveTab(key) {
+  activeTab.value = key
+  router.replace({ name: 'iteration-detail', params: { id: iterationId.value }, query: { ...route.query, tab: key } })
+}
 
 async function loadData() {
   loading.value = true
@@ -252,6 +317,7 @@ async function loadData() {
     requirements.value = detailRes.data.requirements
     tasks.value = detailRes.data.tasks
     testCases.value = detailRes.data.test_cases
+    bugs.value = detailRes.data.bugs || []
     metrics.value = detailRes.data.metrics
     users.value = userRes.data
   } catch {
@@ -305,13 +371,41 @@ async function openCaseExecution(row) {
   caseExecutionHistory.value = (await fetchTestCaseExecutions(row.id)).data
   caseExecutionVisible.value = true
 }
+async function openCaseBug(row) {
+  if (!canCreateBugFromCase(row)) return
+  bugSourceCase.value = row
+  const history = (await fetchTestCaseExecutions(row.id)).data
+  const latest = history[0]
+  caseBugForm.value = {
+    title: row.title,
+    bug_type: '代码错误',
+    severity: '3',
+    priority: '3',
+    reproduce_steps: buildReproduceText(latest, row),
+    actual_result: buildActualText(latest)
+  }
+  caseBugVisible.value = true
+}
 async function submitCaseExecution() {
   saving.value = true
   try {
-    await executeTestCase(selectedCase.value.id, { ...caseExecutionForm.value })
-    caseExecutionHistory.value = (await fetchTestCaseExecutions(selectedCase.value.id)).data
+    const currentId = selectedCase.value.id
+    await executeTestCase(currentId, { ...caseExecutionForm.value })
     await loadData()
     ElMessage.success('用例执行结果已保存')
+    await openNextCaseAfterExecution(currentId, testCases.value)
+  } finally {
+    saving.value = false
+  }
+}
+async function submitCaseBug() {
+  if (!caseBugForm.value.title.trim()) return ElMessage.warning('请填写 Bug 标题')
+  saving.value = true
+  try {
+    await createBugFromTestCase(bugSourceCase.value.id, { ...caseBugForm.value })
+    caseBugVisible.value = false
+    await loadData()
+    ElMessage.success('Bug 已提交')
   } finally {
     saving.value = false
   }
@@ -321,6 +415,8 @@ const ProjectRequirementTree = defineComponent({
   props: {
     project: { type: Object, required: true },
     requirements: { type: Array, required: true }
+    ,
+    users: { type: Array, required: true }
   },
   emits: ['remove'],
   setup(props, { emit }) {
@@ -329,7 +425,10 @@ const ProjectRequirementTree = defineComponent({
       return h('div', { class: 'iteration-tree-node' }, [
         depth > 0 ? h('h4', { style: { paddingLeft: `${depth * 18}px` } }, project.name) : null,
         rows.map((row) => h('div', { class: 'iteration-requirement-row', style: { paddingLeft: `${depth * 18 + 12}px` } }, [
-          h('span', row.title),
+          h('span', [
+            h('a', { class: 'table-link', href: `#/requirements/${row.id}?from=iteration&iterationId=${iterationId.value}&tab=requirements` }, row.title),
+            h('span', { class: 'muted-text' }, ` · ${userLabel(props.users, row.owner_id)} · ${row.status || '-'}`)
+          ]),
           h(ElButton, { link: true, type: 'danger', onClick: () => emit('remove', row.id) }, () => '移除')
         ])),
         (project.children || []).map((child) => renderNode(child, depth + 1))
@@ -340,4 +439,30 @@ const ProjectRequirementTree = defineComponent({
 })
 
 onMounted(loadData)
+watch(() => route.query.tab, (value) => { activeTab.value = normalizeIterationTab(value) })
+
+async function openNextCaseAfterExecution(currentId, rows) {
+  const index = rows.findIndex((item) => item.id === currentId)
+  const next = index >= 0 ? rows[index + 1] : null
+  if (next) await openCaseExecution(next)
+  else caseExecutionVisible.value = false
+}
+function buildReproduceText(execution, testCase) {
+  const rows = Array.isArray(execution?.steps_result_json) ? execution.steps_result_json : []
+  if (!rows.length) return testCase.expected_result || ''
+  return [
+    '[步骤]',
+    ...rows.map((row, index) => `${index + 1}. ${row.step || ''}`),
+    '',
+    '[结果]',
+    ...rows.map((row, index) => `${index + 1}. ${executionResultLabel(row.result)} ${row.actual || ''}`),
+    '',
+    '[期望]',
+    ...rows.map((row, index) => `${index + 1}. ${row.expected || ''}`)
+  ].join('\n')
+}
+function buildActualText(execution) {
+  const rows = Array.isArray(execution?.steps_result_json) ? execution.steps_result_json : []
+  return rows.map((row) => row.actual).filter(Boolean).join('\n')
+}
 </script>

@@ -19,8 +19,8 @@
             <el-table-column label="默认测试人" width="140"><template #default="{ row }">{{ userLabel(users, row.default_tester_id) }}</template></el-table-column>
             <el-table-column label="最近执行时间" width="170"><template #default="{ row }">{{ formatDateTime(row.last_execute_time) }}</template></el-table-column>
             <el-table-column label="最近结果" width="110"><template #default="{ row }">{{ executionResultLabel(row.last_execute_result) }}</template></el-table-column>
-            <el-table-column label="操作" width="220" fixed="right">
-              <template #default="{ row }"><el-button link type="success" @click="openCaseExecution(row)">执行</el-button><el-button link type="primary" @click="openCaseEdit(row)">编辑</el-button><el-popconfirm title="确认删除该用例？" @confirm="removeCase(row.id)"><template #reference><el-button link type="danger">删除</el-button></template></el-popconfirm></template>
+            <el-table-column label="操作" width="280" fixed="right">
+              <template #default="{ row }"><el-button link type="success" @click="openCaseExecution(row)">执行</el-button><el-button link type="warning" :disabled="!canCreateBugFromCase(row)" @click="openCaseBug(row)">提 Bug</el-button><el-button link type="primary" @click="openCaseEdit(row)">编辑</el-button><el-popconfirm title="确认删除该用例？" @confirm="removeCase(row.id)"><template #reference><el-button link type="danger">删除</el-button></template></el-popconfirm></template>
             </el-table-column>
           </el-table>
           <div class="table-pagination">
@@ -113,6 +113,20 @@
       <template #footer><el-button @click="caseExecutionVisible = false">取消</el-button><el-button type="primary" :loading="saving" @click="submitCaseExecution">保存</el-button></template>
     </el-dialog>
 
+    <el-dialog v-model="caseBugVisible" title="提交 Bug" width="820px">
+      <el-form label-position="top">
+        <el-form-item label="Bug 标题" required><el-input v-model="caseBugForm.title" /></el-form-item>
+        <div class="form-grid">
+          <el-form-item label="Bug 类型"><el-select v-model="caseBugForm.bug_type"><el-option v-for="option in bugTypeOptions" :key="option" :label="option" :value="option" /></el-select></el-form-item>
+          <el-form-item label="严重程度"><el-select v-model="caseBugForm.severity"><el-option v-for="option in priorityLevelOptions" :key="option.value" :label="option.label" :value="option.value" /></el-select></el-form-item>
+          <el-form-item label="优先级"><el-select v-model="caseBugForm.priority"><el-option v-for="option in priorityLevelOptions" :key="option.value" :label="option.label" :value="option.value" /></el-select></el-form-item>
+        </div>
+        <el-form-item label="重现步骤"><el-input v-model="caseBugForm.reproduce_steps" type="textarea" :rows="8" /></el-form-item>
+        <el-form-item label="实际结果"><el-input v-model="caseBugForm.actual_result" type="textarea" :rows="2" /></el-form-item>
+      </el-form>
+      <template #footer><el-button @click="caseBugVisible = false">取消</el-button><el-button type="primary" :loading="saving" @click="submitCaseBug">保存</el-button></template>
+    </el-dialog>
+
     <el-dialog v-model="runDialogVisible" :title="editingRunId ? '编辑测试单' : '新增测试单'" width="560px">
       <el-form label-position="top">
         <el-form-item label="测试单名称" required><el-input v-model="runForm.name" /></el-form-item>
@@ -154,7 +168,7 @@ import { ElMessage } from 'element-plus'
 import { fetchIterations } from '../api/iterations'
 import { fetchProjects } from '../api/projects'
 import { fetchRequirements } from '../api/requirements'
-import { createTestCase, deleteTestCase, executeTestCase, fetchTestCaseExecutions, fetchTestCases, updateTestCase } from '../api/testCases'
+import { createBugFromTestCase, createTestCase, deleteTestCase, executeTestCase, fetchTestCaseExecutions, fetchTestCases, updateTestCase } from '../api/testCases'
 import { createBugFromTestRunCase, createTestRun, deleteTestRun, fetchTestRunCases, fetchTestRuns, selectTestCases, updateTestRun, updateTestRunCase } from '../api/testRuns'
 import { fetchUsers } from '../api/users'
 import { labelById, userLabel } from '../utils/referenceLabels'
@@ -176,9 +190,10 @@ const {
   total: runTotal,
   pagedItems: pagedTestRuns
 } = usePagination(testRuns)
-const caseDialogVisible = ref(false), runDialogVisible = ref(false), selectDialogVisible = ref(false), executionDialogVisible = ref(false), caseExecutionVisible = ref(false)
+const caseDialogVisible = ref(false), runDialogVisible = ref(false), selectDialogVisible = ref(false), executionDialogVisible = ref(false), caseExecutionVisible = ref(false), caseBugVisible = ref(false)
 const editingCaseId = ref(null), editingRunId = ref(null), selectedRunId = ref(null)
 const selectedCase = ref(null)
+const bugSourceCase = ref(null)
 const caseExecutionHistory = ref([])
 const caseTypeOptions = [
   { label: '接口测试', value: 'api' },
@@ -203,8 +218,17 @@ const executionResultOptions = [
   { label: '失败', value: 'failed' },
   { label: '阻塞', value: 'blocked' }
 ]
+const bugTypeOptions = ['代码错误', '配置相关', '安装部署', '安全相关', '性能问题', '标准规范', '测试脚本', '设计缺陷', '其他']
+const priorityLevelOptions = [
+  { label: '① 最高', value: '1' },
+  { label: '② 高', value: '2' },
+  { label: '③ 中', value: '3' },
+  { label: '④ 低', value: '4' },
+  { label: '⑤ 最低', value: '5' }
+]
 const caseForm = reactive({ project_id: null, requirement_id: null, title: '', case_type: 'functional', test_scope: 'functional_test', default_tester_id: null, precondition: '', steps_json: [{ step: '', expected: '' }], expected_result: '' })
 const caseExecutionForm = reactive({ execute_time: '', steps_result_json: [] })
+const caseBugForm = reactive({ title: '', bug_type: '代码错误', severity: '3', priority: '3', reproduce_steps: '', actual_result: '' })
 const runForm = reactive({ project_id: null, iteration_id: null, name: '', test_owner_id: null, status: 'planning', remark: '' })
 const selectForm = reactive({ test_case_ids: [], tester_id: null })
 const executionForm = reactive({ run_case_id: null, result: 'passed', remark: '', bug_title: '' })
@@ -218,6 +242,7 @@ const failedExecutionCount = computed(() => caseExecutionHistory.value.filter((i
 function formatDateTime(value) { return value ? new Date(value).toLocaleString('zh-CN', { hour12: false }) : '-' }
 function executionResultLabel(value) { return executionResultOptions.find((option) => option.value === value)?.label || '-' }
 function executionHistoryTitle(item) { return `#${item.id} ${formatDateTime(item.execute_time)}，结果为 ${executionResultLabel(item.result)}` }
+function canCreateBugFromCase(row) { return ['failed', 'blocked'].includes(row.last_execute_result) }
 function defaultExecutionTime() {
   const date = new Date()
   const pad = (value) => String(value).padStart(2, '0')
@@ -234,6 +259,21 @@ async function openCaseExecution(row) {
   caseExecutionHistory.value = (await fetchTestCaseExecutions(row.id)).data
   caseExecutionVisible.value = true
 }
+async function openCaseBug(row) {
+  if (!canCreateBugFromCase(row)) return
+  bugSourceCase.value = row
+  const history = (await fetchTestCaseExecutions(row.id)).data
+  const latest = history[0]
+  Object.assign(caseBugForm, {
+    title: row.title,
+    bug_type: '代码错误',
+    severity: '3',
+    priority: '3',
+    reproduce_steps: buildReproduceText(latest, row),
+    actual_result: buildActualText(latest)
+  })
+  caseBugVisible.value = true
+}
 function openRunCreate() { editingRunId.value = null; Object.assign(runForm, { project_id: null, iteration_id: null, name: '', test_owner_id: null, status: 'planning', remark: '' }); runDialogVisible.value = true }
 function openRunEdit(row) { editingRunId.value = row.id; Object.assign(runForm, { ...row, remark: row.remark || '' }); runDialogVisible.value = true }
 function openSelectCases(row) { selectedRunId.value = row.id; selectForm.test_case_ids = []; selectForm.tester_id = null; selectDialogVisible.value = true }
@@ -248,11 +288,37 @@ async function loadData() {
 }
 async function loadRunCases() { testRunCases.value = (await fetchTestRunCases()).data }
 async function submitCase() { if (!caseForm.title.trim()) return ElMessage.warning('请填写用例标题'); saving.value = true; try { const payload = { ...caseForm, project_id: caseForm.project_id || null, requirement_id: caseForm.requirement_id || null, default_tester_id: caseForm.default_tester_id || null, steps_json: cleanCaseSteps() }; if (editingCaseId.value) await updateTestCase(editingCaseId.value, payload); else await createTestCase(payload); caseDialogVisible.value = false; await loadData() } finally { saving.value = false } }
-async function submitCaseExecution() { saving.value = true; try { await executeTestCase(selectedCase.value.id, { execute_time: caseExecutionForm.execute_time, steps_result_json: caseExecutionForm.steps_result_json }); caseExecutionHistory.value = (await fetchTestCaseExecutions(selectedCase.value.id)).data; await loadData(); ElMessage.success('用例执行结果已保存') } finally { saving.value = false } }
+async function submitCaseExecution() { saving.value = true; try { const currentId = selectedCase.value.id; await executeTestCase(currentId, { execute_time: caseExecutionForm.execute_time, steps_result_json: caseExecutionForm.steps_result_json }); await loadData(); ElMessage.success('用例执行结果已保存'); await openNextCaseAfterExecution(currentId, pagedTestCases.value) } finally { saving.value = false } }
+async function submitCaseBug() { if (!caseBugForm.title.trim()) return ElMessage.warning('请填写 Bug 标题'); saving.value = true; try { await createBugFromTestCase(bugSourceCase.value.id, { ...caseBugForm }); caseBugVisible.value = false; await loadData(); ElMessage.success('Bug 已提交') } finally { saving.value = false } }
 async function submitRun() { if (!runForm.project_id || !runForm.name.trim()) return ElMessage.warning('请选择项目并填写测试单名称'); saving.value = true; try { const payload = { ...runForm, iteration_id: runForm.iteration_id || null, test_owner_id: runForm.test_owner_id || null }; if (editingRunId.value) await updateTestRun(editingRunId.value, payload); else await createTestRun(payload); runDialogVisible.value = false; await loadData() } finally { saving.value = false } }
 async function submitSelectCases() { if (!selectForm.test_case_ids.length) return ElMessage.warning('请选择测试用例'); saving.value = true; try { await selectTestCases(selectedRunId.value, { test_case_ids: selectForm.test_case_ids, tester_id: selectForm.tester_id || null }); selectDialogVisible.value = false; await loadData(); ElMessage.success('用例已加入测试单') } finally { saving.value = false } }
 async function submitExecution() { if (!executionForm.run_case_id) return ElMessage.warning('请选择执行记录'); saving.value = true; try { await updateTestRunCase(executionForm.run_case_id, { result: executionForm.result, remark: executionForm.remark }); if (executionForm.result === 'failed' && executionForm.bug_title.trim()) await createBugFromTestRunCase(executionForm.run_case_id, { title: executionForm.bug_title, actual_result: executionForm.remark }); executionDialogVisible.value = false; await loadData(); ElMessage.success('执行结果已保存') } finally { saving.value = false } }
 async function removeCase(id) { await deleteTestCase(id); await loadData() }
 async function removeRun(id) { await deleteTestRun(id); await loadData() }
 onMounted(loadData)
+
+async function openNextCaseAfterExecution(currentId, rows) {
+  const index = rows.findIndex((item) => item.id === currentId)
+  const next = index >= 0 ? rows[index + 1] : null
+  if (next) await openCaseExecution(next)
+  else caseExecutionVisible.value = false
+}
+function buildReproduceText(execution, testCase) {
+  const rows = Array.isArray(execution?.steps_result_json) ? execution.steps_result_json : []
+  if (!rows.length) return testCase.expected_result || ''
+  return [
+    '[步骤]',
+    ...rows.map((row, index) => `${index + 1}. ${row.step || ''}`),
+    '',
+    '[结果]',
+    ...rows.map((row, index) => `${index + 1}. ${executionResultLabel(row.result)} ${row.actual || ''}`),
+    '',
+    '[期望]',
+    ...rows.map((row, index) => `${index + 1}. ${row.expected || ''}`)
+  ].join('\n')
+}
+function buildActualText(execution) {
+  const rows = Array.isArray(execution?.steps_result_json) ? execution.steps_result_json : []
+  return rows.map((row) => row.actual).filter(Boolean).join('\n')
+}
 </script>

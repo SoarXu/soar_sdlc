@@ -23,3 +23,7 @@ export function executeTestCase(id, payload) {
 export function fetchTestCaseExecutions(id) {
   return http.get(`/test-cases/${id}/executions`)
 }
+
+export function createBugFromTestCase(id, payload) {
+  return http.post(`/test-cases/${id}/bugs`, payload)
+}

@@ -1,7 +1,7 @@
 <template>
   <section>
     <div class="detail-titlebar">
-      <el-button @click="$router.back()">返回</el-button>
+      <el-button @click="goBackToProjectRequirements">返回</el-button>
       <el-tag effect="plain">#{{ requirement.id }}</el-tag>
       <h1>{{ requirement.title || '需求详情' }}</h1>
       <router-link v-if="requirement.project_id" class="detail-link" :to="`/projects/${requirement.project_id}`">进入项目</router-link>
@@ -73,7 +73,7 @@
 
 <script setup>
 import { computed, onMounted, ref } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 
 import { fetchIterations } from '../api/iterations'
@@ -85,6 +85,7 @@ import RequirementPriorityBadge from '../components/RequirementPriorityBadge.vue
 import { labelById, userLabel } from '../utils/referenceLabels'
 
 const route = useRoute()
+const router = useRouter()
 const requirementId = computed(() => Number(route.params.id))
 const loading = ref(false)
 const requirement = ref({})
@@ -118,6 +119,13 @@ function operationActionLabel(value) { return optionLabel(operationActionOptions
 function formatDateTime(value) {
   if (!value) return ''
   return new Date(value).toLocaleString('zh-CN', { hour12: false })
+}
+function goBackToProjectRequirements() {
+  if (requirement.value.project_id) {
+    router.push({ name: 'project-detail', params: { id: requirement.value.project_id }, query: { tab: 'requirements' } })
+  } else {
+    router.push({ name: 'requirements' })
+  }
 }
 
 async function loadData() {

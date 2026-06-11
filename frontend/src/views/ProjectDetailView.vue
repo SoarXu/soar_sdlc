@@ -19,7 +19,7 @@
         class="project-tab-button"
         :class="{ active: activeTab === tab.key }"
         type="button"
-        @click="activeTab = tab.key"
+        @click="setActiveTab(tab.key)"
       >
         {{ tab.label }}
       </button>
@@ -260,8 +260,8 @@
 </template>
 
 <script setup>
-import { computed, onMounted, reactive, ref } from 'vue'
-import { useRoute } from 'vue-router'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 
 import { createBug, deleteBug, fetchBugs, updateBug } from '../api/bugs'
@@ -277,10 +277,11 @@ import RequirementPriorityBadge from '../components/RequirementPriorityBadge.vue
 import { labelById, userLabel } from '../utils/referenceLabels'
 
 const route = useRoute()
+const router = useRouter()
 const projectId = computed(() => Number(route.params.id))
 const loading = ref(false)
 const saving = ref(false)
-const activeTab = ref('overview')
+const activeTab = ref(normalizeProjectTab(route.query.tab))
 const testTab = ref('cases')
 const project = ref({})
 const programs = ref([])
@@ -418,6 +419,13 @@ const runForm = reactive({ project_id: null, iteration_id: null, name: '', test_
 const bugForm = reactive({ project_id: null, requirement_id: null, task_id: null, test_case_id: null, test_run_id: null, title: '', severity: 'medium', priority: 'medium', owner_id: null, reporter_id: null, reproduce_steps: '', expected_result: '', actual_result: '', status: 'open' })
 
 function optionLabel(options, value) { return options.find((option) => option.value === value)?.label || value || '-' }
+function normalizeProjectTab(value) {
+  return ['overview', 'iterations', 'requirements', 'tasks', 'tests', 'bugs', 'members', 'settings'].includes(value) ? value : 'overview'
+}
+function setActiveTab(key) {
+  activeTab.value = key
+  router.replace({ name: 'project-detail', params: { id: projectId.value }, query: { ...route.query, tab: key } })
+}
 function projectStatusLabel(value) { return optionLabel(projectStatusOptions, value) }
 function iterationStatusLabel(value) { return optionLabel(iterationStatusOptions, value) }
 function normalizeRequirementPriority(value) { return legacyRequirementPriorityValues[value] || value || '3' }
@@ -529,4 +537,5 @@ async function removeRun(id) { await deleteTestRun(id); await loadData() }
 async function removeBug(id) { await deleteBug(id); await loadData() }
 
 onMounted(loadData)
+watch(() => route.query.tab, (value) => { activeTab.value = normalizeProjectTab(value) })
 </script>

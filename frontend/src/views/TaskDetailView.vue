@@ -1,7 +1,7 @@
 <template>
   <section>
     <div class="detail-titlebar">
-      <el-button @click="$router.back()">返回</el-button>
+      <el-button @click="goBackToProjectTasks">返回</el-button>
       <el-tag effect="plain">#{{ task.id }}</el-tag>
       <h1>{{ task.title || '任务详情' }}</h1>
       <router-link v-if="task.project_id" class="detail-link" :to="`/projects/${task.project_id}`">进入项目</router-link>
@@ -39,7 +39,7 @@
 
 <script setup>
 import { computed, onMounted, ref } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 
 import { fetchProjects } from '../api/projects'
@@ -49,12 +49,21 @@ import { fetchUsers } from '../api/users'
 import { labelById, userLabel } from '../utils/referenceLabels'
 
 const route = useRoute()
+const router = useRouter()
 const taskId = computed(() => Number(route.params.id))
 const loading = ref(false)
 const task = ref({})
 const projects = ref([])
 const requirements = ref([])
 const users = ref([])
+
+function goBackToProjectTasks() {
+  if (task.value.project_id) {
+    router.push({ name: 'project-detail', params: { id: task.value.project_id }, query: { tab: 'tasks' } })
+  } else {
+    router.push({ name: 'tasks' })
+  }
+}
 
 async function loadData() {
   loading.value = true

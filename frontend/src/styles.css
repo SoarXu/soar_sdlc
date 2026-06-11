@@ -175,6 +175,7 @@ body {
 
 .project-detail-head {
   display: flex;
+  flex: 0 0 auto;
   align-items: flex-start;
   justify-content: space-between;
   gap: 16px;
@@ -196,6 +197,7 @@ body {
 
 .project-tabs {
   display: flex;
+  flex: 0 0 auto;
   flex-wrap: nowrap;
   gap: 0;
   align-items: stretch;
@@ -204,6 +206,31 @@ body {
   overflow-x: auto;
   background: #2f80ed;
   box-shadow: inset 0 -1px 0 rgba(255, 255, 255, .2);
+}
+
+.project-detail-page {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+.project-detail-card {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.project-detail-card > .el-card__body {
+  height: 100%;
+  min-height: 0;
+  overflow: auto;
+}
+
+.project-overview {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
 }
 
 .project-tab-button {
@@ -526,11 +553,21 @@ body {
 }
 
 .project-history {
+  flex: 1 1 auto;
   margin-top: 18px;
+  max-height: max(220px, min(360px, calc(100vh - 590px)));
+  min-height: 0;
+  overflow-y: auto;
+  padding-right: 8px;
 }
 
 .project-history h2 {
+  position: sticky;
+  top: 0;
+  z-index: 1;
   margin: 0 0 10px;
+  padding: 0 0 8px;
+  background: #ffffff;
   font-size: 16px;
 }
 
@@ -538,9 +575,6 @@ body {
   display: flex;
   flex-direction: column;
   gap: 10px;
-  max-height: min(420px, 48vh);
-  overflow-y: auto;
-  padding-right: 8px;
 }
 
 .project-history-line {

@@ -1,5 +1,5 @@
 <template>
-  <section>
+  <section class="project-detail-page">
     <div class="project-detail-head">
       <div>
         <el-button link type="primary" @click="$router.push('/projects')">返回项目列表</el-button>
@@ -27,6 +27,7 @@
 
     <el-card v-loading="loading" shadow="never" class="project-detail-card">
       <template v-if="activeTab === 'overview'">
+        <div class="project-overview">
         <div class="metrics project-detail-metrics">
           <el-card v-for="item in metrics" :key="item.key" shadow="never">
             <span>{{ item.label }}</span>
@@ -68,6 +69,7 @@
               </div>
             </div>
           </div>
+        </div>
         </div>
       </template>
 

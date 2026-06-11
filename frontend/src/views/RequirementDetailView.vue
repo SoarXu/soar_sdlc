@@ -14,7 +14,7 @@
         <el-descriptions-item label="负责人">{{ userLabel(users, requirement.owner_id) }}</el-descriptions-item>
         <el-descriptions-item label="提出人">{{ userLabel(users, requirement.proposer_id) }}</el-descriptions-item>
         <el-descriptions-item label="优先级"><RequirementPriorityBadge :value="requirement.priority" /></el-descriptions-item>
-        <el-descriptions-item label="状态">{{ requirement.status || '-' }}</el-descriptions-item>
+        <el-descriptions-item label="状态">{{ requirementStatusLabel(requirement.status) }}</el-descriptions-item>
         <el-descriptions-item label="评审状态">{{ requirement.review_status || '-' }}</el-descriptions-item>
         <el-descriptions-item label="类型">{{ requirement.requirement_type || '-' }}</el-descriptions-item>
         <el-descriptions-item label="来源项目">{{ labelById(projects, requirement.source_project_id) }}</el-descriptions-item>
@@ -43,6 +43,31 @@
         <el-table-column prop="status" label="状态" width="120" />
       </el-table>
     </el-card>
+
+    <el-card shadow="never" class="detail-panel">
+      <template #header>状态历史</template>
+      <el-empty v-if="!statusOperations.length" description="暂无状态历史" />
+      <el-timeline v-else class="status-history">
+        <el-timeline-item
+          v-for="operation in statusOperations"
+          :key="operation.id"
+          :timestamp="formatDateTime(operation.effective_time)"
+          placement="top"
+        >
+          <div class="status-history-item">
+            <div class="status-history-title">
+              {{ operationActionLabel(operation.action) }}
+              <span>{{ requirementStatusLabel(operation.from_status) }} → {{ requirementStatusLabel(operation.to_status) }}</span>
+            </div>
+            <div class="status-history-meta">
+              操作人：{{ operation.actor_name || '系统' }}
+              <template v-if="operation.reason"> · 原因：{{ operation.reason }}</template>
+            </div>
+            <p v-if="operation.remark">{{ operation.remark }}</p>
+          </div>
+        </el-timeline-item>
+      </el-timeline>
+    </el-card>
   </section>
 </template>
 
@@ -53,7 +78,7 @@ import { ElMessage } from 'element-plus'
 
 import { fetchIterations } from '../api/iterations'
 import { fetchProjects } from '../api/projects'
-import { fetchRequirement } from '../api/requirements'
+import { fetchRequirement, fetchRequirementStatusOperations } from '../api/requirements'
 import { fetchTasks } from '../api/tasks'
 import { fetchUsers } from '../api/users'
 import RequirementPriorityBadge from '../components/RequirementPriorityBadge.vue'
@@ -67,23 +92,44 @@ const projects = ref([])
 const iterations = ref([])
 const users = ref([])
 const tasks = ref([])
+const statusOperations = ref([])
 const relatedTasks = computed(() => tasks.value.filter((item) => item.requirement_id === requirementId.value))
+const requirementStatusOptions = [
+  { label: '草稿', value: 'draft' },
+  { label: '激活', value: 'active' },
+  { label: '完成', value: 'done' },
+  { label: '关闭', value: 'closed' }
+]
+const operationActionOptions = [
+  { label: '激活', value: 'activate' },
+  { label: '关闭', value: 'close' }
+]
+
+function optionLabel(options, value) { return options.find((option) => option.value === value)?.label || value || '-' }
+function requirementStatusLabel(value) { return optionLabel(requirementStatusOptions, value) }
+function operationActionLabel(value) { return optionLabel(operationActionOptions, value) }
+function formatDateTime(value) {
+  if (!value) return ''
+  return new Date(value).toLocaleString('zh-CN', { hour12: false })
+}
 
 async function loadData() {
   loading.value = true
   try {
-    const [requirementRes, projectRes, iterationRes, userRes, taskRes] = await Promise.all([
+    const [requirementRes, projectRes, iterationRes, userRes, taskRes, operationRes] = await Promise.all([
       fetchRequirement(requirementId.value),
       fetchProjects(),
       fetchIterations(),
       fetchUsers(),
-      fetchTasks()
+      fetchTasks(),
+      fetchRequirementStatusOperations(requirementId.value)
     ])
     requirement.value = requirementRes.data
     projects.value = projectRes.data
     iterations.value = iterationRes.data
     users.value = userRes.data
     tasks.value = taskRes.data
+    statusOperations.value = operationRes.data
   } catch {
     ElMessage.error('需求详情加载失败')
   } finally {

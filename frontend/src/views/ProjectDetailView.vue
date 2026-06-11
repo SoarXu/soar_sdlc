@@ -73,10 +73,11 @@
           <el-table-column label="优先级" width="100"><template #default="{ row }"><RequirementPriorityBadge :value="row.priority" /></template></el-table-column>
           <el-table-column label="评审状态" width="120"><template #default="{ row }">{{ reviewStatusLabel(row.review_status) }}</template></el-table-column>
           <el-table-column label="状态" width="100"><template #default="{ row }">{{ requirementStatusLabel(row.status) }}</template></el-table-column>
-          <el-table-column label="操作" width="230" fixed="right">
+          <el-table-column label="操作" width="280" fixed="right">
             <template #default="{ row }">
               <el-button link type="primary" @click="openRequirementEdit(row)">编辑</el-button>
               <el-button v-if="row.status === 'draft'" link type="warning" @click="activateRequirementRow(row.id)">激活</el-button>
+              <el-button v-if="row.status === 'active'" link type="danger" @click="openRequirementClose(row)">关闭</el-button>
               <el-button link type="success" @click="openGenerate(row)">生成任务</el-button>
               <el-popconfirm title="确认删除该需求？" @confirm="removeRequirement(row.id)"><template #reference><el-button link type="danger">删除</el-button></template></el-popconfirm>
             </template>
@@ -176,6 +177,23 @@
       <template #footer><el-button @click="generateVisible = false">取消</el-button><el-button type="primary" :loading="saving" @click="submitGenerateTask">生成</el-button></template>
     </el-dialog>
 
+    <el-dialog v-model="closeRequirementVisible" title="关闭需求" width="480px">
+      <el-form label-position="top">
+        <el-form-item label="关闭原因" required>
+          <el-select v-model="closeRequirementForm.reason" placeholder="请选择关闭原因">
+            <el-option v-for="option in requirementCloseReasons" :key="option" :label="option" :value="option" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="备注">
+          <el-input v-model="closeRequirementForm.remark" type="textarea" :rows="3" placeholder="补充说明本次关闭原因" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="closeRequirementVisible = false">取消</el-button>
+        <el-button type="primary" :loading="saving" @click="submitRequirementClose">确认关闭</el-button>
+      </template>
+    </el-dialog>
+
     <el-dialog v-model="taskDialogVisible" :title="editingTaskId ? '编辑任务' : '新增任务'" width="620px">
       <el-form label-position="top">
         <el-form-item label="任务标题" required><el-input v-model="taskForm.title" /></el-form-item>
@@ -211,7 +229,7 @@ import { createBug, deleteBug, fetchBugs, updateBug } from '../api/bugs'
 import { createIteration, deleteIteration, fetchIterations, updateIteration } from '../api/iterations'
 import { fetchPrograms } from '../api/programs'
 import { fetchProject } from '../api/projects'
-import { activateRequirement, createRequirement, deleteRequirement, fetchRequirements, generateTask, updateRequirement } from '../api/requirements'
+import { activateRequirement, closeRequirement, createRequirement, deleteRequirement, fetchRequirements, generateTask, updateRequirement } from '../api/requirements'
 import { createTask, deleteTask, fetchTasks, updateTask } from '../api/tasks'
 import { createTestCase, deleteTestCase, fetchTestCases, updateTestCase } from '../api/testCases'
 import { createTestRun, deleteTestRun, fetchTestRuns, updateTestRun } from '../api/testRuns'
@@ -235,9 +253,9 @@ const testCases = ref([])
 const testRuns = ref([])
 const bugs = ref([])
 
-const iterationDialogVisible = ref(false), requirementDialogVisible = ref(false), generateVisible = ref(false), taskDialogVisible = ref(false)
+const iterationDialogVisible = ref(false), requirementDialogVisible = ref(false), generateVisible = ref(false), closeRequirementVisible = ref(false), taskDialogVisible = ref(false)
 const caseDialogVisible = ref(false), runDialogVisible = ref(false), bugDialogVisible = ref(false)
-const editingIterationId = ref(null), editingRequirementId = ref(null), generatingRequirementId = ref(null), editingTaskId = ref(null)
+const editingIterationId = ref(null), editingRequirementId = ref(null), generatingRequirementId = ref(null), closingRequirementId = ref(null), editingTaskId = ref(null)
 const editingCaseId = ref(null), editingRunId = ref(null), editingBugId = ref(null)
 
 const tabs = [
@@ -276,6 +294,7 @@ const requirementPriorityOptions = [
   { label: '4', value: '4' },
   { label: '5', value: '5' }
 ]
+const requirementCloseReasons = ['已完成', '重复', '延期', '不做', '设计如此']
 const legacyRequirementPriorityValues = { high: '1', medium: '3', low: '5' }
 const reviewStatusOptions = [
   { label: '无需评审', value: 'not_required' },
@@ -324,6 +343,7 @@ const metrics = computed(() => [
 const iterationForm = reactive({ project_ids: [], name: '', owner_id: null, start_date: null, end_date: null, status: 'planning', goal: '' })
 const requirementForm = reactive({ project_id: null, iteration_id: null, title: '', requirement_type: '', priority: '3', owner_id: null, proposer_id: null, status: 'draft', review_status: 'not_required', description: '', acceptance_criteria: '', source_reviewed: false })
 const generateForm = reactive({ title: '', task_type: '', description: '' })
+const closeRequirementForm = reactive({ reason: '', remark: '' })
 const taskForm = reactive({ project_id: null, requirement_id: null, title: '', task_type: '', priority: 'medium', owner_id: null, estimated_hours: null, actual_hours: null, due_date: null, status: 'todo', description: '' })
 const caseForm = reactive({ project_id: null, requirement_id: null, title: '', case_type: '', priority: 'medium', default_tester_id: null, precondition: '', expected_result: '', status: 'active' })
 const runForm = reactive({ project_id: null, iteration_id: null, name: '', test_owner_id: null, status: 'planning', remark: '' })
@@ -351,6 +371,7 @@ function openIterationEdit(row) { editingIterationId.value = row.id; Object.assi
 function openRequirementCreate() { editingRequirementId.value = null; resetRequirementForm(); requirementDialogVisible.value = true }
 function openRequirementEdit(row) { editingRequirementId.value = row.id; Object.assign(requirementForm, { ...row, priority: normalizeRequirementPriority(row.priority), requirement_type: row.requirement_type || '', description: row.description || '', acceptance_criteria: row.acceptance_criteria || '' }); requirementDialogVisible.value = true }
 function openGenerate(row) { generatingRequirementId.value = row.id; generateForm.title = row.title; generateForm.task_type = 'development'; generateForm.description = ''; generateVisible.value = true }
+function openRequirementClose(row) { closingRequirementId.value = row.id; Object.assign(closeRequirementForm, { reason: '', remark: '' }); closeRequirementVisible.value = true }
 function openTaskCreate() { editingTaskId.value = null; resetTaskForm(); taskDialogVisible.value = true }
 function openTaskEdit(row) { editingTaskId.value = row.id; Object.assign(taskForm, { ...row, task_type: row.task_type || '', description: row.description || '' }); taskDialogVisible.value = true }
 function openCaseCreate() { editingCaseId.value = null; resetCaseForm(); caseDialogVisible.value = true }
@@ -387,6 +408,18 @@ async function submitIteration() { if (!iterationForm.name.trim()) return ElMess
 async function submitRequirement() { if (!requirementForm.title.trim()) return ElMessage.warning('请填写需求标题'); saving.value = true; try { const { status: _status, ...formData } = requirementForm; const payload = { ...formData, project_id: projectId.value, iteration_id: requirementForm.iteration_id || null, owner_id: requirementForm.owner_id || null, proposer_id: requirementForm.proposer_id || null }; if (editingRequirementId.value) await updateRequirement(editingRequirementId.value, payload); else await createRequirement(payload); requirementDialogVisible.value = false; await loadData() } finally { saving.value = false } }
 async function activateRequirementRow(id) { await activateRequirement(id); await loadData(); ElMessage.success('需求已激活，关联任务已进入进行中') }
 async function submitGenerateTask() { if (!generateForm.title.trim()) return ElMessage.warning('请填写任务标题'); saving.value = true; try { await generateTask(generatingRequirementId.value, { ...generateForm }); generateVisible.value = false; await loadData(); ElMessage.success('任务已生成') } finally { saving.value = false } }
+async function submitRequirementClose() {
+  if (!closeRequirementForm.reason) return ElMessage.warning('请选择关闭原因')
+  saving.value = true
+  try {
+    await closeRequirement(closingRequirementId.value, { ...closeRequirementForm })
+    closeRequirementVisible.value = false
+    await loadData()
+    ElMessage.success('需求已关闭')
+  } finally {
+    saving.value = false
+  }
+}
 async function submitTask() { if (!taskForm.title.trim()) return ElMessage.warning('请填写任务标题'); saving.value = true; try { const payload = { ...taskForm, project_id: projectId.value, requirement_id: taskForm.requirement_id || null, owner_id: taskForm.owner_id || null }; if (editingTaskId.value) await updateTask(editingTaskId.value, payload); else await createTask(payload); taskDialogVisible.value = false; await loadData() } finally { saving.value = false } }
 async function submitCase() { if (!caseForm.title.trim()) return ElMessage.warning('请填写用例标题'); saving.value = true; try { const payload = { ...caseForm, project_id: projectId.value, requirement_id: caseForm.requirement_id || null, default_tester_id: caseForm.default_tester_id || null }; if (editingCaseId.value) await updateTestCase(editingCaseId.value, payload); else await createTestCase(payload); caseDialogVisible.value = false; await loadData() } finally { saving.value = false } }
 async function submitRun() { if (!runForm.name.trim()) return ElMessage.warning('请填写测试单名称'); saving.value = true; try { const payload = { ...runForm, project_id: projectId.value, iteration_id: runForm.iteration_id || null, test_owner_id: runForm.test_owner_id || null }; if (editingRunId.value) await updateTestRun(editingRunId.value, payload); else await createTestRun(payload); runDialogVisible.value = false; await loadData() } finally { saving.value = false } }

@@ -116,6 +116,41 @@ def test_requirement_activation_updates_linked_tasks_to_doing(client: TestClient
     assert task_detail.status_code == 200
     assert task_detail.json()["status"] == "doing"
 
+    history = client.get(f"/api/v1/requirements/{requirement_id}/status-operations")
+    assert history.status_code == 200
+    assert history.json()[-1]["action"] == "activate"
+    assert history.json()[-1]["to_status"] == "active"
+
+
+def test_requirement_close_requires_reason_and_records_history(client: TestClient):
+    project_id = _create_project(client)
+    requirement = client.post(
+        "/api/v1/requirements",
+        json={"project_id": project_id, "title": f"待关闭需求-{uuid4().hex[:8]}"},
+    )
+    assert requirement.status_code == 200
+    requirement_id = requirement.json()["id"]
+
+    activated = client.post(f"/api/v1/requirements/{requirement_id}/activate")
+    assert activated.status_code == 200
+
+    rejected = client.post(f"/api/v1/requirements/{requirement_id}/close", json={"remark": "缺少原因"})
+    assert rejected.status_code == 422
+
+    closed = client.post(
+        f"/api/v1/requirements/{requirement_id}/close",
+        json={"reason": "done", "remark": "已完成上线"},
+    )
+    assert closed.status_code == 200
+    assert closed.json()["status"] == "closed"
+
+    history = client.get(f"/api/v1/requirements/{requirement_id}/status-operations")
+    assert history.status_code == 200
+    actions = [item["action"] for item in history.json()]
+    assert actions[-2:] == ["activate", "close"]
+    assert history.json()[-1]["reason"] == "done"
+    assert history.json()[-1]["remark"] == "已完成上线"
+
 
 def test_requirement_status_cannot_be_changed_by_form_save(client: TestClient):
     project_id = _create_project(client)

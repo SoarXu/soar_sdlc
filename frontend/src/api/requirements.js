@@ -20,6 +20,14 @@ export function activateRequirement(id) {
   return http.post(`/requirements/${id}/activate`)
 }
 
+export function closeRequirement(id, payload) {
+  return http.post(`/requirements/${id}/close`, payload)
+}
+
+export function fetchRequirementStatusOperations(id) {
+  return http.get(`/requirements/${id}/status-operations`)
+}
+
 export function deleteRequirement(id) {
   return http.delete(`/requirements/${id}`)
 }

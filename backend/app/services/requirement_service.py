@@ -6,7 +6,9 @@ from sqlalchemy.orm import Session
 from app.models.project import Project
 from app.models.requirement import Requirement
 from app.models.task import Task
+from app.services.status_operation_service import create_status_operation, list_status_operations
 from app.views.requirement_view import GenerateTaskRequest, RequirementCreate, RequirementUpdate
+from app.views.status_operation_view import StatusOperationCreate
 
 
 def list_requirements(db: Session) -> list[Requirement]:
@@ -44,15 +46,50 @@ def update_requirement(db: Session, requirement_id: int, payload: RequirementUpd
 
 def activate_requirement(db: Session, requirement_id: int) -> Requirement:
     requirement = _get_active_requirement(db, requirement_id)
+    from_status = requirement.status
     requirement.status = "active"
     (
         db.query(Task)
         .filter(Task.requirement_id == requirement.id, Task.deleted == 0, Task.status == "todo")
         .update({Task.status: "doing"}, synchronize_session=False)
     )
+    create_status_operation(
+        db,
+        object_type="requirement",
+        object_id=requirement.id,
+        action="activate",
+        from_status=from_status,
+        to_status=requirement.status,
+        payload=None,
+    )
     db.commit()
     db.refresh(requirement)
     return requirement
+
+
+def close_requirement(db: Session, requirement_id: int, payload: StatusOperationCreate) -> Requirement:
+    if not payload.reason:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="关闭原因必填")
+    requirement = _get_active_requirement(db, requirement_id)
+    from_status = requirement.status
+    requirement.status = "closed"
+    create_status_operation(
+        db,
+        object_type="requirement",
+        object_id=requirement.id,
+        action="close",
+        from_status=from_status,
+        to_status=requirement.status,
+        payload=payload,
+    )
+    db.commit()
+    db.refresh(requirement)
+    return requirement
+
+
+def list_requirement_status_operations(db: Session, requirement_id: int) -> list[dict]:
+    _get_active_requirement(db, requirement_id)
+    return list_status_operations(db, "requirement", requirement_id)
 
 
 def delete_requirement(db: Session, requirement_id: int) -> None:

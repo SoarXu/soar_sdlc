@@ -415,6 +415,7 @@ CREATE TABLE IF NOT EXISTS status_operation_log (
   action VARCHAR(32) NOT NULL COMMENT '操作：start、suspend、close、activate',
   from_status VARCHAR(32) NULL COMMENT '操作前状态',
   to_status VARCHAR(32) NOT NULL COMMENT '操作后状态',
+  reason VARCHAR(64) NULL COMMENT '关闭原因',
   effective_time DATETIME NOT NULL COMMENT '实际完成时间',
   remark TEXT NULL COMMENT '备注',
   actor_id BIGINT UNSIGNED NULL COMMENT '操作人 ID',

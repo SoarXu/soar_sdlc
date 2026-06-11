@@ -18,11 +18,12 @@
         <el-table-column label="负责人" width="150"><template #default="{ row }">{{ userLabel(users, row.owner_id) }}</template></el-table-column>
         <el-table-column label="优先级" width="100"><template #default="{ row }"><RequirementPriorityBadge :value="row.priority" /></template></el-table-column>
         <el-table-column prop="review_status" label="评审状态" width="120" />
-        <el-table-column prop="status" label="状态" width="100" />
-        <el-table-column label="操作" width="230" fixed="right">
+        <el-table-column label="状态" width="100"><template #default="{ row }">{{ requirementStatusLabel(row.status) }}</template></el-table-column>
+        <el-table-column label="操作" width="280" fixed="right">
           <template #default="{ row }">
             <el-button link type="primary" @click="openEdit(row)">编辑</el-button>
             <el-button v-if="row.status === 'draft'" link type="warning" @click="activateRequirementRow(row.id)">激活</el-button>
+            <el-button v-if="row.status === 'active'" link type="danger" @click="openClose(row)">关闭</el-button>
             <el-button link type="success" @click="openGenerate(row)">生成任务</el-button>
             <el-popconfirm title="确认删除该需求？" @confirm="removeRequirement(row.id)">
               <template #reference><el-button link type="danger">删除</el-button></template>
@@ -99,6 +100,20 @@
       </el-form>
       <template #footer><el-button @click="generateVisible = false">取消</el-button><el-button type="primary" :loading="saving" @click="submitGenerateTask">生成</el-button></template>
     </el-dialog>
+
+    <el-dialog v-model="closeVisible" title="关闭需求" width="480px">
+      <el-form label-position="top">
+        <el-form-item label="关闭原因" required>
+          <el-select v-model="closeForm.reason" placeholder="请选择关闭原因">
+            <el-option v-for="option in requirementCloseReasons" :key="option" :label="option" :value="option" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="备注">
+          <el-input v-model="closeForm.remark" type="textarea" :rows="3" placeholder="补充说明本次关闭原因" />
+        </el-form-item>
+      </el-form>
+      <template #footer><el-button @click="closeVisible = false">取消</el-button><el-button type="primary" :loading="saving" @click="submitClose">确认关闭</el-button></template>
+    </el-dialog>
   </section>
 </template>
 
@@ -107,7 +122,7 @@ import { onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { fetchIterations } from '../api/iterations'
 import { fetchProjects } from '../api/projects'
-import { activateRequirement, createRequirement, deleteRequirement, fetchRequirements, generateTask, updateRequirement } from '../api/requirements'
+import { activateRequirement, closeRequirement, createRequirement, deleteRequirement, fetchRequirements, generateTask, updateRequirement } from '../api/requirements'
 import { fetchUsers } from '../api/users'
 import RequirementPriorityBadge from '../components/RequirementPriorityBadge.vue'
 import { labelById, userLabel } from '../utils/referenceLabels'
@@ -117,8 +132,10 @@ const loading = ref(false)
 const saving = ref(false)
 const dialogVisible = ref(false)
 const generateVisible = ref(false)
+const closeVisible = ref(false)
 const editingId = ref(null)
 const generatingRequirementId = ref(null)
+const closingRequirementId = ref(null)
 const requirements = ref([])
 const projects = ref([])
 const iterations = ref([])
@@ -133,6 +150,7 @@ const {
 const form = reactive({ project_id: null, source_project_id: null, iteration_id: null, title: '', requirement_type: '', priority: '3', owner_id: null, proposer_id: null, status: 'draft', review_status: 'not_required', description: '', acceptance_criteria: '', source_reviewed: false })
 const ownerManuallySet = ref(false)
 const generateForm = reactive({ title: '', task_type: '', description: '' })
+const closeForm = reactive({ reason: '', remark: '' })
 const requirementPriorityOptions = [
   { label: '1', value: '1' },
   { label: '2', value: '2' },
@@ -140,15 +158,24 @@ const requirementPriorityOptions = [
   { label: '4', value: '4' },
   { label: '5', value: '5' }
 ]
+const requirementCloseReasons = ['已完成', '重复', '延期', '不做', '设计如此']
 const legacyRequirementPriorityValues = { high: '1', medium: '3', low: '5' }
+const requirementStatusOptions = [
+  { label: '草稿', value: 'draft' },
+  { label: '激活', value: 'active' },
+  { label: '完成', value: 'done' },
+  { label: '关闭', value: 'closed' }
+]
 
 function normalizeRequirementPriority(value) { return legacyRequirementPriorityValues[value] || value || '3' }
+function requirementStatusLabel(value) { return requirementStatusOptions.find((option) => option.value === value)?.label || value || '-' }
 function resetForm() { Object.assign(form, { project_id: null, source_project_id: null, iteration_id: null, title: '', requirement_type: '', priority: '3', owner_id: null, proposer_id: null, status: 'draft', review_status: 'not_required', description: '', acceptance_criteria: '', source_reviewed: false }); ownerManuallySet.value = false }
 function openCreate() { editingId.value = null; resetForm(); dialogVisible.value = true }
 function onSourceProjectChange(projectId) { if (!projectId || ownerManuallySet.value) return; const project = projects.value.find(p => p.id === projectId); if (project && project.owner_id) { form.owner_id = project.owner_id } }
 function onOwnerChange() { ownerManuallySet.value = true }
 function openEdit(row) { editingId.value = row.id; ownerManuallySet.value = true; Object.assign(form, { ...row, priority: normalizeRequirementPriority(row.priority), requirement_type: row.requirement_type || '', description: row.description || '', acceptance_criteria: row.acceptance_criteria || '' }); dialogVisible.value = true }
 function openGenerate(row) { generatingRequirementId.value = row.id; generateForm.title = row.title; generateForm.task_type = 'development'; generateForm.description = ''; generateVisible.value = true }
+function openClose(row) { closingRequirementId.value = row.id; Object.assign(closeForm, { reason: '', remark: '' }); closeVisible.value = true }
 
 async function loadData() {
   loading.value = true
@@ -170,6 +197,18 @@ async function submitRequirement() {
 }
 async function submitGenerateTask() { if (!generateForm.title.trim()) return ElMessage.warning('请填写任务标题'); saving.value = true; try { await generateTask(generatingRequirementId.value, { ...generateForm }); generateVisible.value = false; ElMessage.success('任务已生成') } finally { saving.value = false } }
 async function activateRequirementRow(id) { await activateRequirement(id); await loadData(); ElMessage.success('需求已激活，关联任务已进入进行中') }
+async function submitClose() {
+  if (!closeForm.reason) return ElMessage.warning('请选择关闭原因')
+  saving.value = true
+  try {
+    await closeRequirement(closingRequirementId.value, { ...closeForm })
+    closeVisible.value = false
+    await loadData()
+    ElMessage.success('需求已关闭')
+  } finally {
+    saving.value = false
+  }
+}
 async function removeRequirement(id) { await deleteRequirement(id); await loadData() }
 onMounted(loadData)
 </script>

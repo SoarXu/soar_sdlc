@@ -28,6 +28,7 @@ def create_status_operation(
     actor_id: int | None = None,
 ) -> StatusOperationLog:
     effective_time = payload.effective_time if payload and payload.effective_time else datetime.now()
+    reason = payload.reason if payload else None
     remark = payload.remark if payload else None
     operation = StatusOperationLog(
         object_type=object_type,
@@ -35,6 +36,7 @@ def create_status_operation(
         action=action,
         from_status=from_status,
         to_status=to_status,
+        reason=reason,
         effective_time=effective_time,
         remark=remark,
         actor_id=actor_id,
@@ -62,6 +64,7 @@ def list_status_operations(db: Session, object_type: str, object_id: int) -> lis
             "action": operation.action,
             "from_status": operation.from_status,
             "to_status": operation.to_status,
+            "reason": operation.reason,
             "effective_time": operation.effective_time,
             "remark": operation.remark,
             "actor_id": operation.actor_id,

@@ -18,7 +18,14 @@
         <el-table-column label="负责人" width="150"><template #default="{ row }">{{ userLabel(users, row.owner_id) }}</template></el-table-column>
         <el-table-column prop="actual_hours" label="实际工时" width="110" />
         <el-table-column prop="due_date" label="截止日期" width="130" />
-        <el-table-column label="状态" width="110"><template #default="{ row }">{{ taskStatusLabel(row.status) }}</template></el-table-column>
+        <el-table-column label="状态" width="110">
+          <template #default="{ row }">
+            <el-tooltip v-if="closeReasonByTask[row.id]" :content="closeReasonByTask[row.id]" placement="top" raw-content>
+              <span class="status-with-reason">{{ taskStatusLabel(row.status) }}</span>
+            </el-tooltip>
+            <span v-else>{{ taskStatusLabel(row.status) }}</span>
+          </template>
+        </el-table-column>
         <el-table-column label="操作" width="240" fixed="right">
           <template #default="{ row }">
             <el-button link type="primary" @click="openEdit(row)">编辑</el-button>
@@ -100,9 +107,10 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { fetchProjects } from '../api/projects'
 import { fetchRequirements } from '../api/requirements'
-import { activateTask, closeTask, createTask, deleteTask, fetchTasks, updateTask } from '../api/tasks'
+import { activateTask, closeTask, createTask, deleteTask, fetchTasks, fetchTaskStatusOperations, updateTask } from '../api/tasks'
 import { fetchUsers } from '../api/users'
 import { labelById, userLabel } from '../utils/referenceLabels'
+import { loadCloseReasonMap } from '../utils/closeReasonTooltip'
 import { usePagination } from '../utils/usePagination'
 
 const loading = ref(false)
@@ -112,6 +120,7 @@ const closeVisible = ref(false)
 const editingId = ref(null)
 const closingTaskId = ref(null)
 const tasks = ref([])
+const closeReasonByTask = ref({})
 const projects = ref([])
 const requirements = ref([])
 const users = ref([])
@@ -165,6 +174,7 @@ async function loadData() {
   try {
     const [taskRes, projectRes, reqRes, userRes] = await Promise.all([fetchTasks(), fetchProjects(), fetchRequirements(), fetchUsers()])
     tasks.value = taskRes.data; projects.value = projectRes.data; requirements.value = reqRes.data; users.value = userRes.data
+    closeReasonByTask.value = await loadCloseReasonMap(tasks.value, fetchTaskStatusOperations)
   } catch { ElMessage.error('任务列表加载失败') } finally { loading.value = false }
 }
 async function submitTask() {

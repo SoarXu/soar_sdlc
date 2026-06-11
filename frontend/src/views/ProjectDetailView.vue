@@ -99,7 +99,14 @@
           <el-table-column label="负责人" width="150"><template #default="{ row }">{{ userLabel(users, row.owner_id) }}</template></el-table-column>
           <el-table-column label="优先级" width="100"><template #default="{ row }"><RequirementPriorityBadge :value="row.priority" /></template></el-table-column>
           <el-table-column label="评审状态" width="120"><template #default="{ row }">{{ reviewStatusLabel(row.review_status) }}</template></el-table-column>
-          <el-table-column label="状态" width="100"><template #default="{ row }">{{ requirementStatusLabel(row.status) }}</template></el-table-column>
+          <el-table-column label="状态" width="100">
+            <template #default="{ row }">
+              <el-tooltip v-if="closeReasonByRequirement[row.id]" :content="closeReasonByRequirement[row.id]" placement="top" raw-content>
+                <span class="status-with-reason">{{ requirementStatusLabel(row.status) }}</span>
+              </el-tooltip>
+              <span v-else>{{ requirementStatusLabel(row.status) }}</span>
+            </template>
+          </el-table-column>
           <el-table-column label="操作" width="280" fixed="right">
             <template #default="{ row }">
               <el-button link type="primary" @click="openRequirementEdit(row)">编辑</el-button>
@@ -123,7 +130,14 @@
           <el-table-column label="负责人" width="150"><template #default="{ row }">{{ userLabel(users, row.owner_id) }}</template></el-table-column>
           <el-table-column prop="actual_hours" label="实际工时" width="110" />
           <el-table-column prop="due_date" label="截止日期" width="130" />
-          <el-table-column label="状态" width="110"><template #default="{ row }">{{ taskStatusLabel(row.status) }}</template></el-table-column>
+          <el-table-column label="状态" width="110">
+            <template #default="{ row }">
+              <el-tooltip v-if="closeReasonByTask[row.id]" :content="closeReasonByTask[row.id]" placement="top" raw-content>
+                <span class="status-with-reason">{{ taskStatusLabel(row.status) }}</span>
+              </el-tooltip>
+              <span v-else>{{ taskStatusLabel(row.status) }}</span>
+            </template>
+          </el-table-column>
           <el-table-column label="操作" width="240" fixed="right">
             <template #default="{ row }"><el-button link type="primary" @click="openTaskEdit(row)">编辑</el-button><el-button v-if="canActivateTask(row)" link type="warning" @click="activateTaskRow(row.id)">激活</el-button><el-button v-if="row.status !== 'closed'" link type="danger" @click="openTaskClose(row)">关闭</el-button><el-popconfirm title="确认删除该任务？" @confirm="removeTask(row.id)"><template #reference><el-button link type="danger">删除</el-button></template></el-popconfirm></template>
           </el-table-column>
@@ -265,13 +279,14 @@ import { createBug, deleteBug, fetchBugs, updateBug } from '../api/bugs'
 import { createIteration, deleteIteration, fetchIterations, updateIteration } from '../api/iterations'
 import { fetchPrograms } from '../api/programs'
 import { fetchProject, fetchProjectAuditLogs, fetchProjectStatusOperations } from '../api/projects'
-import { activateRequirement, closeRequirement, createRequirement, deleteRequirement, fetchRequirements, updateRequirement } from '../api/requirements'
-import { activateTask, closeTask, createTask, deleteTask, fetchTasks, updateTask } from '../api/tasks'
+import { activateRequirement, closeRequirement, createRequirement, deleteRequirement, fetchRequirements, fetchRequirementStatusOperations, updateRequirement } from '../api/requirements'
+import { activateTask, closeTask, createTask, deleteTask, fetchTasks, fetchTaskStatusOperations, updateTask } from '../api/tasks'
 import { createTestCase, deleteTestCase, fetchTestCases, updateTestCase } from '../api/testCases'
 import { createTestRun, deleteTestRun, fetchTestRuns, updateTestRun } from '../api/testRuns'
 import { fetchUsers } from '../api/users'
 import RequirementPriorityBadge from '../components/RequirementPriorityBadge.vue'
 import { currentUserId } from '../utils/currentUser'
+import { loadCloseReasonMap } from '../utils/closeReasonTooltip'
 import { labelById, userLabel } from '../utils/referenceLabels'
 
 const route = useRoute()
@@ -292,6 +307,8 @@ const testRuns = ref([])
 const bugs = ref([])
 const projectAuditLogs = ref([])
 const projectStatusOperations = ref([])
+const closeReasonByRequirement = ref({})
+const closeReasonByTask = ref({})
 const expandedHistory = reactive({})
 
 const iterationDialogVisible = ref(false), requirementDialogVisible = ref(false), closeRequirementVisible = ref(false), taskDialogVisible = ref(false), closeTaskVisible = ref(false)
@@ -503,6 +520,8 @@ async function loadData() {
     project.value = projectRes.data; programs.value = programRes.data; users.value = userRes.data; iterations.value = iterationRes.data
     requirements.value = requirementRes.data; tasks.value = taskRes.data; testCases.value = caseRes.data; testRuns.value = runRes.data; bugs.value = bugRes.data
     projectAuditLogs.value = auditRes.data; projectStatusOperations.value = statusRes.data
+    closeReasonByRequirement.value = await loadCloseReasonMap(projectRequirements.value, fetchRequirementStatusOperations)
+    closeReasonByTask.value = await loadCloseReasonMap(projectTasks.value, fetchTaskStatusOperations)
   } catch {
     ElMessage.error('项目详情加载失败')
   } finally {

@@ -427,6 +427,13 @@ body {
   font-size: 13px;
 }
 
+.status-with-reason {
+  color: #2468d8;
+  cursor: help;
+  text-decoration: underline dotted;
+  text-underline-offset: 3px;
+}
+
 .status-history {
   border-top: 1px solid #e5eaf3;
   margin-top: 20px;

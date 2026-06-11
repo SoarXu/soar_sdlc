@@ -18,7 +18,14 @@
         <el-table-column label="负责人" width="150"><template #default="{ row }">{{ userLabel(users, row.owner_id) }}</template></el-table-column>
         <el-table-column label="优先级" width="100"><template #default="{ row }"><RequirementPriorityBadge :value="row.priority" /></template></el-table-column>
         <el-table-column prop="review_status" label="评审状态" width="120" />
-        <el-table-column label="状态" width="100"><template #default="{ row }">{{ requirementStatusLabel(row.status) }}</template></el-table-column>
+        <el-table-column label="状态" width="100">
+          <template #default="{ row }">
+            <el-tooltip v-if="closeReasonByRequirement[row.id]" :content="closeReasonByRequirement[row.id]" placement="top" raw-content>
+              <span class="status-with-reason">{{ requirementStatusLabel(row.status) }}</span>
+            </el-tooltip>
+            <span v-else>{{ requirementStatusLabel(row.status) }}</span>
+          </template>
+        </el-table-column>
         <el-table-column label="操作" width="280" fixed="right">
           <template #default="{ row }">
             <el-button link type="primary" @click="openEdit(row)">编辑</el-button>
@@ -126,10 +133,11 @@ import { onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { fetchIterations } from '../api/iterations'
 import { fetchProjects } from '../api/projects'
-import { activateRequirement, closeRequirement, createRequirement, deleteRequirement, fetchRequirements, generateTask, updateRequirement } from '../api/requirements'
+import { activateRequirement, closeRequirement, createRequirement, deleteRequirement, fetchRequirements, fetchRequirementStatusOperations, generateTask, updateRequirement } from '../api/requirements'
 import { fetchUsers } from '../api/users'
 import RequirementPriorityBadge from '../components/RequirementPriorityBadge.vue'
 import { currentUserId } from '../utils/currentUser'
+import { loadCloseReasonMap } from '../utils/closeReasonTooltip'
 import { labelById, userLabel } from '../utils/referenceLabels'
 import { usePagination } from '../utils/usePagination'
 
@@ -142,6 +150,7 @@ const editingId = ref(null)
 const generatingRequirementId = ref(null)
 const closingRequirementId = ref(null)
 const requirements = ref([])
+const closeReasonByRequirement = ref({})
 const projects = ref([])
 const iterations = ref([])
 const users = ref([])
@@ -191,6 +200,7 @@ async function loadData() {
   try {
     const [reqRes, projectRes, iterationRes, userRes] = await Promise.all([fetchRequirements(), fetchProjects(), fetchIterations(), fetchUsers()])
     requirements.value = reqRes.data; projects.value = projectRes.data; iterations.value = iterationRes.data; users.value = userRes.data
+    closeReasonByRequirement.value = await loadCloseReasonMap(requirements.value, fetchRequirementStatusOperations)
   } catch { ElMessage.error('需求列表加载失败') } finally { loading.value = false }
 }
 

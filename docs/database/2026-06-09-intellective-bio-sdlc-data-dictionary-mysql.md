@@ -189,7 +189,7 @@
 | iteration_id | BIGINT UNSIGNED | NULL | 所属迭代 ID |
 | title | VARCHAR(255) | NOT NULL | 需求标题 |
 | requirement_type | VARCHAR(64) | NULL | 需求类型 |
-| priority | VARCHAR(32) | NOT NULL DEFAULT 'medium' | 优先级 |
+| priority | VARCHAR(32) | NOT NULL DEFAULT '3' | 优先级：1 最高，5 最低 |
 | owner_id | BIGINT UNSIGNED | NULL | 负责人 ID |
 | proposer_id | BIGINT UNSIGNED | NULL | 提出人 ID |
 | status | VARCHAR(32) | NOT NULL DEFAULT 'draft' | 状态：draft、active、done、closed |

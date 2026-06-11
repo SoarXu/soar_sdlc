@@ -15,7 +15,7 @@ class Requirement(Base):
     iteration_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     title: Mapped[str] = mapped_column(String(255))
     requirement_type: Mapped[str | None] = mapped_column(String(64), nullable=True)
-    priority: Mapped[str] = mapped_column(String(32), default="medium")
+    priority: Mapped[str] = mapped_column(String(32), default="3")
     owner_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     proposer_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     status: Mapped[str] = mapped_column(String(32), default="draft")

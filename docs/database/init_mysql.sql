@@ -142,7 +142,7 @@ CREATE TABLE IF NOT EXISTS requirements (
   iteration_id BIGINT UNSIGNED NULL COMMENT '所属迭代 ID',
   title VARCHAR(255) NOT NULL COMMENT '需求标题',
   requirement_type VARCHAR(64) NULL COMMENT '需求类型',
-  priority VARCHAR(32) NOT NULL DEFAULT 'medium' COMMENT '优先级',
+  priority VARCHAR(32) NOT NULL DEFAULT '3' COMMENT '优先级：1 最高，5 最低',
   owner_id BIGINT UNSIGNED NULL COMMENT '负责人 ID',
   proposer_id BIGINT UNSIGNED NULL COMMENT '提出人 ID',
   status VARCHAR(32) NOT NULL DEFAULT 'draft' COMMENT '状态：draft、active、done、closed',

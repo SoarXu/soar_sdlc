@@ -35,7 +35,7 @@ def test_requirement_can_generate_task_without_review_by_default(client: TestCli
         json={
             "project_id": project_id,
             "title": "需求生成任务",
-            "priority": "high",
+            "priority": "1",
             "owner_id": 1,
             "review_status": "not_required",
         },
@@ -60,10 +60,18 @@ def test_requirement_and_task_crud_use_prd_fields(client: TestClient):
 
     requirement = client.post(
         "/api/v1/requirements",
-        json={"project_id": project_id, "title": "需求 CRUD", "priority": "medium", "status": "draft"},
+        json={"project_id": project_id, "title": "需求 CRUD", "priority": "3", "status": "draft"},
     )
     assert requirement.status_code == 200
     requirement_id = requirement.json()["id"]
+    assert requirement.json()["priority"] == "3"
+
+    default_priority_requirement = client.post(
+        "/api/v1/requirements",
+        json={"project_id": project_id, "title": f"默认优先级-{uuid4().hex[:8]}"},
+    )
+    assert default_priority_requirement.status_code == 200
+    assert default_priority_requirement.json()["priority"] == "3"
 
     requirement_update = client.patch(f"/api/v1/requirements/{requirement_id}", json={"status": "active"})
     assert requirement_update.status_code == 200

@@ -16,7 +16,7 @@
         <el-table-column label="来源项目" width="180"><template #default="{ row }">{{ labelById(projects, row.source_project_id) }}</template></el-table-column>
         <el-table-column label="迭代" width="160"><template #default="{ row }">{{ labelById(iterations, row.iteration_id) }}</template></el-table-column>
         <el-table-column label="负责人" width="150"><template #default="{ row }">{{ userLabel(users, row.owner_id) }}</template></el-table-column>
-        <el-table-column prop="priority" label="优先级" width="100" />
+        <el-table-column label="优先级" width="100"><template #default="{ row }">{{ requirementPriorityLabel(row.priority) }}</template></el-table-column>
         <el-table-column prop="review_status" label="评审状态" width="120" />
         <el-table-column prop="status" label="状态" width="100" />
         <el-table-column label="操作" width="230" fixed="right">
@@ -74,7 +74,7 @@
           <el-form-item label="类型"><el-input v-model="form.requirement_type" /></el-form-item>
           <el-form-item label="优先级">
             <el-select v-model="form.priority">
-              <el-option label="高" value="high" /><el-option label="中" value="medium" /><el-option label="低" value="low" />
+              <el-option v-for="option in requirementPriorityOptions" :key="option.value" :label="option.label" :value="option.value" />
             </el-select>
           </el-form-item>
           <el-form-item label="状态">
@@ -132,15 +132,26 @@ const {
   total: requirementTotal,
   pagedItems: pagedRequirements
 } = usePagination(requirements)
-const form = reactive({ project_id: null, source_project_id: null, iteration_id: null, title: '', requirement_type: '', priority: 'medium', owner_id: null, proposer_id: null, status: 'draft', review_status: 'not_required', description: '', acceptance_criteria: '', source_reviewed: false })
+const form = reactive({ project_id: null, source_project_id: null, iteration_id: null, title: '', requirement_type: '', priority: '3', owner_id: null, proposer_id: null, status: 'draft', review_status: 'not_required', description: '', acceptance_criteria: '', source_reviewed: false })
 const ownerManuallySet = ref(false)
 const generateForm = reactive({ title: '', task_type: '', description: '' })
+const requirementPriorityOptions = [
+  { label: '1', value: '1' },
+  { label: '2', value: '2' },
+  { label: '3', value: '3' },
+  { label: '4', value: '4' },
+  { label: '5', value: '5' }
+]
+const legacyRequirementPriorityLabels = { high: '1', medium: '3', low: '5' }
+const legacyRequirementPriorityValues = { high: '1', medium: '3', low: '5' }
 
-function resetForm() { Object.assign(form, { project_id: null, source_project_id: null, iteration_id: null, title: '', requirement_type: '', priority: 'medium', owner_id: null, proposer_id: null, status: 'draft', review_status: 'not_required', description: '', acceptance_criteria: '', source_reviewed: false }); ownerManuallySet.value = false }
+function requirementPriorityLabel(value) { return legacyRequirementPriorityLabels[value] || requirementPriorityOptions.find((option) => option.value === value)?.label || value || '-' }
+function normalizeRequirementPriority(value) { return legacyRequirementPriorityValues[value] || value || '3' }
+function resetForm() { Object.assign(form, { project_id: null, source_project_id: null, iteration_id: null, title: '', requirement_type: '', priority: '3', owner_id: null, proposer_id: null, status: 'draft', review_status: 'not_required', description: '', acceptance_criteria: '', source_reviewed: false }); ownerManuallySet.value = false }
 function openCreate() { editingId.value = null; resetForm(); dialogVisible.value = true }
 function onSourceProjectChange(projectId) { if (!projectId || ownerManuallySet.value) return; const project = projects.value.find(p => p.id === projectId); if (project && project.owner_id) { form.owner_id = project.owner_id } }
 function onOwnerChange() { ownerManuallySet.value = true }
-function openEdit(row) { editingId.value = row.id; ownerManuallySet.value = true; Object.assign(form, { ...row, requirement_type: row.requirement_type || '', description: row.description || '', acceptance_criteria: row.acceptance_criteria || '' }); dialogVisible.value = true }
+function openEdit(row) { editingId.value = row.id; ownerManuallySet.value = true; Object.assign(form, { ...row, priority: normalizeRequirementPriority(row.priority), requirement_type: row.requirement_type || '', description: row.description || '', acceptance_criteria: row.acceptance_criteria || '' }); dialogVisible.value = true }
 function openGenerate(row) { generatingRequirementId.value = row.id; generateForm.title = row.title; generateForm.task_type = 'development'; generateForm.description = ''; generateVisible.value = true }
 
 async function loadData() {

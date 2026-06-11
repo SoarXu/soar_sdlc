@@ -13,7 +13,7 @@
         <el-descriptions-item label="迭代">{{ labelById(iterations, requirement.iteration_id) }}</el-descriptions-item>
         <el-descriptions-item label="负责人">{{ userLabel(users, requirement.owner_id) }}</el-descriptions-item>
         <el-descriptions-item label="提出人">{{ userLabel(users, requirement.proposer_id) }}</el-descriptions-item>
-        <el-descriptions-item label="优先级">{{ requirement.priority || '-' }}</el-descriptions-item>
+        <el-descriptions-item label="优先级">{{ requirementPriorityLabel(requirement.priority) }}</el-descriptions-item>
         <el-descriptions-item label="状态">{{ requirement.status || '-' }}</el-descriptions-item>
         <el-descriptions-item label="评审状态">{{ requirement.review_status || '-' }}</el-descriptions-item>
         <el-descriptions-item label="类型">{{ requirement.requirement_type || '-' }}</el-descriptions-item>
@@ -66,8 +66,20 @@ const projects = ref([])
 const iterations = ref([])
 const users = ref([])
 const tasks = ref([])
+const requirementPriorityOptions = [
+  { label: '1', value: '1' },
+  { label: '2', value: '2' },
+  { label: '3', value: '3' },
+  { label: '4', value: '4' },
+  { label: '5', value: '5' }
+]
+const legacyRequirementPriorityLabels = { high: '1', medium: '3', low: '5' }
 
 const relatedTasks = computed(() => tasks.value.filter((item) => item.requirement_id === requirementId.value))
+
+function requirementPriorityLabel(value) {
+  return legacyRequirementPriorityLabels[value] || requirementPriorityOptions.find((option) => option.value === value)?.label || value || '-'
+}
 
 async function loadData() {
   loading.value = true

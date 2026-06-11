@@ -9,7 +9,7 @@ class RequirementBase(BaseModel):
     iteration_id: int | None = None
     title: str
     requirement_type: str | None = None
-    priority: str = "medium"
+    priority: str = "3"
     owner_id: int | None = None
     proposer_id: int | None = None
     status: str = "draft"

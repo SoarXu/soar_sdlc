@@ -16,8 +16,8 @@ export async function loadCloseReasonMap(items, fetchStatusOperations) {
 
 export function closeReasonText(operation) {
   const parts = []
-  if (operation.reason) parts.push(`关闭原因：${operation.reason}`)
-  if (operation.remark) parts.push(`备注：${operation.remark}`)
+  if (operation.reason) parts.push(operation.reason)
+  if (operation.remark) parts.push(operation.remark)
   return parts.map(escapeHtml).join('<br>')
 }
 

@@ -242,7 +242,7 @@ def test_requirement_close_closes_open_linked_tasks_with_same_reason(client: Tes
 
 def test_closed_project_blocks_requirement_and_task_activation(client: TestClient):
     project_id = _create_project(client)
-    client.post(f"/api/v1/projects/{project_id}/start")
+    client.post(f"/api/v1/projects/{project_id}/start", json={"effective_time": "2026-06-01T09:00:00"})
     requirement = client.post(
         "/api/v1/requirements",
         json={"project_id": project_id, "title": f"项目关闭需求-{uuid4().hex[:8]}"},
@@ -254,7 +254,7 @@ def test_closed_project_blocks_requirement_and_task_activation(client: TestClien
     client.post(f"/api/v1/requirements/{requirement['id']}/activate")
     client.post(f"/api/v1/tasks/{task['id']}/activate")
 
-    closed_project = client.post(f"/api/v1/projects/{project_id}/close")
+    closed_project = client.post(f"/api/v1/projects/{project_id}/close", json={"effective_time": "2026-06-10T18:00:00"})
     assert closed_project.status_code == 200
 
     requirement_detail = client.get(f"/api/v1/requirements/{requirement['id']}")

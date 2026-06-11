@@ -185,7 +185,7 @@
 
     <el-dialog v-model="statusDialogVisible" :title="statusDialogTitle" width="760px" class="status-operation-dialog">
       <el-form label-position="top">
-        <el-form-item label="实际完成" required>
+        <el-form-item v-if="statusDateRequired" :label="statusDateLabel" required>
           <el-date-picker
             v-model="statusForm.effective_time"
             type="datetime"
@@ -315,6 +315,8 @@ const projectDialogTitle = computed(() => {
 const statusTargetLabel = computed(() => (statusTargetType.value === 'program' ? '项目集' : '项目'))
 const statusDialogTitle = computed(() => `${statusActionLabel(statusAction.value)}${statusTargetLabel.value} ${statusTarget.value?.name || ''}`)
 const statusConfirmText = computed(() => `${statusActionLabel(statusAction.value)}${statusTargetLabel.value}`)
+const statusDateRequired = computed(() => statusAction.value === 'close' || (statusAction.value === 'start' && statusTarget.value?.status === 'planning'))
+const statusDateLabel = computed(() => (statusAction.value === 'start' ? '实际开始日期' : '实际完成日期'))
 
 const treeRows = computed(() => programTree.value.map(toTreeRow))
 const flatPrograms = computed(() => flattenPrograms(programTree.value))
@@ -492,7 +494,7 @@ async function openStatusDialog(row, targetType, action) {
   statusTarget.value = row
   statusTargetType.value = targetType
   statusAction.value = action
-  Object.assign(statusForm, { effective_time: currentDateTimeValue(), remark: '' })
+  Object.assign(statusForm, { effective_time: statusDateRequired.value ? currentDateTimeValue() : '', remark: '' })
   try {
     const response =
       targetType === 'program'
@@ -627,12 +629,9 @@ async function changeProjectStatus(id, action, payload = {}) {
 }
 
 async function submitStatusOperation() {
-  if (!statusForm.effective_time) return ElMessage.warning('请选择实际完成时间')
+  if (statusDateRequired.value && !statusForm.effective_time) return ElMessage.warning(`请选择${statusDateLabel.value}`)
   saving.value = true
-  const payload = {
-    effective_time: statusForm.effective_time,
-    remark: statusForm.remark
-  }
+  const payload = buildStatusPayload()
   try {
     if (statusTargetType.value === 'program') {
       await changeProgramStatus(statusTarget.value.id, statusAction.value, payload)
@@ -643,6 +642,12 @@ async function submitStatusOperation() {
   } finally {
     saving.value = false
   }
+}
+
+function buildStatusPayload() {
+  const payload = { remark: statusForm.remark }
+  if (statusDateRequired.value) payload.effective_time = statusForm.effective_time
+  return payload
 }
 
 async function removeProgram(id) {

@@ -100,7 +100,7 @@
 
     <el-dialog v-model="statusDialogVisible" :title="statusDialogTitle" width="760px" class="status-operation-dialog">
       <el-form label-position="top">
-        <el-form-item label="实际完成" required>
+        <el-form-item v-if="statusDateRequired" :label="statusDateLabel" required>
           <el-date-picker
             v-model="statusForm.effective_time"
             type="datetime"
@@ -229,6 +229,8 @@ const maintenanceForm = reactive({ effective_time: '', remark: '', payload: null
 
 const statusDialogTitle = computed(() => `${statusActionLabel(statusAction.value)}项目 ${statusTarget.value?.name || ''}`)
 const statusConfirmText = computed(() => `${statusActionLabel(statusAction.value)}项目`)
+const statusDateRequired = computed(() => statusAction.value === 'close' || (statusAction.value === 'start' && statusTarget.value?.status === 'planning'))
+const statusDateLabel = computed(() => (statusAction.value === 'start' ? '实际开始日期' : '实际完成日期'))
 
 function projectStatusLabel(value) {
   return projectStatusOptions.find((option) => option.value === value)?.label || value || '-'
@@ -283,7 +285,7 @@ function currentDateTimeValue() {
 async function openStatusDialog(row, action) {
   statusTarget.value = row
   statusAction.value = action
-  Object.assign(statusForm, { effective_time: currentDateTimeValue(), remark: '' })
+  Object.assign(statusForm, { effective_time: statusDateRequired.value ? currentDateTimeValue() : '', remark: '' })
   try {
     const response = await fetchProjectStatusOperations(row.id)
     statusHistory.value = response.data
@@ -362,10 +364,7 @@ async function changeProjectStatus(id, action) {
     activate: activateProject
   }
   try {
-    await actions[action](id, {
-      effective_time: statusForm.effective_time,
-      remark: statusForm.remark
-    })
+    await actions[action](id, buildStatusPayload())
     await loadData()
   } catch (error) {
     ElMessage.error(error.response?.data?.detail || '项目状态更新失败')
@@ -374,7 +373,7 @@ async function changeProjectStatus(id, action) {
 }
 
 async function submitStatusOperation() {
-  if (!statusForm.effective_time) return ElMessage.warning('请选择实际完成时间')
+  if (statusDateRequired.value && !statusForm.effective_time) return ElMessage.warning(`请选择${statusDateLabel.value}`)
   saving.value = true
   try {
     await changeProjectStatus(statusTarget.value.id, statusAction.value)
@@ -382,6 +381,12 @@ async function submitStatusOperation() {
   } finally {
     saving.value = false
   }
+}
+
+function buildStatusPayload() {
+  const payload = { remark: statusForm.remark }
+  if (statusDateRequired.value) payload.effective_time = statusForm.effective_time
+  return payload
 }
 
 async function removeProject(id) { await deleteProject(id); await loadData() }

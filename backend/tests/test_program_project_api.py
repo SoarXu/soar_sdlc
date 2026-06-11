@@ -52,7 +52,10 @@ def test_program_crud_persists_to_database(client: TestClient):
     assert updated.json()["planned_end_date"] is None
     assert updated.json()["actual_end_date"] == "2027-01-10"
 
-    started = client.post(f"/api/v1/programs/{program_id}/start")
+    started = client.post(
+        f"/api/v1/programs/{program_id}/start",
+        json={"effective_time": "2026-06-10T09:00:00"},
+    )
     assert started.status_code == 200
     assert started.json()["status"] == "active"
 
@@ -62,7 +65,7 @@ def test_program_crud_persists_to_database(client: TestClient):
 
     restarted = client.post(
         f"/api/v1/programs/{program_id}/start",
-        json={"effective_time": "2026-06-10T11:31:59", "remark": "重新启动项目集"},
+        json={"remark": "重新启动项目集"},
     )
     assert restarted.status_code == 200
     assert restarted.json()["status"] == "active"
@@ -123,7 +126,10 @@ def test_project_crud_uses_prd_fields(client: TestClient):
     assert updated.json()["end_date"] is None
     assert updated.json()["actual_end_date"] == "2026-12-15"
 
-    started = client.post(f"/api/v1/projects/{project_id}/start")
+    started = client.post(
+        f"/api/v1/projects/{project_id}/start",
+        json={"effective_time": "2026-07-01T09:00:00"},
+    )
     assert started.status_code == 200
     assert started.json()["status"] == "active"
 
@@ -142,7 +148,10 @@ def test_project_crud_uses_prd_fields(client: TestClient):
     assert paused_again.status_code == 200
     assert paused_again.json()["status"] == "paused"
 
-    closed = client.post(f"/api/v1/projects/{project_id}/close")
+    closed = client.post(
+        f"/api/v1/projects/{project_id}/close",
+        json={"effective_time": "2026-07-10T18:00:00"},
+    )
     assert closed.status_code == 200
     assert closed.json()["status"] == "closed"
 
@@ -219,7 +228,7 @@ def test_project_can_create_child_project_and_inherit_program(client: TestClient
 def test_open_project_move_only_changes_parent(client: TestClient):
     parent = client.post("/api/v1/projects", json={"name": f"父项目-{uuid4().hex[:8]}"}).json()
     project = client.post("/api/v1/projects", json={"name": f"移动项目-{uuid4().hex[:8]}"}).json()
-    client.post(f"/api/v1/projects/{project['id']}/start")
+    client.post(f"/api/v1/projects/{project['id']}/start", json={"effective_time": "2026-06-01T09:00:00"})
 
     moved = client.patch(f"/api/v1/projects/{project['id']}", json={"parent_id": parent["id"]})
 
@@ -233,8 +242,8 @@ def test_open_project_move_only_changes_parent(client: TestClient):
 def test_closed_project_move_enters_maintenance(client: TestClient):
     parent = client.post("/api/v1/projects", json={"name": f"运维父项目-{uuid4().hex[:8]}"}).json()
     project = client.post("/api/v1/projects", json={"name": f"转运维项目-{uuid4().hex[:8]}"}).json()
-    client.post(f"/api/v1/projects/{project['id']}/start")
-    client.post(f"/api/v1/projects/{project['id']}/close")
+    client.post(f"/api/v1/projects/{project['id']}/start", json={"effective_time": "2026-06-01T09:00:00"})
+    client.post(f"/api/v1/projects/{project['id']}/close", json={"effective_time": "2026-06-10T18:00:00"})
 
     moved = client.patch(
         f"/api/v1/projects/{project['id']}",
@@ -296,7 +305,10 @@ def test_project_start_activates_parent_program(client: TestClient):
         json={"name": f"同步项目-{uuid4().hex[:8]}", "program_id": program["id"]},
     ).json()
 
-    response = client.post(f"/api/v1/projects/{project['id']}/start")
+    response = client.post(
+        f"/api/v1/projects/{project['id']}/start",
+        json={"effective_time": "2026-06-01T09:00:00"},
+    )
 
     assert response.status_code == 200
     assert response.json()["status"] == "active"
@@ -305,22 +317,86 @@ def test_project_start_activates_parent_program(client: TestClient):
     assert synced_program["status"] == "active"
 
 
+def test_project_status_dates_follow_action_rules(client: TestClient):
+    project = client.post(
+        "/api/v1/projects",
+        json={"name": f"项目状态日期-{uuid4().hex[:8]}"},
+    ).json()
+
+    missing_start = client.post(f"/api/v1/projects/{project['id']}/start", json={"remark": "no date"})
+    assert missing_start.status_code == 400
+
+    started = client.post(
+        f"/api/v1/projects/{project['id']}/start",
+        json={"effective_time": "2026-06-01T09:00:00", "remark": "start"},
+    )
+    assert started.status_code == 200
+    assert started.json()["actual_start_date"] == "2026-06-01"
+
+    client.post(f"/api/v1/projects/{project['id']}/suspend", json={"remark": "pause"})
+    restarted = client.post(f"/api/v1/projects/{project['id']}/start", json={"remark": "resume"})
+    assert restarted.status_code == 200
+    assert restarted.json()["actual_start_date"] == "2026-06-01"
+
+    missing_close = client.post(f"/api/v1/projects/{project['id']}/close", json={"remark": "no date"})
+    assert missing_close.status_code == 400
+
+    closed = client.post(
+        f"/api/v1/projects/{project['id']}/close",
+        json={"effective_time": "2026-06-08T18:30:00", "remark": "close"},
+    )
+    assert closed.status_code == 200
+    assert closed.json()["actual_end_date"] == "2026-06-08"
+
+
+def test_program_status_dates_follow_action_rules(client: TestClient):
+    program = client.post(
+        "/api/v1/programs",
+        json={"name": f"项目集状态日期-{uuid4().hex[:8]}"},
+    ).json()
+
+    missing_start = client.post(f"/api/v1/programs/{program['id']}/start", json={"remark": "no date"})
+    assert missing_start.status_code == 400
+
+    started = client.post(
+        f"/api/v1/programs/{program['id']}/start",
+        json={"effective_time": "2026-06-02T09:00:00", "remark": "start"},
+    )
+    assert started.status_code == 200
+    assert started.json()["actual_start_date"] == "2026-06-02"
+
+    client.post(f"/api/v1/programs/{program['id']}/suspend", json={"remark": "pause"})
+    restarted = client.post(f"/api/v1/programs/{program['id']}/start", json={"remark": "resume"})
+    assert restarted.status_code == 200
+    assert restarted.json()["actual_start_date"] == "2026-06-02"
+
+    missing_close = client.post(f"/api/v1/programs/{program['id']}/close", json={"remark": "no date"})
+    assert missing_close.status_code == 400
+
+    closed = client.post(
+        f"/api/v1/programs/{program['id']}/close",
+        json={"effective_time": "2026-06-09T18:30:00", "remark": "close"},
+    )
+    assert closed.status_code == 200
+    assert closed.json()["actual_end_date"] == "2026-06-09"
+
+
 def test_closing_program_blocks_when_descendants_are_not_closed(client: TestClient):
     parent = client.post("/api/v1/programs", json={"name": f"关闭父项目集-{uuid4().hex[:8]}"}).json()
     child = client.post(
         "/api/v1/programs",
         json={"name": f"关闭子项目集-{uuid4().hex[:8]}", "parent_id": parent["id"]},
     ).json()
-    client.post(f"/api/v1/programs/{parent['id']}/start")
+    client.post(f"/api/v1/programs/{parent['id']}/start", json={"effective_time": "2026-06-01T09:00:00"})
 
     blocked = client.post(f"/api/v1/programs/{parent['id']}/close")
 
     assert blocked.status_code == 400
     assert blocked.json()["detail"] == "存在子项目集或项目为未关闭状态"
 
-    client.post(f"/api/v1/programs/{child['id']}/start")
-    client.post(f"/api/v1/programs/{child['id']}/close")
-    closed = client.post(f"/api/v1/programs/{parent['id']}/close")
+    client.post(f"/api/v1/programs/{child['id']}/start", json={"effective_time": "2026-06-01T09:00:00"})
+    client.post(f"/api/v1/programs/{child['id']}/close", json={"effective_time": "2026-06-02T18:00:00"})
+    closed = client.post(f"/api/v1/programs/{parent['id']}/close", json={"effective_time": "2026-06-03T18:00:00"})
 
     assert closed.status_code == 200
     assert closed.json()["status"] == "closed"

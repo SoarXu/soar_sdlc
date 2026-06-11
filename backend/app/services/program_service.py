@@ -141,7 +141,9 @@ def start_program(db: Session, program_id: int, payload: StatusOperationCreate |
     _require_status(program.status, {"planning", "paused"}, "只有规划中或已挂起的项目集可以启动")
     from_status = program.status
     program.status = "active"
-    program.actual_start_date = _effective_date(payload)
+    if from_status == "planning":
+        _require_effective_time(payload, "请选择实际开始日期")
+        program.actual_start_date = _effective_date(payload)
     _activate_ancestor_programs(db, program.parent_id)
     create_status_operation(
         db,
@@ -183,6 +185,7 @@ def close_program(db: Session, program_id: int, payload: StatusOperationCreate |
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="存在子项目集或项目为未关闭状态")
     from_status = program.status
     program.status = "closed"
+    _require_effective_time(payload, "请选择实际完成日期")
     program.actual_end_date = _effective_date(payload)
     create_status_operation(
         db,
@@ -233,6 +236,11 @@ def _get_active_program(db: Session, program_id: int) -> Program:
 
 def _require_status(current_status: str, allowed_statuses: set[str], message: str) -> None:
     if current_status not in allowed_statuses:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=message)
+
+
+def _require_effective_time(payload: StatusOperationCreate | None, message: str) -> None:
+    if not payload or not payload.effective_time:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=message)
 
 

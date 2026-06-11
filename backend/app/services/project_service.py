@@ -135,7 +135,9 @@ def start_project(db: Session, project_id: int, payload: StatusOperationCreate |
     _require_status(project.status, {"planning", "paused"}, "只有规划中或已挂起的项目可以启动")
     from_status = project.status
     project.status = "active"
-    project.actual_start_date = _effective_date(payload)
+    if from_status == "planning":
+        _require_effective_time(payload, "请选择实际开始日期")
+        project.actual_start_date = _effective_date(payload)
     _activate_program_tree(db, project.program_id)
     create_status_operation(
         db,
@@ -175,6 +177,7 @@ def close_project(db: Session, project_id: int, payload: StatusOperationCreate |
     _require_status(project.status, {"active", "paused", MAINTENANCE_STATUS}, "只有进行中、已挂起或运维中的项目可以关闭")
     from_status = project.status
     project.status = "closed"
+    _require_effective_time(payload, "请选择实际完成日期")
     project.actual_end_date = _effective_date(payload)
     cascade_payload = StatusOperationCreate(reason="不做", remark=payload.remark if payload else None)
     requirements = (
@@ -259,6 +262,11 @@ def _is_project_descendant_of(db: Session, project: Project, ancestor_id: int) -
 
 def _require_status(current_status: str, allowed_statuses: set[str], message: str) -> None:
     if current_status not in allowed_statuses:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=message)
+
+
+def _require_effective_time(payload: StatusOperationCreate | None, message: str) -> None:
+    if not payload or not payload.effective_time:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=message)
 
 

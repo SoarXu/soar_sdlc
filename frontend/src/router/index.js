@@ -14,6 +14,7 @@ import RequirementsView from '../views/RequirementsView.vue'
 import TaskDetailView from '../views/TaskDetailView.vue'
 import TasksView from '../views/TasksView.vue'
 import TestsView from '../views/TestsView.vue'
+import WorkflowView from '../views/WorkflowView.vue'
 
 const routes = [
   { path: '/login', name: 'login', component: LoginView },
@@ -32,7 +33,8 @@ const routes = [
       { path: 'requirements', name: 'requirements', component: RequirementsView },
       { path: 'tasks', name: 'tasks', component: TasksView },
       { path: 'tests', name: 'tests', component: TestsView },
-      { path: 'bugs', name: 'bugs', component: BugsView }
+      { path: 'bugs', name: 'bugs', component: BugsView },
+      { path: 'workflow', name: 'workflow', component: WorkflowView }
     ]
   }
 ]

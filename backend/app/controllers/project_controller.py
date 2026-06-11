@@ -8,6 +8,7 @@ from app.services.project_service import (
     create_project,
     delete_project,
     get_project,
+    list_project_audit_logs,
     list_project_status_operations,
     list_projects,
     start_project,
@@ -15,6 +16,7 @@ from app.services.project_service import (
     update_project,
 )
 from app.views.project_view import ProjectCreate, ProjectRead, ProjectUpdate
+from app.views.audit_log_view import AuditLogRead
 from app.views.status_operation_view import StatusOperationCreate, StatusOperationRead
 
 
@@ -44,6 +46,11 @@ def patch_project(project_id: int, payload: ProjectUpdate, db: Session = Depends
 @router.get("/{project_id}/status-operations", response_model=list[StatusOperationRead])
 def get_project_status_operations(project_id: int, db: Session = Depends(get_db)):
     return list_project_status_operations(db, project_id)
+
+
+@router.get("/{project_id}/audit-logs", response_model=list[AuditLogRead])
+def get_project_audit_logs(project_id: int, db: Session = Depends(get_db)):
+    return list_project_audit_logs(db, project_id)
 
 
 @router.post("/{project_id}/start", response_model=ProjectRead)

@@ -3,6 +3,7 @@ from datetime import date, datetime
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 
+from app.models.audit_log import AuditLog
 from app.models.program import Program
 from app.models.project import Project
 from app.models.requirement import Requirement
@@ -67,8 +68,19 @@ def update_project(db: Session, project_id: int, payload: ProjectUpdate) -> Proj
         data["end_date"] = None
     data.pop("status", None)
     maintenance_start_time = data.pop("maintenance_start_time", None)
+    before_data, after_data = _project_change_data(project, data)
     for field, value in data.items():
         setattr(project, field, value)
+    if before_data:
+        db.add(
+            AuditLog(
+                action="update",
+                object_type="project",
+                object_id=project.id,
+                before_data=before_data,
+                after_data=after_data,
+            )
+        )
     if should_move_to_maintenance:
         effective_time = maintenance_start_time or datetime.now()
         from_status = project.status
@@ -87,6 +99,16 @@ def update_project(db: Session, project_id: int, payload: ProjectUpdate) -> Proj
     db.commit()
     db.refresh(project)
     return project
+
+
+def list_project_audit_logs(db: Session, project_id: int) -> list[AuditLog]:
+    _get_active_project(db, project_id)
+    return (
+        db.query(AuditLog)
+        .filter(AuditLog.object_type == "project", AuditLog.object_id == project_id)
+        .order_by(AuditLog.create_time.desc(), AuditLog.id.desc())
+        .all()
+    )
 
 
 def delete_project(db: Session, project_id: int) -> None:
@@ -254,6 +276,25 @@ def _effective_date(payload: StatusOperationCreate | None) -> date:
     if payload and payload.effective_time:
         return payload.effective_time.date()
     return date.today()
+
+
+def _project_change_data(project: Project, data: dict) -> tuple[dict, dict]:
+    before_data = {}
+    after_data = {}
+    for field, new_value in data.items():
+        old_value = getattr(project, field)
+        old_normalized = _audit_value(old_value)
+        new_normalized = _audit_value(new_value)
+        if old_normalized != new_normalized:
+            before_data[field] = old_normalized
+            after_data[field] = new_normalized
+    return before_data, after_data
+
+
+def _audit_value(value):
+    if isinstance(value, (date, datetime)):
+        return value.isoformat()
+    return value
 
 
 def _collect_descendant_project_ids(db: Session, project_id: int) -> set[int]:

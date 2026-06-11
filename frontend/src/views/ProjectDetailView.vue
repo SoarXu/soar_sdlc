@@ -44,6 +44,31 @@
           <el-descriptions-item label="实际结束">{{ project.actual_end_date || '-' }}</el-descriptions-item>
           <el-descriptions-item label="描述" :span="2">{{ project.description || '-' }}</el-descriptions-item>
         </el-descriptions>
+        <div class="project-history">
+          <h2>历史记录</h2>
+          <el-empty v-if="!projectHistory.length" description="暂无历史记录" />
+          <div v-else class="project-history-list">
+            <div v-for="(item, index) in projectHistory" :key="item.key" class="project-history-entry">
+              <div class="project-history-line">
+                <span class="project-history-index">{{ index + 1 }}</span>
+                <span>{{ formatDateTime(item.time) }}，由 {{ item.actor }} {{ item.actionLabel }}。</span>
+                <button
+                  v-if="item.type === 'audit'"
+                  class="project-history-toggle"
+                  type="button"
+                  @click="toggleHistory(item.key)"
+                >
+                  {{ expandedHistory[item.key] ? '-' : '+' }}
+                </button>
+              </div>
+              <div v-if="item.type === 'audit' && expandedHistory[item.key]" class="project-history-detail">
+                <p v-for="change in item.changes" :key="change.field">
+                  修改了 <strong>{{ projectFieldLabel(change.field) }}</strong>，旧值为 "{{ displayHistoryValue(change.oldValue) }}"，新值为 "{{ displayHistoryValue(change.newValue) }}"。
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
       </template>
 
       <template v-else-if="activeTab === 'iterations'">
@@ -242,7 +267,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { createBug, deleteBug, fetchBugs, updateBug } from '../api/bugs'
 import { createIteration, deleteIteration, fetchIterations, updateIteration } from '../api/iterations'
 import { fetchPrograms } from '../api/programs'
-import { fetchProject } from '../api/projects'
+import { fetchProject, fetchProjectAuditLogs, fetchProjectStatusOperations } from '../api/projects'
 import { activateRequirement, closeRequirement, createRequirement, deleteRequirement, fetchRequirements, generateTask, updateRequirement } from '../api/requirements'
 import { activateTask, closeTask, createTask, deleteTask, fetchTasks, updateTask } from '../api/tasks'
 import { createTestCase, deleteTestCase, fetchTestCases, updateTestCase } from '../api/testCases'
@@ -266,6 +291,9 @@ const tasks = ref([])
 const testCases = ref([])
 const testRuns = ref([])
 const bugs = ref([])
+const projectAuditLogs = ref([])
+const projectStatusOperations = ref([])
+const expandedHistory = reactive({})
 
 const iterationDialogVisible = ref(false), requirementDialogVisible = ref(false), generateVisible = ref(false), closeRequirementVisible = ref(false), taskDialogVisible = ref(false), closeTaskVisible = ref(false)
 const caseDialogVisible = ref(false), runDialogVisible = ref(false), bugDialogVisible = ref(false)
@@ -355,6 +383,29 @@ const metrics = computed(() => [
   { key: 'tests', label: '测试', value: projectTestCases.value.length + projectTestRuns.value.length },
   { key: 'bugs', label: 'Bug', value: projectBugs.value.length }
 ])
+const projectHistory = computed(() => {
+  const statusItems = projectStatusOperations.value.map((item) => ({
+    key: `status-${item.id}`,
+    type: 'status',
+    time: item.effective_time || item.create_time,
+    actor: item.actor_name || '系统',
+    actionLabel: `${operationActionLabel(item.action)}`,
+    changes: []
+  }))
+  const auditItems = projectAuditLogs.value.map((item) => ({
+    key: `audit-${item.id}`,
+    type: 'audit',
+    time: item.create_time,
+    actor: '系统',
+    actionLabel: '编辑',
+    changes: Object.keys(item.after_data || {}).map((field) => ({
+      field,
+      oldValue: item.before_data?.[field],
+      newValue: item.after_data?.[field]
+    }))
+  }))
+  return [...statusItems, ...auditItems].sort((a, b) => new Date(a.time) - new Date(b.time))
+})
 
 const iterationForm = reactive({ project_ids: [], name: '', owner_id: null, start_date: null, end_date: null, status: 'planning', goal: '' })
 const requirementForm = reactive({ project_id: null, iteration_id: null, title: '', requirement_type: '', priority: '3', owner_id: null, proposer_id: null, status: 'draft', review_status: 'not_required', description: '', acceptance_criteria: '', source_reviewed: false })
@@ -376,10 +427,29 @@ function taskStatusLabel(value) { return optionLabel(taskStatusOptions, value) }
 function testCaseStatusLabel(value) { return optionLabel(testCaseStatusOptions, value) }
 function testRunStatusLabel(value) { return optionLabel(testRunStatusOptions, value) }
 function bugStatusLabel(value) { return optionLabel(bugStatusOptions, value) }
+function operationActionLabel(value) { return optionLabel([{ label: '启动', value: 'start' }, { label: '挂起', value: 'suspend' }, { label: '关闭', value: 'close' }, { label: '激活', value: 'activate' }, { label: '转运维', value: 'move_to_maintenance' }], value) }
 function canActivateRequirement(row) { return ['draft', 'closed'].includes(row.status) }
 function canActivateTask(row) { return ['todo', 'closed'].includes(row.status) }
 function apiErrorMessage(error, fallback) { return error?.response?.data?.detail || fallback }
 function showActionError(error, fallback) { ElMessageBox.alert(apiErrorMessage(error, fallback), '提示', { type: 'warning' }) }
+function toggleHistory(key) { expandedHistory[key] = !expandedHistory[key] }
+function formatDateTime(value) { return value ? new Date(value).toLocaleString('zh-CN', { hour12: false }) : '-' }
+function displayHistoryValue(value) { return value === null || value === undefined || value === '' ? '-' : value }
+function projectFieldLabel(field) {
+  return optionLabel([
+    { label: '项目名称', value: 'name' },
+    { label: '上级项目', value: 'parent_id' },
+    { label: '所属项目集', value: 'program_id' },
+    { label: '负责人', value: 'owner_id' },
+    { label: '计划开始', value: 'start_date' },
+    { label: '计划结束', value: 'end_date' },
+    { label: '实际开始', value: 'actual_start_date' },
+    { label: '实际结束', value: 'actual_end_date' },
+    { label: '长期', value: 'is_long_term' },
+    { label: '描述', value: 'description' },
+    { label: '工作流配置', value: 'workflow_config_id' }
+  ], field)
+}
 function resetIterationForm() { Object.assign(iterationForm, { project_ids: [projectId.value], name: '', owner_id: null, start_date: null, end_date: null, status: 'planning', goal: '' }) }
 function resetRequirementForm() { Object.assign(requirementForm, { project_id: projectId.value, iteration_id: null, title: '', requirement_type: '', priority: '3', owner_id: project.value.owner_id || null, proposer_id: null, status: 'draft', review_status: 'not_required', description: '', acceptance_criteria: '', source_reviewed: false }) }
 function resetTaskForm() { Object.assign(taskForm, { project_id: projectId.value, requirement_id: null, title: '', task_type: '', priority: 'medium', owner_id: null, estimated_hours: null, actual_hours: null, due_date: null, status: 'todo', description: '' }) }
@@ -406,7 +476,7 @@ function openBugEdit(row) { editingBugId.value = row.id; Object.assign(bugForm, 
 async function loadData() {
   loading.value = true
   try {
-    const [projectRes, programRes, userRes, iterationRes, requirementRes, taskRes, caseRes, runRes, bugRes] = await Promise.all([
+    const [projectRes, programRes, userRes, iterationRes, requirementRes, taskRes, caseRes, runRes, bugRes, auditRes, statusRes] = await Promise.all([
       fetchProject(projectId.value),
       fetchPrograms(),
       fetchUsers(),
@@ -415,10 +485,13 @@ async function loadData() {
       fetchTasks(),
       fetchTestCases(),
       fetchTestRuns(),
-      fetchBugs()
+      fetchBugs(),
+      fetchProjectAuditLogs(projectId.value),
+      fetchProjectStatusOperations(projectId.value)
     ])
     project.value = projectRes.data; programs.value = programRes.data; users.value = userRes.data; iterations.value = iterationRes.data
     requirements.value = requirementRes.data; tasks.value = taskRes.data; testCases.value = caseRes.data; testRuns.value = runRes.data; bugs.value = bugRes.data
+    projectAuditLogs.value = auditRes.data; projectStatusOperations.value = statusRes.data
   } catch {
     ElMessage.error('项目详情加载失败')
   } finally {

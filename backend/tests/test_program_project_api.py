@@ -158,6 +158,38 @@ def test_project_crud_uses_prd_fields(client: TestClient):
     assert deleted.status_code == 204
 
 
+def test_project_update_records_only_changed_fields(client: TestClient):
+    project = client.post(
+        "/api/v1/projects",
+        json={
+            "name": f"编辑记录项目-{uuid4().hex[:8]}",
+            "description": "原描述",
+            "start_date": "2026-07-01",
+        },
+    ).json()
+    project_id = project["id"]
+
+    updated = client.patch(
+        f"/api/v1/projects/{project_id}",
+        json={"name": "编辑后项目", "description": "原描述", "start_date": "2026-07-02"},
+    )
+    assert updated.status_code == 200
+
+    logs = client.get(f"/api/v1/projects/{project_id}/audit-logs")
+    assert logs.status_code == 200
+    data = logs.json()
+    assert len(data) == 1
+    assert data[0]["action"] == "update"
+    assert data[0]["object_type"] == "project"
+    assert data[0]["object_id"] == project_id
+    assert data[0]["before_data"] == {"name": project["name"], "start_date": "2026-07-01"}
+    assert data[0]["after_data"] == {"name": "编辑后项目", "start_date": "2026-07-02"}
+
+    unchanged = client.patch(f"/api/v1/projects/{project_id}", json={"name": "编辑后项目"})
+    assert unchanged.status_code == 200
+    assert len(client.get(f"/api/v1/projects/{project_id}/audit-logs").json()) == 1
+
+
 def test_project_can_create_child_project_and_inherit_program(client: TestClient):
     program = client.post("/api/v1/programs", json={"name": f"子项目项目集-{uuid4().hex[:8]}"}).json()
     parent = client.post(

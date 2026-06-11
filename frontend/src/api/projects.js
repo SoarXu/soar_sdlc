@@ -20,6 +20,10 @@ export function fetchProjectStatusOperations(id) {
   return http.get(`/projects/${id}/status-operations`)
 }
 
+export function fetchProjectAuditLogs(id) {
+  return http.get(`/projects/${id}/audit-logs`)
+}
+
 export function startProject(id, payload = {}) {
   return http.post(`/projects/${id}/start`, payload)
 }

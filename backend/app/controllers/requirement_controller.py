@@ -9,11 +9,13 @@ from app.services.requirement_service import (
     delete_requirement,
     generate_task_from_requirement,
     get_requirement,
+    list_requirement_audit_logs,
     list_requirement_status_operations,
     list_requirements,
     update_requirement,
 )
 from app.views.requirement_view import GenerateTaskRequest, RequirementCreate, RequirementRead, RequirementUpdate
+from app.views.audit_log_view import AuditLogRead
 from app.views.status_operation_view import StatusOperationCreate, StatusOperationRead
 from app.views.task_view import TaskRead
 
@@ -54,6 +56,11 @@ def close_requirement_status(requirement_id: int, payload: StatusOperationCreate
 @router.get("/{requirement_id}/status-operations", response_model=list[StatusOperationRead])
 def get_requirement_status_operations(requirement_id: int, db: Session = Depends(get_db)):
     return list_requirement_status_operations(db, requirement_id)
+
+
+@router.get("/{requirement_id}/audit-logs", response_model=list[AuditLogRead])
+def get_requirement_audit_logs(requirement_id: int, db: Session = Depends(get_db)):
+    return list_requirement_audit_logs(db, requirement_id)
 
 
 @router.delete("/{requirement_id}", status_code=status.HTTP_204_NO_CONTENT)

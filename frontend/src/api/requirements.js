@@ -28,6 +28,10 @@ export function fetchRequirementStatusOperations(id) {
   return http.get(`/requirements/${id}/status-operations`)
 }
 
+export function fetchRequirementAuditLogs(id) {
+  return http.get(`/requirements/${id}/audit-logs`)
+}
+
 export function deleteRequirement(id) {
   return http.delete(`/requirements/${id}`)
 }

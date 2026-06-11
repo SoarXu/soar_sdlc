@@ -45,40 +45,48 @@
     </el-card>
 
     <el-card shadow="never" class="detail-panel">
-      <template #header>状态历史</template>
-      <el-empty v-if="!statusOperations.length" description="暂无状态历史" />
-      <el-timeline v-else class="status-history">
-        <el-timeline-item
-          v-for="operation in statusOperations"
-          :key="operation.id"
-          :timestamp="formatDateTime(operation.effective_time)"
-          placement="top"
-        >
-          <div class="status-history-item">
-            <div class="status-history-title">
-              {{ operationActionLabel(operation.action) }}
-              <span>{{ requirementStatusLabel(operation.from_status) }} → {{ requirementStatusLabel(operation.to_status) }}</span>
-            </div>
-            <div class="status-history-meta">
-              操作人：{{ operation.actor_name || '系统' }}
-              <template v-if="operation.reason"> · 原因：{{ operation.reason }}</template>
-            </div>
-            <p v-if="operation.remark">{{ operation.remark }}</p>
+      <template #header>历史记录</template>
+      <el-empty v-if="!requirementHistory.length" description="暂无历史记录" />
+      <div v-else class="project-history-list">
+        <div v-for="(item, index) in requirementHistory" :key="item.key" class="project-history-entry">
+          <div class="project-history-line">
+            <span class="project-history-index">{{ index + 1 }}</span>
+            <span>{{ formatDateTime(item.time) }}，由 {{ item.actor }} {{ item.actionLabel }}。</span>
+            <button
+              v-if="item.type === 'audit'"
+              class="project-history-toggle"
+              type="button"
+              @click="toggleHistory(item.key)"
+            >
+              {{ expandedHistory[item.key] ? '-' : '+' }}
+            </button>
           </div>
-        </el-timeline-item>
-      </el-timeline>
+          <div v-if="item.type === 'audit' && expandedHistory[item.key]" class="project-history-detail">
+            <p v-for="change in item.changes" :key="change.field">
+              修改了 <strong>{{ requirementFieldLabel(change.field) }}</strong>，旧值为 "{{ displayHistoryValue(change.oldValue) }}"，新值为 "{{ displayHistoryValue(change.newValue) }}"。
+            </p>
+          </div>
+          <div v-if="item.type === 'status'" class="project-history-detail">
+            <div class="status-history-meta">
+              {{ requirementStatusLabel(item.fromStatus) }} → {{ requirementStatusLabel(item.toStatus) }}
+              <template v-if="item.reason"> · 原因：{{ item.reason }}</template>
+            </div>
+            <p v-if="item.remark">{{ item.remark }}</p>
+          </div>
+        </div>
+      </div>
     </el-card>
   </section>
 </template>
 
 <script setup>
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 
 import { fetchIterations } from '../api/iterations'
 import { fetchProjects } from '../api/projects'
-import { fetchRequirement, fetchRequirementStatusOperations } from '../api/requirements'
+import { fetchRequirement, fetchRequirementAuditLogs, fetchRequirementStatusOperations } from '../api/requirements'
 import { fetchTasks } from '../api/tasks'
 import { fetchUsers } from '../api/users'
 import RequirementPriorityBadge from '../components/RequirementPriorityBadge.vue'
@@ -94,7 +102,35 @@ const iterations = ref([])
 const users = ref([])
 const tasks = ref([])
 const statusOperations = ref([])
+const auditLogs = ref([])
+const expandedHistory = reactive({})
 const relatedTasks = computed(() => tasks.value.filter((item) => item.requirement_id === requirementId.value))
+const requirementHistory = computed(() => {
+  const statusItems = statusOperations.value.map((item) => ({
+    key: `status-${item.id}`,
+    type: 'status',
+    time: item.effective_time || item.create_time,
+    actor: item.actor_name || '系统',
+    actionLabel: operationActionLabel(item.action),
+    fromStatus: item.from_status,
+    toStatus: item.to_status,
+    reason: item.reason,
+    remark: item.remark
+  }))
+  const auditItems = auditLogs.value.map((item) => ({
+    key: `audit-${item.id}`,
+    type: 'audit',
+    time: item.create_time,
+    actor: '系统',
+    actionLabel: '编辑',
+    changes: Object.keys(item.after_data || {}).map((field) => ({
+      field,
+      oldValue: item.before_data?.[field],
+      newValue: item.after_data?.[field]
+    }))
+  }))
+  return [...statusItems, ...auditItems].sort((a, b) => new Date(a.time) - new Date(b.time))
+})
 const requirementStatusOptions = [
   { label: '草稿', value: 'draft' },
   { label: '激活', value: 'active' },
@@ -120,6 +156,24 @@ function formatDateTime(value) {
   if (!value) return ''
   return new Date(value).toLocaleString('zh-CN', { hour12: false })
 }
+function toggleHistory(key) { expandedHistory[key] = !expandedHistory[key] }
+function displayHistoryValue(value) { return value === null || value === undefined || value === '' ? '-' : value }
+function requirementFieldLabel(field) {
+  return optionLabel([
+    { label: '所属项目', value: 'project_id' },
+    { label: '来源项目', value: 'source_project_id' },
+    { label: '迭代', value: 'iteration_id' },
+    { label: '需求标题', value: 'title' },
+    { label: '需求类型', value: 'requirement_type' },
+    { label: '优先级', value: 'priority' },
+    { label: '负责人', value: 'owner_id' },
+    { label: '提出人', value: 'proposer_id' },
+    { label: '评审状态', value: 'review_status' },
+    { label: '需求描述', value: 'description' },
+    { label: '验收标准', value: 'acceptance_criteria' },
+    { label: '是否评审通过', value: 'source_reviewed' }
+  ], field)
+}
 function goBackToProjectRequirements() {
   if (requirement.value.project_id) {
     router.push({ name: 'project-detail', params: { id: requirement.value.project_id }, query: { tab: 'requirements' } })
@@ -131,13 +185,14 @@ function goBackToProjectRequirements() {
 async function loadData() {
   loading.value = true
   try {
-    const [requirementRes, projectRes, iterationRes, userRes, taskRes, operationRes] = await Promise.all([
+    const [requirementRes, projectRes, iterationRes, userRes, taskRes, operationRes, auditRes] = await Promise.all([
       fetchRequirement(requirementId.value),
       fetchProjects(),
       fetchIterations(),
       fetchUsers(),
       fetchTasks(),
-      fetchRequirementStatusOperations(requirementId.value)
+      fetchRequirementStatusOperations(requirementId.value),
+      fetchRequirementAuditLogs(requirementId.value)
     ])
     requirement.value = requirementRes.data
     projects.value = projectRes.data
@@ -145,6 +200,7 @@ async function loadData() {
     users.value = userRes.data
     tasks.value = taskRes.data
     statusOperations.value = operationRes.data
+    auditLogs.value = auditRes.data
   } catch {
     ElMessage.error('需求详情加载失败')
   } finally {

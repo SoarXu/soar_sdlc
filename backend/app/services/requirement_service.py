@@ -1,8 +1,9 @@
-from datetime import datetime
+from datetime import date, datetime
 
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 
+from app.models.audit_log import AuditLog
 from app.models.project import Project
 from app.models.requirement import Requirement
 from app.models.task import Task
@@ -36,10 +37,21 @@ def create_requirement(db: Session, payload: RequirementCreate) -> Requirement:
 
 def update_requirement(db: Session, requirement_id: int, payload: RequirementUpdate) -> Requirement:
     requirement = _get_active_requirement(db, requirement_id)
-    for field, value in payload.model_dump(exclude_unset=True).items():
-        if field == "status":
-            continue
+    data = payload.model_dump(exclude_unset=True)
+    data.pop("status", None)
+    before_data, after_data = _requirement_change_data(requirement, data)
+    for field, value in data.items():
         setattr(requirement, field, value)
+    if before_data:
+        db.add(
+            AuditLog(
+                action="update",
+                object_type="requirement",
+                object_id=requirement.id,
+                before_data=before_data,
+                after_data=after_data,
+            )
+        )
     db.commit()
     db.refresh(requirement)
     return requirement
@@ -108,6 +120,16 @@ def list_requirement_status_operations(db: Session, requirement_id: int) -> list
     return list_status_operations(db, "requirement", requirement_id)
 
 
+def list_requirement_audit_logs(db: Session, requirement_id: int) -> list[AuditLog]:
+    _get_active_requirement(db, requirement_id)
+    return (
+        db.query(AuditLog)
+        .filter(AuditLog.object_type == "requirement", AuditLog.object_id == requirement_id)
+        .order_by(AuditLog.create_time.desc(), AuditLog.id.desc())
+        .all()
+    )
+
+
 def delete_requirement(db: Session, requirement_id: int) -> None:
     requirement = _get_active_requirement(db, requirement_id)
     requirement.deleted = 1
@@ -151,3 +173,22 @@ def _ensure_project_open_for_requirement(db: Session, requirement: Requirement) 
     project = db.query(Project).filter(Project.id == requirement.project_id, Project.deleted == 0).first()
     if project and project.status == "closed":
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="项目已关闭，需求不允许激活")
+
+
+def _requirement_change_data(requirement: Requirement, data: dict) -> tuple[dict, dict]:
+    before_data = {}
+    after_data = {}
+    for field, new_value in data.items():
+        old_value = getattr(requirement, field)
+        old_normalized = _audit_value(old_value)
+        new_normalized = _audit_value(new_value)
+        if old_normalized != new_normalized:
+            before_data[field] = old_normalized
+            after_data[field] = new_normalized
+    return before_data, after_data
+
+
+def _audit_value(value):
+    if isinstance(value, (date, datetime)):
+        return value.isoformat()
+    return value

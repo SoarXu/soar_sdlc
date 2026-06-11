@@ -90,6 +90,39 @@ def test_requirement_and_task_crud_use_prd_fields(client: TestClient):
     assert client.delete(f"/api/v1/requirements/{requirement_id}").status_code == 204
 
 
+def test_requirement_update_records_only_changed_fields(client: TestClient):
+    project_id = _create_project(client)
+    requirement = client.post(
+        "/api/v1/requirements",
+        json={
+            "project_id": project_id,
+            "title": f"编辑记录需求-{uuid4().hex[:8]}",
+            "priority": "3",
+            "description": "原描述",
+        },
+    ).json()
+
+    updated = client.patch(
+        f"/api/v1/requirements/{requirement['id']}",
+        json={"title": "编辑后需求", "priority": "2", "description": "原描述"},
+    )
+    assert updated.status_code == 200
+
+    logs = client.get(f"/api/v1/requirements/{requirement['id']}/audit-logs")
+    assert logs.status_code == 200
+    data = logs.json()
+    assert len(data) == 1
+    assert data[0]["action"] == "update"
+    assert data[0]["object_type"] == "requirement"
+    assert data[0]["object_id"] == requirement["id"]
+    assert data[0]["before_data"] == {"title": requirement["title"], "priority": "3"}
+    assert data[0]["after_data"] == {"title": "编辑后需求", "priority": "2"}
+
+    unchanged = client.patch(f"/api/v1/requirements/{requirement['id']}", json={"title": "编辑后需求"})
+    assert unchanged.status_code == 200
+    assert len(client.get(f"/api/v1/requirements/{requirement['id']}/audit-logs").json()) == 1
+
+
 def test_requirement_activation_updates_linked_tasks_to_doing(client: TestClient):
     project_id = _create_project(client)
     requirement = client.post(

@@ -1,5 +1,5 @@
 <template>
-  <section>
+  <section class="requirement-detail-page">
     <div class="detail-titlebar">
       <el-button @click="goBackToProjectRequirements">返回</el-button>
       <el-tag effect="plain">#{{ requirement.id }}</el-tag>
@@ -44,34 +44,36 @@
       </el-table>
     </el-card>
 
-    <el-card shadow="never" class="detail-panel">
+    <el-card shadow="never" class="detail-panel requirement-history-card">
       <template #header>历史记录</template>
-      <el-empty v-if="!requirementHistory.length" description="暂无历史记录" />
-      <div v-else class="project-history-list">
-        <div v-for="(item, index) in requirementHistory" :key="item.key" class="project-history-entry">
-          <div class="project-history-line">
-            <span class="project-history-index">{{ index + 1 }}</span>
-            <span>{{ formatDateTime(item.time) }}，由 {{ item.actor }} {{ item.actionLabel }}。</span>
-            <button
-              v-if="item.type === 'audit'"
-              class="project-history-toggle"
-              type="button"
-              @click="toggleHistory(item.key)"
-            >
-              {{ expandedHistory[item.key] ? '-' : '+' }}
-            </button>
-          </div>
-          <div v-if="item.type === 'audit' && expandedHistory[item.key]" class="project-history-detail">
-            <p v-for="change in item.changes" :key="change.field">
-              修改了 <strong>{{ requirementFieldLabel(change.field) }}</strong>，旧值为 "{{ displayHistoryValue(change.oldValue) }}"，新值为 "{{ displayHistoryValue(change.newValue) }}"。
-            </p>
-          </div>
-          <div v-if="item.type === 'status'" class="project-history-detail">
-            <div class="status-history-meta">
-              {{ requirementStatusLabel(item.fromStatus) }} → {{ requirementStatusLabel(item.toStatus) }}
-              <template v-if="item.reason"> · 原因：{{ item.reason }}</template>
+      <div class="project-history requirement-history">
+        <el-empty v-if="!requirementHistory.length" description="暂无历史记录" />
+        <div v-else class="project-history-list">
+          <div v-for="(item, index) in requirementHistory" :key="item.key" class="project-history-entry">
+            <div class="project-history-line">
+              <span class="project-history-index">{{ index + 1 }}</span>
+              <span>{{ formatDateTime(item.time) }}，由 {{ item.actor }} {{ item.actionLabel }}。</span>
+              <button
+                v-if="item.type === 'audit'"
+                class="project-history-toggle"
+                type="button"
+                @click="toggleHistory(item.key)"
+              >
+                {{ expandedHistory[item.key] ? '-' : '+' }}
+              </button>
             </div>
-            <p v-if="item.remark">{{ item.remark }}</p>
+            <div v-if="item.type === 'audit' && expandedHistory[item.key]" class="project-history-detail">
+              <p v-for="change in item.changes" :key="change.field">
+                修改了 <strong>{{ requirementFieldLabel(change.field) }}</strong>，旧值为 "{{ displayHistoryValue(change.oldValue) }}"，新值为 "{{ displayHistoryValue(change.newValue) }}"。
+              </p>
+            </div>
+            <div v-if="item.type === 'status'" class="project-history-detail">
+              <div class="status-history-meta">
+                {{ requirementStatusLabel(item.fromStatus) }} → {{ requirementStatusLabel(item.toStatus) }}
+                <template v-if="item.reason"> · 原因：{{ item.reason }}</template>
+              </div>
+              <p v-if="item.remark">{{ item.remark }}</p>
+            </div>
           </div>
         </div>
       </div>

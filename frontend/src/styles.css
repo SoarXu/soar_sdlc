@@ -430,7 +430,7 @@ body {
 .status-history {
   border-top: 1px solid #e5eaf3;
   margin-top: 20px;
-  max-height: min(360px, 45vh);
+  max-height: min(320px, 36vh);
   overflow-y: auto;
   padding-top: 18px;
   padding-right: 8px;
@@ -466,6 +466,7 @@ body {
 
 .detail-titlebar {
   display: flex;
+  flex: 0 0 auto;
   align-items: center;
   gap: 10px;
   min-height: 40px;
@@ -493,6 +494,7 @@ body {
 }
 
 .detail-panel {
+  flex: 0 0 auto;
   margin-bottom: 12px;
 }
 
@@ -523,6 +525,18 @@ body {
 
 .status-history {
   padding-top: 4px;
+}
+
+.status-operation-dialog .status-history {
+  max-height: min(280px, 32vh);
+}
+
+.status-history .status-history-title {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding-bottom: 8px;
+  background: #ffffff;
 }
 
 .status-history-item {
@@ -559,6 +573,30 @@ body {
   min-height: 0;
   overflow-y: auto;
   padding-right: 8px;
+}
+
+.requirement-detail-page {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+.requirement-history-card {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.requirement-history-card > .el-card__body {
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.requirement-history {
+  height: 100%;
+  max-height: none;
+  margin-top: 0;
 }
 
 .project-history h2 {

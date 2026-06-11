@@ -104,6 +104,8 @@ def ensure_runtime_schema(engine: Engine) -> None:
 
     _ensure_column(engine, "iterations", "deleted",
                    "ALTER TABLE iterations ADD COLUMN deleted TINYINT(1) NOT NULL DEFAULT 0 COMMENT '是否删除 0否1是' AFTER delete_time")
+    _ensure_column(engine, "iterations", "actual_start_date",
+                   "ALTER TABLE iterations ADD COLUMN actual_start_date DATE NULL COMMENT '实际开始日期' AFTER end_date")
     # Make legacy project_id column nullable (replaced by iteration_projects table)
     inspector2 = inspect(engine)
     if "iterations" in inspector2.get_table_names():

@@ -6,7 +6,10 @@
         <h1>{{ iteration.name || '迭代详情' }}</h1>
         <p>{{ projectNames }} · {{ userLabel(users, iteration.owner_id) }} · {{ iteration.start_date || '-' }} 至 {{ iteration.end_date || '-' }}</p>
       </div>
-      <el-tag size="large">{{ iterationStatusLabel(iteration.status) }}</el-tag>
+      <div class="iteration-head-actions">
+        <el-button v-if="iteration.status === 'planning'" type="success" @click="openIterationStart">开始</el-button>
+        <el-tag size="large">{{ iterationStatusLabel(iteration.status) }}</el-tag>
+      </div>
     </div>
 
     <div class="project-tabs">
@@ -37,6 +40,7 @@
           <el-descriptions-item label="负责人">{{ userLabel(users, iteration.owner_id) }}</el-descriptions-item>
           <el-descriptions-item label="开始日期">{{ iteration.start_date || '-' }}</el-descriptions-item>
           <el-descriptions-item label="结束日期">{{ iteration.end_date || '-' }}</el-descriptions-item>
+          <el-descriptions-item label="实际开始">{{ iteration.actual_start_date || '-' }}</el-descriptions-item>
           <el-descriptions-item label="目标" :span="2">{{ iteration.goal || '-' }}</el-descriptions-item>
         </el-descriptions>
       </template>
@@ -173,6 +177,14 @@
       <template #footer><el-button @click="taskDialogVisible = false">取消</el-button><el-button type="primary" :loading="saving" @click="submitTasks">关联</el-button></template>
     </el-dialog>
 
+    <el-dialog v-model="iterationStartVisible" title="开始迭代" width="480px">
+      <el-form label-position="top">
+        <el-form-item label="实际开始日期" required><el-date-picker v-model="iterationStartForm.effective_time" type="datetime" value-format="YYYY-MM-DDTHH:mm:ss" /></el-form-item>
+        <el-form-item label="备注"><el-input v-model="iterationStartForm.remark" type="textarea" :rows="3" /></el-form-item>
+      </el-form>
+      <template #footer><el-button @click="iterationStartVisible = false">取消</el-button><el-button type="primary" :loading="saving" @click="submitIterationStart">确认开始</el-button></template>
+    </el-dialog>
+
     <el-dialog v-model="closeRequirementVisible" title="关闭需求" width="480px">
       <el-form label-position="top">
         <el-form-item label="关闭原因" required>
@@ -248,6 +260,7 @@ import {
   fetchAvailableIterationRequirements,
   fetchAvailableIterationTasks,
   fetchIterationDetail,
+  startIteration,
   linkIterationRequirements,
   linkIterationTasks,
   unlinkIterationRequirement,
@@ -280,6 +293,7 @@ const selectedRequirementIds = ref([])
 const selectedTaskIds = ref([])
 const requirementDialogVisible = ref(false)
 const taskDialogVisible = ref(false)
+const iterationStartVisible = ref(false)
 const closeRequirementVisible = ref(false)
 const closeTaskVisible = ref(false)
 const closingRequirementId = ref(null)
@@ -290,6 +304,7 @@ const selectedCase = ref(null)
 const bugSourceCase = ref(null)
 const caseExecutionHistory = ref([])
 const caseExecutionForm = ref({ execute_time: '', steps_result_json: [] })
+const iterationStartForm = ref({ effective_time: '', remark: '' })
 const closeReasonByRequirement = ref({})
 const closeReasonByTask = ref({})
 const tabs = [
@@ -396,6 +411,7 @@ function defaultExecutionTime() {
   const pad = (value) => String(value).padStart(2, '0')
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`
 }
+function currentDateTimeValue() { return defaultExecutionTime() }
 function normalizeCaseSteps(value) { return Array.isArray(value) && value.length ? value.map((item) => ({ step: item.step || '', expected: item.expected || '' })) : [{ step: '', expected: '' }] }
 function normalizeIterationTab(value) { return ['overview', 'requirements', 'tasks', 'cases', 'bugs'].includes(value) ? value : 'overview' }
 function setActiveTab(key) {
@@ -466,6 +482,19 @@ async function submitTasks() {
   }
 }
 async function removeTask(taskId) { await unlinkIterationTask(iterationId.value, taskId); await loadData() }
+function openIterationStart() { iterationStartForm.value = { effective_time: currentDateTimeValue(), remark: '' }; iterationStartVisible.value = true }
+async function submitIterationStart() {
+  if (!iterationStartForm.value.effective_time) return ElMessage.warning('请选择实际开始日期')
+  saving.value = true
+  try {
+    await startIteration(iterationId.value, { ...iterationStartForm.value })
+    iterationStartVisible.value = false
+    await loadData()
+    ElMessage.success('迭代已开始')
+  } finally {
+    saving.value = false
+  }
+}
 async function activateTaskRow(id) { try { await activateTask(id); await loadData(); ElMessage.success('任务已激活') } catch (error) { showActionError(error, '任务激活失败') } }
 function openTaskClose(row) { closingTaskId.value = row.id; Object.assign(closeTaskForm, { reason: '', remark: '' }); closeTaskVisible.value = true }
 async function submitTaskClose() { if (!closeTaskForm.reason) return ElMessage.warning('请选择关闭原因'); saving.value = true; try { await closeTask(closingTaskId.value, { ...closeTaskForm }); closeTaskVisible.value = false; await loadData(); ElMessage.success('任务已关闭') } catch (error) { showActionError(error, '任务关闭失败') } finally { saving.value = false } }

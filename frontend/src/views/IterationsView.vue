@@ -18,9 +18,11 @@
         <el-table-column label="负责人" width="150"><template #default="{ row }">{{ userLabel(users, row.owner_id) }}</template></el-table-column>
         <el-table-column prop="start_date" label="开始日期" width="130" />
         <el-table-column prop="end_date" label="结束日期" width="130" />
+        <el-table-column prop="actual_start_date" label="实际开始" width="130" />
         <el-table-column prop="status" label="状态" width="120" />
-        <el-table-column label="操作" width="160" fixed="right">
+        <el-table-column label="操作" width="210" fixed="right">
           <template #default="{ row }">
+            <el-button v-if="row.status === 'planning'" link type="success" @click="openStart(row)">开始</el-button>
             <el-button link type="primary" @click="openEdit(row)">编辑</el-button>
             <el-popconfirm title="确认删除该迭代？" @confirm="removeIteration(row.id)">
               <template #reference><el-button link type="danger">删除</el-button></template>
@@ -71,13 +73,26 @@
         <el-button type="primary" :loading="saving" @click="submitIteration">保存</el-button>
       </template>
     </el-dialog>
+
+    <el-dialog v-model="startDialogVisible" title="开始迭代" width="480px">
+      <el-form label-position="top">
+        <el-form-item label="实际开始日期" required>
+          <el-date-picker v-model="startForm.effective_time" type="datetime" value-format="YYYY-MM-DDTHH:mm:ss" />
+        </el-form-item>
+        <el-form-item label="备注"><el-input v-model="startForm.remark" type="textarea" :rows="3" /></el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="startDialogVisible = false">取消</el-button>
+        <el-button type="primary" :loading="saving" @click="submitStart">确认开始</el-button>
+      </template>
+    </el-dialog>
   </section>
 </template>
 
 <script setup>
 import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
-import { createIteration, deleteIteration, fetchIterations, updateIteration } from '../api/iterations'
+import { createIteration, deleteIteration, fetchIterations, startIteration, updateIteration } from '../api/iterations'
 import { fetchProjects } from '../api/projects'
 import { fetchUsers } from '../api/users'
 import { labelById, userLabel } from '../utils/referenceLabels'
@@ -86,7 +101,9 @@ import { usePagination } from '../utils/usePagination'
 const loading = ref(false)
 const saving = ref(false)
 const dialogVisible = ref(false)
+const startDialogVisible = ref(false)
 const editingId = ref(null)
+const startingId = ref(null)
 const iterations = ref([])
 const projects = ref([])
 const users = ref([])
@@ -99,10 +116,17 @@ const {
 } = usePagination(iterations)
 const topLevelProjects = computed(() => projects.value.filter(p => !p.parent_id))
 const form = reactive({ project_ids: [], name: '', owner_id: null, start_date: null, end_date: null, status: 'planning', goal: '' })
+const startForm = reactive({ effective_time: '', remark: '' })
 
 function resetForm() { Object.assign(form, { project_ids: [], name: '', owner_id: null, start_date: null, end_date: null, status: 'planning', goal: '' }) }
+function currentDateTimeValue() {
+  const date = new Date()
+  const pad = (value) => String(value).padStart(2, '0')
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`
+}
 function openCreate() { editingId.value = null; resetForm(); dialogVisible.value = true }
 function openEdit(row) { editingId.value = row.id; Object.assign(form, { ...row, project_ids: row.project_ids || [], goal: row.goal || '' }); dialogVisible.value = true }
+function openStart(row) { startingId.value = row.id; Object.assign(startForm, { effective_time: currentDateTimeValue(), remark: '' }); startDialogVisible.value = true }
 
 async function loadData() {
   loading.value = true
@@ -133,5 +157,17 @@ async function submitIteration() {
 }
 
 async function removeIteration(id) { await deleteIteration(id); await loadData() }
+async function submitStart() {
+  if (!startForm.effective_time) return ElMessage.warning('请选择实际开始日期')
+  saving.value = true
+  try {
+    await startIteration(startingId.value, { ...startForm })
+    startDialogVisible.value = false
+    await loadData()
+    ElMessage.success('迭代已开始')
+  } finally {
+    saving.value = false
+  }
+}
 onMounted(loadData)
 </script>

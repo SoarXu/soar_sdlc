@@ -40,6 +40,14 @@ export function updateIteration(id, payload) {
   return http.patch(`/iterations/${id}`, payload)
 }
 
+export function startIteration(id, payload = {}) {
+  return http.post(`/iterations/${id}/start`, payload)
+}
+
+export function fetchIterationStatusOperations(id) {
+  return http.get(`/iterations/${id}/status-operations`)
+}
+
 export function deleteIteration(id) {
   return http.delete(`/iterations/${id}`)
 }

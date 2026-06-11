@@ -14,6 +14,7 @@ class Iteration(Base):
     owner_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     start_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     end_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    actual_start_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     status: Mapped[str] = mapped_column(String(32), default="planning")
     goal: Mapped[str | None] = mapped_column(Text, nullable=True)
     creator_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)

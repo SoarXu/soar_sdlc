@@ -121,3 +121,24 @@ def test_iteration_detail_links_requirements_tasks_and_metrics(client: TestClien
     assert removed_task.status_code == 204
     detail_after_task_remove = client.get(f"/api/v1/iterations/{iteration_id}/detail").json()
     assert child_task not in {item["id"] for item in detail_after_task_remove["tasks"]}
+
+
+def test_iteration_can_start_with_actual_start_date(client: TestClient):
+    project_id = _create_project(client)
+    iteration_id = _create_iteration(client, [project_id])
+
+    started = client.post(
+        f"/api/v1/iterations/{iteration_id}/start",
+        json={"effective_time": "2026-06-12T09:30:00", "remark": "iteration kickoff"},
+    )
+    assert started.status_code == 200
+    data = started.json()
+    assert data["status"] == "active"
+    assert data["actual_start_date"] == "2026-06-12"
+
+    operations = client.get(f"/api/v1/iterations/{iteration_id}/status-operations")
+    assert operations.status_code == 200
+    assert operations.json()[0]["action"] == "start"
+    assert operations.json()[0]["from_status"] == "planning"
+    assert operations.json()[0]["to_status"] == "active"
+    assert operations.json()[0]["remark"] == "iteration kickoff"

@@ -81,9 +81,10 @@
           <el-table-column label="负责人" width="150"><template #default="{ row }">{{ userLabel(users, row.owner_id) }}</template></el-table-column>
           <el-table-column prop="start_date" label="开始日期" width="130" />
           <el-table-column prop="end_date" label="结束日期" width="130" />
+          <el-table-column prop="actual_start_date" label="实际开始" width="130" />
           <el-table-column label="状态" width="120"><template #default="{ row }">{{ iterationStatusLabel(row.status) }}</template></el-table-column>
-          <el-table-column label="操作" width="150" fixed="right">
-            <template #default="{ row }"><el-button link type="primary" @click="openIterationEdit(row)">编辑</el-button><el-popconfirm title="确认删除该迭代？" @confirm="removeIteration(row.id)"><template #reference><el-button link type="danger">删除</el-button></template></el-popconfirm></template>
+          <el-table-column label="操作" width="210" fixed="right">
+            <template #default="{ row }"><el-button v-if="row.status === 'planning'" link type="success" @click="openIterationStart(row)">开始</el-button><el-button link type="primary" @click="openIterationEdit(row)">编辑</el-button><el-popconfirm title="确认删除该迭代？" @confirm="removeIteration(row.id)"><template #reference><el-button link type="danger">删除</el-button></template></el-popconfirm></template>
           </el-table-column>
         </el-table>
       </template>
@@ -205,6 +206,14 @@
         <el-form-item label="目标"><el-input v-model="iterationForm.goal" type="textarea" :rows="3" /></el-form-item>
       </el-form>
       <template #footer><el-button @click="iterationDialogVisible = false">取消</el-button><el-button type="primary" :loading="saving" @click="submitIteration">保存</el-button></template>
+    </el-dialog>
+
+    <el-dialog v-model="iterationStartVisible" title="开始迭代" width="480px">
+      <el-form label-position="top">
+        <el-form-item label="实际开始日期" required><el-date-picker v-model="iterationStartForm.effective_time" type="datetime" value-format="YYYY-MM-DDTHH:mm:ss" /></el-form-item>
+        <el-form-item label="备注"><el-input v-model="iterationStartForm.remark" type="textarea" :rows="3" /></el-form-item>
+      </el-form>
+      <template #footer><el-button @click="iterationStartVisible = false">取消</el-button><el-button type="primary" :loading="saving" @click="submitIterationStart">确认开始</el-button></template>
     </el-dialog>
 
     <el-dialog v-model="requirementDialogVisible" :title="editingRequirementId ? '编辑需求' : '新增需求'" width="640px">
@@ -341,7 +350,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 
 import { createBug, deleteBug, fetchBugs, updateBug } from '../api/bugs'
-import { createIteration, deleteIteration, fetchIterations, updateIteration } from '../api/iterations'
+import { createIteration, deleteIteration, fetchIterations, startIteration, updateIteration } from '../api/iterations'
 import { fetchPrograms } from '../api/programs'
 import { fetchProject, fetchProjectAuditLogs, fetchProjectStatusOperations } from '../api/projects'
 import { activateRequirement, closeRequirement, createRequirement, deleteRequirement, fetchRequirements, fetchRequirementStatusOperations, updateRequirement } from '../api/requirements'
@@ -376,9 +385,9 @@ const closeReasonByRequirement = ref({})
 const closeReasonByTask = ref({})
 const expandedHistory = reactive({})
 
-const iterationDialogVisible = ref(false), requirementDialogVisible = ref(false), closeRequirementVisible = ref(false), taskDialogVisible = ref(false), closeTaskVisible = ref(false)
+const iterationDialogVisible = ref(false), iterationStartVisible = ref(false), requirementDialogVisible = ref(false), closeRequirementVisible = ref(false), taskDialogVisible = ref(false), closeTaskVisible = ref(false)
 const caseDialogVisible = ref(false), runDialogVisible = ref(false), bugDialogVisible = ref(false), caseExecutionVisible = ref(false), caseBugVisible = ref(false)
-const editingIterationId = ref(null), editingRequirementId = ref(null), closingRequirementId = ref(null), editingTaskId = ref(null)
+const editingIterationId = ref(null), startingIterationId = ref(null), editingRequirementId = ref(null), closingRequirementId = ref(null), editingTaskId = ref(null)
 const closingTaskId = ref(null)
 const editingCaseId = ref(null), editingRunId = ref(null), editingBugId = ref(null)
 const selectedCase = ref(null)
@@ -522,6 +531,7 @@ const projectHistory = computed(() => {
 const failedExecutionCount = computed(() => caseExecutionHistory.value.filter((item) => item.result === 'failed').length)
 
 const iterationForm = reactive({ project_ids: [], name: '', owner_id: null, start_date: null, end_date: null, status: 'planning', goal: '' })
+const iterationStartForm = reactive({ effective_time: '', remark: '' })
 const requirementForm = reactive({ project_id: null, iteration_id: null, title: '', requirement_type: '功能', priority: '3', owner_id: null, proposer_id: null, status: 'draft', review_status: 'not_required', description: '', acceptance_criteria: '', source_reviewed: false })
 const closeRequirementForm = reactive({ reason: '', remark: '' })
 const taskForm = reactive({ project_id: null, requirement_id: null, title: '', task_type: '', priority: 'medium', owner_id: null, estimated_hours: null, actual_hours: null, due_date: null, status: 'todo', description: '' })
@@ -563,6 +573,7 @@ function defaultExecutionTime() {
   const pad = (value) => String(value).padStart(2, '0')
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`
 }
+function currentDateTimeValue() { return defaultExecutionTime() }
 function displayHistoryValue(value) { return value === null || value === undefined || value === '' ? '-' : value }
 function projectFieldLabel(field) {
   return optionLabel([
@@ -588,6 +599,7 @@ function resetBugForm() { Object.assign(bugForm, { project_id: projectId.value, 
 
 function openIterationCreate() { editingIterationId.value = null; resetIterationForm(); iterationDialogVisible.value = true }
 function openIterationEdit(row) { editingIterationId.value = row.id; Object.assign(iterationForm, { ...row, project_ids: row.project_ids || [], goal: row.goal || '' }); iterationDialogVisible.value = true }
+function openIterationStart(row) { startingIterationId.value = row.id; Object.assign(iterationStartForm, { effective_time: currentDateTimeValue(), remark: '' }); iterationStartVisible.value = true }
 function openRequirementCreate() { editingRequirementId.value = null; resetRequirementForm(); requirementDialogVisible.value = true }
 function openRequirementEdit(row) { editingRequirementId.value = row.id; Object.assign(requirementForm, { ...row, priority: normalizeRequirementPriority(row.priority), requirement_type: row.requirement_type || '', description: row.description || '', acceptance_criteria: row.acceptance_criteria || '' }); requirementDialogVisible.value = true }
 function openGenerate(row) { editingTaskId.value = null; resetTaskForm(); Object.assign(taskForm, { requirement_id: row.id, title: row.title, owner_id: taskOwnerForRequirement(row) }); taskDialogVisible.value = true }
@@ -665,6 +677,7 @@ async function loadData() {
 }
 
 async function submitIteration() { if (!iterationForm.name.trim()) return ElMessage.warning('请填写迭代名称'); saving.value = true; try { const payload = { ...iterationForm, project_ids: iterationForm.project_ids.length ? iterationForm.project_ids : [projectId.value], owner_id: iterationForm.owner_id || null }; if (editingIterationId.value) await updateIteration(editingIterationId.value, payload); else await createIteration(payload); iterationDialogVisible.value = false; await loadData() } finally { saving.value = false } }
+async function submitIterationStart() { if (!iterationStartForm.effective_time) return ElMessage.warning('请选择实际开始日期'); saving.value = true; try { await startIteration(startingIterationId.value, { ...iterationStartForm }); iterationStartVisible.value = false; await loadData(); ElMessage.success('迭代已开始') } finally { saving.value = false } }
 async function submitRequirement() { if (!requirementForm.title.trim()) return ElMessage.warning('请填写需求标题'); saving.value = true; try { const { status: _status, ...formData } = requirementForm; const payload = { ...formData, project_id: projectId.value, iteration_id: requirementForm.iteration_id || null, owner_id: requirementForm.owner_id || null, proposer_id: requirementForm.proposer_id || null }; if (editingRequirementId.value) await updateRequirement(editingRequirementId.value, payload); else await createRequirement(payload); requirementDialogVisible.value = false; await loadData() } finally { saving.value = false } }
 async function activateRequirementRow(id) { try { await activateRequirement(id); await loadData(); ElMessage.success('需求已激活，关联任务已进入进行中') } catch (error) { showActionError(error, '需求激活失败') } }
 async function submitRequirementClose() {

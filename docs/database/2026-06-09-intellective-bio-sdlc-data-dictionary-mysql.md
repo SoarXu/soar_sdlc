@@ -164,6 +164,7 @@
 | owner_id | BIGINT UNSIGNED | NULL | 负责人 ID |
 | start_date | DATE | NULL | 开始日期 |
 | end_date | DATE | NULL | 结束日期 |
+| actual_start_date | DATE | NULL | 实际开始日期 |
 | status | VARCHAR(32) | NOT NULL DEFAULT 'planning' | 状态：planning、active、finished、closed |
 | goal | TEXT | NULL | 目标说明 |
 | creator_id | BIGINT UNSIGNED | NULL | 创建人 |

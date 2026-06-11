@@ -9,7 +9,9 @@ from app.models.project import Project
 from app.models.requirement import Requirement
 from app.models.task import Task
 from app.models.test_case import TestCase
+from app.services.status_operation_service import create_status_operation, list_status_operations
 from app.views.iteration_view import IterationCreate, IterationUpdate
+from app.views.status_operation_view import StatusOperationCreate
 
 
 def list_iterations(db: Session, project_id: int | None = None) -> list[dict]:
@@ -31,6 +33,7 @@ def list_iterations(db: Session, project_id: int | None = None) -> list[dict]:
             "owner_id": it.owner_id,
             "start_date": it.start_date,
             "end_date": it.end_date,
+            "actual_start_date": it.actual_start_date,
             "status": it.status,
             "goal": it.goal,
             "creator_id": it.creator_id,
@@ -67,6 +70,7 @@ def create_iteration(db: Session, payload: IterationCreate) -> dict:
         "owner_id": iteration.owner_id,
         "start_date": iteration.start_date,
         "end_date": iteration.end_date,
+        "actual_start_date": iteration.actual_start_date,
         "status": iteration.status,
         "goal": iteration.goal,
         "creator_id": iteration.creator_id,
@@ -107,6 +111,7 @@ def update_iteration(db: Session, iteration_id: int, payload: IterationUpdate) -
         "owner_id": iteration.owner_id,
         "start_date": iteration.start_date,
         "end_date": iteration.end_date,
+        "actual_start_date": iteration.actual_start_date,
         "status": iteration.status,
         "goal": iteration.goal,
         "creator_id": iteration.creator_id,
@@ -122,6 +127,34 @@ def delete_iteration(db: Session, iteration_id: int) -> None:
     iteration.deleted = 1
     iteration.delete_time = datetime.now()
     db.commit()
+
+
+def start_iteration(db: Session, iteration_id: int, payload: StatusOperationCreate | None = None) -> dict:
+    iteration = _get_active_iteration(db, iteration_id)
+    if iteration.status != "planning":
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="只有规划中的迭代可以开始")
+    if not payload or not payload.effective_time:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="请选择实际开始日期")
+    from_status = iteration.status
+    iteration.status = "active"
+    iteration.actual_start_date = payload.effective_time.date()
+    create_status_operation(
+        db,
+        object_type="iteration",
+        object_id=iteration.id,
+        action="start",
+        from_status=from_status,
+        to_status=iteration.status,
+        payload=payload,
+    )
+    db.commit()
+    db.refresh(iteration)
+    return _iteration_to_dict(iteration, _iteration_project_ids(db, iteration.id))
+
+
+def list_iteration_status_operations(db: Session, iteration_id: int) -> list[dict]:
+    _get_active_iteration(db, iteration_id)
+    return list_status_operations(db, "iteration", iteration_id)
 
 
 def get_iteration_detail(db: Session, iteration_id: int) -> dict:
@@ -260,6 +293,7 @@ def _iteration_to_dict(iteration: Iteration, project_ids: list[int]) -> dict:
         "owner_id": iteration.owner_id,
         "start_date": iteration.start_date,
         "end_date": iteration.end_date,
+        "actual_start_date": iteration.actual_start_date,
         "status": iteration.status,
         "goal": iteration.goal,
         "creator_id": iteration.creator_id,

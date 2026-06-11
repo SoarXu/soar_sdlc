@@ -5,7 +5,10 @@ from sqlalchemy.orm import Session
 
 from app.models.program import Program
 from app.models.project import Project
+from app.models.requirement import Requirement
+from app.models.task import Task
 from app.services.status_operation_service import create_status_operation, list_status_operations
+from app.services.requirement_service import close_requirement_record
 from app.views.project_view import ProjectCreate, ProjectUpdate
 from app.views.status_operation_view import StatusOperationCreate
 
@@ -151,6 +154,23 @@ def close_project(db: Session, project_id: int, payload: StatusOperationCreate |
     from_status = project.status
     project.status = "closed"
     project.actual_end_date = _effective_date(payload)
+    cascade_payload = StatusOperationCreate(reason="不做", remark=payload.remark if payload else None)
+    requirements = (
+        db.query(Requirement)
+        .filter(Requirement.project_id == project.id, Requirement.deleted == 0, Requirement.status != "closed")
+        .all()
+    )
+    for requirement in requirements:
+        close_requirement_record(db, requirement, cascade_payload)
+    orphan_tasks = (
+        db.query(Task)
+        .filter(Task.project_id == project.id, Task.deleted == 0, Task.requirement_id.is_(None), Task.status != "closed")
+        .all()
+    )
+    for task in orphan_tasks:
+        from app.services.task_service import close_task_record
+
+        close_task_record(db, task, cascade_payload)
     create_status_operation(
         db,
         object_type="project",

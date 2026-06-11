@@ -7,6 +7,7 @@ from app.models.project import Project
 from app.models.requirement import Requirement
 from app.models.task import Task
 from app.services.status_operation_service import create_status_operation, list_status_operations
+from app.services.task_service import close_task_record
 from app.views.requirement_view import GenerateTaskRequest, RequirementCreate, RequirementUpdate
 from app.views.status_operation_view import StatusOperationCreate
 
@@ -46,6 +47,7 @@ def update_requirement(db: Session, requirement_id: int, payload: RequirementUpd
 
 def activate_requirement(db: Session, requirement_id: int) -> Requirement:
     requirement = _get_active_requirement(db, requirement_id)
+    _ensure_project_open_for_requirement(db, requirement)
     from_status = requirement.status
     requirement.status = "active"
     (
@@ -71,6 +73,22 @@ def close_requirement(db: Session, requirement_id: int, payload: StatusOperation
     if not payload.reason:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="关闭原因必填")
     requirement = _get_active_requirement(db, requirement_id)
+    close_requirement_record(db, requirement, payload)
+    db.commit()
+    db.refresh(requirement)
+    return requirement
+
+
+def close_requirement_record(db: Session, requirement: Requirement, payload: StatusOperationCreate) -> Requirement:
+    tasks = (
+        db.query(Task)
+        .filter(Task.requirement_id == requirement.id, Task.deleted == 0, Task.status != "closed")
+        .all()
+    )
+    for task in tasks:
+        close_task_record(db, task, payload)
+    if requirement.status == "closed":
+        return requirement
     from_status = requirement.status
     requirement.status = "closed"
     create_status_operation(
@@ -82,8 +100,6 @@ def close_requirement(db: Session, requirement_id: int, payload: StatusOperation
         to_status=requirement.status,
         payload=payload,
     )
-    db.commit()
-    db.refresh(requirement)
     return requirement
 
 
@@ -129,3 +145,9 @@ def _get_active_requirement(db: Session, requirement_id: int) -> Requirement:
     if not requirement:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Requirement not found")
     return requirement
+
+
+def _ensure_project_open_for_requirement(db: Session, requirement: Requirement) -> None:
+    project = db.query(Project).filter(Project.id == requirement.project_id, Project.deleted == 0).first()
+    if project and project.status == "closed":
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="项目已关闭，需求不允许激活")

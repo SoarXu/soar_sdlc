@@ -119,7 +119,7 @@
 
 <script setup>
 import { onMounted, reactive, ref } from 'vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { fetchIterations } from '../api/iterations'
 import { fetchProjects } from '../api/projects'
 import { activateRequirement, closeRequirement, createRequirement, deleteRequirement, fetchRequirements, generateTask, updateRequirement } from '../api/requirements'
@@ -170,6 +170,8 @@ const requirementStatusOptions = [
 function normalizeRequirementPriority(value) { return legacyRequirementPriorityValues[value] || value || '3' }
 function requirementStatusLabel(value) { return requirementStatusOptions.find((option) => option.value === value)?.label || value || '-' }
 function canActivateRequirement(row) { return ['draft', 'closed'].includes(row.status) }
+function apiErrorMessage(error, fallback) { return error?.response?.data?.detail || fallback }
+function showActionError(error, fallback) { ElMessageBox.alert(apiErrorMessage(error, fallback), '提示', { type: 'warning' }) }
 function resetForm() { Object.assign(form, { project_id: null, source_project_id: null, iteration_id: null, title: '', requirement_type: '', priority: '3', owner_id: null, proposer_id: null, status: 'draft', review_status: 'not_required', description: '', acceptance_criteria: '', source_reviewed: false }); ownerManuallySet.value = false }
 function openCreate() { editingId.value = null; resetForm(); dialogVisible.value = true }
 function onSourceProjectChange(projectId) { if (!projectId || ownerManuallySet.value) return; const project = projects.value.find(p => p.id === projectId); if (project && project.owner_id) { form.owner_id = project.owner_id } }
@@ -197,7 +199,15 @@ async function submitRequirement() {
   } finally { saving.value = false }
 }
 async function submitGenerateTask() { if (!generateForm.title.trim()) return ElMessage.warning('请填写任务标题'); saving.value = true; try { await generateTask(generatingRequirementId.value, { ...generateForm }); generateVisible.value = false; ElMessage.success('任务已生成') } finally { saving.value = false } }
-async function activateRequirementRow(id) { await activateRequirement(id); await loadData(); ElMessage.success('需求已激活，关联任务已进入进行中') }
+async function activateRequirementRow(id) {
+  try {
+    await activateRequirement(id)
+    await loadData()
+    ElMessage.success('需求已激活，关联任务已进入进行中')
+  } catch (error) {
+    showActionError(error, '需求激活失败')
+  }
+}
 async function submitClose() {
   if (!closeForm.reason) return ElMessage.warning('请选择关闭原因')
   saving.value = true

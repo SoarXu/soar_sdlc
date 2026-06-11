@@ -16,6 +16,18 @@ export function updateTask(id, payload) {
   return http.patch(`/tasks/${id}`, payload)
 }
 
+export function activateTask(id) {
+  return http.post(`/tasks/${id}/activate`)
+}
+
+export function closeTask(id, payload) {
+  return http.post(`/tasks/${id}/close`, payload)
+}
+
+export function fetchTaskStatusOperations(id) {
+  return http.get(`/tasks/${id}/status-operations`)
+}
+
 export function deleteTask(id) {
   return http.delete(`/tasks/${id}`)
 }

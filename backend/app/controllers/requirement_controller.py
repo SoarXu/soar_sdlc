@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session
 
 from app.db.session import get_db
 from app.services.requirement_service import (
+    activate_requirement,
     create_requirement,
     delete_requirement,
     generate_task_from_requirement,
@@ -35,6 +36,11 @@ def post_requirement(payload: RequirementCreate, db: Session = Depends(get_db)):
 @router.patch("/{requirement_id}", response_model=RequirementRead)
 def patch_requirement(requirement_id: int, payload: RequirementUpdate, db: Session = Depends(get_db)):
     return update_requirement(db, requirement_id, payload)
+
+
+@router.post("/{requirement_id}/activate", response_model=RequirementRead)
+def activate_requirement_status(requirement_id: int, db: Session = Depends(get_db)):
+    return activate_requirement(db, requirement_id)
 
 
 @router.delete("/{requirement_id}", status_code=status.HTTP_204_NO_CONTENT)

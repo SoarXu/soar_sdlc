@@ -16,6 +16,10 @@ export function updateRequirement(id, payload) {
   return http.patch(`/requirements/${id}`, payload)
 }
 
+export function activateRequirement(id) {
+  return http.post(`/requirements/${id}/activate`)
+}
+
 export function deleteRequirement(id) {
   return http.delete(`/requirements/${id}`)
 }

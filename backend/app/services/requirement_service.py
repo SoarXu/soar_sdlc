@@ -19,6 +19,7 @@ def get_requirement(db: Session, requirement_id: int) -> Requirement:
 
 def create_requirement(db: Session, payload: RequirementCreate) -> Requirement:
     data = payload.model_dump()
+    data["status"] = "draft"
     if data.get("source_project_id") and not data.get("owner_id"):
         source_project = db.query(Project).filter(Project.id == data["source_project_id"], Project.deleted == 0).first()
         if source_project and source_project.owner_id:
@@ -33,7 +34,22 @@ def create_requirement(db: Session, payload: RequirementCreate) -> Requirement:
 def update_requirement(db: Session, requirement_id: int, payload: RequirementUpdate) -> Requirement:
     requirement = _get_active_requirement(db, requirement_id)
     for field, value in payload.model_dump(exclude_unset=True).items():
+        if field == "status":
+            continue
         setattr(requirement, field, value)
+    db.commit()
+    db.refresh(requirement)
+    return requirement
+
+
+def activate_requirement(db: Session, requirement_id: int) -> Requirement:
+    requirement = _get_active_requirement(db, requirement_id)
+    requirement.status = "active"
+    (
+        db.query(Task)
+        .filter(Task.requirement_id == requirement.id, Task.deleted == 0, Task.status == "todo")
+        .update({Task.status: "doing"}, synchronize_session=False)
+    )
     db.commit()
     db.refresh(requirement)
     return requirement

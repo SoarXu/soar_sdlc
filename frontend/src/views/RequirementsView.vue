@@ -22,6 +22,7 @@
         <el-table-column label="操作" width="230" fixed="right">
           <template #default="{ row }">
             <el-button link type="primary" @click="openEdit(row)">编辑</el-button>
+            <el-button v-if="row.status === 'draft'" link type="warning" @click="activateRequirementRow(row.id)">激活</el-button>
             <el-button link type="success" @click="openGenerate(row)">生成任务</el-button>
             <el-popconfirm title="确认删除该需求？" @confirm="removeRequirement(row.id)">
               <template #reference><el-button link type="danger">删除</el-button></template>
@@ -78,11 +79,6 @@
               <el-option v-for="option in requirementPriorityOptions" :key="option.value" :label="option.label" :value="option.value"><RequirementPriorityBadge :value="option.value" /></el-option>
             </el-select>
           </el-form-item>
-          <el-form-item label="状态">
-            <el-select v-model="form.status">
-              <el-option label="草稿" value="draft" /><el-option label="激活" value="active" /><el-option label="完成" value="done" /><el-option label="关闭" value="closed" />
-            </el-select>
-          </el-form-item>
           <el-form-item label="评审状态">
             <el-select v-model="form.review_status">
               <el-option label="无需评审" value="not_required" /><el-option label="待评审" value="pending" /><el-option label="已通过" value="approved" />
@@ -111,7 +107,7 @@ import { onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { fetchIterations } from '../api/iterations'
 import { fetchProjects } from '../api/projects'
-import { createRequirement, deleteRequirement, fetchRequirements, generateTask, updateRequirement } from '../api/requirements'
+import { activateRequirement, createRequirement, deleteRequirement, fetchRequirements, generateTask, updateRequirement } from '../api/requirements'
 import { fetchUsers } from '../api/users'
 import RequirementPriorityBadge from '../components/RequirementPriorityBadge.vue'
 import { labelById, userLabel } from '../utils/referenceLabels'
@@ -166,12 +162,14 @@ async function submitRequirement() {
   if (!form.project_id || !form.title.trim()) return ElMessage.warning('请选择项目并填写需求标题')
   saving.value = true
   try {
-    const payload = { ...form, iteration_id: form.iteration_id || null, owner_id: form.owner_id || null, proposer_id: form.proposer_id || null }
+    const { status: _status, ...formData } = form
+    const payload = { ...formData, iteration_id: form.iteration_id || null, owner_id: form.owner_id || null, proposer_id: form.proposer_id || null }
     if (editingId.value) await updateRequirement(editingId.value, payload); else await createRequirement(payload)
     dialogVisible.value = false; await loadData()
   } finally { saving.value = false }
 }
 async function submitGenerateTask() { if (!generateForm.title.trim()) return ElMessage.warning('请填写任务标题'); saving.value = true; try { await generateTask(generatingRequirementId.value, { ...generateForm }); generateVisible.value = false; ElMessage.success('任务已生成') } finally { saving.value = false } }
+async function activateRequirementRow(id) { await activateRequirement(id); await loadData(); ElMessage.success('需求已激活，关联任务已进入进行中') }
 async function removeRequirement(id) { await deleteRequirement(id); await loadData() }
 onMounted(loadData)
 </script>

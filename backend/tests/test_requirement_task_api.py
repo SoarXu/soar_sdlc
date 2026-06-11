@@ -73,10 +73,6 @@ def test_requirement_and_task_crud_use_prd_fields(client: TestClient):
     assert default_priority_requirement.status_code == 200
     assert default_priority_requirement.json()["priority"] == "3"
 
-    requirement_update = client.patch(f"/api/v1/requirements/{requirement_id}", json={"status": "active"})
-    assert requirement_update.status_code == 200
-    assert requirement_update.json()["status"] == "active"
-
     task = client.post(
         "/api/v1/tasks",
         json={"project_id": project_id, "requirement_id": requirement_id, "title": "任务 CRUD"},
@@ -92,6 +88,49 @@ def test_requirement_and_task_crud_use_prd_fields(client: TestClient):
 
     assert client.delete(f"/api/v1/tasks/{task_id}").status_code == 204
     assert client.delete(f"/api/v1/requirements/{requirement_id}").status_code == 204
+
+
+def test_requirement_activation_updates_linked_tasks_to_doing(client: TestClient):
+    project_id = _create_project(client)
+    requirement = client.post(
+        "/api/v1/requirements",
+        json={"project_id": project_id, "title": f"待激活需求-{uuid4().hex[:8]}"},
+    )
+    assert requirement.status_code == 200
+    requirement_id = requirement.json()["id"]
+    assert requirement.json()["status"] == "draft"
+
+    task = client.post(
+        "/api/v1/tasks",
+        json={"project_id": project_id, "requirement_id": requirement_id, "title": f"联动任务-{uuid4().hex[:8]}"},
+    )
+    assert task.status_code == 200
+    task_id = task.json()["id"]
+    assert task.json()["status"] == "todo"
+
+    activated = client.post(f"/api/v1/requirements/{requirement_id}/activate")
+    assert activated.status_code == 200
+    assert activated.json()["status"] == "active"
+
+    task_detail = client.get(f"/api/v1/tasks/{task_id}")
+    assert task_detail.status_code == 200
+    assert task_detail.json()["status"] == "doing"
+
+
+def test_requirement_status_cannot_be_changed_by_form_save(client: TestClient):
+    project_id = _create_project(client)
+    requirement = client.post(
+        "/api/v1/requirements",
+        json={"project_id": project_id, "title": f"表单状态保护-{uuid4().hex[:8]}", "status": "active"},
+    )
+    assert requirement.status_code == 200
+    requirement_id = requirement.json()["id"]
+    assert requirement.json()["status"] == "draft"
+
+    updated = client.patch(f"/api/v1/requirements/{requirement_id}", json={"title": "表单更新标题", "status": "closed"})
+    assert updated.status_code == 200
+    assert updated.json()["title"] == "表单更新标题"
+    assert updated.json()["status"] == "draft"
 
 
 def test_requirement_and_task_detail_endpoints(client: TestClient):

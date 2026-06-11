@@ -13,6 +13,7 @@ class Task(Base):
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     project_id: Mapped[int] = mapped_column(BigInteger)
     source_project_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    iteration_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     requirement_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     title: Mapped[str] = mapped_column(String(255))
     task_type: Mapped[str | None] = mapped_column(String(64), nullable=True)

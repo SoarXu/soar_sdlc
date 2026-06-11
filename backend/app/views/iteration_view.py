@@ -47,3 +47,11 @@ class IterationRead(BaseModel):
     create_time: datetime | None = None
     update_time: datetime | None = None
     delete_time: datetime | None = None
+
+
+class LinkRequirementsRequest(BaseModel):
+    requirement_ids: list[int]
+
+
+class LinkTasksRequest(BaseModel):
+    task_ids: list[int]

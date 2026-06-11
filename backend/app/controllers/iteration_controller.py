@@ -2,8 +2,20 @@ from fastapi import APIRouter, Depends, Response, status
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
-from app.services.iteration_service import create_iteration, delete_iteration, list_iterations, update_iteration
-from app.views.iteration_view import IterationCreate, IterationRead, IterationUpdate
+from app.services.iteration_service import (
+    available_requirements,
+    available_tasks,
+    create_iteration,
+    delete_iteration,
+    get_iteration_detail,
+    link_requirements,
+    link_tasks,
+    list_iterations,
+    unlink_requirement,
+    unlink_task,
+    update_iteration,
+)
+from app.views.iteration_view import IterationCreate, IterationRead, IterationUpdate, LinkRequirementsRequest, LinkTasksRequest
 
 
 router = APIRouter()
@@ -22,6 +34,43 @@ def post_iteration(payload: IterationCreate, db: Session = Depends(get_db)):
 @router.patch("/{iteration_id}", response_model=IterationRead)
 def patch_iteration(iteration_id: int, payload: IterationUpdate, db: Session = Depends(get_db)):
     return update_iteration(db, iteration_id, payload)
+
+
+@router.get("/{iteration_id}/detail")
+def get_iteration_detail_view(iteration_id: int, db: Session = Depends(get_db)):
+    return get_iteration_detail(db, iteration_id)
+
+
+@router.get("/{iteration_id}/available-requirements")
+def get_available_requirements(iteration_id: int, db: Session = Depends(get_db)):
+    return available_requirements(db, iteration_id)
+
+
+@router.post("/{iteration_id}/requirements")
+def post_iteration_requirements(iteration_id: int, payload: LinkRequirementsRequest, db: Session = Depends(get_db)):
+    return link_requirements(db, iteration_id, payload.requirement_ids)
+
+
+@router.delete("/{iteration_id}/requirements/{requirement_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_iteration_requirement(iteration_id: int, requirement_id: int, db: Session = Depends(get_db)):
+    unlink_requirement(db, iteration_id, requirement_id)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.get("/{iteration_id}/available-tasks")
+def get_available_tasks(iteration_id: int, db: Session = Depends(get_db)):
+    return available_tasks(db, iteration_id)
+
+
+@router.post("/{iteration_id}/tasks")
+def post_iteration_tasks(iteration_id: int, payload: LinkTasksRequest, db: Session = Depends(get_db)):
+    return link_tasks(db, iteration_id, payload.task_ids)
+
+
+@router.delete("/{iteration_id}/tasks/{task_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_iteration_task(iteration_id: int, task_id: int, db: Session = Depends(get_db)):
+    unlink_task(db, iteration_id, task_id)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.delete("/{iteration_id}", status_code=status.HTTP_204_NO_CONTENT)

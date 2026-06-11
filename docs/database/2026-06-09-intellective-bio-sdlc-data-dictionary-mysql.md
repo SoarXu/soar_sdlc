@@ -216,6 +216,7 @@
 |---|---|---|---|
 | id | BIGINT UNSIGNED | PK, AUTO_INCREMENT | 任务 ID |
 | project_id | BIGINT UNSIGNED | NOT NULL | 所属项目 ID |
+| iteration_id | BIGINT UNSIGNED | NULL | 直接关联迭代 ID |
 | requirement_id | BIGINT UNSIGNED | NULL | 关联需求 ID |
 | title | VARCHAR(255) | NOT NULL | 任务标题 |
 | task_type | VARCHAR(64) | NULL | 任务类型 |
@@ -236,6 +237,7 @@
 索引：
 
 - `idx_tasks_project(project_id)`
+- `idx_tasks_iteration(iteration_id)`
 - `idx_tasks_requirement(requirement_id)`
 - `idx_tasks_owner(owner_id)`
 - `idx_tasks_status(status)`

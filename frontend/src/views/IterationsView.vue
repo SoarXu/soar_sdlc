@@ -11,7 +11,9 @@
     <el-card shadow="never">
       <el-table v-loading="loading" :data="pagedIterations" stripe>
         <el-table-column prop="id" label="ID" width="80" />
-        <el-table-column prop="name" label="迭代名称" min-width="180" />
+        <el-table-column label="迭代名称" min-width="180">
+          <template #default="{ row }"><router-link class="table-link" :to="`/iterations/${row.id}`">{{ row.name }}</router-link></template>
+        </el-table-column>
         <el-table-column label="项目" min-width="240"><template #default="{ row }">{{ (row.project_ids || []).map(id => labelById(projects, id)).join('、') }}</template></el-table-column>
         <el-table-column label="负责人" width="150"><template #default="{ row }">{{ userLabel(users, row.owner_id) }}</template></el-table-column>
         <el-table-column prop="start_date" label="开始日期" width="130" />

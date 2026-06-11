@@ -482,6 +482,28 @@ body {
   margin-left: 0;
 }
 
+.iteration-project-block {
+  margin-bottom: 18px;
+}
+
+.iteration-project-block h3,
+.iteration-tree-node h4 {
+  margin: 8px 0;
+  font-size: 15px;
+}
+
+.iteration-requirement-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 38px;
+  border-bottom: 1px solid #edf1f7;
+}
+
+.muted-text {
+  color: #8a94a6;
+}
+
 .detail-titlebar {
   display: flex;
   flex: 0 0 auto;

@@ -165,6 +165,7 @@ CREATE TABLE IF NOT EXISTS requirements (
 CREATE TABLE IF NOT EXISTS tasks (
   id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '任务 ID',
   project_id BIGINT UNSIGNED NOT NULL COMMENT '所属项目 ID',
+  iteration_id BIGINT UNSIGNED NULL COMMENT '直接关联迭代 ID',
   requirement_id BIGINT UNSIGNED NULL COMMENT '关联需求 ID',
   title VARCHAR(255) NOT NULL COMMENT '任务标题',
   task_type VARCHAR(64) NULL COMMENT '任务类型',
@@ -183,6 +184,7 @@ CREATE TABLE IF NOT EXISTS tasks (
   delete_time DATETIME NULL COMMENT '软删除时间',
   PRIMARY KEY (id),
   KEY idx_tasks_project (project_id),
+  KEY idx_tasks_iteration (iteration_id),
   KEY idx_tasks_requirement (requirement_id),
   KEY idx_tasks_owner (owner_id),
   KEY idx_tasks_status (status)

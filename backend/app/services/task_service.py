@@ -1,4 +1,5 @@
 from datetime import date, datetime
+from decimal import Decimal
 
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
@@ -146,6 +147,8 @@ def _task_change_data(task: Task, data: dict) -> tuple[dict, dict]:
 def _audit_value(value):
     if isinstance(value, (date, datetime)):
         return value.isoformat()
+    if isinstance(value, Decimal):
+        return float(value)
     return value
 
 

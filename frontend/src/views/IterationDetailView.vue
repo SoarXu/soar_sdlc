@@ -118,17 +118,22 @@
       </template>
 
       <template v-else-if="activeTab === 'cases'">
-        <el-table :data="testCases" stripe width="100%">
-          <el-table-column prop="id" label="ID" width="80" />
-          <el-table-column prop="title" label="用例标题" min-width="220" show-overflow-tooltip />
-          <el-table-column label="项目" width="180"><template #default="{ row }">{{ labelById(flatProjects, row.project_id) }}</template></el-table-column>
-          <el-table-column label="需求" min-width="220"><template #default="{ row }">{{ labelById(requirements, row.requirement_id, 'title') }}</template></el-table-column>
-          <el-table-column label="类型" width="120"><template #default="{ row }">{{ caseTypeLabel(row.case_type) }}</template></el-table-column>
-          <el-table-column label="适用范围" width="150"><template #default="{ row }">{{ testScopeLabel(row.test_scope) }}</template></el-table-column>
-          <el-table-column label="最近执行时间" width="170"><template #default="{ row }">{{ formatDateTime(row.last_execute_time) }}</template></el-table-column>
-          <el-table-column label="最近结果" width="110"><template #default="{ row }">{{ executionResultLabel(row.last_execute_result) }}</template></el-table-column>
-          <el-table-column label="操作" width="150" fixed="right"><template #default="{ row }"><el-button link type="success" @click="openCaseExecution(row)">执行</el-button><el-button link type="warning" :disabled="!canCreateBugFromCase(row)" @click="openCaseBug(row)">提 Bug</el-button></template></el-table-column>
-        </el-table>
+        <div v-if="!testCases.length" class="project-tab-placeholder">暂无关联用例</div>
+        <div v-else class="iteration-tree-list">
+          <div v-for="project in flatProjects" :key="project.id" class="iteration-project-block">
+            <h3 v-if="testCasesByProject(project.id).length">{{ project.name }}</h3>
+            <el-table v-if="testCasesByProject(project.id).length" :data="testCasesByProject(project.id)" stripe width="100%">
+              <el-table-column prop="id" label="ID" width="80" />
+              <el-table-column prop="title" label="用例标题" min-width="180" show-overflow-tooltip />
+              <el-table-column label="需求" min-width="180"><template #default="{ row }">{{ labelById(requirements, row.requirement_id, 'title') }}</template></el-table-column>
+              <el-table-column label="类型" width="120"><template #default="{ row }">{{ caseTypeLabel(row.case_type) }}</template></el-table-column>
+              <el-table-column label="适用范围" width="150"><template #default="{ row }">{{ testScopeLabel(row.test_scope) }}</template></el-table-column>
+              <el-table-column label="最近执行时间" width="170"><template #default="{ row }">{{ formatDateTime(row.last_execute_time) }}</template></el-table-column>
+              <el-table-column label="最近结果" width="110"><template #default="{ row }">{{ executionResultLabel(row.last_execute_result) }}</template></el-table-column>
+              <el-table-column label="操作" width="150" fixed="right"><template #default="{ row }"><el-button link type="success" @click="openCaseExecution(row)">执行</el-button><el-button link type="warning" :disabled="!canCreateBugFromCase(row)" @click="openCaseBug(row)">提 Bug</el-button></template></el-table-column>
+            </el-table>
+          </div>
+        </div>
       </template>
 
       <template v-else-if="activeTab === 'bugs'">
@@ -379,6 +384,7 @@ function canActivateRequirement(row) { return ['draft', 'closed'].includes(row.s
 function canActivateTask(row) { return ['todo', 'closed'].includes(row.status) }
 function requirementsByProject(projectId) { return requirements.value.filter((item) => item.project_id === projectId) }
 function tasksByProject(projectId) { return tasks.value.filter((item) => item.project_id === projectId) }
+function testCasesByProject(projectId) { return testCases.value.filter((item) => item.project_id === projectId) }
 function requirementDetailLink(row) { return { name: 'requirement-detail', params: { id: row.id }, query: { from: 'iteration', iterationId: iterationId.value, tab: 'requirements' } } }
 function taskDetailLink(row) { return { name: 'task-detail', params: { id: row.id }, query: { from: 'iteration', iterationId: iterationId.value, tab: 'tasks' } } }
 function percent(value) { return `${Math.round((value || 0) * 100)}%` }

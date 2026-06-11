@@ -302,6 +302,31 @@ def test_closed_project_blocks_requirement_and_task_activation(client: TestClien
     assert task_history[-1]["action"] == "close"
     assert task_history[-1]["reason"] == "不做"
 
+
+def test_closed_project_blocks_requirement_and_task_edit_delete(client: TestClient):
+    project_id = _create_project(client)
+    client.post(f"/api/v1/projects/{project_id}/start", json={"effective_time": "2026-06-01T09:00:00"})
+    requirement = client.post(
+        "/api/v1/requirements",
+        json={"project_id": project_id, "title": f"关闭项目需求编辑-{uuid4().hex[:8]}"},
+    ).json()
+    task = client.post(
+        "/api/v1/tasks",
+        json={"project_id": project_id, "requirement_id": requirement["id"], "title": f"关闭项目任务编辑-{uuid4().hex[:8]}"},
+    ).json()
+    closed_project = client.post(f"/api/v1/projects/{project_id}/close", json={"effective_time": "2026-06-10T18:00:00"})
+    assert closed_project.status_code == 200
+
+    requirement_edit = client.patch(f"/api/v1/requirements/{requirement['id']}", json={"title": "禁止编辑需求"})
+    task_edit = client.patch(f"/api/v1/tasks/{task['id']}", json={"title": "禁止编辑任务"})
+    requirement_delete = client.delete(f"/api/v1/requirements/{requirement['id']}")
+    task_delete = client.delete(f"/api/v1/tasks/{task['id']}")
+
+    assert requirement_edit.status_code == 400
+    assert task_edit.status_code == 400
+    assert requirement_delete.status_code == 400
+    assert task_delete.status_code == 400
+
     requirement_reactivate = client.post(f"/api/v1/requirements/{requirement['id']}/activate")
     task_reactivate = client.post(f"/api/v1/tasks/{task['id']}/activate")
     assert requirement_reactivate.status_code == 400

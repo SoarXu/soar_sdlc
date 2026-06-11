@@ -37,6 +37,7 @@ def create_requirement(db: Session, payload: RequirementCreate) -> Requirement:
 
 def update_requirement(db: Session, requirement_id: int, payload: RequirementUpdate) -> Requirement:
     requirement = _get_active_requirement(db, requirement_id)
+    _ensure_project_editable_for_requirement(db, requirement)
     data = payload.model_dump(exclude_unset=True)
     data.pop("status", None)
     before_data, after_data = _requirement_change_data(requirement, data)
@@ -132,6 +133,7 @@ def list_requirement_audit_logs(db: Session, requirement_id: int) -> list[AuditL
 
 def delete_requirement(db: Session, requirement_id: int) -> None:
     requirement = _get_active_requirement(db, requirement_id)
+    _ensure_project_editable_for_requirement(db, requirement)
     requirement.deleted = 1
     requirement.delete_time = datetime.now()
     db.commit()
@@ -173,6 +175,12 @@ def _ensure_project_open_for_requirement(db: Session, requirement: Requirement) 
     project = db.query(Project).filter(Project.id == requirement.project_id, Project.deleted == 0).first()
     if project and project.status == "closed":
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="项目已关闭，需求不允许激活")
+
+
+def _ensure_project_editable_for_requirement(db: Session, requirement: Requirement) -> None:
+    project = db.query(Project).filter(Project.id == requirement.project_id, Project.deleted == 0).first()
+    if project and project.status == "closed":
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="项目已关闭，需求不允许编辑或删除")
 
 
 def _requirement_change_data(requirement: Requirement, data: dict) -> tuple[dict, dict]:

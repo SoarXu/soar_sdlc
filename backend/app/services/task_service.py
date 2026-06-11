@@ -34,6 +34,7 @@ def create_task(db: Session, payload: TaskCreate) -> Task:
 
 def update_task(db: Session, task_id: int, payload: TaskUpdate) -> Task:
     task = _get_active_task(db, task_id)
+    _ensure_project_editable_for_task(db, task)
     data = payload.model_dump(exclude_unset=True)
     before_data, after_data = _task_change_data(task, data)
     for field, value in data.items():
@@ -116,6 +117,7 @@ def list_task_audit_logs(db: Session, task_id: int) -> list[AuditLog]:
 
 def delete_task(db: Session, task_id: int) -> None:
     task = _get_active_task(db, task_id)
+    _ensure_project_editable_for_task(db, task)
     task.deleted = 1
     task.delete_time = datetime.now()
     db.commit()
@@ -145,6 +147,12 @@ def _audit_value(value):
     if isinstance(value, (date, datetime)):
         return value.isoformat()
     return value
+
+
+def _ensure_project_editable_for_task(db: Session, task: Task) -> None:
+    project = db.query(Project).filter(Project.id == task.project_id, Project.deleted == 0).first()
+    if project and project.status == "closed":
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="项目已关闭，任务不允许编辑或删除")
 
 
 def _ensure_project_open_for_task(db: Session, task: Task) -> None:

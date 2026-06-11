@@ -28,12 +28,12 @@
         </el-table-column>
         <el-table-column label="操作" width="280" fixed="right">
           <template #default="{ row }">
-            <el-button link type="primary" @click="openEdit(row)">编辑</el-button>
+            <el-button link type="primary" :disabled="isRequirementProjectClosed(row)" @click="openEdit(row)">编辑</el-button>
             <el-button v-if="canActivateRequirement(row)" link type="warning" @click="activateRequirementRow(row.id)">激活</el-button>
             <el-button v-if="row.status === 'active'" link type="danger" @click="openClose(row)">关闭</el-button>
             <el-button link type="success" @click="openGenerate(row)">生成任务</el-button>
-            <el-popconfirm title="确认删除该需求？" @confirm="removeRequirement(row.id)">
-              <template #reference><el-button link type="danger">删除</el-button></template>
+            <el-popconfirm title="确认删除该需求？" :disabled="isRequirementProjectClosed(row)" @confirm="removeRequirement(row.id)">
+              <template #reference><el-button link type="danger" :disabled="isRequirementProjectClosed(row)">删除</el-button></template>
             </el-popconfirm>
           </template>
         </el-table-column>
@@ -185,6 +185,7 @@ const requirementStatusOptions = [
 function normalizeRequirementPriority(value) { return legacyRequirementPriorityValues[value] || value || '3' }
 function requirementStatusLabel(value) { return requirementStatusOptions.find((option) => option.value === value)?.label || value || '-' }
 function canActivateRequirement(row) { return ['draft', 'closed'].includes(row.status) }
+function isRequirementProjectClosed(row) { return projects.value.find((item) => item.id === row.project_id)?.status === 'closed' }
 function apiErrorMessage(error, fallback) { return error?.response?.data?.detail || fallback }
 function showActionError(error, fallback) { ElMessageBox.alert(apiErrorMessage(error, fallback), '提示', { type: 'warning' }) }
 function resetForm() { Object.assign(form, { project_id: null, source_project_id: null, iteration_id: null, title: '', requirement_type: '功能', priority: '3', owner_id: null, proposer_id: currentUserId(users.value), status: 'draft', review_status: 'not_required', description: '', acceptance_criteria: '', source_reviewed: false }); ownerManuallySet.value = false }

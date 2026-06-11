@@ -89,7 +89,7 @@
       </template>
 
       <template v-else-if="activeTab === 'requirements'">
-        <div class="project-tab-toolbar"><el-button type="primary" @click="openRequirementCreate">新增需求</el-button></div>
+        <div class="project-tab-toolbar"><el-button type="primary" :disabled="projectClosed" @click="openRequirementCreate">新增需求</el-button></div>
         <el-table :data="projectRequirements" stripe width="100%">
           <el-table-column prop="id" label="ID" width="80" />
           <el-table-column label="需求标题" min-width="180" show-overflow-tooltip>
@@ -109,18 +109,18 @@
           </el-table-column>
           <el-table-column label="操作" width="280" fixed="right">
             <template #default="{ row }">
-              <el-button link type="primary" @click="openRequirementEdit(row)">编辑</el-button>
+              <el-button link type="primary" :disabled="projectClosed" @click="openRequirementEdit(row)">编辑</el-button>
               <el-button v-if="canActivateRequirement(row)" link type="warning" @click="activateRequirementRow(row.id)">激活</el-button>
               <el-button v-if="row.status === 'active'" link type="danger" @click="openRequirementClose(row)">关闭</el-button>
-              <el-button link type="success" @click="openGenerate(row)">生成任务</el-button>
-              <el-popconfirm title="确认删除该需求？" @confirm="removeRequirement(row.id)"><template #reference><el-button link type="danger">删除</el-button></template></el-popconfirm>
+              <el-button link type="success" :disabled="projectClosed" @click="openGenerate(row)">生成任务</el-button>
+              <el-popconfirm title="确认删除该需求？" :disabled="projectClosed" @confirm="removeRequirement(row.id)"><template #reference><el-button link type="danger" :disabled="projectClosed">删除</el-button></template></el-popconfirm>
             </template>
           </el-table-column>
         </el-table>
       </template>
 
       <template v-else-if="activeTab === 'tasks'">
-        <div class="project-tab-toolbar"><el-button type="primary" @click="openTaskCreate">新增任务</el-button></div>
+        <div class="project-tab-toolbar"><el-button type="primary" :disabled="projectClosed" @click="openTaskCreate">新增任务</el-button></div>
         <el-table :data="projectTasks" stripe width="100%">
           <el-table-column prop="id" label="ID" width="80" />
           <el-table-column label="任务标题" min-width="180" show-overflow-tooltip>
@@ -139,7 +139,7 @@
             </template>
           </el-table-column>
           <el-table-column label="操作" width="240" fixed="right">
-            <template #default="{ row }"><el-button link type="primary" @click="openTaskEdit(row)">编辑</el-button><el-button v-if="canActivateTask(row)" link type="warning" @click="activateTaskRow(row.id)">激活</el-button><el-button v-if="row.status !== 'closed'" link type="danger" @click="openTaskClose(row)">关闭</el-button><el-popconfirm title="确认删除该任务？" @confirm="removeTask(row.id)"><template #reference><el-button link type="danger">删除</el-button></template></el-popconfirm></template>
+            <template #default="{ row }"><el-button link type="primary" :disabled="projectClosed" @click="openTaskEdit(row)">编辑</el-button><el-button v-if="canActivateTask(row)" link type="warning" @click="activateTaskRow(row.id)">激活</el-button><el-button v-if="row.status !== 'closed'" link type="danger" @click="openTaskClose(row)">关闭</el-button><el-popconfirm title="确认删除该任务？" :disabled="projectClosed" @confirm="removeTask(row.id)"><template #reference><el-button link type="danger" :disabled="projectClosed">删除</el-button></template></el-popconfirm></template>
           </el-table-column>
         </el-table>
       </template>
@@ -388,6 +388,7 @@ const bugStatusOptions = [
 const projectIterations = computed(() => iterations.value.filter((item) => (item.project_ids || []).includes(projectId.value)))
 const projectRequirements = computed(() => requirements.value.filter((item) => item.project_id === projectId.value))
 const projectTasks = computed(() => tasks.value.filter((item) => item.project_id === projectId.value))
+const projectClosed = computed(() => project.value.status === 'closed')
 const projectTestCases = computed(() => testCases.value.filter((item) => item.project_id === projectId.value))
 const projectTestRuns = computed(() => testRuns.value.filter((item) => item.project_id === projectId.value))
 const projectBugs = computed(() => bugs.value.filter((item) => item.project_id === projectId.value))

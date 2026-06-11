@@ -28,11 +28,11 @@
         </el-table-column>
         <el-table-column label="操作" width="240" fixed="right">
           <template #default="{ row }">
-            <el-button link type="primary" @click="openEdit(row)">编辑</el-button>
+            <el-button link type="primary" :disabled="isTaskProjectClosed(row)" @click="openEdit(row)">编辑</el-button>
             <el-button v-if="canActivateTask(row)" link type="warning" @click="activateTaskRow(row.id)">激活</el-button>
             <el-button v-if="row.status !== 'closed'" link type="danger" @click="openClose(row)">关闭</el-button>
-            <el-popconfirm title="确认删除该任务？" @confirm="removeTask(row.id)">
-              <template #reference><el-button link type="danger">删除</el-button></template>
+            <el-popconfirm title="确认删除该任务？" :disabled="isTaskProjectClosed(row)" @confirm="removeTask(row.id)">
+              <template #reference><el-button link type="danger" :disabled="isTaskProjectClosed(row)">删除</el-button></template>
             </el-popconfirm>
           </template>
         </el-table-column>
@@ -149,6 +149,7 @@ const taskStatusOptions = [
 function optionLabel(options, value) { return options.find((option) => option.value === value)?.label || value || '-' }
 function taskStatusLabel(value) { return optionLabel(taskStatusOptions, value) }
 function canActivateTask(row) { return ['todo', 'closed'].includes(row.status) }
+function isTaskProjectClosed(row) { return projects.value.find((item) => item.id === row.project_id)?.status === 'closed' }
 function apiErrorMessage(error, fallback) { return error?.response?.data?.detail || fallback }
 function showActionError(error, fallback) { ElMessageBox.alert(apiErrorMessage(error, fallback), '提示', { type: 'warning' }) }
 function resetForm() { Object.assign(form, { project_id: null, source_project_id: null, requirement_id: null, title: '', task_type: '', priority: 'medium', owner_id: null, estimated_hours: null, actual_hours: null, due_date: null, status: 'todo', description: '' }); ownerManuallySet.value = false }

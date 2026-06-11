@@ -15,7 +15,7 @@
         <el-descriptions-item label="提出人">{{ userLabel(users, requirement.proposer_id) }}</el-descriptions-item>
         <el-descriptions-item label="优先级"><RequirementPriorityBadge :value="requirement.priority" /></el-descriptions-item>
         <el-descriptions-item label="状态">{{ requirementStatusLabel(requirement.status) }}</el-descriptions-item>
-        <el-descriptions-item label="评审状态">{{ requirement.review_status || '-' }}</el-descriptions-item>
+        <el-descriptions-item label="评审状态">{{ reviewStatusLabel(requirement.review_status) }}</el-descriptions-item>
         <el-descriptions-item label="类型">{{ requirement.requirement_type || '-' }}</el-descriptions-item>
         <el-descriptions-item label="来源项目">{{ labelById(projects, requirement.source_project_id) }}</el-descriptions-item>
       </el-descriptions>
@@ -104,9 +104,16 @@ const operationActionOptions = [
   { label: '激活', value: 'activate' },
   { label: '关闭', value: 'close' }
 ]
+const reviewStatusOptions = [
+  { label: '无需评审', value: 'not_required' },
+  { label: '待评审', value: 'pending' },
+  { label: '已通过', value: 'approved' },
+  { label: '已拒绝', value: 'rejected' }
+]
 
 function optionLabel(options, value) { return options.find((option) => option.value === value)?.label || value || '-' }
 function requirementStatusLabel(value) { return optionLabel(requirementStatusOptions, value) }
+function reviewStatusLabel(value) { return optionLabel(reviewStatusOptions, value) }
 function operationActionLabel(value) { return optionLabel(operationActionOptions, value) }
 function formatDateTime(value) {
   if (!value) return ''

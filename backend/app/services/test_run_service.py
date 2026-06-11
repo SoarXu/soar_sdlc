@@ -8,7 +8,7 @@ from app.views.test_run_view import SelectTestCasesRequest, TestRunCaseUpdate, T
 
 
 def list_test_runs(db: Session) -> list[TestRun]:
-    return db.query(TestRun).filter(TestRun.delete_time.is_(None)).order_by(TestRun.id.desc()).all()
+    return db.query(TestRun).filter(TestRun.deleted == 0).order_by(TestRun.id.desc()).all()
 
 
 def create_test_run(db: Session, payload: TestRunCreate) -> TestRun:
@@ -30,6 +30,7 @@ def update_test_run(db: Session, test_run_id: int, payload: TestRunUpdate) -> Te
 
 def delete_test_run(db: Session, test_run_id: int) -> None:
     test_run = _get_active_test_run(db, test_run_id)
+    test_run.deleted = 1
     test_run.delete_time = datetime.now()
     db.commit()
 
@@ -72,7 +73,7 @@ def list_test_run_cases(db: Session) -> list[TestRunCase]:
 
 
 def _get_active_test_run(db: Session, test_run_id: int) -> TestRun:
-    test_run = db.query(TestRun).filter(TestRun.id == test_run_id, TestRun.delete_time.is_(None)).first()
+    test_run = db.query(TestRun).filter(TestRun.id == test_run_id, TestRun.deleted == 0).first()
     if not test_run:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Test run not found")
     return test_run

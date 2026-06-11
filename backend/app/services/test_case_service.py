@@ -8,7 +8,7 @@ from app.views.test_case_view import TestCaseCreate, TestCaseUpdate
 
 
 def list_test_cases(db: Session) -> list[TestCase]:
-    return db.query(TestCase).filter(TestCase.delete_time.is_(None)).order_by(TestCase.id.desc()).all()
+    return db.query(TestCase).filter(TestCase.deleted == 0).order_by(TestCase.id.desc()).all()
 
 
 def create_test_case(db: Session, payload: TestCaseCreate) -> TestCase:
@@ -30,12 +30,13 @@ def update_test_case(db: Session, test_case_id: int, payload: TestCaseUpdate) ->
 
 def delete_test_case(db: Session, test_case_id: int) -> None:
     test_case = _get_active_test_case(db, test_case_id)
+    test_case.deleted = 1
     test_case.delete_time = datetime.now()
     db.commit()
 
 
 def _get_active_test_case(db: Session, test_case_id: int) -> TestCase:
-    test_case = db.query(TestCase).filter(TestCase.id == test_case_id, TestCase.delete_time.is_(None)).first()
+    test_case = db.query(TestCase).filter(TestCase.id == test_case_id, TestCase.deleted == 0).first()
     if not test_case:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Test case not found")
     return test_case

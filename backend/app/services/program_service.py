@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import date, datetime
 
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
@@ -18,7 +18,7 @@ PROGRAM_STATUS_OPTIONS = [
 
 
 def list_programs(db: Session) -> list[Program]:
-    return db.query(Program).filter(Program.delete_time.is_(None)).order_by(Program.id.desc()).all()
+    return db.query(Program).filter(Program.deleted == 0).order_by(Program.id.desc()).all()
 
 
 def list_program_status_options() -> list[dict[str, str]]:
@@ -26,8 +26,8 @@ def list_program_status_options() -> list[dict[str, str]]:
 
 
 def list_program_tree(db: Session) -> list[dict]:
-    programs = db.query(Program).filter(Program.delete_time.is_(None)).order_by(Program.id.asc()).all()
-    projects = db.query(Project).filter(Project.delete_time.is_(None)).order_by(Project.id.asc()).all()
+    programs = db.query(Program).filter(Program.deleted == 0).order_by(Program.id.asc()).all()
+    projects = db.query(Project).filter(Project.deleted == 0).order_by(Project.id.asc()).all()
 
     nodes = {
         program.id: {
@@ -108,7 +108,31 @@ def update_program(db: Session, program_id: int, payload: ProgramUpdate) -> Prog
 
 def delete_program(db: Session, program_id: int) -> None:
     program = _get_active_program(db, program_id)
-    program.delete_time = datetime.now()
+    now = datetime.now()
+
+    descendant_ids = _collect_descendant_program_ids(db, program_id)
+
+    programs_to_delete = (
+        db.query(Program)
+        .filter(Program.id.in_(descendant_ids), Program.deleted == 0)
+        .all()
+    )
+    for p in programs_to_delete:
+        p.deleted = 1
+        p.delete_time = now
+
+    descendant_ids.add(program_id)
+    projects_to_delete = (
+        db.query(Project)
+        .filter(Project.program_id.in_(descendant_ids), Project.deleted == 0)
+        .all()
+    )
+    for p in projects_to_delete:
+        p.deleted = 1
+        p.delete_time = now
+
+    program.deleted = 1
+    program.delete_time = now
     db.commit()
 
 
@@ -117,6 +141,7 @@ def start_program(db: Session, program_id: int, payload: StatusOperationCreate |
     _require_status(program.status, {"planning", "paused"}, "只有规划中或已挂起的项目集可以启动")
     from_status = program.status
     program.status = "active"
+    program.actual_start_date = _effective_date(payload)
     _activate_ancestor_programs(db, program.parent_id)
     create_status_operation(
         db,
@@ -158,6 +183,7 @@ def close_program(db: Session, program_id: int, payload: StatusOperationCreate |
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="存在子项目集或项目为未关闭状态")
     from_status = program.status
     program.status = "closed"
+    program.actual_end_date = _effective_date(payload)
     create_status_operation(
         db,
         object_type="program",
@@ -177,6 +203,7 @@ def activate_program(db: Session, program_id: int, payload: StatusOperationCreat
     _require_status(program.status, {"closed"}, "只有已关闭的项目集可以激活")
     from_status = program.status
     program.status = "active"
+    program.actual_end_date = None
     _activate_ancestor_programs(db, program.parent_id)
     create_status_operation(
         db,
@@ -198,7 +225,7 @@ def list_program_status_operations(db: Session, program_id: int) -> list[dict]:
 
 
 def _get_active_program(db: Session, program_id: int) -> Program:
-    program = db.query(Program).filter(Program.id == program_id, Program.delete_time.is_(None)).first()
+    program = db.query(Program).filter(Program.id == program_id, Program.deleted == 0).first()
     if not program:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Program not found")
     return program
@@ -211,7 +238,7 @@ def _require_status(current_status: str, allowed_statuses: set[str], message: st
 
 def _activate_ancestor_programs(db: Session, parent_id: int | None) -> None:
     while parent_id:
-        parent = db.query(Program).filter(Program.id == parent_id, Program.delete_time.is_(None)).first()
+        parent = db.query(Program).filter(Program.id == parent_id, Program.deleted == 0).first()
         if not parent:
             return
         if parent.status != "active":
@@ -220,7 +247,7 @@ def _activate_ancestor_programs(db: Session, parent_id: int | None) -> None:
 
 
 def _has_unclosed_children(db: Session, program_id: int) -> bool:
-    child_programs = db.query(Program).filter(Program.parent_id == program_id, Program.delete_time.is_(None)).all()
+    child_programs = db.query(Program).filter(Program.parent_id == program_id, Program.deleted == 0).all()
     if any(child.status != "closed" for child in child_programs):
         return True
     for child in child_programs:
@@ -229,7 +256,22 @@ def _has_unclosed_children(db: Session, program_id: int) -> bool:
 
     return (
         db.query(Project)
-        .filter(Project.program_id == program_id, Project.delete_time.is_(None), Project.status != "closed")
+        .filter(Project.program_id == program_id, Project.deleted == 0, Project.status != "closed")
         .first()
         is not None
     )
+
+
+def _effective_date(payload: StatusOperationCreate | None) -> date:
+    if payload and payload.effective_time:
+        return payload.effective_time.date()
+    return date.today()
+
+
+def _collect_descendant_program_ids(db: Session, program_id: int) -> set[int]:
+    result: set[int] = set()
+    children = db.query(Program).filter(Program.parent_id == program_id, Program.deleted == 0).all()
+    for child in children:
+        result.add(child.id)
+        result.update(_collect_descendant_program_ids(db, child.id))
+    return result

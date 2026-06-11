@@ -44,9 +44,9 @@
             <el-button link type="success" @click="openCreate(row)">新增项目</el-button>
             <el-button v-if="row.status === 'planning' || row.status === 'paused'" link type="success" @click="openStatusDialog(row, 'start')">启动</el-button>
             <el-button v-if="row.status === 'active'" link type="warning" @click="openStatusDialog(row, 'suspend')">挂起</el-button>
-            <el-button v-if="row.status === 'active' || row.status === 'paused'" link type="danger" @click="openStatusDialog(row, 'close')">关闭</el-button>
+            <el-button v-if="row.status === 'active' || row.status === 'paused' || row.status === 'maintenance'" link type="danger" @click="openStatusDialog(row, 'close')">关闭</el-button>
             <el-button v-if="row.status === 'closed'" link type="success" @click="openStatusDialog(row, 'activate')">激活</el-button>
-            <el-popconfirm title="确认删除该项目？" @confirm="removeProject(row.id)">
+            <el-popconfirm title="确认删除该项目？子项目将一并删除。" @confirm="removeProject(row.id)">
               <template #reference><el-button link type="danger">删除</el-button></template>
             </el-popconfirm>
           </template>
@@ -89,8 +89,6 @@
               <el-date-picker v-model="form.end_date" value-format="YYYY-MM-DD" type="date" :disabled="form.is_long_term" />
             </div>
           </el-form-item>
-          <el-form-item label="实际开始"><el-date-picker v-model="form.actual_start_date" value-format="YYYY-MM-DD" type="date" /></el-form-item>
-          <el-form-item label="实际结束"><el-date-picker v-model="form.actual_end_date" value-format="YYYY-MM-DD" type="date" /></el-form-item>
         </div>
         <el-form-item label="描述"><el-input v-model="form.description" type="textarea" :rows="3" /></el-form-item>
       </el-form>
@@ -132,6 +130,27 @@
         <el-button type="primary" :loading="saving" @click="submitStatusOperation">{{ statusConfirmText }}</el-button>
       </template>
     </el-dialog>
+
+    <el-dialog v-model="maintenanceDialogVisible" title="确认转运维" width="560px">
+      <el-alert
+        type="warning"
+        show-icon
+        :closable="false"
+        title="该项目已关闭，移动到其他项目下后将进入运维阶段，后续新增需求默认标记为运维期。"
+      />
+      <el-form label-position="top" class="dialog-form">
+        <el-form-item label="转运维时间" required>
+          <el-date-picker v-model="maintenanceForm.effective_time" type="datetime" value-format="YYYY-MM-DDTHH:mm:ss" />
+        </el-form-item>
+        <el-form-item label="备注">
+          <el-input v-model="maintenanceForm.remark" type="textarea" :rows="4" placeholder="请输入本次转运维备注" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="maintenanceDialogVisible = false">取消</el-button>
+        <el-button type="primary" :loading="saving" @click="confirmMaintenanceMove">确认转运维</el-button>
+      </template>
+    </el-dialog>
   </section>
 </template>
 
@@ -158,8 +177,10 @@ import { usePagination } from '../utils/usePagination'
 const loading = ref(false)
 const saving = ref(false)
 const dialogVisible = ref(false)
+const maintenanceDialogVisible = ref(false)
 const statusDialogVisible = ref(false)
 const editingId = ref(null)
+const editingOriginal = ref(null)
 const statusTarget = ref(null)
 const statusAction = ref('')
 const statusHistory = ref([])
@@ -167,7 +188,20 @@ const projects = ref([])
 const programs = ref([])
 const users = ref([])
 const projectTree = computed(() => buildProjectTree(projects.value))
-const parentProjectOptions = computed(() => projects.value.filter((item) => item.id !== editingId.value))
+function collectDescendantIds(projectId) {
+  const ids = new Set()
+  const walk = (pid) => {
+    projects.value.filter(p => p.parent_id === pid).forEach(p => { ids.add(p.id); walk(p.id) })
+  }
+  walk(projectId)
+  return ids
+}
+const parentProjectOptions = computed(() => {
+  if (!editingId.value) return projects.value
+  const excludeIds = collectDescendantIds(editingId.value)
+  excludeIds.add(editingId.value)
+  return projects.value.filter((item) => !excludeIds.has(item.id))
+})
 const {
   page: projectPage,
   pageSize: projectPageSize,
@@ -175,20 +209,23 @@ const {
   total: projectTotal,
   pagedItems: pagedProjectTree
 } = usePagination(projectTree)
-const form = reactive({ parent_id: null, program_id: null, name: '', owner_id: null, start_date: null, end_date: null, actual_start_date: null, actual_end_date: null, is_long_term: false, status: 'planning', description: '' })
+const form = reactive({ parent_id: null, program_id: null, name: '', owner_id: null, start_date: null, end_date: null, is_long_term: false, status: 'planning', description: '' })
 const projectStatusOptions = [
   { label: '规划中', value: 'planning' },
   { label: '进行中', value: 'active' },
   { label: '已挂起', value: 'paused' },
+  { label: '运维中', value: 'maintenance' },
   { label: '已关闭', value: 'closed' }
 ]
 const statusActionOptions = {
   start: '启动',
   suspend: '挂起',
   close: '关闭',
-  activate: '激活'
+  activate: '激活',
+  move_to_maintenance: '转运维'
 }
 const statusForm = reactive({ effective_time: '', remark: '' })
+const maintenanceForm = reactive({ effective_time: '', remark: '', payload: null })
 
 const statusDialogTitle = computed(() => `${statusActionLabel(statusAction.value)}项目 ${statusTarget.value?.name || ''}`)
 const statusConfirmText = computed(() => `${statusActionLabel(statusAction.value)}项目`)
@@ -202,7 +239,7 @@ function statusActionLabel(value) {
 }
 
 function resetForm() {
-  Object.assign(form, { parent_id: null, program_id: null, name: '', owner_id: null, start_date: null, end_date: null, actual_start_date: null, actual_end_date: null, is_long_term: false, status: 'planning', description: '' })
+  Object.assign(form, { parent_id: null, program_id: null, name: '', owner_id: null, start_date: null, end_date: null, is_long_term: false, status: 'planning', description: '' })
 }
 
 function buildProjectTree(items) {
@@ -225,7 +262,12 @@ function openCreate(parent = null) {
   }
   dialogVisible.value = true
 }
-function openEdit(row) { editingId.value = row.id; Object.assign(form, { ...row, is_long_term: Boolean(row.is_long_term), description: row.description || '' }); dialogVisible.value = true }
+function openEdit(row) {
+  editingId.value = row.id
+  editingOriginal.value = { ...row }
+  Object.assign(form, { ...row, is_long_term: Boolean(row.is_long_term), description: row.description || '' })
+  dialogVisible.value = true
+}
 
 function formatDateTime(value) {
   if (!value) return '-'
@@ -271,8 +313,40 @@ async function submitProject() {
   try {
     const payload = { ...form, program_id: form.program_id || null, owner_id: form.owner_id || null, end_date: form.is_long_term ? null : form.end_date }
     delete payload.status
+    if (needsMaintenanceConfirm(payload)) {
+      saving.value = false
+      Object.assign(maintenanceForm, { effective_time: currentDateTimeValue(), remark: '', payload })
+      maintenanceDialogVisible.value = true
+      return
+    }
     if (editingId.value) await updateProject(editingId.value, payload)
     else await createProject(payload)
+    dialogVisible.value = false
+    await loadData()
+  } finally {
+    saving.value = false
+  }
+}
+
+function needsMaintenanceConfirm(payload) {
+  return Boolean(
+    editingId.value
+    && editingOriginal.value?.status === 'closed'
+    && payload.parent_id
+    && payload.parent_id !== editingOriginal.value.parent_id
+  )
+}
+
+async function confirmMaintenanceMove() {
+  if (!maintenanceForm.effective_time) return ElMessage.warning('请选择转运维时间')
+  saving.value = true
+  try {
+    await updateProject(editingId.value, {
+      ...maintenanceForm.payload,
+      maintenance_start_time: maintenanceForm.effective_time,
+      maintenance_remark: maintenanceForm.remark
+    })
+    maintenanceDialogVisible.value = false
     dialogVisible.value = false
     await loadData()
   } finally {

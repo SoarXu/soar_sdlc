@@ -13,7 +13,7 @@ from app.views.bug_view import BugCreate, BugFromTestRunCaseRequest, BugUpdate
 
 
 def list_bugs(db: Session) -> list[Bug]:
-    return db.query(Bug).filter(Bug.delete_time.is_(None)).order_by(Bug.id.desc()).all()
+    return db.query(Bug).filter(Bug.deleted == 0).order_by(Bug.id.desc()).all()
 
 
 def create_bug(db: Session, payload: BugCreate) -> Bug:
@@ -37,11 +37,11 @@ def create_bug_from_test_run_case(db: Session, run_case_id: int, payload: BugFro
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Test context not found")
 
     requirement = (
-        db.query(Requirement).filter(Requirement.id == test_case.requirement_id, Requirement.delete_time.is_(None)).first()
+        db.query(Requirement).filter(Requirement.id == test_case.requirement_id, Requirement.deleted == 0).first()
         if test_case.requirement_id
         else None
     )
-    project = db.query(Project).filter(Project.id == test_run.project_id, Project.delete_time.is_(None)).first()
+    project = db.query(Project).filter(Project.id == test_run.project_id, Project.deleted == 0).first()
     owner_id = requirement.owner_id if requirement and requirement.owner_id else project.owner_id if project else None
 
     bug = Bug(
@@ -76,12 +76,13 @@ def update_bug(db: Session, bug_id: int, payload: BugUpdate) -> Bug:
 
 def delete_bug(db: Session, bug_id: int) -> None:
     bug = _get_active_bug(db, bug_id)
+    bug.deleted = 1
     bug.delete_time = datetime.now()
     db.commit()
 
 
 def _get_active_bug(db: Session, bug_id: int) -> Bug:
-    bug = db.query(Bug).filter(Bug.id == bug_id, Bug.delete_time.is_(None)).first()
+    bug = db.query(Bug).filter(Bug.id == bug_id, Bug.deleted == 0).first()
     if not bug:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Bug not found")
     return bug

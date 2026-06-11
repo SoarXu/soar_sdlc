@@ -184,6 +184,51 @@ def test_project_can_create_child_project_and_inherit_program(client: TestClient
     assert cycle.json()["detail"] == "项目不能选择下级项目作为上级项目"
 
 
+def test_open_project_move_only_changes_parent(client: TestClient):
+    parent = client.post("/api/v1/projects", json={"name": f"父项目-{uuid4().hex[:8]}"}).json()
+    project = client.post("/api/v1/projects", json={"name": f"移动项目-{uuid4().hex[:8]}"}).json()
+    client.post(f"/api/v1/projects/{project['id']}/start")
+
+    moved = client.patch(f"/api/v1/projects/{project['id']}", json={"parent_id": parent["id"]})
+
+    assert moved.status_code == 200
+    assert moved.json()["parent_id"] == parent["id"]
+    assert moved.json()["status"] == "active"
+    assert moved.json()["lifecycle_phase"] == "development"
+    assert moved.json()["maintenance_start_time"] is None
+
+
+def test_closed_project_move_enters_maintenance(client: TestClient):
+    parent = client.post("/api/v1/projects", json={"name": f"运维父项目-{uuid4().hex[:8]}"}).json()
+    project = client.post("/api/v1/projects", json={"name": f"转运维项目-{uuid4().hex[:8]}"}).json()
+    client.post(f"/api/v1/projects/{project['id']}/start")
+    client.post(f"/api/v1/projects/{project['id']}/close")
+
+    moved = client.patch(
+        f"/api/v1/projects/{project['id']}",
+        json={
+            "parent_id": parent["id"],
+            "maintenance_start_time": "2026-06-11T09:30:00",
+            "maintenance_remark": "关闭后纳入运维项目管理",
+        },
+    )
+
+    assert moved.status_code == 200
+    assert moved.json()["parent_id"] == parent["id"]
+    assert moved.json()["status"] == "maintenance"
+    assert moved.json()["lifecycle_phase"] == "maintenance"
+    assert moved.json()["maintenance_start_time"] == "2026-06-11T09:30:00"
+
+    history = client.get(f"/api/v1/projects/{project['id']}/status-operations").json()
+    assert any(
+        item["action"] == "move_to_maintenance"
+        and item["from_status"] == "closed"
+        and item["to_status"] == "maintenance"
+        and item["remark"] == "关闭后纳入运维项目管理"
+        for item in history
+    )
+
+
 def test_dashboard_summary_reads_database_counts(client: TestClient):
     response = client.get("/api/v1/dashboard/summary")
 

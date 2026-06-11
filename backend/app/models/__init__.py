@@ -2,7 +2,7 @@ from app.models.audit_log import AuditLog
 from app.models.bug import Attachment, Bug, ObjectTag, Tag
 from app.models.field_registry import CustomFieldValue, FormFieldRegistry, FormLayoutConfig
 from app.models.integration_mapping import ExternalIntegrationMapping
-from app.models.iteration import Iteration
+from app.models.iteration import Iteration, IterationProject
 from app.models.notification import Notification, NotificationChannelConfig, NotificationDeliveryLog
 from app.models.project import Project
 from app.models.project_member import ProjectMember
@@ -26,6 +26,7 @@ __all__ = [
     "FormFieldRegistry",
     "FormLayoutConfig",
     "Iteration",
+    "IterationProject",
     "Notification",
     "NotificationChannelConfig",
     "NotificationDeliveryLog",

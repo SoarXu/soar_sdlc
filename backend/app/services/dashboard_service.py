@@ -15,10 +15,10 @@ def get_dashboard_summary(db: Session) -> DashboardSummary:
         projects=_count_active(db, Project),
         requirements=_count_active(db, Requirement),
         tasks=_count_active(db, Task),
-        open_bugs=db.query(func.count(Bug.id)).filter(Bug.delete_time.is_(None), Bug.status != "closed").scalar()
+        open_bugs=db.query(func.count(Bug.id)).filter(Bug.deleted == 0, Bug.status != "closed").scalar()
         or 0,
     )
 
 
 def _count_active(db: Session, model) -> int:
-    return db.query(func.count(model.id)).filter(model.delete_time.is_(None)).scalar() or 0
+    return db.query(func.count(model.id)).filter(model.deleted == 0).scalar() or 0

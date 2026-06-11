@@ -1,6 +1,6 @@
 from datetime import date, datetime
 
-from sqlalchemy import BigInteger, Date, DateTime, String, Text, text
+from sqlalchemy import BigInteger, Date, DateTime, Integer, String, Text, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.session import Base
@@ -10,7 +10,6 @@ class Iteration(Base):
     __tablename__ = "iterations"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
-    project_id: Mapped[int] = mapped_column(BigInteger)
     name: Mapped[str] = mapped_column(String(150))
     owner_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     start_date: Mapped[date | None] = mapped_column(Date, nullable=True)
@@ -25,4 +24,13 @@ class Iteration(Base):
         server_default=text("CURRENT_TIMESTAMP"),
         server_onupdate=text("CURRENT_TIMESTAMP"),
     )
+    deleted: Mapped[int] = mapped_column(Integer, default=0)
     delete_time: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+
+class IterationProject(Base):
+    __tablename__ = "iteration_projects"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    iteration_id: Mapped[int] = mapped_column(BigInteger)
+    project_id: Mapped[int] = mapped_column(BigInteger)

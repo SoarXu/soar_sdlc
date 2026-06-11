@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import BigInteger, Boolean, DateTime, String, Text, text
+from sqlalchemy import BigInteger, Boolean, DateTime, Integer, String, Text, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.session import Base
@@ -11,6 +11,7 @@ class Requirement(Base):
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     project_id: Mapped[int] = mapped_column(BigInteger)
+    source_project_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     iteration_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     title: Mapped[str] = mapped_column(String(255))
     requirement_type: Mapped[str | None] = mapped_column(String(64), nullable=True)
@@ -30,4 +31,5 @@ class Requirement(Base):
         server_default=text("CURRENT_TIMESTAMP"),
         server_onupdate=text("CURRENT_TIMESTAMP"),
     )
+    deleted: Mapped[int] = mapped_column(Integer, default=0)
     delete_time: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)

@@ -4,7 +4,8 @@ from pydantic import BaseModel, ConfigDict
 
 
 class IterationBase(BaseModel):
-    project_id: int
+    project_id: int | None = None
+    project_ids: list[int] = []
     name: str
     owner_id: int | None = None
     start_date: date | None = None
@@ -19,6 +20,7 @@ class IterationCreate(IterationBase):
 
 class IterationUpdate(BaseModel):
     project_id: int | None = None
+    project_ids: list[int] | None = None
     name: str | None = None
     owner_id: int | None = None
     start_date: date | None = None
@@ -28,10 +30,18 @@ class IterationUpdate(BaseModel):
     updater_id: int | None = None
 
 
-class IterationRead(IterationBase):
+class IterationRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: int
+    project_id: int | None = None
+    project_ids: list[int] = []
+    name: str
+    owner_id: int | None = None
+    start_date: date | None = None
+    end_date: date | None = None
+    status: str = "planning"
+    goal: str | None = None
     creator_id: int | None = None
     updater_id: int | None = None
     create_time: datetime | None = None

@@ -71,12 +71,12 @@ def seed_default_users(db: Session) -> list[User]:
             users.append(user)
 
     db.commit()
-    return db.query(User).filter(User.delete_time.is_(None), User.is_active.is_(True)).order_by(User.id.asc()).all()
+    return db.query(User).filter(User.deleted == 0, User.is_active.is_(True)).order_by(User.id.asc()).all()
 
 
 def authenticate_user(db: Session, username: str, password: str) -> User | None:
     seed_default_users(db)
-    user = db.query(User).filter(User.username == username, User.delete_time.is_(None), User.is_active.is_(True)).first()
+    user = db.query(User).filter(User.username == username, User.deleted == 0, User.is_active.is_(True)).first()
     if not user or not _password_matches(user.password_hash, password):
         return None
     return user

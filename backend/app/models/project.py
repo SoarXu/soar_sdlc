@@ -1,6 +1,6 @@
 from datetime import date, datetime
 
-from sqlalchemy import BigInteger, Boolean, Date, DateTime, String, Text, text
+from sqlalchemy import BigInteger, Boolean, Date, DateTime, Integer, String, Text, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.session import Base
@@ -20,6 +20,8 @@ class Project(Base):
     actual_end_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     is_long_term: Mapped[bool] = mapped_column(Boolean, default=False)
     status: Mapped[str] = mapped_column(String(32), default="planning")
+    lifecycle_phase: Mapped[str] = mapped_column(String(32), default="development")
+    maintenance_start_time: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     workflow_config_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     creator_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
@@ -30,4 +32,5 @@ class Project(Base):
         server_default=text("CURRENT_TIMESTAMP"),
         server_onupdate=text("CURRENT_TIMESTAMP"),
     )
+    deleted: Mapped[int] = mapped_column(Integer, default=0)
     delete_time: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)

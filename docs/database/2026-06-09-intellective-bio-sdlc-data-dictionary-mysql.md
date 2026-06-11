@@ -108,7 +108,9 @@
 | actual_start_date | DATE | NULL | 实际开始日期 |
 | actual_end_date | DATE | NULL | 实际结束日期 |
 | is_long_term | TINYINT(1) | NOT NULL DEFAULT 0 | 是否长期维护 |
-| status | VARCHAR(32) | NOT NULL DEFAULT 'planning' | 状态：planning、active、paused、closed |
+| status | VARCHAR(32) | NOT NULL DEFAULT 'planning' | 状态：planning、active、paused、closed、maintenance |
+| lifecycle_phase | VARCHAR(32) | NOT NULL DEFAULT 'development' | 生命周期阶段：development、maintenance |
+| maintenance_start_time | DATETIME | NULL | 进入运维时间 |
 | description | TEXT | NULL | 描述 |
 | creator_id | BIGINT UNSIGNED | NULL | 创建人 |
 | updater_id | BIGINT UNSIGNED | NULL | 更新人 |
@@ -633,7 +635,7 @@
 | 对象 | 状态 |
 |---|---|
 | 项目集 | planning、active、paused、closed |
-| 项目 | planning、active、paused、closed |
+| 项目 | planning、active、paused、closed、maintenance |
 | 迭代 | planning、active、finished、closed |
 | 需求 | draft、active、done、closed |
 | 任务 | todo、doing、done、closed |

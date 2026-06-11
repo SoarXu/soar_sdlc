@@ -12,7 +12,7 @@
       <el-table v-loading="loading" :data="pagedIterations" stripe>
         <el-table-column prop="id" label="ID" width="80" />
         <el-table-column prop="name" label="迭代名称" min-width="180" />
-        <el-table-column label="项目" width="180"><template #default="{ row }">{{ labelById(projects, row.project_id) }}</template></el-table-column>
+        <el-table-column label="项目" min-width="240"><template #default="{ row }">{{ (row.project_ids || []).map(id => labelById(projects, id)).join('、') }}</template></el-table-column>
         <el-table-column label="负责人" width="150"><template #default="{ row }">{{ userLabel(users, row.owner_id) }}</template></el-table-column>
         <el-table-column prop="start_date" label="开始日期" width="130" />
         <el-table-column prop="end_date" label="结束日期" width="130" />
@@ -42,8 +42,8 @@
         <el-form-item label="迭代名称" required><el-input v-model="form.name" /></el-form-item>
         <div class="form-grid">
           <el-form-item label="项目" required>
-            <el-select v-model="form.project_id" filterable placeholder="请选择项目">
-              <el-option v-for="project in projects" :key="project.id" :label="project.name" :value="project.id" />
+            <el-select v-model="form.project_ids" multiple filterable placeholder="请选择项目（仅顶级项目）">
+              <el-option v-for="project in topLevelProjects" :key="project.id" :label="project.name" :value="project.id" />
             </el-select>
           </el-form-item>
           <el-form-item label="负责人">
@@ -73,7 +73,7 @@
 </template>
 
 <script setup>
-import { onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { createIteration, deleteIteration, fetchIterations, updateIteration } from '../api/iterations'
 import { fetchProjects } from '../api/projects'
@@ -95,11 +95,12 @@ const {
   total: iterationTotal,
   pagedItems: pagedIterations
 } = usePagination(iterations)
-const form = reactive({ project_id: null, name: '', owner_id: null, start_date: null, end_date: null, status: 'planning', goal: '' })
+const topLevelProjects = computed(() => projects.value.filter(p => !p.parent_id))
+const form = reactive({ project_ids: [], name: '', owner_id: null, start_date: null, end_date: null, status: 'planning', goal: '' })
 
-function resetForm() { Object.assign(form, { project_id: null, name: '', owner_id: null, start_date: null, end_date: null, status: 'planning', goal: '' }) }
+function resetForm() { Object.assign(form, { project_ids: [], name: '', owner_id: null, start_date: null, end_date: null, status: 'planning', goal: '' }) }
 function openCreate() { editingId.value = null; resetForm(); dialogVisible.value = true }
-function openEdit(row) { editingId.value = row.id; Object.assign(form, { ...row, goal: row.goal || '' }); dialogVisible.value = true }
+function openEdit(row) { editingId.value = row.id; Object.assign(form, { ...row, project_ids: row.project_ids || [], goal: row.goal || '' }); dialogVisible.value = true }
 
 async function loadData() {
   loading.value = true
@@ -116,7 +117,7 @@ async function loadData() {
 }
 
 async function submitIteration() {
-  if (!form.project_id || !form.name.trim()) return ElMessage.warning('请选择项目并填写迭代名称')
+  if (!form.project_ids.length || !form.name.trim()) return ElMessage.warning('请选择项目并填写迭代名称')
   saving.value = true
   try {
     const payload = { ...form, owner_id: form.owner_id || null }

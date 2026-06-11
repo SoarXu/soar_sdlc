@@ -13,6 +13,7 @@
         <el-table-column prop="id" label="ID" width="80" />
         <el-table-column prop="title" label="需求标题" min-width="220" />
         <el-table-column label="项目" width="180"><template #default="{ row }">{{ labelById(projects, row.project_id) }}</template></el-table-column>
+        <el-table-column label="来源项目" width="180"><template #default="{ row }">{{ labelById(projects, row.source_project_id) }}</template></el-table-column>
         <el-table-column label="迭代" width="160"><template #default="{ row }">{{ labelById(iterations, row.iteration_id) }}</template></el-table-column>
         <el-table-column label="负责人" width="150"><template #default="{ row }">{{ userLabel(users, row.owner_id) }}</template></el-table-column>
         <el-table-column prop="priority" label="优先级" width="100" />
@@ -48,13 +49,18 @@
               <el-option v-for="project in projects" :key="project.id" :label="project.name" :value="project.id" />
             </el-select>
           </el-form-item>
+          <el-form-item label="来源项目">
+            <el-select v-model="form.source_project_id" clearable filterable placeholder="请选择来源项目" @change="onSourceProjectChange">
+              <el-option v-for="project in projects" :key="project.id" :label="project.name" :value="project.id" />
+            </el-select>
+          </el-form-item>
           <el-form-item label="迭代">
             <el-select v-model="form.iteration_id" clearable filterable placeholder="请选择迭代">
               <el-option v-for="iteration in iterations" :key="iteration.id" :label="iteration.name" :value="iteration.id" />
             </el-select>
           </el-form-item>
           <el-form-item label="负责人">
-            <el-select v-model="form.owner_id" clearable filterable placeholder="请选择负责人">
+            <el-select v-model="form.owner_id" clearable filterable placeholder="请选择负责人" @change="onOwnerChange">
               <el-option v-for="user in users" :key="user.id" :label="user.full_name" :value="user.id" />
             </el-select>
           </el-form-item>
@@ -126,12 +132,15 @@ const {
   total: requirementTotal,
   pagedItems: pagedRequirements
 } = usePagination(requirements)
-const form = reactive({ project_id: null, iteration_id: null, title: '', requirement_type: '', priority: 'medium', owner_id: null, proposer_id: null, status: 'draft', review_status: 'not_required', description: '', acceptance_criteria: '', source_reviewed: false })
+const form = reactive({ project_id: null, source_project_id: null, iteration_id: null, title: '', requirement_type: '', priority: 'medium', owner_id: null, proposer_id: null, status: 'draft', review_status: 'not_required', description: '', acceptance_criteria: '', source_reviewed: false })
+const ownerManuallySet = ref(false)
 const generateForm = reactive({ title: '', task_type: '', description: '' })
 
-function resetForm() { Object.assign(form, { project_id: null, iteration_id: null, title: '', requirement_type: '', priority: 'medium', owner_id: null, proposer_id: null, status: 'draft', review_status: 'not_required', description: '', acceptance_criteria: '', source_reviewed: false }) }
+function resetForm() { Object.assign(form, { project_id: null, source_project_id: null, iteration_id: null, title: '', requirement_type: '', priority: 'medium', owner_id: null, proposer_id: null, status: 'draft', review_status: 'not_required', description: '', acceptance_criteria: '', source_reviewed: false }); ownerManuallySet.value = false }
 function openCreate() { editingId.value = null; resetForm(); dialogVisible.value = true }
-function openEdit(row) { editingId.value = row.id; Object.assign(form, { ...row, requirement_type: row.requirement_type || '', description: row.description || '', acceptance_criteria: row.acceptance_criteria || '' }); dialogVisible.value = true }
+function onSourceProjectChange(projectId) { if (!projectId || ownerManuallySet.value) return; const project = projects.value.find(p => p.id === projectId); if (project && project.owner_id) { form.owner_id = project.owner_id } }
+function onOwnerChange() { ownerManuallySet.value = true }
+function openEdit(row) { editingId.value = row.id; ownerManuallySet.value = true; Object.assign(form, { ...row, requirement_type: row.requirement_type || '', description: row.description || '', acceptance_criteria: row.acceptance_criteria || '' }); dialogVisible.value = true }
 function openGenerate(row) { generatingRequirementId.value = row.id; generateForm.title = row.title; generateForm.task_type = 'development'; generateForm.description = ''; generateVisible.value = true }
 
 async function loadData() {

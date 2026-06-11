@@ -5,6 +5,7 @@ from pydantic import BaseModel, ConfigDict
 
 class RequirementBase(BaseModel):
     project_id: int
+    source_project_id: int | None = None
     iteration_id: int | None = None
     title: str
     requirement_type: str | None = None
@@ -24,6 +25,7 @@ class RequirementCreate(RequirementBase):
 
 class RequirementUpdate(BaseModel):
     project_id: int | None = None
+    source_project_id: int | None = None
     iteration_id: int | None = None
     title: str | None = None
     requirement_type: str | None = None

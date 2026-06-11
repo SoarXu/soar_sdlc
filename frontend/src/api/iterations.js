@@ -1,7 +1,7 @@
 import { http } from './http'
 
-export function fetchIterations() {
-  return http.get('/iterations')
+export function fetchIterations(params) {
+  return http.get('/iterations', { params })
 }
 
 export function createIteration(payload) {

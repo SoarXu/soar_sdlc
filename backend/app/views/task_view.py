@@ -6,6 +6,7 @@ from pydantic import BaseModel, ConfigDict, field_serializer
 
 class TaskBase(BaseModel):
     project_id: int
+    source_project_id: int | None = None
     requirement_id: int | None = None
     title: str
     task_type: str | None = None
@@ -25,6 +26,7 @@ class TaskCreate(TaskBase):
 
 class TaskUpdate(BaseModel):
     project_id: int | None = None
+    source_project_id: int | None = None
     requirement_id: int | None = None
     title: str | None = None
     task_type: str | None = None

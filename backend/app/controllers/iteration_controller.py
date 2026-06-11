@@ -10,8 +10,8 @@ router = APIRouter()
 
 
 @router.get("", response_model=list[IterationRead])
-def get_iterations(db: Session = Depends(get_db)):
-    return list_iterations(db)
+def get_iterations(project_id: int | None = None, db: Session = Depends(get_db)):
+    return list_iterations(db, project_id)
 
 
 @router.post("", response_model=IterationRead)

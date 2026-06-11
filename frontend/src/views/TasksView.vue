@@ -13,6 +13,7 @@
         <el-table-column prop="id" label="ID" width="80" />
         <el-table-column prop="title" label="任务标题" min-width="220" />
         <el-table-column label="项目" width="180"><template #default="{ row }">{{ labelById(projects, row.project_id) }}</template></el-table-column>
+        <el-table-column label="来源项目" width="180"><template #default="{ row }">{{ labelById(projects, row.source_project_id) }}</template></el-table-column>
         <el-table-column label="需求" width="180"><template #default="{ row }">{{ labelById(requirements, row.requirement_id, 'title') }}</template></el-table-column>
         <el-table-column label="负责人" width="150"><template #default="{ row }">{{ userLabel(users, row.owner_id) }}</template></el-table-column>
         <el-table-column prop="actual_hours" label="实际工时" width="110" />
@@ -47,13 +48,18 @@
               <el-option v-for="project in projects" :key="project.id" :label="project.name" :value="project.id" />
             </el-select>
           </el-form-item>
+          <el-form-item label="来源项目">
+            <el-select v-model="form.source_project_id" clearable filterable placeholder="请选择来源项目" @change="onSourceProjectChange">
+              <el-option v-for="project in projects" :key="project.id" :label="project.name" :value="project.id" />
+            </el-select>
+          </el-form-item>
           <el-form-item label="需求">
             <el-select v-model="form.requirement_id" clearable filterable placeholder="请选择需求">
               <el-option v-for="requirement in requirements" :key="requirement.id" :label="requirement.title" :value="requirement.id" />
             </el-select>
           </el-form-item>
           <el-form-item label="负责人">
-            <el-select v-model="form.owner_id" clearable filterable placeholder="请选择负责人">
+            <el-select v-model="form.owner_id" clearable filterable placeholder="请选择负责人" @change="onOwnerChange">
               <el-option v-for="user in users" :key="user.id" :label="user.full_name" :value="user.id" />
             </el-select>
           </el-form-item>
@@ -98,11 +104,14 @@ const {
   total: taskTotal,
   pagedItems: pagedTasks
 } = usePagination(tasks)
-const form = reactive({ project_id: null, requirement_id: null, title: '', task_type: '', priority: 'medium', owner_id: null, estimated_hours: null, actual_hours: null, due_date: null, status: 'todo', description: '' })
+const form = reactive({ project_id: null, source_project_id: null, requirement_id: null, title: '', task_type: '', priority: 'medium', owner_id: null, estimated_hours: null, actual_hours: null, due_date: null, status: 'todo', description: '' })
+const ownerManuallySet = ref(false)
 
-function resetForm() { Object.assign(form, { project_id: null, requirement_id: null, title: '', task_type: '', priority: 'medium', owner_id: null, estimated_hours: null, actual_hours: null, due_date: null, status: 'todo', description: '' }) }
+function resetForm() { Object.assign(form, { project_id: null, source_project_id: null, requirement_id: null, title: '', task_type: '', priority: 'medium', owner_id: null, estimated_hours: null, actual_hours: null, due_date: null, status: 'todo', description: '' }); ownerManuallySet.value = false }
 function openCreate() { editingId.value = null; resetForm(); dialogVisible.value = true }
-function openEdit(row) { editingId.value = row.id; Object.assign(form, { ...row, task_type: row.task_type || '', description: row.description || '' }); dialogVisible.value = true }
+function openEdit(row) { editingId.value = row.id; ownerManuallySet.value = true; Object.assign(form, { ...row, task_type: row.task_type || '', description: row.description || '' }); dialogVisible.value = true }
+function onSourceProjectChange(projectId) { if (!projectId || ownerManuallySet.value) return; const project = projects.value.find(p => p.id === projectId); if (project && project.owner_id) { form.owner_id = project.owner_id } }
+function onOwnerChange() { ownerManuallySet.value = true }
 
 async function loadData() {
   loading.value = true

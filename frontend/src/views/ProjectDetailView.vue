@@ -377,10 +377,7 @@
             <el-option v-for="iteration in projectIterations" :key="iteration.id" :label="iteration.name" :value="iteration.id" />
           </el-select>
         </el-form-item>
-        <el-form-item v-if="['activate', 'close'].includes(bugActionType) && actingBug?.status === 'verifying'" label="验证结果">
-          <el-input v-model="bugActionForm.verify_result" />
-        </el-form-item>
-        <el-form-item v-if="['suspend', 'close'].includes(bugActionType)" label="原因">
+        <el-form-item v-if="bugActionType === 'suspend'" label="原因">
           <el-input v-model="bugActionForm.reason" />
         </el-form-item>
         <el-form-item label="备注">
@@ -800,7 +797,7 @@ async function submitBugAction() {
   saving.value = true
   try {
     const id = actingBug.value.id
-    const payload = { ...bugActionForm }
+    const payload = ['activate', 'close'].includes(bugActionType.value) ? { remark: bugActionForm.remark } : { ...bugActionForm }
     const actions = {
       start_fixing: startFixingBug,
       resolve: resolveBug,

@@ -78,10 +78,7 @@
             <el-option v-for="iteration in iterations" :key="iteration.id" :label="iteration.name" :value="iteration.id" />
           </el-select>
         </el-form-item>
-        <el-form-item v-if="['activate', 'close'].includes(actionType) && actingBug?.status === 'verifying'" label="验证结果">
-          <el-input v-model="actionForm.verify_result" />
-        </el-form-item>
-        <el-form-item v-if="['suspend', 'close'].includes(actionType)" label="原因">
+        <el-form-item v-if="actionType === 'suspend'" label="原因">
           <el-input v-model="actionForm.reason" />
         </el-form-item>
         <el-form-item label="备注">
@@ -196,7 +193,8 @@ async function submitBugAction() {
       suspend: suspendBug,
       close: closeBug
     }
-    await actions[actionType.value](actingBug.value.id, { ...actionForm })
+    const payload = ['activate', 'close'].includes(actionType.value) ? { remark: actionForm.remark } : { ...actionForm }
+    await actions[actionType.value](actingBug.value.id, payload)
     actionDialogVisible.value = false
     await loadData()
     ElMessage.success('Bug 状态已更新')

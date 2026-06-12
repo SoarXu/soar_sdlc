@@ -242,6 +242,14 @@ def test_open_project_move_only_changes_parent(client: TestClient):
 def test_closed_project_move_enters_maintenance(client: TestClient):
     parent = client.post("/api/v1/projects", json={"name": f"运维父项目-{uuid4().hex[:8]}"}).json()
     project = client.post("/api/v1/projects", json={"name": f"转运维项目-{uuid4().hex[:8]}"}).json()
+    development_requirement = client.post(
+        "/api/v1/requirements",
+        json={"project_id": project["id"], "title": f"开发需求-{uuid4().hex[:8]}"},
+    ).json()
+    development_task = client.post(
+        "/api/v1/tasks",
+        json={"project_id": project["id"], "title": f"开发任务-{uuid4().hex[:8]}"},
+    ).json()
     client.post(f"/api/v1/projects/{project['id']}/start", json={"effective_time": "2026-06-01T09:00:00"})
     client.post(f"/api/v1/projects/{project['id']}/close", json={"effective_time": "2026-06-10T18:00:00"})
 
@@ -259,6 +267,21 @@ def test_closed_project_move_enters_maintenance(client: TestClient):
     assert moved.json()["status"] == "maintenance"
     assert moved.json()["lifecycle_phase"] == "maintenance"
     assert moved.json()["maintenance_start_time"] == "2026-06-11T09:30:00"
+    assert client.get(f"/api/v1/requirements/{development_requirement['id']}").json()["lifecycle_phase"] == "development"
+    assert client.get(f"/api/v1/tasks/{development_task['id']}").json()["lifecycle_phase"] == "development"
+
+    maintenance_requirement = client.post(
+        "/api/v1/requirements",
+        json={"project_id": project["id"], "title": f"运维需求-{uuid4().hex[:8]}"},
+    )
+    maintenance_task = client.post(
+        "/api/v1/tasks",
+        json={"project_id": project["id"], "title": f"运维任务-{uuid4().hex[:8]}"},
+    )
+    assert maintenance_requirement.status_code == 200
+    assert maintenance_task.status_code == 200
+    assert maintenance_requirement.json()["lifecycle_phase"] == "maintenance"
+    assert maintenance_task.json()["lifecycle_phase"] == "maintenance"
 
     history = client.get(f"/api/v1/projects/{project['id']}/status-operations").json()
     assert any(

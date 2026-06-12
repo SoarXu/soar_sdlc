@@ -166,6 +166,7 @@
 | end_date | DATE | NULL | 结束日期 |
 | actual_start_date | DATE | NULL | 实际开始日期 |
 | status | VARCHAR(32) | NOT NULL DEFAULT 'planning' | 状态：planning、active、finished、closed |
+| lifecycle_phase | VARCHAR(32) | NOT NULL DEFAULT 'development' | 生命周期阶段：development、maintenance |
 | goal | TEXT | NULL | 目标说明 |
 | creator_id | BIGINT UNSIGNED | NULL | 创建人 |
 | updater_id | BIGINT UNSIGNED | NULL | 更新人 |
@@ -194,6 +195,7 @@
 | owner_id | BIGINT UNSIGNED | NULL | 负责人 ID |
 | proposer_id | BIGINT UNSIGNED | NULL | 提出人 ID |
 | status | VARCHAR(32) | NOT NULL DEFAULT 'draft' | 状态：draft、active、done、closed |
+| lifecycle_phase | VARCHAR(32) | NOT NULL DEFAULT 'development' | 生命周期阶段：development、maintenance |
 | review_status | VARCHAR(32) | NOT NULL DEFAULT 'not_required' | 评审状态 |
 | description | TEXT | NULL | 需求描述 |
 | acceptance_criteria | TEXT | NULL | 验收标准 |
@@ -227,6 +229,7 @@
 | actual_hours | DECIMAL(10,2) | NULL | 实际工时 |
 | due_date | DATE | NULL | 截止日期 |
 | status | VARCHAR(32) | NOT NULL DEFAULT 'todo' | 状态：todo、doing、done、closed |
+| lifecycle_phase | VARCHAR(32) | NOT NULL DEFAULT 'development' | 生命周期阶段：development、maintenance |
 | description | TEXT | NULL | 任务描述 |
 | source_requirement_review_status | VARCHAR(32) | NULL | 生成任务时需求评审状态快照 |
 | creator_id | BIGINT UNSIGNED | NULL | 创建人 |
@@ -261,6 +264,7 @@
 | expected_result | TEXT | NULL | 预期结果 |
 | last_execute_time | DATETIME | NULL | 最近执行时间 |
 | last_execute_result | VARCHAR(32) | NULL | 最近执行结果：ignored、passed、failed、blocked |
+| lifecycle_phase | VARCHAR(32) | NOT NULL DEFAULT 'development' | 生命周期阶段：development、maintenance |
 | creator_id | BIGINT UNSIGNED | NULL | 创建人 |
 | updater_id | BIGINT UNSIGNED | NULL | 更新人 |
 | create_time | DATETIME | NOT NULL | 创建时间 |
@@ -302,6 +306,7 @@
 | start_date | DATE | NULL | 开始日期 |
 | end_date | DATE | NULL | 结束日期 |
 | status | VARCHAR(32) | NOT NULL DEFAULT 'planning' | 执行状态 |
+| lifecycle_phase | VARCHAR(32) | NOT NULL DEFAULT 'development' | 生命周期阶段：development、maintenance |
 | remark | TEXT | NULL | 备注 |
 | creator_id | BIGINT UNSIGNED | NULL | 创建人 |
 | updater_id | BIGINT UNSIGNED | NULL | 更新人 |
@@ -351,6 +356,7 @@
 | expected_result | TEXT | NULL | 期望结果 |
 | actual_result | TEXT | NULL | 实际结果 |
 | status | VARCHAR(32) | NOT NULL DEFAULT 'open' | open、fixing、verifying、closed、reopened |
+| lifecycle_phase | VARCHAR(32) | NOT NULL DEFAULT 'development' | 生命周期阶段：development、maintenance |
 | creator_id | BIGINT UNSIGNED | NULL | 创建人 |
 | updater_id | BIGINT UNSIGNED | NULL | 更新人 |
 | create_time | DATETIME | NOT NULL | 创建时间 |

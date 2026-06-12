@@ -19,6 +19,7 @@ class Requirement(Base):
     owner_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     proposer_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     status: Mapped[str] = mapped_column(String(32), default="draft")
+    lifecycle_phase: Mapped[str] = mapped_column(String(32), default="development")
     review_status: Mapped[str] = mapped_column(String(32), default="not_required")
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     acceptance_criteria: Mapped[str | None] = mapped_column(Text, nullable=True)

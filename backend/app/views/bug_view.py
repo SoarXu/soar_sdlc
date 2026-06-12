@@ -20,6 +20,7 @@ class BugBase(BaseModel):
     expected_result: str | None = None
     actual_result: str | None = None
     status: str = "open"
+    lifecycle_phase: str | None = None
 
 
 class BugCreate(BugBase):
@@ -43,6 +44,7 @@ class BugUpdate(BaseModel):
     expected_result: str | None = None
     actual_result: str | None = None
     status: str | None = None
+    lifecycle_phase: str | None = None
     updater_id: int | None = None
 
 

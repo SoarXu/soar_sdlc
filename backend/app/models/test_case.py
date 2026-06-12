@@ -23,6 +23,7 @@ class TestCase(Base):
     last_execute_time: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     last_execute_result: Mapped[str | None] = mapped_column(String(32), nullable=True)
     status: Mapped[str] = mapped_column(String(32), default="active")
+    lifecycle_phase: Mapped[str] = mapped_column(String(32), default="development")
     creator_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     updater_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     create_time: Mapped[datetime] = mapped_column(DateTime, server_default=text("CURRENT_TIMESTAMP"))

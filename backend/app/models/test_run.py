@@ -17,6 +17,7 @@ class TestRun(Base):
     start_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     end_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     status: Mapped[str] = mapped_column(String(32), default="planning")
+    lifecycle_phase: Mapped[str] = mapped_column(String(32), default="development")
     remark: Mapped[str | None] = mapped_column(Text, nullable=True)
     creator_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     updater_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)

@@ -13,6 +13,7 @@ class IterationBase(BaseModel):
     actual_start_date: date | None = None
     actual_end_date: date | None = None
     status: str = "planning"
+    lifecycle_phase: str | None = None
     goal: str | None = None
 
 
@@ -30,6 +31,7 @@ class IterationUpdate(BaseModel):
     actual_start_date: date | None = None
     actual_end_date: date | None = None
     status: str | None = None
+    lifecycle_phase: str | None = None
     goal: str | None = None
     updater_id: int | None = None
 
@@ -47,6 +49,7 @@ class IterationRead(BaseModel):
     actual_start_date: date | None = None
     actual_end_date: date | None = None
     status: str = "planning"
+    lifecycle_phase: str | None = None
     goal: str | None = None
     creator_id: int | None = None
     updater_id: int | None = None

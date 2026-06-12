@@ -6,7 +6,9 @@ from sqlalchemy.orm import Session
 
 from app.models.audit_log import AuditLog
 from app.models.project import Project
+from app.models.requirement import Requirement
 from app.models.task import Task
+from app.services.lifecycle_service import project_lifecycle_phase, requirement_lifecycle_phase
 from app.services.status_operation_service import create_status_operation, list_status_operations
 from app.views.status_operation_view import StatusOperationCreate
 from app.views.task_view import TaskCreate, TaskUpdate
@@ -22,6 +24,14 @@ def get_task(db: Session, task_id: int) -> Task:
 
 def create_task(db: Session, payload: TaskCreate) -> Task:
     data = payload.model_dump()
+    data["lifecycle_phase"] = (
+        requirement_lifecycle_phase(db, data.get("requirement_id"))
+        or project_lifecycle_phase(db, data.get("project_id"))
+    )
+    if data.get("requirement_id") and not data.get("owner_id"):
+        requirement = db.query(Requirement).filter(Requirement.id == data["requirement_id"], Requirement.deleted == 0).first()
+        if requirement and requirement.owner_id:
+            data["owner_id"] = requirement.owner_id
     if data.get("source_project_id") and not data.get("owner_id"):
         source_project = db.query(Project).filter(Project.id == data["source_project_id"], Project.deleted == 0).first()
         if source_project and source_project.owner_id:

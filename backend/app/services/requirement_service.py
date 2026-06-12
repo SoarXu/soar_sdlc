@@ -7,6 +7,7 @@ from app.models.audit_log import AuditLog
 from app.models.project import Project
 from app.models.requirement import Requirement
 from app.models.task import Task
+from app.services.lifecycle_service import project_lifecycle_phase
 from app.services.status_operation_service import create_status_operation, list_status_operations
 from app.services.task_service import close_task_record
 from app.views.requirement_view import GenerateTaskRequest, RequirementCreate, RequirementUpdate
@@ -24,6 +25,7 @@ def get_requirement(db: Session, requirement_id: int) -> Requirement:
 def create_requirement(db: Session, payload: RequirementCreate) -> Requirement:
     data = payload.model_dump()
     data["status"] = "draft"
+    data["lifecycle_phase"] = project_lifecycle_phase(db, data.get("project_id"))
     if data.get("source_project_id") and not data.get("owner_id"):
         source_project = db.query(Project).filter(Project.id == data["source_project_id"], Project.deleted == 0).first()
         if source_project and source_project.owner_id:
@@ -151,6 +153,7 @@ def generate_task_from_requirement(db: Session, requirement_id: int, payload: Ge
         owner_id=requirement.owner_id,
         due_date=payload.due_date,
         status="todo",
+        lifecycle_phase=requirement.lifecycle_phase,
         description=payload.description,
         source_requirement_review_status=requirement.review_status,
     )

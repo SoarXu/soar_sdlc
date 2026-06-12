@@ -24,6 +24,9 @@
         {{ tab.label }}
       </button>
     </div>
+    <div class="project-phase-switch">
+      <el-segmented v-model="activeLifecyclePhase" :options="lifecyclePhaseOptions" />
+    </div>
 
     <el-card v-loading="loading" shadow="never" class="project-detail-card">
       <template v-if="activeTab === 'overview'">
@@ -377,6 +380,8 @@ const projectId = computed(() => Number(route.params.id))
 const loading = ref(false)
 const saving = ref(false)
 const activeTab = ref(normalizeProjectTab(route.query.tab))
+const activeLifecyclePhase = ref('development')
+const lifecyclePhaseInitialized = ref(false)
 const testTab = ref('cases')
 const project = ref({})
 const programs = ref([])
@@ -411,6 +416,10 @@ const tabs = [
   { key: 'bugs', label: 'Bug' },
   { key: 'members', label: '成员' },
   { key: 'settings', label: '配置' }
+]
+const lifecyclePhaseOptions = [
+  { label: '开发阶段', value: 'development' },
+  { label: '运维阶段', value: 'maintenance' }
 ]
 const projectStatusOptions = [
   { label: '规划中', value: 'planning' },
@@ -497,13 +506,14 @@ const bugStatusOptions = [
   { label: '重新打开', value: 'reopened' }
 ]
 
-const projectIterations = computed(() => iterations.value.filter((item) => (item.project_ids || []).includes(projectId.value)))
-const projectRequirements = computed(() => requirements.value.filter((item) => item.project_id === projectId.value))
-const projectTasks = computed(() => tasks.value.filter((item) => item.project_id === projectId.value))
+const matchesLifecyclePhase = (item) => (item.lifecycle_phase || 'development') === activeLifecyclePhase.value
+const projectIterations = computed(() => iterations.value.filter((item) => (item.project_ids || []).includes(projectId.value) && matchesLifecyclePhase(item)))
+const projectRequirements = computed(() => requirements.value.filter((item) => item.project_id === projectId.value && matchesLifecyclePhase(item)))
+const projectTasks = computed(() => tasks.value.filter((item) => item.project_id === projectId.value && matchesLifecyclePhase(item)))
 const projectClosed = computed(() => project.value.status === 'closed')
-const projectTestCases = computed(() => testCases.value.filter((item) => item.project_id === projectId.value))
-const projectTestRuns = computed(() => testRuns.value.filter((item) => item.project_id === projectId.value))
-const projectBugs = computed(() => bugs.value.filter((item) => item.project_id === projectId.value))
+const projectTestCases = computed(() => testCases.value.filter((item) => item.project_id === projectId.value && matchesLifecyclePhase(item)))
+const projectTestRuns = computed(() => testRuns.value.filter((item) => item.project_id === projectId.value && matchesLifecyclePhase(item)))
+const projectBugs = computed(() => bugs.value.filter((item) => item.project_id === projectId.value && matchesLifecyclePhase(item)))
 const activeTabLabel = computed(() => tabs.find((tab) => tab.key === activeTab.value)?.label || '')
 const projectEndDateLabel = computed(() => project.value.is_long_term ? '长期' : project.value.end_date || '未设置结束')
 const metrics = computed(() => [
@@ -674,7 +684,12 @@ async function loadData() {
       fetchProjectAuditLogs(projectId.value),
       fetchProjectStatusOperations(projectId.value)
     ])
-    project.value = projectRes.data; programs.value = programRes.data; users.value = userRes.data; iterations.value = iterationRes.data
+    project.value = projectRes.data
+    if (!lifecyclePhaseInitialized.value) {
+      activeLifecyclePhase.value = project.value.lifecycle_phase === 'maintenance' ? 'maintenance' : 'development'
+      lifecyclePhaseInitialized.value = true
+    }
+    programs.value = programRes.data; users.value = userRes.data; iterations.value = iterationRes.data
     requirements.value = requirementRes.data; tasks.value = taskRes.data; testCases.value = caseRes.data; testRuns.value = runRes.data; bugs.value = bugRes.data
     projectAuditLogs.value = auditRes.data; projectStatusOperations.value = statusRes.data
     closeReasonByRequirement.value = await loadCloseReasonMap(projectRequirements.value, fetchRequirementStatusOperations)
@@ -720,6 +735,7 @@ async function removeBug(id) { await deleteBug(id); await loadData() }
 
 onMounted(loadData)
 watch(() => route.query.tab, (value) => { activeTab.value = normalizeProjectTab(value) })
+watch(() => projectId.value, () => { lifecyclePhaseInitialized.value = false })
 
 async function openNextCaseAfterExecution(currentId, rows) {
   const index = rows.findIndex((item) => item.id === currentId)

@@ -26,6 +26,7 @@ class Bug(Base):
     expected_result: Mapped[str | None] = mapped_column(Text, nullable=True)
     actual_result: Mapped[str | None] = mapped_column(Text, nullable=True)
     status: Mapped[str] = mapped_column(String(32), default="open")
+    lifecycle_phase: Mapped[str] = mapped_column(String(32), default="development")
     creator_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     updater_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     create_time: Mapped[datetime] = mapped_column(DateTime, server_default=text("CURRENT_TIMESTAMP"))

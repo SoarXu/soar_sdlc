@@ -13,6 +13,7 @@ class RequirementBase(BaseModel):
     owner_id: int | None = None
     proposer_id: int | None = None
     status: str = "draft"
+    lifecycle_phase: str | None = None
     review_status: str = "not_required"
     description: str | None = None
     acceptance_criteria: str | None = None
@@ -33,6 +34,7 @@ class RequirementUpdate(BaseModel):
     owner_id: int | None = None
     proposer_id: int | None = None
     status: str | None = None
+    lifecycle_phase: str | None = None
     review_status: str | None = None
     description: str | None = None
     acceptance_criteria: str | None = None

@@ -17,6 +17,7 @@ class TaskBase(BaseModel):
     actual_hours: Decimal | None = None
     due_date: date | None = None
     status: str = "todo"
+    lifecycle_phase: str | None = None
     description: str | None = None
     source_requirement_review_status: str | None = None
 
@@ -38,6 +39,7 @@ class TaskUpdate(BaseModel):
     actual_hours: Decimal | None = None
     due_date: date | None = None
     status: str | None = None
+    lifecycle_phase: str | None = None
     description: str | None = None
     source_requirement_review_status: str | None = None
     updater_id: int | None = None

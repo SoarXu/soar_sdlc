@@ -73,6 +73,8 @@ def ensure_runtime_schema(engine: Engine) -> None:
     _ensure_column(engine, "requirements", "source_project_id",
                    "ALTER TABLE requirements ADD COLUMN source_project_id BIGINT UNSIGNED NULL COMMENT '来源项目 ID' AFTER project_id",
                    "CREATE INDEX idx_requirements_source_project ON requirements (source_project_id)")
+    _ensure_column(engine, "requirements", "lifecycle_phase",
+                   "ALTER TABLE requirements ADD COLUMN lifecycle_phase VARCHAR(32) NOT NULL DEFAULT 'development' COMMENT '生命周期阶段' AFTER status")
     _ensure_column(engine, "requirements", "deleted",
                    "ALTER TABLE requirements ADD COLUMN deleted TINYINT(1) NOT NULL DEFAULT 0 COMMENT '是否删除 0否1是' AFTER delete_time")
 
@@ -82,6 +84,8 @@ def ensure_runtime_schema(engine: Engine) -> None:
     _ensure_column(engine, "tasks", "iteration_id",
                    "ALTER TABLE tasks ADD COLUMN iteration_id BIGINT UNSIGNED NULL COMMENT '直接关联迭代 ID' AFTER source_project_id",
                    "CREATE INDEX idx_tasks_iteration ON tasks (iteration_id)")
+    _ensure_column(engine, "tasks", "lifecycle_phase",
+                   "ALTER TABLE tasks ADD COLUMN lifecycle_phase VARCHAR(32) NOT NULL DEFAULT 'development' COMMENT '生命周期阶段' AFTER status")
     _ensure_column(engine, "tasks", "deleted",
                    "ALTER TABLE tasks ADD COLUMN deleted TINYINT(1) NOT NULL DEFAULT 0 COMMENT '是否删除 0否1是' AFTER delete_time")
 
@@ -93,6 +97,8 @@ def ensure_runtime_schema(engine: Engine) -> None:
                    "CREATE INDEX idx_bugs_iteration ON bugs (iteration_id)")
     _ensure_column(engine, "bugs", "bug_type",
                    "ALTER TABLE bugs ADD COLUMN bug_type VARCHAR(64) NULL COMMENT 'Bug 类型' AFTER title")
+    _ensure_column(engine, "bugs", "lifecycle_phase",
+                   "ALTER TABLE bugs ADD COLUMN lifecycle_phase VARCHAR(32) NOT NULL DEFAULT 'development' COMMENT '生命周期阶段' AFTER status")
     _ensure_column(engine, "bugs", "deleted",
                    "ALTER TABLE bugs ADD COLUMN deleted TINYINT(1) NOT NULL DEFAULT 0 COMMENT '是否删除 0否1是' AFTER delete_time")
 
@@ -105,6 +111,8 @@ def ensure_runtime_schema(engine: Engine) -> None:
                    "ALTER TABLE test_cases ADD COLUMN last_execute_time DATETIME NULL COMMENT '最近执行时间' AFTER expected_result")
     _ensure_column(engine, "test_cases", "last_execute_result",
                    "ALTER TABLE test_cases ADD COLUMN last_execute_result VARCHAR(32) NULL COMMENT '最近执行结果' AFTER last_execute_time")
+    _ensure_column(engine, "test_cases", "lifecycle_phase",
+                   "ALTER TABLE test_cases ADD COLUMN lifecycle_phase VARCHAR(32) NOT NULL DEFAULT 'development' COMMENT '生命周期阶段' AFTER status")
     _ensure_column(engine, "test_cases", "deleted",
                    "ALTER TABLE test_cases ADD COLUMN deleted TINYINT(1) NOT NULL DEFAULT 0 COMMENT '是否删除 0否1是' AFTER delete_time")
 
@@ -131,6 +139,8 @@ def ensure_runtime_schema(engine: Engine) -> None:
                    "ALTER TABLE iterations ADD COLUMN actual_start_date DATE NULL COMMENT '实际开始日期' AFTER end_date")
     _ensure_column(engine, "iterations", "actual_end_date",
                    "ALTER TABLE iterations ADD COLUMN actual_end_date DATE NULL COMMENT '实际结束日期' AFTER actual_start_date")
+    _ensure_column(engine, "iterations", "lifecycle_phase",
+                   "ALTER TABLE iterations ADD COLUMN lifecycle_phase VARCHAR(32) NOT NULL DEFAULT 'development' COMMENT '生命周期阶段' AFTER status")
     # Make legacy project_id column nullable (replaced by iteration_projects table)
     inspector2 = inspect(engine)
     if "iterations" in inspector2.get_table_names():
@@ -155,6 +165,8 @@ def ensure_runtime_schema(engine: Engine) -> None:
 
     _ensure_column(engine, "test_runs", "deleted",
                    "ALTER TABLE test_runs ADD COLUMN deleted TINYINT(1) NOT NULL DEFAULT 0 COMMENT '是否删除 0否1是' AFTER delete_time")
+    _ensure_column(engine, "test_runs", "lifecycle_phase",
+                   "ALTER TABLE test_runs ADD COLUMN lifecycle_phase VARCHAR(32) NOT NULL DEFAULT 'development' COMMENT '生命周期阶段' AFTER status")
 
     _ensure_column(engine, "users", "deleted",
                    "ALTER TABLE users ADD COLUMN deleted TINYINT(1) NOT NULL DEFAULT 0 COMMENT '是否删除 0否1是' AFTER delete_time")

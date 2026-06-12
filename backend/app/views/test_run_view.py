@@ -11,6 +11,7 @@ class TestRunBase(BaseModel):
     start_date: date | None = None
     end_date: date | None = None
     status: str = "planning"
+    lifecycle_phase: str | None = None
     remark: str | None = None
 
 
@@ -26,6 +27,7 @@ class TestRunUpdate(BaseModel):
     start_date: date | None = None
     end_date: date | None = None
     status: str | None = None
+    lifecycle_phase: str | None = None
     remark: str | None = None
     updater_id: int | None = None
 

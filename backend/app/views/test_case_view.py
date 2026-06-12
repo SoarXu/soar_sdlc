@@ -13,6 +13,7 @@ class TestCaseBase(BaseModel):
     precondition: str | None = None
     steps_json: dict | list | None = None
     expected_result: str | None = None
+    lifecycle_phase: str | None = None
 
 
 class TestCaseCreate(TestCaseBase):
@@ -29,6 +30,7 @@ class TestCaseUpdate(BaseModel):
     precondition: str | None = None
     steps_json: dict | list | None = None
     expected_result: str | None = None
+    lifecycle_phase: str | None = None
     updater_id: int | None = None
 
 

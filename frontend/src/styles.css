@@ -228,6 +228,12 @@ body {
   box-shadow: inset 0 -1px 0 rgba(255, 255, 255, .2);
 }
 
+.project-phase-switch {
+  display: flex;
+  justify-content: flex-end;
+  padding: 0 18px 12px;
+}
+
 .project-detail-page {
   display: flex;
   flex-direction: column;

@@ -7,6 +7,7 @@ from app.models.bug import Bug
 from app.models.requirement import Requirement
 from app.models.test_case import TestCase
 from app.models.test_case_execution import TestCaseExecutionLog
+from app.services.lifecycle_service import project_lifecycle_phase, requirement_lifecycle_phase
 from app.views.test_case_view import BugFromTestCaseRequest, TestCaseCreate, TestCaseExecutionCreate, TestCaseUpdate
 
 
@@ -15,7 +16,12 @@ def list_test_cases(db: Session) -> list[TestCase]:
 
 
 def create_test_case(db: Session, payload: TestCaseCreate) -> TestCase:
-    test_case = TestCase(**payload.model_dump())
+    data = payload.model_dump()
+    data["lifecycle_phase"] = (
+        requirement_lifecycle_phase(db, data.get("requirement_id"))
+        or project_lifecycle_phase(db, data.get("project_id"))
+    )
+    test_case = TestCase(**data)
     db.add(test_case)
     db.commit()
     db.refresh(test_case)
@@ -103,6 +109,7 @@ def create_bug_from_test_case(db: Session, test_case_id: int, payload: BugFromTe
         expected_result=payload.expected_result or test_case.expected_result,
         actual_result=payload.actual_result or _build_actual_result(latest_execution),
         status="open",
+        lifecycle_phase=test_case.lifecycle_phase,
     )
     db.add(bug)
     db.commit()

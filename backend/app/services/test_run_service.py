@@ -4,6 +4,7 @@ from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 
 from app.models.test_run import TestRun, TestRunCase
+from app.services.lifecycle_service import iteration_lifecycle_phase, project_lifecycle_phase
 from app.views.test_run_view import SelectTestCasesRequest, TestRunCaseUpdate, TestRunCreate, TestRunUpdate
 
 
@@ -12,7 +13,12 @@ def list_test_runs(db: Session) -> list[TestRun]:
 
 
 def create_test_run(db: Session, payload: TestRunCreate) -> TestRun:
-    test_run = TestRun(**payload.model_dump())
+    data = payload.model_dump()
+    data["lifecycle_phase"] = (
+        iteration_lifecycle_phase(db, data.get("iteration_id"))
+        or project_lifecycle_phase(db, data.get("project_id"))
+    )
+    test_run = TestRun(**data)
     db.add(test_run)
     db.commit()
     db.refresh(test_run)

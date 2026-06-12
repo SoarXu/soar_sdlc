@@ -9,6 +9,7 @@ from app.models.project import Project
 from app.models.requirement import Requirement
 from app.models.task import Task
 from app.models.test_case import TestCase
+from app.services.lifecycle_service import project_lifecycle_phase
 from app.services.status_operation_service import create_status_operation, list_status_operations
 from app.views.iteration_view import IterationCreate, IterationUpdate
 from app.views.status_operation_view import StatusOperationCreate
@@ -36,6 +37,7 @@ def list_iterations(db: Session, project_id: int | None = None) -> list[dict]:
             "actual_start_date": it.actual_start_date,
             "actual_end_date": it.actual_end_date,
             "status": it.status,
+            "lifecycle_phase": it.lifecycle_phase,
             "goal": it.goal,
             "creator_id": it.creator_id,
             "updater_id": it.updater_id,
@@ -53,6 +55,7 @@ def create_iteration(db: Session, payload: IterationCreate) -> dict:
     if project_id and not project_ids:
         project_ids = [project_id]
     _validate_top_level_projects(db, project_ids)
+    data["lifecycle_phase"] = project_lifecycle_phase(db, project_ids[0] if project_ids else None)
 
     iteration = Iteration(**data)
     db.add(iteration)
@@ -74,6 +77,7 @@ def create_iteration(db: Session, payload: IterationCreate) -> dict:
         "actual_start_date": iteration.actual_start_date,
         "actual_end_date": iteration.actual_end_date,
         "status": iteration.status,
+        "lifecycle_phase": iteration.lifecycle_phase,
         "goal": iteration.goal,
         "creator_id": iteration.creator_id,
         "updater_id": iteration.updater_id,
@@ -116,6 +120,7 @@ def update_iteration(db: Session, iteration_id: int, payload: IterationUpdate) -
         "actual_start_date": iteration.actual_start_date,
         "actual_end_date": iteration.actual_end_date,
         "status": iteration.status,
+        "lifecycle_phase": iteration.lifecycle_phase,
         "goal": iteration.goal,
         "creator_id": iteration.creator_id,
         "updater_id": iteration.updater_id,
@@ -322,6 +327,7 @@ def _iteration_to_dict(iteration: Iteration, project_ids: list[int]) -> dict:
         "actual_start_date": iteration.actual_start_date,
         "actual_end_date": iteration.actual_end_date,
         "status": iteration.status,
+        "lifecycle_phase": iteration.lifecycle_phase,
         "goal": iteration.goal,
         "creator_id": iteration.creator_id,
         "updater_id": iteration.updater_id,

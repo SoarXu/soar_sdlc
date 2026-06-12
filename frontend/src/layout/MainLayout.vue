@@ -78,8 +78,8 @@ import { fetchUsers } from '../api/users'
 
 const router = useRouter()
 const authStore = useAuthStore()
-const currentFullName = ref(localStorage.getItem('current_full_name') || '')
 const currentUsername = computed(() => localStorage.getItem('current_username') || '')
+const currentFullName = ref(cachedFullNameForCurrentUser())
 const currentDisplayName = computed(() => currentFullName.value || currentUsername.value || '未登录')
 
 function handleUserCommand(command) {
@@ -90,18 +90,31 @@ function handleUserCommand(command) {
 }
 
 async function loadCurrentUserName() {
-  if (currentFullName.value || !currentUsername.value) return
+  if (!currentUsername.value) return
+  const cachedName = cachedFullNameForCurrentUser()
+  if (cachedName) {
+    currentFullName.value = cachedName
+    return
+  }
   try {
     const { data } = await fetchUsers()
     const user = data.find((item) => item.username === currentUsername.value)
     if (user?.full_name) {
       currentFullName.value = user.full_name
       localStorage.setItem('current_full_name', user.full_name)
+      localStorage.setItem('current_full_name_username', user.username)
       localStorage.setItem('current_user_id', user.id)
     }
   } catch {
     currentFullName.value = currentUsername.value
   }
+}
+
+function cachedFullNameForCurrentUser() {
+  const username = localStorage.getItem('current_username') || ''
+  const cachedUsername = localStorage.getItem('current_full_name_username') || ''
+  if (!username || username !== cachedUsername) return ''
+  return localStorage.getItem('current_full_name') || ''
 }
 
 onMounted(loadCurrentUserName)

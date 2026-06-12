@@ -191,7 +191,21 @@
           <el-table-column label="严重程度" width="110"><template #default="{ row }"><RequirementPriorityBadge :value="row.severity" /></template></el-table-column>
           <el-table-column label="优先级" width="110"><template #default="{ row }"><RequirementPriorityBadge :value="row.priority" /></template></el-table-column>
           <el-table-column label="状态" width="120"><template #default="{ row }">{{ bugStatusLabel(row.status) }}</template></el-table-column>
-          <el-table-column label="操作" width="150" fixed="right"><template #default="{ row }"><el-button link type="primary" @click="openBugEdit(row)">编辑</el-button><el-popconfirm title="确认删除该 Bug？" @confirm="removeBug(row.id)"><template #reference><el-button link type="danger">删除</el-button></template></el-popconfirm></template></el-table-column>
+          <el-table-column label="操作" width="380" fixed="right">
+            <template #default="{ row }">
+              <div class="table-actions">
+                <el-button link type="primary" @click="openBugEdit(row)">编辑</el-button>
+                <el-button v-if="['open', 'reopened', 'suspended'].includes(row.status)" link type="success" @click="openBugAction(row, 'start_fixing')">开始修复</el-button>
+                <el-button v-if="row.status === 'fixing'" link type="success" @click="openBugAction(row, 'resolve')">提交解决</el-button>
+                <el-button v-if="row.status === 'resolved'" link type="warning" @click="openBugAction(row, 'start_verifying')">开始验证</el-button>
+                <el-button v-if="row.status === 'verifying'" link type="success" @click="openBugAction(row, 'verify_passed')">验证通过</el-button>
+                <el-button v-if="['resolved', 'verifying'].includes(row.status)" link type="danger" @click="openBugAction(row, 'verify_failed')">验证失败</el-button>
+                <el-button v-if="['open', 'fixing', 'reopened'].includes(row.status)" link type="warning" @click="openBugAction(row, 'suspend')">挂起</el-button>
+                <el-button v-if="['open', 'suspended'].includes(row.status)" link type="danger" @click="openBugAction(row, 'close')">关闭</el-button>
+                <el-popconfirm title="确认删除该 Bug？" @confirm="removeBug(row.id)"><template #reference><el-button link type="danger">删除</el-button></template></el-popconfirm>
+              </div>
+            </template>
+          </el-table-column>
         </el-table>
       </template>
 
@@ -349,8 +363,28 @@
     </el-dialog>
 
     <el-dialog v-model="bugDialogVisible" :title="editingBugId ? '编辑 Bug' : '新增 Bug'" width="700px">
-      <el-form label-position="top"><el-form-item label="Bug 标题" required><el-input v-model="bugForm.title" /></el-form-item><div class="form-grid"><el-form-item label="需求"><el-select v-model="bugForm.requirement_id" clearable filterable><el-option v-for="requirement in projectRequirements" :key="requirement.id" :label="requirement.title" :value="requirement.id" /></el-select></el-form-item><el-form-item label="任务"><el-select v-model="bugForm.task_id" clearable filterable><el-option v-for="task in projectTasks" :key="task.id" :label="task.title" :value="task.id" /></el-select></el-form-item><el-form-item label="来源用例"><el-select v-model="bugForm.test_case_id" clearable filterable><el-option v-for="item in projectTestCases" :key="item.id" :label="item.title" :value="item.id" /></el-select></el-form-item><el-form-item label="来源测试单"><el-select v-model="bugForm.test_run_id" clearable filterable><el-option v-for="run in projectTestRuns" :key="run.id" :label="run.name" :value="run.id" /></el-select></el-form-item><el-form-item label="Bug 类型"><el-select v-model="bugForm.bug_type"><el-option v-for="option in bugTypeOptions" :key="option" :label="option" :value="option" /></el-select></el-form-item><el-form-item label="负责人"><el-select v-model="bugForm.owner_id" clearable filterable><el-option v-for="user in users" :key="user.id" :label="user.full_name" :value="user.id" /></el-select></el-form-item><el-form-item label="提出人"><el-select v-model="bugForm.reporter_id" clearable filterable><el-option v-for="user in users" :key="user.id" :label="user.full_name" :value="user.id" /></el-select></el-form-item><el-form-item label="严重程度"><el-select v-model="bugForm.severity"><el-option v-for="option in priorityLevelOptions" :key="option.value" :label="option.label" :value="option.value"><RequirementPriorityBadge :value="option.value" /></el-option></el-select></el-form-item><el-form-item label="优先级"><el-select v-model="bugForm.priority"><el-option v-for="option in priorityLevelOptions" :key="option.value" :label="option.label" :value="option.value"><RequirementPriorityBadge :value="option.value" /></el-option></el-select></el-form-item><el-form-item label="状态"><el-select v-model="bugForm.status"><el-option label="待修复" value="open" /><el-option label="修复中" value="fixing" /><el-option label="待验证" value="verifying" /><el-option label="已关闭" value="closed" /><el-option label="重新打开" value="reopened" /></el-select></el-form-item></div><el-form-item label="复现步骤"><el-input v-model="bugForm.reproduce_steps" type="textarea" :rows="6" /></el-form-item><el-form-item label="期望结果"><el-input v-model="bugForm.expected_result" type="textarea" :rows="2" /></el-form-item><el-form-item label="实际结果"><el-input v-model="bugForm.actual_result" type="textarea" :rows="2" /></el-form-item></el-form>
+      <el-form label-position="top"><el-form-item label="Bug 标题" required><el-input v-model="bugForm.title" /></el-form-item><div class="form-grid"><el-form-item label="需求"><el-select v-model="bugForm.requirement_id" clearable filterable><el-option v-for="requirement in projectRequirements" :key="requirement.id" :label="requirement.title" :value="requirement.id" /></el-select></el-form-item><el-form-item label="任务"><el-select v-model="bugForm.task_id" clearable filterable><el-option v-for="task in projectTasks" :key="task.id" :label="task.title" :value="task.id" /></el-select></el-form-item><el-form-item label="来源用例"><el-select v-model="bugForm.test_case_id" clearable filterable><el-option v-for="item in projectTestCases" :key="item.id" :label="item.title" :value="item.id" /></el-select></el-form-item><el-form-item label="来源测试单"><el-select v-model="bugForm.test_run_id" clearable filterable><el-option v-for="run in projectTestRuns" :key="run.id" :label="run.name" :value="run.id" /></el-select></el-form-item><el-form-item label="Bug 类型"><el-select v-model="bugForm.bug_type"><el-option v-for="option in bugTypeOptions" :key="option" :label="option" :value="option" /></el-select></el-form-item><el-form-item label="负责人"><el-select v-model="bugForm.owner_id" clearable filterable><el-option v-for="user in users" :key="user.id" :label="user.full_name" :value="user.id" /></el-select></el-form-item><el-form-item label="提出人"><el-select v-model="bugForm.reporter_id" clearable filterable><el-option v-for="user in users" :key="user.id" :label="user.full_name" :value="user.id" /></el-select></el-form-item><el-form-item label="严重程度"><el-select v-model="bugForm.severity"><el-option v-for="option in priorityLevelOptions" :key="option.value" :label="option.label" :value="option.value"><RequirementPriorityBadge :value="option.value" /></el-option></el-select></el-form-item><el-form-item label="优先级"><el-select v-model="bugForm.priority"><el-option v-for="option in priorityLevelOptions" :key="option.value" :label="option.label" :value="option.value"><RequirementPriorityBadge :value="option.value" /></el-option></el-select></el-form-item></div><el-form-item label="复现步骤"><el-input v-model="bugForm.reproduce_steps" type="textarea" :rows="6" /></el-form-item><el-form-item label="期望结果"><el-input v-model="bugForm.expected_result" type="textarea" :rows="2" /></el-form-item><el-form-item label="实际结果"><el-input v-model="bugForm.actual_result" type="textarea" :rows="2" /></el-form-item></el-form>
       <template #footer><el-button @click="bugDialogVisible = false">取消</el-button><el-button type="primary" :loading="saving" @click="submitBug">保存</el-button></template>
+    </el-dialog>
+
+    <el-dialog v-model="bugActionVisible" :title="bugActionTitle" width="480px">
+      <el-form label-position="top">
+        <el-form-item v-if="bugActionType === 'resolve'" label="解决结果" required>
+          <el-select v-model="bugActionForm.resolution">
+            <el-option v-for="option in bugResolutionOptions" :key="option.value" :label="option.label" :value="option.value" />
+          </el-select>
+        </el-form-item>
+        <el-form-item v-if="['verify_passed', 'verify_failed'].includes(bugActionType)" label="验证结果">
+          <el-input v-model="bugActionForm.verify_result" />
+        </el-form-item>
+        <el-form-item v-if="['suspend', 'close'].includes(bugActionType)" label="原因">
+          <el-input v-model="bugActionForm.reason" />
+        </el-form-item>
+        <el-form-item label="备注">
+          <el-input v-model="bugActionForm.remark" type="textarea" :rows="3" />
+        </el-form-item>
+      </el-form>
+      <template #footer><el-button @click="bugActionVisible = false">取消</el-button><el-button type="primary" :loading="saving" @click="submitBugAction">确认</el-button></template>
     </el-dialog>
   </section>
 </template>
@@ -360,7 +394,7 @@ import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 
-import { createBug, deleteBug, fetchBugs, updateBug } from '../api/bugs'
+import { closeBug, createBug, deleteBug, fetchBugs, resolveBug, startFixingBug, startVerifyingBug, suspendBug, updateBug, verifyBugFailed, verifyBugPassed } from '../api/bugs'
 import { createIteration, deleteIteration, fetchIterations, finishIteration, startIteration, updateIteration } from '../api/iterations'
 import { fetchPrograms } from '../api/programs'
 import { fetchProject, fetchProjectAuditLogs, fetchProjectStatusOperations } from '../api/projects'
@@ -399,10 +433,12 @@ const closeReasonByTask = ref({})
 const expandedHistory = reactive({})
 
 const iterationDialogVisible = ref(false), iterationStartVisible = ref(false), iterationFinishVisible = ref(false), requirementDialogVisible = ref(false), closeRequirementVisible = ref(false), taskDialogVisible = ref(false), closeTaskVisible = ref(false)
-const caseDialogVisible = ref(false), runDialogVisible = ref(false), bugDialogVisible = ref(false), caseExecutionVisible = ref(false), caseBugVisible = ref(false)
+const caseDialogVisible = ref(false), runDialogVisible = ref(false), bugDialogVisible = ref(false), bugActionVisible = ref(false), caseExecutionVisible = ref(false), caseBugVisible = ref(false)
 const editingIterationId = ref(null), startingIterationId = ref(null), editingRequirementId = ref(null), closingRequirementId = ref(null), editingTaskId = ref(null)
 const closingTaskId = ref(null)
 const editingCaseId = ref(null), editingRunId = ref(null), editingBugId = ref(null)
+const actingBug = ref(null)
+const bugActionType = ref('')
 const selectedCase = ref(null)
 const bugSourceCase = ref(null)
 const caseExecutionHistory = ref([])
@@ -501,9 +537,19 @@ const testRunStatusOptions = [
 const bugStatusOptions = [
   { label: '待修复', value: 'open' },
   { label: '修复中', value: 'fixing' },
+  { label: '已解决', value: 'resolved' },
   { label: '待验证', value: 'verifying' },
   { label: '已关闭', value: 'closed' },
-  { label: '重新打开', value: 'reopened' }
+  { label: '重新打开', value: 'reopened' },
+  { label: '已挂起', value: 'suspended' }
+]
+const bugResolutionOptions = [
+  { label: '已修复', value: 'fixed' },
+  { label: '重复 Bug', value: 'duplicate' },
+  { label: '非问题', value: 'not_bug' },
+  { label: '无法复现', value: 'cannot_reproduce' },
+  { label: '设计如此', value: 'by_design' },
+  { label: '延期处理', value: 'deferred' }
 ]
 
 const matchesLifecyclePhase = (item) => (item.lifecycle_phase || 'development') === activeLifecyclePhase.value
@@ -547,6 +593,15 @@ const projectHistory = computed(() => {
   return [...statusItems, ...auditItems].sort((a, b) => new Date(a.time) - new Date(b.time))
 })
 const failedExecutionCount = computed(() => caseExecutionHistory.value.filter((item) => item.result === 'failed').length)
+const bugActionTitle = computed(() => ({
+  start_fixing: '开始修复',
+  resolve: '提交解决',
+  start_verifying: '开始验证',
+  verify_passed: '验证通过',
+  verify_failed: '验证失败',
+  suspend: '挂起 Bug',
+  close: '关闭 Bug'
+}[bugActionType.value] || 'Bug 操作'))
 
 const iterationForm = reactive({ project_ids: [], name: '', owner_id: null, start_date: null, end_date: null, status: 'planning', goal: '' })
 const iterationStartForm = reactive({ effective_time: '', remark: '' })
@@ -559,6 +614,7 @@ const caseForm = reactive({ project_id: null, requirement_id: null, title: '', c
 const caseExecutionForm = reactive({ execute_time: '', steps_result_json: [] })
 const runForm = reactive({ project_id: null, iteration_id: null, name: '', test_owner_id: null, status: 'planning', remark: '' })
 const bugForm = reactive({ project_id: null, requirement_id: null, task_id: null, test_case_id: null, test_run_id: null, title: '', bug_type: '代码错误', severity: '3', priority: '3', owner_id: null, reporter_id: null, reproduce_steps: '', expected_result: '', actual_result: '', status: 'open' })
+const bugActionForm = reactive({ resolution: '', verify_result: '', reason: '', remark: '' })
 const caseBugForm = reactive({ title: '', bug_type: '代码错误', severity: '3', priority: '3', reproduce_steps: '', actual_result: '' })
 
 function optionLabel(options, value) { return options.find((option) => option.value === value)?.label || value || '-' }
@@ -667,6 +723,17 @@ function openRunCreate() { editingRunId.value = null; resetRunForm(); runDialogV
 function openRunEdit(row) { editingRunId.value = row.id; Object.assign(runForm, { ...row, remark: row.remark || '' }); runDialogVisible.value = true }
 function openBugCreate() { editingBugId.value = null; resetBugForm(); bugDialogVisible.value = true }
 function openBugEdit(row) { editingBugId.value = row.id; Object.assign(bugForm, { ...row, reproduce_steps: row.reproduce_steps || '', expected_result: row.expected_result || '', actual_result: row.actual_result || '' }); bugDialogVisible.value = true }
+function openBugAction(row, actionType) {
+  actingBug.value = row
+  bugActionType.value = actionType
+  Object.assign(bugActionForm, {
+    resolution: actionType === 'resolve' ? 'fixed' : '',
+    verify_result: actionType === 'verify_passed' ? 'passed' : actionType === 'verify_failed' ? 'failed' : '',
+    reason: '',
+    remark: ''
+  })
+  bugActionVisible.value = true
+}
 
 async function loadData() {
   loading.value = true
@@ -725,6 +792,29 @@ async function submitCase() { if (!caseForm.title.trim()) return ElMessage.warni
 async function submitCaseExecution() { saving.value = true; try { const currentId = selectedCase.value.id; await executeTestCase(currentId, { execute_time: caseExecutionForm.execute_time, steps_result_json: caseExecutionForm.steps_result_json }); await loadData(); ElMessage.success('用例执行结果已保存'); await openNextCaseAfterExecution(currentId, projectTestCases.value) } finally { saving.value = false } }
 async function submitRun() { if (!runForm.name.trim()) return ElMessage.warning('请填写测试单名称'); saving.value = true; try { const payload = { ...runForm, project_id: projectId.value, iteration_id: runForm.iteration_id || null, test_owner_id: runForm.test_owner_id || null }; if (editingRunId.value) await updateTestRun(editingRunId.value, payload); else await createTestRun(payload); runDialogVisible.value = false; await loadData() } finally { saving.value = false } }
 async function submitBug() { if (!bugForm.title.trim()) return ElMessage.warning('请填写 Bug 标题'); saving.value = true; try { const payload = { ...bugForm, project_id: projectId.value, requirement_id: bugForm.requirement_id || null, task_id: bugForm.task_id || null, test_case_id: bugForm.test_case_id || null, test_run_id: bugForm.test_run_id || null, owner_id: bugForm.owner_id || null, reporter_id: bugForm.reporter_id || null }; if (editingBugId.value) await updateBug(editingBugId.value, payload); else await createBug(payload); bugDialogVisible.value = false; await loadData() } finally { saving.value = false } }
+async function submitBugAction() {
+  if (bugActionType.value === 'resolve' && !bugActionForm.resolution) return ElMessage.warning('请选择解决结果')
+  saving.value = true
+  try {
+    const id = actingBug.value.id
+    const payload = { ...bugActionForm }
+    const actions = {
+      start_fixing: startFixingBug,
+      resolve: resolveBug,
+      start_verifying: startVerifyingBug,
+      verify_passed: verifyBugPassed,
+      verify_failed: verifyBugFailed,
+      suspend: suspendBug,
+      close: closeBug
+    }
+    await actions[bugActionType.value](id, payload)
+    bugActionVisible.value = false
+    await loadData()
+    ElMessage.success('Bug 状态已更新')
+  } finally {
+    saving.value = false
+  }
+}
 async function submitCaseBug() { if (!caseBugForm.title.trim()) return ElMessage.warning('请填写 Bug 标题'); saving.value = true; try { await createBugFromTestCase(bugSourceCase.value.id, { ...caseBugForm }); caseBugVisible.value = false; await loadData(); ElMessage.success('Bug 已提交') } finally { saving.value = false } }
 async function removeIteration(id) { await deleteIteration(id); await loadData() }
 async function removeRequirement(id) { await deleteRequirement(id); await loadData() }

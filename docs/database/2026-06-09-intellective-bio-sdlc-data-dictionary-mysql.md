@@ -357,6 +357,14 @@
 | actual_result | TEXT | NULL | 实际结果 |
 | status | VARCHAR(32) | NOT NULL DEFAULT 'open' | open、fixing、verifying、closed、reopened |
 | lifecycle_phase | VARCHAR(32) | NOT NULL DEFAULT 'development' | 生命周期阶段：development、maintenance |
+| resolution | VARCHAR(64) | NULL | 解决结果 |
+| resolve_time | DATETIME | NULL | 解决时间 |
+| resolved_by | BIGINT UNSIGNED | NULL | 解决人 |
+| verify_result | VARCHAR(64) | NULL | 验证结果 |
+| verify_time | DATETIME | NULL | 验证时间 |
+| verified_by | BIGINT UNSIGNED | NULL | 验证人 |
+| reopen_count | INT | NOT NULL DEFAULT 0 | 重新打开次数 |
+| close_reason | VARCHAR(64) | NULL | 关闭原因 |
 | creator_id | BIGINT UNSIGNED | NULL | 创建人 |
 | updater_id | BIGINT UNSIGNED | NULL | 更新人 |
 | create_time | DATETIME | NOT NULL | 创建时间 |

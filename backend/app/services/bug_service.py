@@ -14,7 +14,8 @@ from app.services.lifecycle_service import (
     requirement_lifecycle_phase,
     test_case_lifecycle_phase,
 )
-from app.views.bug_view import BugCreate, BugFromTestRunCaseRequest, BugUpdate
+from app.services.status_operation_service import create_status_operation, list_status_operations
+from app.views.bug_view import BugCreate, BugFromTestRunCaseRequest, BugStatusActionRequest, BugUpdate
 
 
 def list_bugs(db: Session) -> list[Bug]:
@@ -79,11 +80,80 @@ def create_bug_from_test_run_case(db: Session, run_case_id: int, payload: BugFro
 
 def update_bug(db: Session, bug_id: int, payload: BugUpdate) -> Bug:
     bug = _get_active_bug(db, bug_id)
-    for field, value in payload.model_dump(exclude_unset=True).items():
+    data = payload.model_dump(exclude_unset=True)
+    data.pop("status", None)
+    data.pop("resolution", None)
+    data.pop("verify_result", None)
+    data.pop("close_reason", None)
+    for field, value in data.items():
         setattr(bug, field, value)
     db.commit()
     db.refresh(bug)
     return bug
+
+
+def start_fixing_bug(db: Session, bug_id: int, payload: BugStatusActionRequest | None = None) -> Bug:
+    bug = _get_active_bug(db, bug_id)
+    _require_bug_status(bug, {"open", "reopened", "suspended"}, "只有待修复、重新打开或已挂起的 Bug 可以开始修复")
+    return _transition_bug(db, bug, "fixing", "start_fixing", payload)
+
+
+def resolve_bug(db: Session, bug_id: int, payload: BugStatusActionRequest) -> Bug:
+    if not payload.resolution:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="解决结果必填")
+    bug = _get_active_bug(db, bug_id)
+    _require_bug_status(bug, {"fixing"}, "只有修复中的 Bug 可以提交解决")
+    bug.resolution = payload.resolution
+    bug.resolve_time = payload.effective_time or datetime.now()
+    bug.resolved_by = payload.operator_id
+    return _transition_bug(db, bug, "resolved", "resolve", payload)
+
+
+def start_verifying_bug(db: Session, bug_id: int, payload: BugStatusActionRequest | None = None) -> Bug:
+    bug = _get_active_bug(db, bug_id)
+    _require_bug_status(bug, {"resolved"}, "只有已解决的 Bug 可以开始验证")
+    return _transition_bug(db, bug, "verifying", "start_verifying", payload)
+
+
+def verify_bug_passed(db: Session, bug_id: int, payload: BugStatusActionRequest | None = None) -> Bug:
+    bug = _get_active_bug(db, bug_id)
+    _require_bug_status(bug, {"verifying"}, "只有待验证的 Bug 可以验证通过")
+    action_payload = payload or BugStatusActionRequest()
+    bug.verify_result = action_payload.verify_result or "passed"
+    bug.verify_time = action_payload.effective_time or datetime.now()
+    bug.verified_by = action_payload.operator_id
+    bug.close_reason = action_payload.reason or "verified"
+    return _transition_bug(db, bug, "closed", "verify_passed", action_payload)
+
+
+def verify_bug_failed(db: Session, bug_id: int, payload: BugStatusActionRequest | None = None) -> Bug:
+    bug = _get_active_bug(db, bug_id)
+    _require_bug_status(bug, {"verifying", "resolved"}, "只有已解决或待验证的 Bug 可以验证失败")
+    action_payload = payload or BugStatusActionRequest()
+    bug.verify_result = action_payload.verify_result or "failed"
+    bug.verify_time = action_payload.effective_time or datetime.now()
+    bug.verified_by = action_payload.operator_id
+    bug.reopen_count = (bug.reopen_count or 0) + 1
+    return _transition_bug(db, bug, "reopened", "verify_failed", action_payload)
+
+
+def suspend_bug(db: Session, bug_id: int, payload: BugStatusActionRequest | None = None) -> Bug:
+    bug = _get_active_bug(db, bug_id)
+    _require_bug_status(bug, {"open", "fixing", "reopened"}, "只有待修复、修复中或重新打开的 Bug 可以挂起")
+    return _transition_bug(db, bug, "suspended", "suspend", payload)
+
+
+def close_bug(db: Session, bug_id: int, payload: BugStatusActionRequest | None = None) -> Bug:
+    bug = _get_active_bug(db, bug_id)
+    _require_bug_status(bug, {"open", "suspended"}, "只有待修复或已挂起的 Bug 可以直接关闭")
+    action_payload = payload or BugStatusActionRequest()
+    bug.close_reason = action_payload.reason
+    return _transition_bug(db, bug, "closed", "close", action_payload)
+
+
+def list_bug_status_operations(db: Session, bug_id: int) -> list[dict]:
+    _get_active_bug(db, bug_id)
+    return list_status_operations(db, "bug", bug_id)
 
 
 def delete_bug(db: Session, bug_id: int) -> None:
@@ -98,3 +168,32 @@ def _get_active_bug(db: Session, bug_id: int) -> Bug:
     if not bug:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Bug not found")
     return bug
+
+
+def _transition_bug(
+    db: Session,
+    bug: Bug,
+    target_status: str,
+    action: str,
+    payload: BugStatusActionRequest | None,
+) -> Bug:
+    from_status = bug.status
+    bug.status = target_status
+    create_status_operation(
+        db,
+        object_type="bug",
+        object_id=bug.id,
+        action=action,
+        from_status=from_status,
+        to_status=target_status,
+        payload=payload,
+        actor_id=payload.operator_id if payload else None,
+    )
+    db.commit()
+    db.refresh(bug)
+    return bug
+
+
+def _require_bug_status(bug: Bug, allowed_statuses: set[str], message: str) -> None:
+    if bug.status not in allowed_statuses:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=message)

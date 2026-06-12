@@ -21,6 +21,14 @@ class BugBase(BaseModel):
     actual_result: str | None = None
     status: str = "open"
     lifecycle_phase: str | None = None
+    resolution: str | None = None
+    resolve_time: datetime | None = None
+    resolved_by: int | None = None
+    verify_result: str | None = None
+    verify_time: datetime | None = None
+    verified_by: int | None = None
+    reopen_count: int = 0
+    close_reason: str | None = None
 
 
 class BugCreate(BugBase):
@@ -45,6 +53,9 @@ class BugUpdate(BaseModel):
     actual_result: str | None = None
     status: str | None = None
     lifecycle_phase: str | None = None
+    resolution: str | None = None
+    verify_result: str | None = None
+    close_reason: str | None = None
     updater_id: int | None = None
 
 
@@ -57,6 +68,15 @@ class BugFromTestRunCaseRequest(BaseModel):
     reproduce_steps: str | None = None
     expected_result: str | None = None
     actual_result: str | None = None
+
+
+class BugStatusActionRequest(BaseModel):
+    reason: str | None = None
+    resolution: str | None = None
+    verify_result: str | None = None
+    remark: str | None = None
+    operator_id: int | None = None
+    effective_time: datetime | None = None
 
 
 class BugRead(BugBase):

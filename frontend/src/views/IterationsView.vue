@@ -19,12 +19,14 @@
         <el-table-column prop="start_date" label="开始日期" width="130" />
         <el-table-column prop="end_date" label="结束日期" width="130" />
         <el-table-column prop="actual_start_date" label="实际开始" width="130" />
+        <el-table-column prop="actual_end_date" label="实际结束" width="130" />
         <el-table-column label="状态" width="120">
           <template #default="{ row }">{{ iterationStatusLabel(row.status) }}</template>
         </el-table-column>
         <el-table-column label="操作" width="210" fixed="right">
           <template #default="{ row }">
             <el-button v-if="row.status === 'planning'" link type="success" @click="openStart(row)">开始</el-button>
+            <el-button v-if="row.status === 'active'" link type="warning" @click="openFinish(row)">结束</el-button>
             <el-button link type="primary" @click="openEdit(row)">编辑</el-button>
             <el-popconfirm title="确认删除该迭代？" @confirm="removeIteration(row.id)">
               <template #reference><el-button link type="danger">删除</el-button></template>
@@ -88,13 +90,26 @@
         <el-button type="primary" :loading="saving" @click="submitStart">确认开始</el-button>
       </template>
     </el-dialog>
+
+    <el-dialog v-model="finishDialogVisible" title="结束迭代" width="480px">
+      <el-form label-position="top">
+        <el-form-item label="实际结束日期" required>
+          <el-date-picker v-model="finishForm.effective_time" type="datetime" value-format="YYYY-MM-DDTHH:mm:ss" />
+        </el-form-item>
+        <el-form-item label="备注"><el-input v-model="finishForm.remark" type="textarea" :rows="3" /></el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="finishDialogVisible = false">取消</el-button>
+        <el-button type="primary" :loading="saving" @click="submitFinish">确认结束</el-button>
+      </template>
+    </el-dialog>
   </section>
 </template>
 
 <script setup>
 import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
-import { createIteration, deleteIteration, fetchIterations, startIteration, updateIteration } from '../api/iterations'
+import { createIteration, deleteIteration, fetchIterations, finishIteration, startIteration, updateIteration } from '../api/iterations'
 import { fetchProjects } from '../api/projects'
 import { fetchUsers } from '../api/users'
 import { labelById, userLabel } from '../utils/referenceLabels'
@@ -104,8 +119,10 @@ const loading = ref(false)
 const saving = ref(false)
 const dialogVisible = ref(false)
 const startDialogVisible = ref(false)
+const finishDialogVisible = ref(false)
 const editingId = ref(null)
 const startingId = ref(null)
+const finishingId = ref(null)
 const iterations = ref([])
 const projects = ref([])
 const users = ref([])
@@ -119,6 +136,7 @@ const {
 const topLevelProjects = computed(() => projects.value.filter(p => !p.parent_id))
 const form = reactive({ project_ids: [], name: '', owner_id: null, start_date: null, end_date: null, status: 'planning', goal: '' })
 const startForm = reactive({ effective_time: '', remark: '' })
+const finishForm = reactive({ effective_time: '', remark: '' })
 const iterationStatusOptions = [
   { label: '规划中', value: 'planning' },
   { label: '进行中', value: 'active' },
@@ -138,6 +156,7 @@ function currentDateTimeValue() {
 function openCreate() { editingId.value = null; resetForm(); dialogVisible.value = true }
 function openEdit(row) { editingId.value = row.id; Object.assign(form, { ...row, project_ids: row.project_ids || [], goal: row.goal || '' }); dialogVisible.value = true }
 function openStart(row) { startingId.value = row.id; Object.assign(startForm, { effective_time: currentDateTimeValue(), remark: '' }); startDialogVisible.value = true }
+function openFinish(row) { finishingId.value = row.id; Object.assign(finishForm, { effective_time: currentDateTimeValue(), remark: '' }); finishDialogVisible.value = true }
 
 async function loadData() {
   loading.value = true
@@ -176,6 +195,18 @@ async function submitStart() {
     startDialogVisible.value = false
     await loadData()
     ElMessage.success('迭代已开始')
+  } finally {
+    saving.value = false
+  }
+}
+async function submitFinish() {
+  if (!finishForm.effective_time) return ElMessage.warning('请选择实际结束日期')
+  saving.value = true
+  try {
+    await finishIteration(finishingId.value, { ...finishForm })
+    finishDialogVisible.value = false
+    await loadData()
+    ElMessage.success('迭代已结束')
   } finally {
     saving.value = false
   }

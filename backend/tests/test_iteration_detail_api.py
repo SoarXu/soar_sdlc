@@ -142,3 +142,30 @@ def test_iteration_can_start_with_actual_start_date(client: TestClient):
     assert operations.json()[0]["from_status"] == "planning"
     assert operations.json()[0]["to_status"] == "active"
     assert operations.json()[0]["remark"] == "iteration kickoff"
+
+
+def test_iteration_can_finish_with_actual_end_date(client: TestClient):
+    project_id = _create_project(client)
+    iteration_id = _create_iteration(client, [project_id])
+    started = client.post(
+        f"/api/v1/iterations/{iteration_id}/start",
+        json={"effective_time": "2026-06-12T09:30:00"},
+    )
+    assert started.status_code == 200
+
+    finished = client.post(
+        f"/api/v1/iterations/{iteration_id}/finish",
+        json={"effective_time": "2026-06-20T18:00:00", "remark": "iteration finish"},
+    )
+
+    assert finished.status_code == 200
+    data = finished.json()
+    assert data["status"] == "finished"
+    assert data["actual_end_date"] == "2026-06-20"
+
+    operations = client.get(f"/api/v1/iterations/{iteration_id}/status-operations")
+    assert operations.status_code == 200
+    assert operations.json()[-1]["action"] == "finish"
+    assert operations.json()[-1]["from_status"] == "active"
+    assert operations.json()[-1]["to_status"] == "finished"
+    assert operations.json()[-1]["remark"] == "iteration finish"

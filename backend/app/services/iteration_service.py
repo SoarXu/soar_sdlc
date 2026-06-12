@@ -34,6 +34,7 @@ def list_iterations(db: Session, project_id: int | None = None) -> list[dict]:
             "start_date": it.start_date,
             "end_date": it.end_date,
             "actual_start_date": it.actual_start_date,
+            "actual_end_date": it.actual_end_date,
             "status": it.status,
             "goal": it.goal,
             "creator_id": it.creator_id,
@@ -71,6 +72,7 @@ def create_iteration(db: Session, payload: IterationCreate) -> dict:
         "start_date": iteration.start_date,
         "end_date": iteration.end_date,
         "actual_start_date": iteration.actual_start_date,
+        "actual_end_date": iteration.actual_end_date,
         "status": iteration.status,
         "goal": iteration.goal,
         "creator_id": iteration.creator_id,
@@ -112,6 +114,7 @@ def update_iteration(db: Session, iteration_id: int, payload: IterationUpdate) -
         "start_date": iteration.start_date,
         "end_date": iteration.end_date,
         "actual_start_date": iteration.actual_start_date,
+        "actual_end_date": iteration.actual_end_date,
         "status": iteration.status,
         "goal": iteration.goal,
         "creator_id": iteration.creator_id,
@@ -143,6 +146,29 @@ def start_iteration(db: Session, iteration_id: int, payload: StatusOperationCrea
         object_type="iteration",
         object_id=iteration.id,
         action="start",
+        from_status=from_status,
+        to_status=iteration.status,
+        payload=payload,
+    )
+    db.commit()
+    db.refresh(iteration)
+    return _iteration_to_dict(iteration, _iteration_project_ids(db, iteration.id))
+
+
+def finish_iteration(db: Session, iteration_id: int, payload: StatusOperationCreate | None = None) -> dict:
+    iteration = _get_active_iteration(db, iteration_id)
+    if iteration.status != "active":
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="只有进行中的迭代可以结束")
+    if not payload or not payload.effective_time:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="请选择实际结束日期")
+    from_status = iteration.status
+    iteration.status = "finished"
+    iteration.actual_end_date = payload.effective_time.date()
+    create_status_operation(
+        db,
+        object_type="iteration",
+        object_id=iteration.id,
+        action="finish",
         from_status=from_status,
         to_status=iteration.status,
         payload=payload,
@@ -294,6 +320,7 @@ def _iteration_to_dict(iteration: Iteration, project_ids: list[int]) -> dict:
         "start_date": iteration.start_date,
         "end_date": iteration.end_date,
         "actual_start_date": iteration.actual_start_date,
+        "actual_end_date": iteration.actual_end_date,
         "status": iteration.status,
         "goal": iteration.goal,
         "creator_id": iteration.creator_id,

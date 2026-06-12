@@ -7,6 +7,7 @@ from app.services.iteration_service import (
     available_tasks,
     create_iteration,
     delete_iteration,
+    finish_iteration,
     get_iteration_detail,
     link_requirements,
     link_tasks,
@@ -52,6 +53,11 @@ def get_iteration_status_operations(iteration_id: int, db: Session = Depends(get
 @router.post("/{iteration_id}/start", response_model=IterationRead)
 def start_iteration_status(iteration_id: int, payload: StatusOperationCreate | None = None, db: Session = Depends(get_db)):
     return start_iteration(db, iteration_id, payload)
+
+
+@router.post("/{iteration_id}/finish", response_model=IterationRead)
+def finish_iteration_status(iteration_id: int, payload: StatusOperationCreate | None = None, db: Session = Depends(get_db)):
+    return finish_iteration(db, iteration_id, payload)
 
 
 @router.get("/{iteration_id}/available-requirements")

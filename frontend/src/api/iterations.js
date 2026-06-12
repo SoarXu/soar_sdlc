@@ -44,6 +44,10 @@ export function startIteration(id, payload = {}) {
   return http.post(`/iterations/${id}/start`, payload)
 }
 
+export function finishIteration(id, payload = {}) {
+  return http.post(`/iterations/${id}/finish`, payload)
+}
+
 export function fetchIterationStatusOperations(id) {
   return http.get(`/iterations/${id}/status-operations`)
 }

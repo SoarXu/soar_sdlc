@@ -8,6 +8,7 @@
       </div>
       <div class="iteration-head-actions">
         <el-button v-if="iteration.status === 'planning'" type="success" @click="openIterationStart">开始</el-button>
+        <el-button v-if="iteration.status === 'active'" type="warning" @click="openIterationFinish">结束</el-button>
         <el-tag size="large">{{ iterationStatusLabel(iteration.status) }}</el-tag>
       </div>
     </div>
@@ -41,6 +42,7 @@
           <el-descriptions-item label="开始日期">{{ iteration.start_date || '-' }}</el-descriptions-item>
           <el-descriptions-item label="结束日期">{{ iteration.end_date || '-' }}</el-descriptions-item>
           <el-descriptions-item label="实际开始">{{ iteration.actual_start_date || '-' }}</el-descriptions-item>
+          <el-descriptions-item label="实际结束">{{ iteration.actual_end_date || '-' }}</el-descriptions-item>
           <el-descriptions-item label="目标" :span="2">{{ iteration.goal || '-' }}</el-descriptions-item>
         </el-descriptions>
       </template>
@@ -185,6 +187,14 @@
       <template #footer><el-button @click="iterationStartVisible = false">取消</el-button><el-button type="primary" :loading="saving" @click="submitIterationStart">确认开始</el-button></template>
     </el-dialog>
 
+    <el-dialog v-model="iterationFinishVisible" title="结束迭代" width="480px">
+      <el-form label-position="top">
+        <el-form-item label="实际结束日期" required><el-date-picker v-model="iterationFinishForm.effective_time" type="datetime" value-format="YYYY-MM-DDTHH:mm:ss" /></el-form-item>
+        <el-form-item label="备注"><el-input v-model="iterationFinishForm.remark" type="textarea" :rows="3" /></el-form-item>
+      </el-form>
+      <template #footer><el-button @click="iterationFinishVisible = false">取消</el-button><el-button type="primary" :loading="saving" @click="submitIterationFinish">确认结束</el-button></template>
+    </el-dialog>
+
     <el-dialog v-model="closeRequirementVisible" title="关闭需求" width="480px">
       <el-form label-position="top">
         <el-form-item label="关闭原因" required>
@@ -260,6 +270,7 @@ import {
   fetchAvailableIterationRequirements,
   fetchAvailableIterationTasks,
   fetchIterationDetail,
+  finishIteration,
   startIteration,
   linkIterationRequirements,
   linkIterationTasks,
@@ -294,6 +305,7 @@ const selectedTaskIds = ref([])
 const requirementDialogVisible = ref(false)
 const taskDialogVisible = ref(false)
 const iterationStartVisible = ref(false)
+const iterationFinishVisible = ref(false)
 const closeRequirementVisible = ref(false)
 const closeTaskVisible = ref(false)
 const closingRequirementId = ref(null)
@@ -305,6 +317,7 @@ const bugSourceCase = ref(null)
 const caseExecutionHistory = ref([])
 const caseExecutionForm = ref({ execute_time: '', steps_result_json: [] })
 const iterationStartForm = ref({ effective_time: '', remark: '' })
+const iterationFinishForm = ref({ effective_time: '', remark: '' })
 const closeReasonByRequirement = ref({})
 const closeReasonByTask = ref({})
 const tabs = [
@@ -483,6 +496,7 @@ async function submitTasks() {
 }
 async function removeTask(taskId) { await unlinkIterationTask(iterationId.value, taskId); await loadData() }
 function openIterationStart() { iterationStartForm.value = { effective_time: currentDateTimeValue(), remark: '' }; iterationStartVisible.value = true }
+function openIterationFinish() { iterationFinishForm.value = { effective_time: currentDateTimeValue(), remark: '' }; iterationFinishVisible.value = true }
 async function submitIterationStart() {
   if (!iterationStartForm.value.effective_time) return ElMessage.warning('请选择实际开始日期')
   saving.value = true
@@ -491,6 +505,18 @@ async function submitIterationStart() {
     iterationStartVisible.value = false
     await loadData()
     ElMessage.success('迭代已开始')
+  } finally {
+    saving.value = false
+  }
+}
+async function submitIterationFinish() {
+  if (!iterationFinishForm.value.effective_time) return ElMessage.warning('请选择实际结束日期')
+  saving.value = true
+  try {
+    await finishIteration(iterationId.value, { ...iterationFinishForm.value })
+    iterationFinishVisible.value = false
+    await loadData()
+    ElMessage.success('迭代已结束')
   } finally {
     saving.value = false
   }

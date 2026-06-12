@@ -9,7 +9,7 @@
       <div class="product-right">
         <el-dropdown trigger="click" @command="handleUserCommand">
           <button class="user-menu" type="button">
-            <span>{{ currentUsername }}</span>
+            <span>{{ currentDisplayName }}</span>
             <el-icon><ArrowDown /></el-icon>
           </button>
           <template #dropdown>
@@ -61,7 +61,7 @@
 </template>
 
 <script setup>
-import { computed } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import {
   ArrowDown,
@@ -74,10 +74,13 @@ import {
   Warning
 } from '@element-plus/icons-vue'
 import { useAuthStore } from '../stores/auth'
+import { fetchUsers } from '../api/users'
 
 const router = useRouter()
 const authStore = useAuthStore()
-const currentUsername = computed(() => localStorage.getItem('current_username') || '用户')
+const currentFullName = ref(localStorage.getItem('current_full_name') || '')
+const currentUsername = computed(() => localStorage.getItem('current_username') || '')
+const currentDisplayName = computed(() => currentFullName.value || currentUsername.value || '未登录')
 
 function handleUserCommand(command) {
   if (command === 'logout') {
@@ -85,4 +88,21 @@ function handleUserCommand(command) {
     router.push('/login')
   }
 }
+
+async function loadCurrentUserName() {
+  if (currentFullName.value || !currentUsername.value) return
+  try {
+    const { data } = await fetchUsers()
+    const user = data.find((item) => item.username === currentUsername.value)
+    if (user?.full_name) {
+      currentFullName.value = user.full_name
+      localStorage.setItem('current_full_name', user.full_name)
+      localStorage.setItem('current_user_id', user.id)
+    }
+  } catch {
+    currentFullName.value = currentUsername.value
+  }
+}
+
+onMounted(loadCurrentUserName)
 </script>

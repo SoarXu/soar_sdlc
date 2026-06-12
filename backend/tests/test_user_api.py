@@ -16,3 +16,5 @@ def test_seeded_non_admin_user_can_login(client: TestClient):
     assert response.status_code == 200
     assert response.json()["token_type"] == "bearer"
     assert response.json()["access_token"]
+    assert response.json()["username"] == "pm_chen"
+    assert response.json()["full_name"] == "陈序"

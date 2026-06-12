@@ -18,4 +18,9 @@ def login(payload: LoginRequest, db: Session = Depends(get_db)):
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect username or password",
         )
-    return TokenResponse(access_token=create_access_token(user.username))
+    return TokenResponse(
+        access_token=create_access_token(user.username),
+        user_id=user.id,
+        username=user.username,
+        full_name=user.full_name,
+    )

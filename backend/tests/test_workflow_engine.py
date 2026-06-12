@@ -36,14 +36,21 @@ def _create_active_requirement_with_task(client: TestClient, project_id: int) ->
     return requirement_id, task_id
 
 
-def _create_workflow_rule(client: TestClient, nodes: list[dict], edges: list[dict], priority: int = 10) -> int:
+def _create_workflow_rule(
+    client: TestClient,
+    nodes: list[dict],
+    edges: list[dict],
+    priority: int = 10,
+    target_object: str = "project",
+    trigger_action: str = "status_changed",
+) -> int:
     payload = {
         "rule_name": f"Workflow Engine Rule {uuid4().hex[:8]}",
         "scope_type": "system",
-        "target_object": "project",
-        "trigger_action": "status_changed",
+        "target_object": target_object,
+        "trigger_action": trigger_action,
         "condition_json": {"designer_version": 1, "nodes": nodes, "edges": edges},
-        "action_json": {"trigger": {"target_object": "project", "trigger_action": "status_changed"}, "steps": []},
+        "action_json": {"trigger": {"target_object": target_object, "trigger_action": trigger_action}, "steps": []},
         "enabled": True,
         "priority": priority,
     }
@@ -190,3 +197,47 @@ def test_project_close_workflow_executes_custom_component_by_handler_key(client:
     requirement_history = client.get(f"/api/v1/requirements/{requirement_id}/status-operations").json()
     requirement_close = next(item for item in requirement_history if item["action"] == "close")
     assert requirement_close["reason"] == "自定义组件关闭"
+def test_workflow_can_change_current_requirement_status(client: TestClient):
+    project_id = _create_active_project(client)
+    requirement = client.post(
+        "/api/v1/requirements",
+        json={"project_id": project_id, "title": f"Current Status Requirement {uuid4().hex[:8]}"},
+    )
+    assert requirement.status_code == 200
+    requirement_id = requirement.json()["id"]
+    nodes = [
+        {
+            "id": "node-1",
+            "component_key": "requirement_status_changed",
+            "category": "trigger",
+            "label": "requirement activated",
+            "x": 80,
+            "y": 80,
+            "config": {"to_status": "active"},
+        },
+        {
+            "id": "node-2",
+            "component_key": "change_current_status",
+            "category": "action",
+            "label": "close current requirement",
+            "x": 340,
+            "y": 80,
+            "config": {"target_status": "closed", "reason": "workflow changed current"},
+        },
+    ]
+    _create_workflow_rule(
+        client,
+        nodes,
+        [{"id": "edge-1", "source": "node-1", "target": "node-2"}],
+        target_object="requirement",
+    )
+
+    activated = client.post(f"/api/v1/requirements/{requirement_id}/activate")
+
+    assert activated.status_code == 200
+    assert activated.json()["status"] == "closed"
+    history = client.get(f"/api/v1/requirements/{requirement_id}/status-operations").json()
+    workflow_change = next(item for item in history if item["action"] == "workflow_change_status")
+    assert workflow_change["from_status"] == "active"
+    assert workflow_change["to_status"] == "closed"
+    assert workflow_change["reason"] == "workflow changed current"

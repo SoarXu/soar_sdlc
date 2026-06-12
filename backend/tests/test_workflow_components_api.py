@@ -9,6 +9,7 @@ def test_workflow_handlers_are_exposed_as_backend_whitelist(client: TestClient):
     assert response.status_code == 200
     handler_keys = {item["handler_key"] for item in response.json()}
     assert "status_changed" in handler_keys
+    assert "change_current_status" in handler_keys
     assert "batch_change_child_status" in handler_keys
     assert "block_operation" in handler_keys
 

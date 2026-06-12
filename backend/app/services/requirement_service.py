@@ -10,6 +10,7 @@ from app.models.task import Task
 from app.services.lifecycle_service import project_lifecycle_phase
 from app.services.status_operation_service import create_status_operation, list_status_operations
 from app.services.task_service import close_task_record
+from app.services.workflow_engine import execute_workflows
 from app.views.requirement_view import GenerateTaskRequest, RequirementCreate, RequirementUpdate
 from app.views.status_operation_view import StatusOperationCreate
 
@@ -78,6 +79,18 @@ def activate_requirement(db: Session, requirement_id: int) -> Requirement:
         from_status=from_status,
         to_status=requirement.status,
         payload=None,
+    )
+    execute_workflows(
+        db,
+        target_object="requirement",
+        trigger_action="status_changed",
+        context={
+            "target_object": "requirement",
+            "object_id": requirement.id,
+            "from_status": from_status,
+            "to_status": requirement.status,
+            "current_status": requirement.status,
+        },
     )
     db.commit()
     db.refresh(requirement)

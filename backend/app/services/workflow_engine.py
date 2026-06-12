@@ -5,6 +5,9 @@ from typing import Any
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 
+from app.models.bug import Bug
+from app.models.iteration import Iteration
+from app.models.program import Program
 from app.models.project import Project
 from app.models.requirement import Requirement
 from app.models.status_operation import StatusOperationLog
@@ -155,6 +158,44 @@ def _handle_block_operation(db: Session, node: dict, context: dict[str, Any], re
     raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=message)
 
 
+def _handle_change_current_status(db: Session, node: dict, context: dict[str, Any], result: WorkflowExecutionResult) -> NodeResult:
+    config = node.get("config") or {}
+    target_status = config.get("target_status")
+    if not target_status:
+        return NodeResult(passed=False)
+    model = _status_model(context.get("target_object"))
+    if not model:
+        return NodeResult(passed=False)
+    obj = (
+        db.query(model)
+        .filter(model.id == context.get("object_id"), getattr(model, "deleted", 0) == 0)
+        .first()
+    )
+    if not obj:
+        return NodeResult(passed=False)
+    from_status = obj.status
+    if from_status == target_status:
+        return NodeResult(passed=True)
+    obj.status = target_status
+    db.add(
+        StatusOperationLog(
+            object_type=context.get("target_object"),
+            object_id=obj.id,
+            action="workflow_change_status",
+            from_status=from_status,
+            to_status=target_status,
+            reason=config.get("reason") or context.get("reason"),
+            effective_time=context.get("effective_time") or datetime.now(),
+            remark=config.get("remark") or context.get("remark"),
+            actor_id=context.get("operator_id"),
+        )
+    )
+    context["from_status"] = from_status
+    context["to_status"] = target_status
+    context["current_status"] = target_status
+    return NodeResult(passed=True)
+
+
 def _handle_batch_change_child_status(db: Session, node: dict, context: dict[str, Any], result: WorkflowExecutionResult) -> NodeResult:
     config = node.get("config") or {}
     child_object = config.get("child_object")
@@ -267,10 +308,22 @@ def _handle_write_history(db: Session, node: dict, context: dict[str, Any], resu
     return NodeResult(passed=True)
 
 
+def _status_model(target_object: str | None):
+    return {
+        "program": Program,
+        "project": Project,
+        "iteration": Iteration,
+        "requirement": Requirement,
+        "task": Task,
+        "bug": Bug,
+    }.get(target_object)
+
+
 NODE_HANDLERS = {
     "status_matches": _handle_status_matches,
     "child_unclosed_exists": _handle_child_unclosed_exists,
     "field_required": _handle_field_required,
+    "change_current_status": _handle_change_current_status,
     "batch_change_child_status": _handle_batch_change_child_status,
     "block_operation": _handle_block_operation,
     "write_history": _handle_write_history,

@@ -109,7 +109,7 @@ def test_test_case_execution_result_all_ignored(client: TestClient):
     assert executed.json()["result"] == "ignored"
 
 
-def test_failed_test_case_execution_can_create_bug_with_iteration_scope(client: TestClient):
+def test_failed_test_case_execution_creates_bug_without_fix_iteration(client: TestClient):
     project_id = _create_project(client)
     requirement_id = _create_requirement(client, project_id, owner_id=1)
     iteration = client.post(
@@ -152,7 +152,7 @@ def test_failed_test_case_execution_can_create_bug_with_iteration_scope(client: 
     data = bug.json()
     assert data["project_id"] == project_id
     assert data["requirement_id"] == requirement_id
-    assert data["iteration_id"] == iteration_id
+    assert data["iteration_id"] is None
     assert data["test_case_id"] == case_id
     assert data["owner_id"] == 1
     assert data["bug_type"] == "代码错误"
@@ -161,7 +161,19 @@ def test_failed_test_case_execution_can_create_bug_with_iteration_scope(client: 
 
     detail = client.get(f"/api/v1/iterations/{iteration_id}/detail")
     assert detail.status_code == 200
-    assert any(item["id"] == data["id"] for item in detail.json()["bugs"])
+    assert all(item["id"] != data["id"] for item in detail.json()["bugs"])
+
+    confirmed = client.post(
+        f"/api/v1/bugs/{data['id']}/start-fixing",
+        json={"iteration_id": iteration_id, "remark": "confirm fix iteration"},
+    )
+    assert confirmed.status_code == 200
+    assert confirmed.json()["status"] == "fixing"
+    assert confirmed.json()["iteration_id"] == iteration_id
+
+    detail_after_confirm = client.get(f"/api/v1/iterations/{iteration_id}/detail")
+    assert detail_after_confirm.status_code == 200
+    assert any(item["id"] == data["id"] for item in detail_after_confirm.json()["bugs"])
 
 
 def test_passed_test_case_execution_cannot_create_bug(client: TestClient):

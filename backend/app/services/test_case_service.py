@@ -96,7 +96,6 @@ def create_bug_from_test_case(db: Session, test_case_id: int, payload: BugFromTe
 
     bug = Bug(
         project_id=project_id,
-        iteration_id=requirement.iteration_id if requirement else None,
         requirement_id=requirement.id if requirement else test_case.requirement_id,
         test_case_id=test_case.id,
         title=payload.title,

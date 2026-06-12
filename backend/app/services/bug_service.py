@@ -4,6 +4,7 @@ from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 
 from app.models.bug import Bug
+from app.models.iteration import Iteration, IterationProject
 from app.models.project import Project
 from app.models.requirement import Requirement
 from app.models.test_case import TestCase
@@ -101,6 +102,9 @@ def update_bug(db: Session, bug_id: int, payload: BugUpdate) -> Bug:
 def start_fixing_bug(db: Session, bug_id: int, payload: BugStatusActionRequest | None = None) -> Bug:
     bug = _get_active_bug(db, bug_id)
     _require_bug_status(bug, {"open", "reopened", "suspended"}, "只有待修复、重新打开或已挂起的 Bug 可以开始修复")
+    if payload and payload.iteration_id:
+        _ensure_iteration_can_fix_bug(db, payload.iteration_id, bug)
+        bug.iteration_id = payload.iteration_id
     return _transition_bug(db, bug, "fixing", "start_fixing", payload)
 
 
@@ -205,3 +209,26 @@ def _transition_bug(
 def _require_bug_status(bug: Bug, allowed_statuses: set[str], message: str) -> None:
     if bug.status not in allowed_statuses:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=message)
+
+
+def _ensure_iteration_can_fix_bug(db: Session, iteration_id: int, bug: Bug) -> None:
+    iteration = db.query(Iteration).filter(Iteration.id == iteration_id, Iteration.deleted == 0).first()
+    if not iteration:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="解决迭代不存在")
+    project_ids = {
+        item.project_id
+        for item in db.query(IterationProject).filter(IterationProject.iteration_id == iteration_id).all()
+    }
+    scoped_project_ids = set(project_ids)
+    for project_id in project_ids:
+        scoped_project_ids.update(_collect_descendant_project_ids(db, project_id))
+    if bug.project_id not in scoped_project_ids:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="解决迭代不包含该 Bug 所属项目")
+
+
+def _collect_descendant_project_ids(db: Session, project_id: int) -> set[int]:
+    children = db.query(Project).filter(Project.parent_id == project_id, Project.deleted == 0).all()
+    result = {child.id for child in children}
+    for child in children:
+        result.update(_collect_descendant_project_ids(db, child.id))
+    return result

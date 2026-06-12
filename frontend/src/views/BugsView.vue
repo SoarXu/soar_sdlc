@@ -75,6 +75,11 @@
             <el-option v-for="option in bugResolutionOptions" :key="option" :label="option" :value="option" />
           </el-select>
         </el-form-item>
+        <el-form-item v-if="actionType === 'start_fixing'" label="解决迭代">
+          <el-select v-model="actionForm.iteration_id" clearable filterable placeholder="请选择解决迭代">
+            <el-option v-for="iteration in iterations" :key="iteration.id" :label="iteration.name" :value="iteration.id" />
+          </el-select>
+        </el-form-item>
         <el-form-item v-if="['verify_passed', 'verify_failed'].includes(actionType)" label="验证结果">
           <el-input v-model="actionForm.verify_result" />
         </el-form-item>
@@ -100,6 +105,7 @@ import { fetchTasks } from '../api/tasks'
 import { fetchTestCases } from '../api/testCases'
 import { fetchTestRuns } from '../api/testRuns'
 import { fetchUsers } from '../api/users'
+import { fetchIterations } from '../api/iterations'
 import RequirementPriorityBadge from '../components/RequirementPriorityBadge.vue'
 import { labelById, userLabel } from '../utils/referenceLabels'
 import { usePagination } from '../utils/usePagination'
@@ -108,7 +114,7 @@ const loading = ref(false), saving = ref(false), dialogVisible = ref(false), edi
 const actionDialogVisible = ref(false)
 const actionType = ref('')
 const actingBug = ref(null)
-const bugs = ref([]), projects = ref([]), requirements = ref([]), tasks = ref([]), testCases = ref([]), testRuns = ref([]), users = ref([])
+const bugs = ref([]), projects = ref([]), requirements = ref([]), tasks = ref([]), testCases = ref([]), testRuns = ref([]), users = ref([]), iterations = ref([])
 const {
   page: bugPage,
   pageSize: bugPageSize,
@@ -134,7 +140,7 @@ const bugStatusOptions = [
 ]
 const bugResolutionOptions = ['设计如此', '重复Bug', '外部原因', '已解决', '无法重现', '延期处理', '不予解决']
 const form = reactive({ project_id: null, requirement_id: null, task_id: null, test_case_id: null, test_run_id: null, title: '', severity: '3', priority: '3', owner_id: null, reporter_id: null, reproduce_steps: '', expected_result: '', actual_result: '' })
-const actionForm = reactive({ resolution: '', verify_result: '', reason: '', remark: '' })
+const actionForm = reactive({ resolution: '', verify_result: '', iteration_id: null, reason: '', remark: '' })
 const bugActionTitle = computed(() => ({
   start_fixing: '确认 Bug',
   resolve: '解决 Bug',
@@ -158,6 +164,7 @@ function openBugAction(row, type) {
   Object.assign(actionForm, {
     resolution: type === 'resolve' ? '已解决' : '',
     verify_result: type === 'verify_passed' ? 'passed' : type === 'verify_failed' ? 'failed' : '',
+    iteration_id: type === 'start_fixing' ? row.iteration_id || null : null,
     reason: '',
     remark: ''
   })
@@ -167,8 +174,8 @@ function openBugAction(row, type) {
 async function loadData() {
   loading.value = true
   try {
-    const [bugRes, projectRes, reqRes, taskRes, caseRes, runRes, userRes] = await Promise.all([fetchBugs(), fetchProjects(), fetchRequirements(), fetchTasks(), fetchTestCases(), fetchTestRuns(), fetchUsers()])
-    bugs.value = bugRes.data; projects.value = projectRes.data; requirements.value = reqRes.data; tasks.value = taskRes.data; testCases.value = caseRes.data; testRuns.value = runRes.data; users.value = userRes.data
+    const [bugRes, projectRes, reqRes, taskRes, caseRes, runRes, userRes, iterationRes] = await Promise.all([fetchBugs(), fetchProjects(), fetchRequirements(), fetchTasks(), fetchTestCases(), fetchTestRuns(), fetchUsers(), fetchIterations()])
+    bugs.value = bugRes.data; projects.value = projectRes.data; requirements.value = reqRes.data; tasks.value = taskRes.data; testCases.value = caseRes.data; testRuns.value = runRes.data; users.value = userRes.data; iterations.value = iterationRes.data
   } catch { ElMessage.error('Bug 列表加载失败') } finally { loading.value = false }
 }
 async function submitBug() {

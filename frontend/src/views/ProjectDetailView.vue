@@ -374,6 +374,11 @@
             <el-option v-for="option in bugResolutionOptions" :key="option.value" :label="option.label" :value="option.value" />
           </el-select>
         </el-form-item>
+        <el-form-item v-if="bugActionType === 'start_fixing'" label="解决迭代">
+          <el-select v-model="bugActionForm.iteration_id" clearable filterable placeholder="请选择解决迭代">
+            <el-option v-for="iteration in projectIterations" :key="iteration.id" :label="iteration.name" :value="iteration.id" />
+          </el-select>
+        </el-form-item>
         <el-form-item v-if="['verify_passed', 'verify_failed'].includes(bugActionType)" label="验证结果">
           <el-input v-model="bugActionForm.verify_result" />
         </el-form-item>
@@ -615,7 +620,7 @@ const caseForm = reactive({ project_id: null, requirement_id: null, title: '', c
 const caseExecutionForm = reactive({ execute_time: '', steps_result_json: [] })
 const runForm = reactive({ project_id: null, iteration_id: null, name: '', test_owner_id: null, status: 'planning', remark: '' })
 const bugForm = reactive({ project_id: null, requirement_id: null, task_id: null, test_case_id: null, test_run_id: null, title: '', bug_type: '代码错误', severity: '3', priority: '3', owner_id: null, reporter_id: null, reproduce_steps: '', expected_result: '', actual_result: '', status: 'open' })
-const bugActionForm = reactive({ resolution: '', verify_result: '', reason: '', remark: '' })
+const bugActionForm = reactive({ resolution: '', verify_result: '', iteration_id: null, reason: '', remark: '' })
 const caseBugForm = reactive({ title: '', bug_type: '代码错误', severity: '3', priority: '3', reproduce_steps: '', actual_result: '' })
 
 function optionLabel(options, value) { return options.find((option) => option.value === value)?.label || value || '-' }
@@ -730,6 +735,7 @@ function openBugAction(row, actionType) {
   Object.assign(bugActionForm, {
     resolution: actionType === 'resolve' ? '已解决' : '',
     verify_result: actionType === 'verify_passed' ? 'passed' : actionType === 'verify_failed' ? 'failed' : '',
+    iteration_id: actionType === 'start_fixing' ? row.iteration_id || null : null,
     reason: '',
     remark: ''
   })

@@ -74,6 +74,7 @@ class BugStatusActionRequest(BaseModel):
     reason: str | None = None
     resolution: str | None = None
     verify_result: str | None = None
+    iteration_id: int | None = None
     remark: str | None = None
     operator_id: int | None = None
     effective_time: datetime | None = None

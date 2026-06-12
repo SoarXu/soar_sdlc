@@ -7,10 +7,17 @@
         <span class="product-subtitle">intellective bio</span>
       </div>
       <div class="product-right">
-        <el-input class="global-search" placeholder="搜索需求、任务、Bug" size="small" />
-        <span>消息</span>
-        <span>帮助</span>
-        <span>系统管理员</span>
+        <el-dropdown trigger="click" @command="handleUserCommand">
+          <button class="user-menu" type="button">
+            <span>{{ currentUsername }}</span>
+            <el-icon><ArrowDown /></el-icon>
+          </button>
+          <template #dropdown>
+            <el-dropdown-menu>
+              <el-dropdown-item command="logout">退出登录</el-dropdown-item>
+            </el-dropdown-menu>
+          </template>
+        </el-dropdown>
       </div>
     </header>
 
@@ -54,7 +61,10 @@
 </template>
 
 <script setup>
+import { computed } from 'vue'
+import { useRouter } from 'vue-router'
 import {
+  ArrowDown,
   DataAnalysis,
   Folder,
   FolderOpened,
@@ -63,4 +73,16 @@ import {
   Timer,
   Warning
 } from '@element-plus/icons-vue'
+import { useAuthStore } from '../stores/auth'
+
+const router = useRouter()
+const authStore = useAuthStore()
+const currentUsername = computed(() => localStorage.getItem('current_username') || '用户')
+
+function handleUserCommand(command) {
+  if (command === 'logout') {
+    authStore.logout()
+    router.push('/login')
+  }
+}
 </script>

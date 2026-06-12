@@ -19,7 +19,9 @@
         <el-table-column prop="start_date" label="开始日期" width="130" />
         <el-table-column prop="end_date" label="结束日期" width="130" />
         <el-table-column prop="actual_start_date" label="实际开始" width="130" />
-        <el-table-column prop="status" label="状态" width="120" />
+        <el-table-column label="状态" width="120">
+          <template #default="{ row }">{{ iterationStatusLabel(row.status) }}</template>
+        </el-table-column>
         <el-table-column label="操作" width="210" fixed="right">
           <template #default="{ row }">
             <el-button v-if="row.status === 'planning'" link type="success" @click="openStart(row)">开始</el-button>
@@ -117,7 +119,16 @@ const {
 const topLevelProjects = computed(() => projects.value.filter(p => !p.parent_id))
 const form = reactive({ project_ids: [], name: '', owner_id: null, start_date: null, end_date: null, status: 'planning', goal: '' })
 const startForm = reactive({ effective_time: '', remark: '' })
+const iterationStatusOptions = [
+  { label: '规划中', value: 'planning' },
+  { label: '进行中', value: 'active' },
+  { label: '已完成', value: 'finished' },
+  { label: '已关闭', value: 'closed' }
+]
 
+function iterationStatusLabel(value) {
+  return iterationStatusOptions.find((option) => option.value === value)?.label || value || '-'
+}
 function resetForm() { Object.assign(form, { project_ids: [], name: '', owner_id: null, start_date: null, end_date: null, status: 'planning', goal: '' }) }
 function currentDateTimeValue() {
   const date = new Date()

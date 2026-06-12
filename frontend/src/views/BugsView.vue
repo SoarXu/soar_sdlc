@@ -24,11 +24,9 @@
               <el-button link type="primary" @click="openEdit(row)">编辑</el-button>
               <el-button v-if="['open', 'reopened', 'suspended'].includes(row.status)" link type="success" @click="openBugAction(row, 'start_fixing')">确认</el-button>
               <el-button v-if="row.status === 'fixing'" link type="success" @click="openBugAction(row, 'resolve')">解决</el-button>
-              <el-button v-if="row.status === 'resolved'" link type="warning" @click="openBugAction(row, 'start_verifying')">开始验证</el-button>
-              <el-button v-if="row.status === 'verifying'" link type="success" @click="openBugAction(row, 'verify_passed')">验证通过</el-button>
-              <el-button v-if="['resolved', 'verifying'].includes(row.status)" link type="danger" @click="openBugAction(row, 'verify_failed')">验证失败</el-button>
+              <el-button v-if="['verifying', 'closed'].includes(row.status)" link type="warning" @click="openBugAction(row, 'activate')">激活</el-button>
               <el-button v-if="['open', 'fixing', 'reopened'].includes(row.status)" link type="warning" @click="openBugAction(row, 'suspend')">挂起</el-button>
-              <el-button v-if="['open', 'suspended'].includes(row.status)" link type="danger" @click="openBugAction(row, 'close')">关闭</el-button>
+              <el-button v-if="['open', 'suspended', 'verifying'].includes(row.status)" link type="danger" @click="openBugAction(row, 'close')">关闭</el-button>
               <el-popconfirm title="确认删除该 Bug？" @confirm="removeBug(row.id)"><template #reference><el-button link type="danger">删除</el-button></template></el-popconfirm>
             </div>
           </template>
@@ -80,7 +78,7 @@
             <el-option v-for="iteration in iterations" :key="iteration.id" :label="iteration.name" :value="iteration.id" />
           </el-select>
         </el-form-item>
-        <el-form-item v-if="['verify_passed', 'verify_failed'].includes(actionType)" label="验证结果">
+        <el-form-item v-if="['activate', 'close'].includes(actionType) && actingBug?.status === 'verifying'" label="验证结果">
           <el-input v-model="actionForm.verify_result" />
         </el-form-item>
         <el-form-item v-if="['suspend', 'close'].includes(actionType)" label="原因">
@@ -98,7 +96,7 @@
 <script setup>
 import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { closeBug, createBug, deleteBug, fetchBugs, resolveBug, startFixingBug, startVerifyingBug, suspendBug, updateBug, verifyBugFailed, verifyBugPassed } from '../api/bugs'
+import { activateBug, closeBug, createBug, deleteBug, fetchBugs, resolveBug, startFixingBug, suspendBug, updateBug } from '../api/bugs'
 import { fetchProjects } from '../api/projects'
 import { fetchRequirements } from '../api/requirements'
 import { fetchTasks } from '../api/tasks'
@@ -144,9 +142,7 @@ const actionForm = reactive({ resolution: '', verify_result: '', iteration_id: n
 const bugActionTitle = computed(() => ({
   start_fixing: '确认 Bug',
   resolve: '解决 Bug',
-  start_verifying: '开始验证',
-  verify_passed: '验证通过',
-  verify_failed: '验证失败',
+  activate: '激活 Bug',
   suspend: '挂起 Bug',
   close: '关闭 Bug'
 }[actionType.value] || 'Bug 操作'))
@@ -163,7 +159,7 @@ function openBugAction(row, type) {
   actionType.value = type
   Object.assign(actionForm, {
     resolution: type === 'resolve' ? '已解决' : '',
-    verify_result: type === 'verify_passed' ? 'passed' : type === 'verify_failed' ? 'failed' : '',
+    verify_result: type === 'close' ? 'passed' : type === 'activate' ? 'failed' : '',
     iteration_id: type === 'start_fixing' ? row.iteration_id || null : null,
     reason: '',
     remark: ''
@@ -196,9 +192,7 @@ async function submitBugAction() {
     const actions = {
       start_fixing: startFixingBug,
       resolve: resolveBug,
-      start_verifying: startVerifyingBug,
-      verify_passed: verifyBugPassed,
-      verify_failed: verifyBugFailed,
+      activate: activateBug,
       suspend: suspendBug,
       close: closeBug
     }

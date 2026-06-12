@@ -48,6 +48,10 @@ export function closeBug(id, payload) {
   return http.post(`/bugs/${id}/close`, payload)
 }
 
+export function activateBug(id, payload) {
+  return http.post(`/bugs/${id}/activate`, payload)
+}
+
 export function deleteBug(id) {
   return http.delete(`/bugs/${id}`)
 }

@@ -197,11 +197,9 @@
                 <el-button link type="primary" @click="openBugEdit(row)">编辑</el-button>
                 <el-button v-if="['open', 'reopened', 'suspended'].includes(row.status)" link type="success" @click="openBugAction(row, 'start_fixing')">确认</el-button>
                 <el-button v-if="row.status === 'fixing'" link type="success" @click="openBugAction(row, 'resolve')">解决</el-button>
-                <el-button v-if="row.status === 'resolved'" link type="warning" @click="openBugAction(row, 'start_verifying')">开始验证</el-button>
-                <el-button v-if="row.status === 'verifying'" link type="success" @click="openBugAction(row, 'verify_passed')">验证通过</el-button>
-                <el-button v-if="['resolved', 'verifying'].includes(row.status)" link type="danger" @click="openBugAction(row, 'verify_failed')">验证失败</el-button>
+                <el-button v-if="['verifying', 'closed'].includes(row.status)" link type="warning" @click="openBugAction(row, 'activate')">激活</el-button>
                 <el-button v-if="['open', 'fixing', 'reopened'].includes(row.status)" link type="warning" @click="openBugAction(row, 'suspend')">挂起</el-button>
-                <el-button v-if="['open', 'suspended'].includes(row.status)" link type="danger" @click="openBugAction(row, 'close')">关闭</el-button>
+                <el-button v-if="['open', 'suspended', 'verifying'].includes(row.status)" link type="danger" @click="openBugAction(row, 'close')">关闭</el-button>
                 <el-popconfirm title="确认删除该 Bug？" @confirm="removeBug(row.id)"><template #reference><el-button link type="danger">删除</el-button></template></el-popconfirm>
               </div>
             </template>
@@ -379,7 +377,7 @@
             <el-option v-for="iteration in projectIterations" :key="iteration.id" :label="iteration.name" :value="iteration.id" />
           </el-select>
         </el-form-item>
-        <el-form-item v-if="['verify_passed', 'verify_failed'].includes(bugActionType)" label="验证结果">
+        <el-form-item v-if="['activate', 'close'].includes(bugActionType) && actingBug?.status === 'verifying'" label="验证结果">
           <el-input v-model="bugActionForm.verify_result" />
         </el-form-item>
         <el-form-item v-if="['suspend', 'close'].includes(bugActionType)" label="原因">
@@ -399,7 +397,7 @@ import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 
-import { closeBug, createBug, deleteBug, fetchBugs, resolveBug, startFixingBug, startVerifyingBug, suspendBug, updateBug, verifyBugFailed, verifyBugPassed } from '../api/bugs'
+import { activateBug, closeBug, createBug, deleteBug, fetchBugs, resolveBug, startFixingBug, suspendBug, updateBug } from '../api/bugs'
 import { createIteration, deleteIteration, fetchIterations, finishIteration, startIteration, updateIteration } from '../api/iterations'
 import { fetchPrograms } from '../api/programs'
 import { fetchProject, fetchProjectAuditLogs, fetchProjectStatusOperations } from '../api/projects'
@@ -602,9 +600,7 @@ const failedExecutionCount = computed(() => caseExecutionHistory.value.filter((i
 const bugActionTitle = computed(() => ({
   start_fixing: '确认 Bug',
   resolve: '解决 Bug',
-  start_verifying: '开始验证',
-  verify_passed: '验证通过',
-  verify_failed: '验证失败',
+  activate: '激活 Bug',
   suspend: '挂起 Bug',
   close: '关闭 Bug'
 }[bugActionType.value] || 'Bug 操作'))
@@ -734,7 +730,7 @@ function openBugAction(row, actionType) {
   bugActionType.value = actionType
   Object.assign(bugActionForm, {
     resolution: actionType === 'resolve' ? '已解决' : '',
-    verify_result: actionType === 'verify_passed' ? 'passed' : actionType === 'verify_failed' ? 'failed' : '',
+    verify_result: actionType === 'close' ? 'passed' : actionType === 'activate' ? 'failed' : '',
     iteration_id: actionType === 'start_fixing' ? row.iteration_id || null : null,
     reason: '',
     remark: ''
@@ -808,9 +804,7 @@ async function submitBugAction() {
     const actions = {
       start_fixing: startFixingBug,
       resolve: resolveBug,
-      start_verifying: startVerifyingBug,
-      verify_passed: verifyBugPassed,
-      verify_failed: verifyBugFailed,
+      activate: activateBug,
       suspend: suspendBug,
       close: closeBug
     }

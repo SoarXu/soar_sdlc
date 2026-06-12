@@ -118,7 +118,7 @@ def resolve_bug(db: Session, bug_id: int, payload: BugStatusActionRequest) -> Bu
     bug.resolution = payload.resolution
     bug.resolve_time = payload.effective_time or datetime.now()
     bug.resolved_by = payload.operator_id
-    return _transition_bug(db, bug, "resolved", "resolve", payload)
+    return _transition_bug(db, bug, "verifying", "resolve", payload)
 
 
 def start_verifying_bug(db: Session, bug_id: int, payload: BugStatusActionRequest | None = None) -> Bug:
@@ -157,10 +157,26 @@ def suspend_bug(db: Session, bug_id: int, payload: BugStatusActionRequest | None
 
 def close_bug(db: Session, bug_id: int, payload: BugStatusActionRequest | None = None) -> Bug:
     bug = _get_active_bug(db, bug_id)
-    _require_bug_status(bug, {"open", "suspended"}, "只有待修复或已挂起的 Bug 可以直接关闭")
+    _require_bug_status(bug, {"open", "suspended", "verifying"}, "只有待确认、已挂起或待验证的 Bug 可以关闭")
     action_payload = payload or BugStatusActionRequest()
+    if bug.status == "verifying":
+        bug.verify_result = action_payload.verify_result or "passed"
+        bug.verify_time = action_payload.effective_time or datetime.now()
+        bug.verified_by = action_payload.operator_id
     bug.close_reason = action_payload.reason
     return _transition_bug(db, bug, "closed", "close", action_payload)
+
+
+def activate_bug(db: Session, bug_id: int, payload: BugStatusActionRequest | None = None) -> Bug:
+    bug = _get_active_bug(db, bug_id)
+    _require_bug_status(bug, {"verifying", "closed"}, "只有待验证或已关闭的 Bug 可以激活")
+    action_payload = payload or BugStatusActionRequest()
+    if bug.status == "verifying":
+        bug.verify_result = action_payload.verify_result or "failed"
+        bug.verify_time = action_payload.effective_time or datetime.now()
+        bug.verified_by = action_payload.operator_id
+    bug.reopen_count = (bug.reopen_count or 0) + 1
+    return _transition_bug(db, bug, "fixing", "activate", action_payload)
 
 
 def list_bug_status_operations(db: Session, bug_id: int) -> list[dict]:

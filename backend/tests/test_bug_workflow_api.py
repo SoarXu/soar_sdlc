@@ -27,31 +27,28 @@ def test_bug_status_flow_records_resolution_verification_and_reopen(client: Test
         json={"resolution": "已解决", "remark": "patched validation"},
     )
     assert resolved.status_code == 200
-    assert resolved.json()["status"] == "resolved"
+    assert resolved.json()["status"] == "verifying"
     assert resolved.json()["resolution"] == "已解决"
     assert resolved.json()["resolve_time"] is not None
 
-    verifying = client.post(f"/api/v1/bugs/{bug_id}/start-verifying", json={"remark": "qa verifying"})
-    assert verifying.status_code == 200
-    assert verifying.json()["status"] == "verifying"
-
     failed = client.post(
-        f"/api/v1/bugs/{bug_id}/verify-failed",
+        f"/api/v1/bugs/{bug_id}/activate",
         json={"verify_result": "failed", "remark": "still reproduces"},
     )
     assert failed.status_code == 200
-    assert failed.json()["status"] == "reopened"
+    assert failed.json()["status"] == "fixing"
     assert failed.json()["verify_result"] == "failed"
     assert failed.json()["reopen_count"] == 1
 
-    refixing = client.post(f"/api/v1/bugs/{bug_id}/start-fixing", json={"remark": "fix again"})
-    assert refixing.status_code == 200
-    assert refixing.json()["status"] == "fixing"
-
-    client.post(f"/api/v1/bugs/{bug_id}/resolve", json={"resolution": "已解决", "remark": "patched again"})
-    client.post(f"/api/v1/bugs/{bug_id}/start-verifying", json={"remark": "verify again"})
     closed = client.post(
-        f"/api/v1/bugs/{bug_id}/verify-passed",
+        f"/api/v1/bugs/{bug_id}/resolve",
+        json={"resolution": "已解决", "remark": "patched again"},
+    )
+    assert closed.status_code == 200
+    assert closed.json()["status"] == "verifying"
+
+    closed = client.post(
+        f"/api/v1/bugs/{bug_id}/close",
         json={"verify_result": "passed", "remark": "verified"},
     )
     assert closed.status_code == 200
@@ -65,12 +62,9 @@ def test_bug_status_flow_records_resolution_verification_and_reopen(client: Test
     assert actions == [
         "start_fixing",
         "resolve",
-        "start_verifying",
-        "verify_failed",
-        "start_fixing",
+        "activate",
         "resolve",
-        "start_verifying",
-        "verify_passed",
+        "close",
     ]
 
 
@@ -97,3 +91,15 @@ def test_bug_detail_and_resolution_options(client: TestClient):
     valid = client.post(f"/api/v1/bugs/{bug_id}/resolve", json={"resolution": "已解决"})
     assert valid.status_code == 200
     assert valid.json()["resolution"] == "已解决"
+    assert valid.json()["status"] == "verifying"
+
+
+def test_closed_bug_can_be_activated(client: TestClient):
+    bug_id = _create_bug(client)
+    client.post(f"/api/v1/bugs/{bug_id}/close", json={"reason": "not required"})
+
+    activated = client.post(f"/api/v1/bugs/{bug_id}/activate", json={"remark": "reopen closed bug"})
+
+    assert activated.status_code == 200
+    assert activated.json()["status"] == "fixing"
+    assert activated.json()["reopen_count"] == 1

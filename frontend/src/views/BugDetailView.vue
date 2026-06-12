@@ -104,9 +104,7 @@ const actionOptions = [
   { label: '确认', value: 'confirm' },
   { label: '开始修复', value: 'start_fixing' },
   { label: '解决', value: 'resolve' },
-  { label: '开始验证', value: 'start_verifying' },
-  { label: '验证通过', value: 'verify_passed' },
-  { label: '验证失败', value: 'verify_failed' },
+  { label: '激活', value: 'activate' },
   { label: '挂起', value: 'suspend' },
   { label: '关闭', value: 'close' }
 ]

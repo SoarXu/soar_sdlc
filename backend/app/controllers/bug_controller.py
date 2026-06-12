@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session
 
 from app.db.session import get_db
 from app.services.bug_service import (
+    activate_bug,
     close_bug,
     create_bug,
     delete_bug,
@@ -77,6 +78,11 @@ def post_bug_suspend(bug_id: int, payload: BugStatusActionRequest | None = None,
 @router.post("/{bug_id}/close", response_model=BugRead)
 def post_bug_close(bug_id: int, payload: BugStatusActionRequest | None = None, db: Session = Depends(get_db)):
     return close_bug(db, bug_id, payload)
+
+
+@router.post("/{bug_id}/activate", response_model=BugRead)
+def post_bug_activate(bug_id: int, payload: BugStatusActionRequest | None = None, db: Session = Depends(get_db)):
+    return activate_bug(db, bug_id, payload)
 
 
 @router.get("/{bug_id}/status-operations", response_model=list[StatusOperationRead])

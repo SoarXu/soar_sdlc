@@ -48,7 +48,7 @@
         <el-form-item label="迭代名称" required><el-input v-model="form.name" /></el-form-item>
         <div class="form-grid">
           <el-form-item label="项目" required>
-            <el-select v-model="form.project_ids" multiple filterable placeholder="请选择项目（仅顶级项目）">
+            <el-select v-model="form.project_ids" multiple filterable placeholder="请选择项目">
               <el-option v-for="project in topLevelProjects" :key="project.id" :label="project.name" :value="project.id" />
             </el-select>
           </el-form-item>

@@ -23,3 +23,23 @@ export function fetchWorkflowComponents() {
 export function fetchWorkflowTemplates() {
   return http.get('/workflow-rules/templates')
 }
+
+export function fetchWorkflowComponentRegistry() {
+  return http.get('/workflow-components')
+}
+
+export function createWorkflowComponent(payload) {
+  return http.post('/workflow-components', payload)
+}
+
+export function updateWorkflowComponent(id, payload) {
+  return http.patch(`/workflow-components/${id}`, payload)
+}
+
+export function deleteWorkflowComponent(id) {
+  return http.delete(`/workflow-components/${id}`)
+}
+
+export function fetchWorkflowHandlers() {
+  return http.get('/workflow-handlers')
+}

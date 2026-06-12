@@ -96,11 +96,13 @@ def _run_children(db: Session, graph: dict[str, Any], node_id: str, context: dic
 
 
 def _run_node(db: Session, node: dict, context: dict[str, Any], result: WorkflowExecutionResult) -> NodeResult:
-    handler = NODE_HANDLERS.get(node.get("component_key"))
+    handler_key = node.get("handler_key") or node.get("component_key")
+    handler = NODE_HANDLERS.get(handler_key)
     if not handler:
         return NodeResult(passed=True)
     node_result = handler(db, node, context, result)
     if node.get("category") == "action":
+        result.mark_action(handler_key)
         result.mark_action(node.get("component_key"))
     return node_result
 

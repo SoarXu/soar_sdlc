@@ -5,16 +5,25 @@
         <h1>工作流配置</h1>
         <p>通过组件节点配置状态触发关系，例如项目关闭后触发未关闭需求和任务状态变更。</p>
       </div>
-      <div class="workflow-head-actions">
+      <div v-if="activeWorkflowTab === 'designer'" class="workflow-head-actions">
         <el-select v-model="selectedTemplateKey" clearable filterable placeholder="选择模板" style="width: 260px" @change="loadTemplate">
           <el-option v-for="template in templates" :key="template.template_key" :label="template.template_name" :value="template.template_key" />
         </el-select>
         <el-button @click="resetDesigner">新建</el-button>
         <el-button type="primary" :loading="saving" @click="saveRule">保存工作流</el-button>
       </div>
+      <div v-else class="workflow-head-actions">
+        <el-button @click="resetComponentForm">新建组件</el-button>
+        <el-button type="primary" :loading="savingComponent" @click="saveComponent">保存组件</el-button>
+      </div>
     </div>
 
-    <div class="workflow-layout">
+    <el-tabs v-model="activeWorkflowTab" class="workflow-tabs">
+      <el-tab-pane label="工作流设计器" name="designer" />
+      <el-tab-pane label="组件管理" name="components" />
+    </el-tabs>
+
+    <div v-if="activeWorkflowTab === 'designer'" class="workflow-layout">
       <aside class="workflow-panel workflow-palette">
         <h2>组件</h2>
         <el-tabs v-model="componentTab" stretch>
@@ -137,6 +146,94 @@
         <el-button v-if="editingRuleId" type="danger" plain @click="removeRule">删除当前规则</el-button>
       </aside>
     </div>
+
+    <div v-else class="workflow-component-admin">
+      <el-card class="workflow-component-form" shadow="never">
+        <template #header>
+          <span>{{ editingComponentId ? '编辑组件' : '新增组件' }}</span>
+        </template>
+        <el-form label-position="top">
+          <div class="workflow-admin-grid">
+            <el-form-item label="组件标识">
+              <el-input v-model="componentForm.component_key" placeholder="例如 custom_project_close_bugs" />
+            </el-form-item>
+            <el-form-item label="组件名称">
+              <el-input v-model="componentForm.component_name" />
+            </el-form-item>
+            <el-form-item label="组件类型">
+              <el-select v-model="componentForm.component_type">
+                <el-option label="触发" value="trigger" />
+                <el-option label="条件" value="condition" />
+                <el-option label="动作" value="action" />
+              </el-select>
+            </el-form-item>
+            <el-form-item label="后端 Handler">
+              <el-select v-model="componentForm.handler_key" filterable>
+                <el-option
+                  v-for="handler in filteredHandlers"
+                  :key="handler.handler_key"
+                  :label="`${handler.label}（${handler.handler_key}）`"
+                  :value="handler.handler_key"
+                />
+              </el-select>
+            </el-form-item>
+            <el-form-item label="适用对象">
+              <el-select v-model="componentForm.object_type" clearable>
+                <el-option label="项目" value="project" />
+                <el-option label="项目集" value="program" />
+                <el-option label="迭代" value="iteration" />
+                <el-option label="需求" value="requirement" />
+                <el-option label="任务" value="task" />
+                <el-option label="Bug" value="bug" />
+                <el-option label="测试用例" value="test_case" />
+              </el-select>
+            </el-form-item>
+            <el-form-item label="排序">
+              <el-input-number v-model="componentForm.sort_order" :min="1" :max="999" />
+            </el-form-item>
+            <el-form-item label="启用">
+              <el-switch v-model="componentForm.enabled" active-text="启用" inactive-text="停用" />
+            </el-form-item>
+            <el-form-item label="系统内置">
+              <el-switch v-model="componentForm.is_system" disabled active-text="是" inactive-text="否" />
+            </el-form-item>
+          </div>
+          <el-form-item label="描述">
+            <el-input v-model="componentForm.description" type="textarea" :rows="2" />
+          </el-form-item>
+          <el-form-item label="参数 Schema JSON">
+            <el-input v-model="componentSchemaText" type="textarea" :rows="8" spellcheck="false" />
+          </el-form-item>
+        </el-form>
+      </el-card>
+
+      <el-card class="workflow-component-table" shadow="never">
+        <template #header>
+          <span>组件列表</span>
+        </template>
+        <el-table :data="componentRegistry" height="100%">
+          <el-table-column prop="component_name" label="组件名称" min-width="150" />
+          <el-table-column prop="component_key" label="标识" min-width="190" />
+          <el-table-column prop="component_type" label="类型" width="90">
+            <template #default="{ row }">{{ categoryLabel(row.component_type) }}</template>
+          </el-table-column>
+          <el-table-column prop="handler_key" label="Handler" min-width="170" />
+          <el-table-column prop="enabled" label="状态" width="80">
+            <template #default="{ row }">
+              <el-tag :type="row.enabled ? 'success' : 'info'">{{ row.enabled ? '启用' : '停用' }}</el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column label="操作" width="160" fixed="right">
+            <template #default="{ row }">
+              <div class="table-actions">
+                <el-button link type="primary" @click="editComponent(row)">编辑</el-button>
+                <el-button link type="danger" :disabled="row.is_system" @click="removeComponent(row)">删除</el-button>
+              </div>
+            </template>
+          </el-table-column>
+        </el-table>
+      </el-card>
+    </div>
   </section>
 </template>
 
@@ -145,16 +242,23 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   createWorkflowRule,
+  createWorkflowComponent,
+  deleteWorkflowComponent,
   deleteWorkflowRule,
+  fetchWorkflowComponentRegistry,
   fetchWorkflowComponents,
+  fetchWorkflowHandlers,
   fetchWorkflowRules,
   fetchWorkflowTemplates,
+  updateWorkflowComponent,
   updateWorkflowRule
 } from '../api/workflowRules'
 
 const canvasWidth = 1120
 const canvasHeight = 620
 const components = ref([])
+const componentRegistry = ref([])
+const workflowHandlers = ref([])
 const templates = ref([])
 const rules = ref([])
 const nodes = ref([])
@@ -163,13 +267,29 @@ const selectedNodeId = ref(null)
 const selectedTemplateKey = ref('')
 const componentTab = ref('trigger')
 const editingRuleId = ref(null)
+const editingComponentId = ref(null)
 const saving = ref(false)
+const savingComponent = ref(false)
 const draggedComponent = ref(null)
 const draggedNode = ref(null)
+const activeWorkflowTab = ref('designer')
 const ruleForm = reactive({ rule_name: '', scope_type: 'system', priority: 100, enabled: true, description: '' })
 const edgeForm = reactive({ source: null, target: null })
+const componentForm = reactive({
+  component_key: '',
+  component_type: 'action',
+  component_name: '',
+  description: '',
+  object_type: '',
+  handler_key: '',
+  enabled: true,
+  is_system: false,
+  sort_order: 100
+})
+const componentSchemaText = ref('[]')
 
 const filteredComponents = computed(() => components.value.filter((item) => item.category === componentTab.value))
+const filteredHandlers = computed(() => workflowHandlers.value.filter((handler) => handler.handler_type === componentForm.component_type))
 const selectedNode = computed(() => nodes.value.find((node) => node.id === selectedNodeId.value))
 const selectedComponentSchema = computed(() => components.value.find((item) => item.component_key === selectedNode.value?.component_key)?.config_schema || [])
 const edgesWithPosition = computed(() => edges.value.map((edge) => {
@@ -205,6 +325,7 @@ function addNode(component, x = null, y = null) {
   const node = {
     id: `node-${Date.now()}-${index}`,
     component_key: component.component_key,
+    handler_key: component.handler_key,
     category: component.category,
     label: component.label,
     x: x ?? 80 + index * 32,
@@ -350,8 +471,10 @@ function buildPayload(trigger) {
     return {
       source: edge.source,
       source_component: source?.component_key || '',
+      source_handler: source?.handler_key || '',
       target: edge.target,
-      target_component: target?.component_key || ''
+      target_component: target?.component_key || '',
+      target_handler: target?.handler_key || ''
     }
   })
   const conditionJson = { designer_version: 1, nodes: nodes.value, edges: edges.value, relations }
@@ -366,6 +489,7 @@ function buildPayload(trigger) {
       id: node.id,
       type: node.category,
       component_key: node.component_key,
+      handler_key: node.handler_key,
       config: node.config
     }))
   }
@@ -404,13 +528,79 @@ async function removeRule() {
   await loadData()
 }
 
+function resetComponentForm() {
+  editingComponentId.value = null
+  Object.assign(componentForm, {
+    component_key: '',
+    component_type: 'action',
+    component_name: '',
+    description: '',
+    object_type: '',
+    handler_key: '',
+    enabled: true,
+    is_system: false,
+    sort_order: 100
+  })
+  componentSchemaText.value = '[]'
+}
+
+function editComponent(component) {
+  editingComponentId.value = component.id
+  Object.assign(componentForm, {
+    component_key: component.component_key,
+    component_type: component.component_type,
+    component_name: component.component_name,
+    description: component.description || '',
+    object_type: component.object_type || '',
+    handler_key: component.handler_key,
+    enabled: component.enabled,
+    is_system: component.is_system,
+    sort_order: component.sort_order
+  })
+  componentSchemaText.value = JSON.stringify(component.config_schema || [], null, 2)
+}
+
+async function saveComponent() {
+  if (!componentForm.component_key.trim()) return ElMessage.warning('请填写组件标识')
+  if (!componentForm.component_name.trim()) return ElMessage.warning('请填写组件名称')
+  if (!componentForm.handler_key) return ElMessage.warning('请选择后端 Handler')
+  let configSchema
+  try {
+    configSchema = JSON.parse(componentSchemaText.value || '[]')
+  } catch {
+    return ElMessage.warning('参数 Schema JSON 格式不正确')
+  }
+  savingComponent.value = true
+  try {
+    const payload = { ...componentForm, object_type: componentForm.object_type || null, config_schema: configSchema }
+    if (editingComponentId.value) await updateWorkflowComponent(editingComponentId.value, payload)
+    else await createWorkflowComponent(payload)
+    await loadData()
+    resetComponentForm()
+    ElMessage.success('组件已保存')
+  } finally {
+    savingComponent.value = false
+  }
+}
+
+async function removeComponent(component) {
+  await ElMessageBox.confirm(`确认删除组件「${component.component_name}」？`, '提示', { type: 'warning' })
+  await deleteWorkflowComponent(component.id)
+  await loadData()
+  if (editingComponentId.value === component.id) resetComponentForm()
+}
+
 async function loadData() {
-  const [componentRes, templateRes, ruleRes] = await Promise.all([
+  const [componentRes, registryRes, handlerRes, templateRes, ruleRes] = await Promise.all([
     fetchWorkflowComponents(),
+    fetchWorkflowComponentRegistry(),
+    fetchWorkflowHandlers(),
     fetchWorkflowTemplates(),
     fetchWorkflowRules()
   ])
   components.value = componentRes.data
+  componentRegistry.value = registryRes.data
+  workflowHandlers.value = handlerRes.data
   templates.value = templateRes.data
   rules.value = ruleRes.data
 }
@@ -446,6 +636,11 @@ onMounted(loadData)
   gap: 12px;
   flex: 1 1 auto;
   min-height: 0;
+}
+
+.workflow-tabs {
+  flex: 0 0 auto;
+  margin-bottom: 10px;
 }
 
 .workflow-panel,
@@ -665,6 +860,33 @@ onMounted(loadData)
   border-color: #2f80ed;
 }
 
+.workflow-component-admin {
+  display: grid;
+  grid-template-columns: minmax(360px, 440px) minmax(0, 1fr);
+  gap: 12px;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.workflow-component-form,
+.workflow-component-table {
+  min-width: 0;
+  min-height: 0;
+}
+
+.workflow-component-form :deep(.el-card__body),
+.workflow-component-table :deep(.el-card__body) {
+  height: calc(100% - 56px);
+  min-height: 0;
+  overflow: auto;
+}
+
+.workflow-admin-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0 12px;
+}
+
 @media (max-width: 1200px) {
   .workflow-layout {
     grid-template-columns: 230px minmax(480px, 1fr);
@@ -688,6 +910,14 @@ onMounted(loadData)
   .workflow-head-actions,
   .workflow-rule-form {
     flex-wrap: wrap;
+  }
+
+  .workflow-component-admin {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .workflow-admin-grid {
+    grid-template-columns: minmax(0, 1fr);
   }
 }
 </style>

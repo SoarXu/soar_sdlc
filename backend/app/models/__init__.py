@@ -16,6 +16,7 @@ from app.models.test_case import TestCase
 from app.models.test_case_execution import TestCaseExecutionLog
 from app.models.test_run import TestRun, TestRunCase
 from app.models.user import User
+from app.models.workflow_component import WorkflowComponent
 from app.models.workflow_rule import WorkflowRule
 
 __all__ = [
@@ -47,5 +48,6 @@ __all__ = [
     "TestRunCase",
     "User",
     "UserRole",
+    "WorkflowComponent",
     "WorkflowRule",
 ]

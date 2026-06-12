@@ -151,3 +151,42 @@ def test_project_close_workflow_can_block_operation(client: TestClient):
     assert blocked.status_code == 400
     assert blocked.json()["detail"] == "工作流阻断项目关闭"
     assert client.get(f"/api/v1/projects/{project_id}").json()["status"] == "active"
+
+
+def test_project_close_workflow_executes_custom_component_by_handler_key(client: TestClient):
+    project_id = _create_active_project(client)
+    requirement_id, _task_id = _create_active_requirement_with_task(client, project_id)
+    nodes = [
+        {
+            "id": "node-1",
+            "component_key": "project_status_changed",
+            "handler_key": "status_changed",
+            "category": "trigger",
+            "label": "项目关闭",
+            "x": 80,
+            "y": 80,
+            "config": {"to_status": "closed"},
+        },
+        {
+            "id": "node-2",
+            "component_key": "custom_close_requirements",
+            "handler_key": "batch_change_child_status",
+            "category": "action",
+            "label": "自定义关闭需求",
+            "x": 340,
+            "y": 80,
+            "config": {"child_object": "requirement", "target_status": "closed", "reason": "自定义组件关闭"},
+        },
+    ]
+    _create_workflow_rule(client, nodes, [{"id": "edge-1", "source": "node-1", "target": "node-2"}])
+
+    closed = client.post(
+        f"/api/v1/projects/{project_id}/close",
+        json={"effective_time": "2026-06-10T18:00:00"},
+    )
+
+    assert closed.status_code == 200
+    assert client.get(f"/api/v1/requirements/{requirement_id}").json()["status"] == "closed"
+    requirement_history = client.get(f"/api/v1/requirements/{requirement_id}/status-operations").json()
+    requirement_close = next(item for item in requirement_history if item["action"] == "close")
+    assert requirement_close["reason"] == "自定义组件关闭"

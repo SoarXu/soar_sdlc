@@ -15,6 +15,29 @@ def _ensure_column(engine: Engine, table: str, col: str, ddl: str, index_ddl: st
 
 
 def ensure_runtime_schema(engine: Engine) -> None:
+    inspector0 = inspect(engine)
+    if "workflow_component_registry" not in inspector0.get_table_names():
+        with engine.begin() as conn:
+            conn.execute(text(
+                "CREATE TABLE workflow_component_registry ("
+                "id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,"
+                "component_key VARCHAR(100) NOT NULL COMMENT '组件唯一标识',"
+                "component_type VARCHAR(32) NOT NULL COMMENT 'trigger、condition、action',"
+                "component_name VARCHAR(100) NOT NULL COMMENT '组件名称',"
+                "description VARCHAR(500) NULL COMMENT '描述',"
+                "object_type VARCHAR(64) NULL COMMENT '适用对象',"
+                "handler_key VARCHAR(100) NOT NULL COMMENT '后端 handler 标识',"
+                "config_schema JSON NULL COMMENT '参数配置 schema',"
+                "enabled TINYINT(1) NOT NULL DEFAULT 1 COMMENT '是否启用',"
+                "is_system TINYINT(1) NOT NULL DEFAULT 0 COMMENT '是否系统内置',"
+                "sort_order INT NOT NULL DEFAULT 100 COMMENT '排序',"
+                "create_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',"
+                "update_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',"
+                "UNIQUE KEY uk_workflow_component_key (component_key),"
+                "KEY idx_workflow_component_type (component_type, enabled)"
+                ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='工作流组件注册表'"
+            ))
+
     _ensure_column(engine, "programs", "parent_id",
                    "ALTER TABLE programs ADD COLUMN parent_id BIGINT UNSIGNED NULL COMMENT '父项目集 ID' AFTER id",
                    "CREATE INDEX idx_programs_parent ON programs (parent_id)")

@@ -28,6 +28,7 @@ TRACKED_TABLES = [
     "attachments",
     "custom_field_value",
     "form_layout_config",
+    "workflow_component_registry",
     "workflow_rules",
     "notifications",
     "bugs",

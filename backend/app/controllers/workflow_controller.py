@@ -33,8 +33,8 @@ def post_workflow_rule(payload: WorkflowRuleCreate, db: Session = Depends(get_db
 
 
 @router.get("/components", response_model=list[WorkflowComponentRead])
-def get_workflow_components():
-    return list_workflow_components()
+def get_workflow_components(db: Session = Depends(get_db)):
+    return list_workflow_components(db)
 
 
 @router.get("/templates", response_model=list[WorkflowTemplateRead])

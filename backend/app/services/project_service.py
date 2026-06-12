@@ -10,6 +10,7 @@ from app.models.requirement import Requirement
 from app.models.task import Task
 from app.services.status_operation_service import create_status_operation, list_status_operations
 from app.services.requirement_service import close_requirement_record
+from app.services.workflow_engine import execute_workflows
 from app.views.project_view import ProjectCreate, ProjectUpdate
 from app.views.status_operation_view import StatusOperationCreate
 
@@ -176,26 +177,41 @@ def close_project(db: Session, project_id: int, payload: StatusOperationCreate |
     project = _get_active_project(db, project_id)
     _require_status(project.status, {"active", "paused", MAINTENANCE_STATUS}, "只有进行中、已挂起或运维中的项目可以关闭")
     from_status = project.status
-    project.status = "closed"
     _require_effective_time(payload, "请选择实际完成日期")
+    workflow_result = execute_workflows(
+        db,
+        target_object="project",
+        trigger_action="status_changed",
+        context={
+            "target_object": "project",
+            "object_id": project.id,
+            "from_status": from_status,
+            "to_status": "closed",
+            "effective_time": payload.effective_time if payload else None,
+            "reason": payload.reason if payload else None,
+            "remark": payload.remark if payload else None,
+        },
+    )
+    project.status = "closed"
     project.actual_end_date = _effective_date(payload)
-    cascade_payload = StatusOperationCreate(reason="不做", remark=payload.remark if payload else None)
-    requirements = (
-        db.query(Requirement)
-        .filter(Requirement.project_id == project.id, Requirement.deleted == 0, Requirement.status != "closed")
-        .all()
-    )
-    for requirement in requirements:
-        close_requirement_record(db, requirement, cascade_payload)
-    orphan_tasks = (
-        db.query(Task)
-        .filter(Task.project_id == project.id, Task.deleted == 0, Task.requirement_id.is_(None), Task.status != "closed")
-        .all()
-    )
-    for task in orphan_tasks:
-        from app.services.task_service import close_task_record
+    if not workflow_result.has_action("batch_change_child_status"):
+        cascade_payload = StatusOperationCreate(reason="不做", remark=payload.remark if payload else None)
+        requirements = (
+            db.query(Requirement)
+            .filter(Requirement.project_id == project.id, Requirement.deleted == 0, Requirement.status != "closed")
+            .all()
+        )
+        for requirement in requirements:
+            close_requirement_record(db, requirement, cascade_payload)
+        orphan_tasks = (
+            db.query(Task)
+            .filter(Task.project_id == project.id, Task.deleted == 0, Task.requirement_id.is_(None), Task.status != "closed")
+            .all()
+        )
+        for task in orphan_tasks:
+            from app.services.task_service import close_task_record
 
-        close_task_record(db, task, cascade_payload)
+            close_task_record(db, task, cascade_payload)
     create_status_operation(
         db,
         object_type="project",

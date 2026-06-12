@@ -24,11 +24,11 @@ def test_bug_status_flow_records_resolution_verification_and_reopen(client: Test
 
     resolved = client.post(
         f"/api/v1/bugs/{bug_id}/resolve",
-        json={"resolution": "fixed", "remark": "patched validation"},
+        json={"resolution": "已解决", "remark": "patched validation"},
     )
     assert resolved.status_code == 200
     assert resolved.json()["status"] == "resolved"
-    assert resolved.json()["resolution"] == "fixed"
+    assert resolved.json()["resolution"] == "已解决"
     assert resolved.json()["resolve_time"] is not None
 
     verifying = client.post(f"/api/v1/bugs/{bug_id}/start-verifying", json={"remark": "qa verifying"})
@@ -48,7 +48,7 @@ def test_bug_status_flow_records_resolution_verification_and_reopen(client: Test
     assert refixing.status_code == 200
     assert refixing.json()["status"] == "fixing"
 
-    client.post(f"/api/v1/bugs/{bug_id}/resolve", json={"resolution": "fixed", "remark": "patched again"})
+    client.post(f"/api/v1/bugs/{bug_id}/resolve", json={"resolution": "已解决", "remark": "patched again"})
     client.post(f"/api/v1/bugs/{bug_id}/start-verifying", json={"remark": "verify again"})
     closed = client.post(
         f"/api/v1/bugs/{bug_id}/verify-passed",
@@ -81,3 +81,19 @@ def test_bug_resolve_requires_resolution(client: TestClient):
     response = client.post(f"/api/v1/bugs/{bug_id}/resolve", json={})
 
     assert response.status_code == 422
+
+
+def test_bug_detail_and_resolution_options(client: TestClient):
+    bug_id = _create_bug(client)
+
+    detail = client.get(f"/api/v1/bugs/{bug_id}")
+    assert detail.status_code == 200
+    assert detail.json()["id"] == bug_id
+
+    client.post(f"/api/v1/bugs/{bug_id}/start-fixing", json={})
+    invalid = client.post(f"/api/v1/bugs/{bug_id}/resolve", json={"resolution": "fixed"})
+    assert invalid.status_code == 422
+
+    valid = client.post(f"/api/v1/bugs/{bug_id}/resolve", json={"resolution": "已解决"})
+    assert valid.status_code == 200
+    assert valid.json()["resolution"] == "已解决"

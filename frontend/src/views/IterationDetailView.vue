@@ -145,7 +145,9 @@
       <template v-else-if="activeTab === 'bugs'">
         <el-table :data="bugs" stripe width="100%">
           <el-table-column prop="id" label="ID" width="80" />
-          <el-table-column prop="title" label="Bug 标题" min-width="180" show-overflow-tooltip />
+          <el-table-column label="Bug 标题" min-width="180" show-overflow-tooltip>
+            <template #default="{ row }"><router-link class="table-link" :to="{ name: 'bug-detail', params: { id: row.id }, query: { from: 'iteration', iterationId: iterationId, tab: 'bugs' } }">{{ row.title }}</router-link></template>
+          </el-table-column>
           <el-table-column label="项目" width="180"><template #default="{ row }">{{ labelById(flatProjects, row.project_id) }}</template></el-table-column>
           <el-table-column label="需求" width="180"><template #default="{ row }">{{ labelById(requirements, row.requirement_id, 'title') }}</template></el-table-column>
           <el-table-column label="Bug 类型" width="120"><template #default="{ row }">{{ row.bug_type || '-' }}</template></el-table-column>
@@ -377,11 +379,13 @@ const executionResultOptions = [
   { label: '阻塞', value: 'blocked' }
 ]
 const bugStatusOptions = [
-  { label: '待修复', value: 'open' },
+  { label: '待确认', value: 'open' },
   { label: '修复中', value: 'fixing' },
+  { label: '已解决', value: 'resolved' },
   { label: '待验证', value: 'verifying' },
   { label: '已关闭', value: 'closed' },
-  { label: '重新打开', value: 'reopened' }
+  { label: '重新打开', value: 'reopened' },
+  { label: '已挂起', value: 'suspended' }
 ]
 const bugTypeOptions = ['代码错误', '配置相关', '安装部署', '安全相关', '性能问题', '标准规范', '测试脚本', '设计缺陷', '其他']
 const priorityLevelOptions = [

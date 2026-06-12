@@ -17,9 +17,15 @@ from app.services.lifecycle_service import (
 from app.services.status_operation_service import create_status_operation, list_status_operations
 from app.views.bug_view import BugCreate, BugFromTestRunCaseRequest, BugStatusActionRequest, BugUpdate
 
+BUG_RESOLUTIONS = {"设计如此", "重复Bug", "外部原因", "已解决", "无法重现", "延期处理", "不予解决"}
+
 
 def list_bugs(db: Session) -> list[Bug]:
     return db.query(Bug).filter(Bug.deleted == 0).order_by(Bug.id.desc()).all()
+
+
+def get_bug(db: Session, bug_id: int) -> Bug:
+    return _get_active_bug(db, bug_id)
 
 
 def create_bug(db: Session, payload: BugCreate) -> Bug:
@@ -101,6 +107,8 @@ def start_fixing_bug(db: Session, bug_id: int, payload: BugStatusActionRequest |
 def resolve_bug(db: Session, bug_id: int, payload: BugStatusActionRequest) -> Bug:
     if not payload.resolution:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="解决结果必填")
+    if payload.resolution not in BUG_RESOLUTIONS:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="未知的解决方案")
     bug = _get_active_bug(db, bug_id)
     _require_bug_status(bug, {"fixing"}, "只有修复中的 Bug 可以提交解决")
     bug.resolution = payload.resolution

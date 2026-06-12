@@ -1,6 +1,7 @@
 import { createRouter, createWebHistory } from 'vue-router'
 
 import MainLayout from '../layout/MainLayout.vue'
+import BugDetailView from '../views/BugDetailView.vue'
 import BugsView from '../views/BugsView.vue'
 import DashboardView from '../views/DashboardView.vue'
 import IterationsView from '../views/IterationsView.vue'
@@ -28,6 +29,7 @@ const routes = [
       { path: 'projects/:id', name: 'project-detail', component: ProjectDetailView },
       { path: 'requirements/:id', name: 'requirement-detail', component: RequirementDetailView },
       { path: 'tasks/:id', name: 'task-detail', component: TaskDetailView },
+      { path: 'bugs/:id', name: 'bug-detail', component: BugDetailView },
       { path: 'iterations', name: 'iterations', component: IterationsView },
       { path: 'iterations/:id', name: 'iteration-detail', component: IterationDetailView },
       { path: 'requirements', name: 'requirements', component: RequirementsView },

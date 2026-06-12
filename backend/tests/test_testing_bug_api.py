@@ -105,7 +105,7 @@ def test_failed_test_result_can_create_bug_with_requirement_owner(client: TestCl
 
     fixing = client.post(f"/api/v1/bugs/{data['id']}/start-fixing", json={})
     assert fixing.status_code == 200
-    resolved = client.post(f"/api/v1/bugs/{data['id']}/resolve", json={"resolution": "fixed"})
+    resolved = client.post(f"/api/v1/bugs/{data['id']}/resolve", json={"resolution": "已解决"})
     assert resolved.status_code == 200
     transitioned = client.post(f"/api/v1/bugs/{data['id']}/start-verifying", json={})
     assert transitioned.status_code == 200

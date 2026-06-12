@@ -183,7 +183,7 @@
         <div class="project-tab-toolbar"><el-button type="primary" @click="openBugCreate">新增 Bug</el-button></div>
         <el-table :data="projectBugs" stripe width="100%">
           <el-table-column prop="id" label="ID" width="80" />
-          <el-table-column prop="title" label="Bug 标题" min-width="180" show-overflow-tooltip />
+          <el-table-column label="Bug 标题" min-width="180" show-overflow-tooltip><template #default="{ row }"><router-link class="table-link" :to="{ name: 'bug-detail', params: { id: row.id }, query: { from: 'project' } }">{{ row.title }}</router-link></template></el-table-column>
           <el-table-column label="需求" width="180"><template #default="{ row }">{{ labelById(projectRequirements, row.requirement_id, 'title') }}</template></el-table-column>
           <el-table-column label="任务" width="180"><template #default="{ row }">{{ labelById(projectTasks, row.task_id, 'title') }}</template></el-table-column>
           <el-table-column label="负责人" width="140"><template #default="{ row }">{{ userLabel(users, row.owner_id) }}</template></el-table-column>
@@ -195,8 +195,8 @@
             <template #default="{ row }">
               <div class="table-actions">
                 <el-button link type="primary" @click="openBugEdit(row)">编辑</el-button>
-                <el-button v-if="['open', 'reopened', 'suspended'].includes(row.status)" link type="success" @click="openBugAction(row, 'start_fixing')">开始修复</el-button>
-                <el-button v-if="row.status === 'fixing'" link type="success" @click="openBugAction(row, 'resolve')">提交解决</el-button>
+                <el-button v-if="['open', 'reopened', 'suspended'].includes(row.status)" link type="success" @click="openBugAction(row, 'start_fixing')">确认</el-button>
+                <el-button v-if="row.status === 'fixing'" link type="success" @click="openBugAction(row, 'resolve')">解决</el-button>
                 <el-button v-if="row.status === 'resolved'" link type="warning" @click="openBugAction(row, 'start_verifying')">开始验证</el-button>
                 <el-button v-if="row.status === 'verifying'" link type="success" @click="openBugAction(row, 'verify_passed')">验证通过</el-button>
                 <el-button v-if="['resolved', 'verifying'].includes(row.status)" link type="danger" @click="openBugAction(row, 'verify_failed')">验证失败</el-button>
@@ -535,7 +535,7 @@ const testRunStatusOptions = [
   { label: '完成', value: 'finished' }
 ]
 const bugStatusOptions = [
-  { label: '待修复', value: 'open' },
+  { label: '待确认', value: 'open' },
   { label: '修复中', value: 'fixing' },
   { label: '已解决', value: 'resolved' },
   { label: '待验证', value: 'verifying' },
@@ -544,12 +544,13 @@ const bugStatusOptions = [
   { label: '已挂起', value: 'suspended' }
 ]
 const bugResolutionOptions = [
-  { label: '已修复', value: 'fixed' },
-  { label: '重复 Bug', value: 'duplicate' },
-  { label: '非问题', value: 'not_bug' },
-  { label: '无法复现', value: 'cannot_reproduce' },
-  { label: '设计如此', value: 'by_design' },
-  { label: '延期处理', value: 'deferred' }
+  { label: '设计如此', value: '设计如此' },
+  { label: '重复Bug', value: '重复Bug' },
+  { label: '外部原因', value: '外部原因' },
+  { label: '已解决', value: '已解决' },
+  { label: '无法重现', value: '无法重现' },
+  { label: '延期处理', value: '延期处理' },
+  { label: '不予解决', value: '不予解决' }
 ]
 
 const matchesLifecyclePhase = (item) => (item.lifecycle_phase || 'development') === activeLifecyclePhase.value
@@ -594,8 +595,8 @@ const projectHistory = computed(() => {
 })
 const failedExecutionCount = computed(() => caseExecutionHistory.value.filter((item) => item.result === 'failed').length)
 const bugActionTitle = computed(() => ({
-  start_fixing: '开始修复',
-  resolve: '提交解决',
+  start_fixing: '确认 Bug',
+  resolve: '解决 Bug',
   start_verifying: '开始验证',
   verify_passed: '验证通过',
   verify_failed: '验证失败',
@@ -727,7 +728,7 @@ function openBugAction(row, actionType) {
   actingBug.value = row
   bugActionType.value = actionType
   Object.assign(bugActionForm, {
-    resolution: actionType === 'resolve' ? 'fixed' : '',
+    resolution: actionType === 'resolve' ? '已解决' : '',
     verify_result: actionType === 'verify_passed' ? 'passed' : actionType === 'verify_failed' ? 'failed' : '',
     reason: '',
     remark: ''

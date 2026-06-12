@@ -6,6 +6,7 @@ from app.services.bug_service import (
     close_bug,
     create_bug,
     delete_bug,
+    get_bug,
     list_bug_status_operations,
     list_bugs,
     resolve_bug,
@@ -31,6 +32,11 @@ def get_bugs(db: Session = Depends(get_db)):
 @router.post("", response_model=BugRead)
 def post_bug(payload: BugCreate, db: Session = Depends(get_db)):
     return create_bug(db, payload)
+
+
+@router.get("/{bug_id}", response_model=BugRead)
+def get_bug_detail(bug_id: int, db: Session = Depends(get_db)):
+    return get_bug(db, bug_id)
 
 
 @router.patch("/{bug_id}", response_model=BugRead)

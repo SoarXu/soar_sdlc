@@ -4,6 +4,14 @@ export function fetchBugs() {
   return http.get('/bugs')
 }
 
+export function fetchBug(id) {
+  return http.get(`/bugs/${id}`)
+}
+
+export function fetchBugStatusOperations(id) {
+  return http.get(`/bugs/${id}/status-operations`)
+}
+
 export function createBug(payload) {
   return http.post('/bugs', payload)
 }

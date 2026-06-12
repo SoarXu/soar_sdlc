@@ -4,6 +4,10 @@ export function fetchTestCases() {
   return http.get('/test-cases')
 }
 
+export function fetchTestCase(id) {
+  return http.get(`/test-cases/${id}`)
+}
+
 export function createTestCase(payload) {
   return http.post('/test-cases', payload)
 }

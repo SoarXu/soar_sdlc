@@ -79,6 +79,11 @@ def test_test_case_execution_records_history_and_latest_result(client: TestClien
     assert len(history.json()) == 1
     assert history.json()[0]["steps_result_json"][1]["actual"] == "test account locked"
 
+    detail = client.get(f"/api/v1/test-cases/{case_id}")
+    assert detail.status_code == 200
+    assert detail.json()["id"] == case_id
+    assert detail.json()["last_execute_result"] == "blocked"
+
 
 def test_test_case_execution_result_failed_takes_precedence(client: TestClient):
     project_id = _create_project(client)

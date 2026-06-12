@@ -7,6 +7,7 @@ from app.services.test_case_service import (
     create_test_case,
     create_test_case_execution,
     delete_test_case,
+    get_test_case,
     list_test_case_executions,
     list_test_cases,
     update_test_case,
@@ -33,6 +34,11 @@ def get_test_cases(db: Session = Depends(get_db)):
 @router.post("", response_model=TestCaseRead)
 def post_test_case(payload: TestCaseCreate, db: Session = Depends(get_db)):
     return create_test_case(db, payload)
+
+
+@router.get("/{test_case_id}", response_model=TestCaseRead)
+def get_test_case_detail(test_case_id: int, db: Session = Depends(get_db)):
+    return get_test_case(db, test_case_id)
 
 
 @router.patch("/{test_case_id}", response_model=TestCaseRead)

@@ -15,6 +15,10 @@ def list_test_cases(db: Session) -> list[TestCase]:
     return db.query(TestCase).filter(TestCase.deleted == 0).order_by(TestCase.id.desc()).all()
 
 
+def get_test_case(db: Session, test_case_id: int) -> TestCase:
+    return _get_active_test_case(db, test_case_id)
+
+
 def create_test_case(db: Session, payload: TestCaseCreate) -> TestCase:
     data = payload.model_dump()
     data["lifecycle_phase"] = (

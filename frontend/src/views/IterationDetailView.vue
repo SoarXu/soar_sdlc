@@ -130,7 +130,9 @@
             <h3 v-if="testCasesByProject(project.id).length">{{ project.name }}</h3>
             <el-table v-if="testCasesByProject(project.id).length" :data="testCasesByProject(project.id)" stripe width="100%">
               <el-table-column prop="id" label="ID" width="80" />
-              <el-table-column prop="title" label="用例标题" min-width="180" show-overflow-tooltip />
+              <el-table-column label="用例标题" min-width="180" show-overflow-tooltip>
+                <template #default="{ row }"><router-link class="table-link" :to="{ name: 'test-case-detail', params: { id: row.id }, query: { from: 'iteration', iterationId: iterationId, tab: 'cases' } }">{{ row.title }}</router-link></template>
+              </el-table-column>
               <el-table-column label="需求" min-width="180"><template #default="{ row }">{{ labelById(requirements, row.requirement_id, 'title') }}</template></el-table-column>
               <el-table-column label="类型" width="120"><template #default="{ row }">{{ caseTypeLabel(row.case_type) }}</template></el-table-column>
               <el-table-column label="适用范围" width="150"><template #default="{ row }">{{ testScopeLabel(row.test_scope) }}</template></el-table-column>

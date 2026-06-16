@@ -2,6 +2,9 @@ from uuid import uuid4
 
 from fastapi.testclient import TestClient
 
+from app.db.session import SessionLocal
+from app.models.user import User
+
 
 def _create_project(client: TestClient, name: str | None = None, parent_id: int | None = None) -> int:
     payload = {"name": name or f"Project-{uuid4().hex[:8]}"}
@@ -10,6 +13,25 @@ def _create_project(client: TestClient, name: str | None = None, parent_id: int 
     response = client.post("/api/v1/projects", json=payload)
     assert response.status_code == 200
     return response.json()["id"]
+
+
+def _create_user(client: TestClient, username: str | None = None, full_name: str | None = None) -> int:
+    suffix = uuid4().hex[:8]
+    db = SessionLocal()
+    try:
+        user = User(
+            username=username or f"user_{suffix}",
+            full_name=full_name or f"User {suffix}",
+            password_hash="test",
+            department="QA",
+            is_active=True,
+        )
+        db.add(user)
+        db.commit()
+        db.refresh(user)
+        return user.id
+    finally:
+        db.close()
 
 
 def _create_iteration(client: TestClient, project_ids: list[int], name: str | None = None) -> int:
@@ -99,6 +121,7 @@ def test_iteration_detail_links_requirements_tasks_and_metrics(client: TestClien
     assert {item["id"] for item in data["requirements"]} == {root_req, child_req}
     assert {item["id"] for item in data["tasks"]} == {root_task, child_task}
     assert {item["id"] for item in data["test_cases"]} == {case_id}
+    assert "owner_id" in data["projects"][0]
     assert data["metrics"]["requirement_total"] == 2
     assert data["metrics"]["closed_requirement_total"] == 1
     assert data["metrics"]["progress_rate"] == 0.5
@@ -121,6 +144,46 @@ def test_iteration_detail_links_requirements_tasks_and_metrics(client: TestClien
     assert removed_task.status_code == 204
     detail_after_task_remove = client.get(f"/api/v1/iterations/{iteration_id}/detail").json()
     assert child_task not in {item["id"] for item in detail_after_task_remove["tasks"]}
+
+
+def test_generated_task_for_linked_requirement_appears_in_iteration_detail(client: TestClient):
+    project_id = _create_project(client)
+    iteration_id = _create_iteration(client, [project_id])
+    requirement_id = _create_requirement(client, project_id, "Linked requirement")
+
+    linked_requirements = client.post(
+        f"/api/v1/iterations/{iteration_id}/requirements",
+        json={"requirement_ids": [requirement_id]},
+    )
+    assert linked_requirements.status_code == 200
+
+    generated = client.post(
+        f"/api/v1/requirements/{requirement_id}/generate-task",
+        json={"title": "Generated task from iteration requirement", "task_type": "development"},
+    )
+    assert generated.status_code == 200
+    task_id = generated.json()["id"]
+
+    detail = client.get(f"/api/v1/iterations/{iteration_id}/detail")
+    assert detail.status_code == 200
+    tasks = detail.json()["tasks"]
+    assert {item["id"] for item in tasks} == {task_id}
+    assert tasks[0]["requirement_id"] == requirement_id
+    assert tasks[0]["project_id"] == project_id
+
+
+def test_generate_task_accepts_default_owner_from_iteration_page(client: TestClient):
+    owner_id = _create_user(client)
+    project_id = _create_project(client)
+    requirement_id = _create_requirement(client, project_id, "Requirement without owner")
+
+    generated = client.post(
+        f"/api/v1/requirements/{requirement_id}/generate-task",
+        json={"title": "Generated task with project owner", "owner_id": owner_id},
+    )
+
+    assert generated.status_code == 200
+    assert generated.json()["owner_id"] == owner_id
 
 
 def test_iteration_can_start_with_actual_start_date(client: TestClient):

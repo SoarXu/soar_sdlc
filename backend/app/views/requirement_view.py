@@ -46,6 +46,7 @@ class GenerateTaskRequest(BaseModel):
     title: str | None = None
     task_type: str | None = None
     priority: str | None = None
+    owner_id: int | None = None
     due_date: str | None = None
     description: str | None = None
 

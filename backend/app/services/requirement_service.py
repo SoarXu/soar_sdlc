@@ -163,7 +163,7 @@ def generate_task_from_requirement(db: Session, requirement_id: int, payload: Ge
         title=payload.title or requirement.title,
         task_type=payload.task_type,
         priority=payload.priority or requirement.priority,
-        owner_id=requirement.owner_id,
+        owner_id=payload.owner_id or requirement.owner_id,
         due_date=payload.due_date,
         status="todo",
         lifecycle_phase=requirement.lifecycle_phase,

@@ -381,6 +381,7 @@ def _project_node(db: Session, project: Project) -> dict:
         "id": project.id,
         "name": project.name,
         "parent_id": project.parent_id,
+        "owner_id": project.owner_id,
         "children": [_project_node(db, child) for child in children],
     }
 

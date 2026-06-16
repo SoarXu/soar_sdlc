@@ -76,7 +76,7 @@
                     <el-button link type="primary" @click="goProjectTab(row.project_id, 'requirements')">编辑</el-button>
                     <el-button v-if="canActivateRequirement(row)" link type="warning" @click="activateRequirementRow(row.id)">激活</el-button>
                     <el-button v-if="row.status === 'active'" link type="danger" @click="openRequirementClose(row)">关闭</el-button>
-                    <el-button link type="success" @click="goProjectTab(row.project_id, 'requirements')">生成任务</el-button>
+                    <el-button link type="success" @click="openGenerateTask(row)">生成任务</el-button>
                     <el-button link type="success" @click="goProjectTab(row.project_id, 'tests')">建用例</el-button>
                     <el-popconfirm title="确认删除该需求？" @confirm="deleteRequirementRow(row.id)"><template #reference><el-button link type="danger">删除</el-button></template></el-popconfirm>
                     <el-button link type="danger" @click="removeRequirement(row.id)">移除</el-button>
@@ -183,6 +183,44 @@
       <template #footer><el-button @click="taskDialogVisible = false">取消</el-button><el-button type="primary" :loading="saving" @click="submitTasks">关联</el-button></template>
     </el-dialog>
 
+    <el-dialog v-model="generateTaskVisible" title="从需求生成任务" width="620px">
+      <el-form label-position="top">
+        <el-form-item label="需求">
+          <el-input :model-value="generatingRequirement?.title || '-'" disabled />
+        </el-form-item>
+        <el-form-item label="任务标题" required>
+          <el-input v-model="generateTaskForm.title" />
+        </el-form-item>
+        <div class="form-grid">
+          <el-form-item label="负责人">
+            <el-select v-model="generateTaskForm.owner_id" clearable filterable>
+              <el-option v-for="user in users" :key="user.id" :label="user.full_name" :value="user.id" />
+            </el-select>
+          </el-form-item>
+          <el-form-item label="类型">
+            <el-input v-model="generateTaskForm.task_type" />
+          </el-form-item>
+          <el-form-item label="优先级">
+            <el-select v-model="generateTaskForm.priority">
+              <el-option label="高" value="high" />
+              <el-option label="中" value="medium" />
+              <el-option label="低" value="low" />
+            </el-select>
+          </el-form-item>
+          <el-form-item label="截止日期">
+            <el-date-picker v-model="generateTaskForm.due_date" value-format="YYYY-MM-DD" type="date" />
+          </el-form-item>
+        </div>
+        <el-form-item label="描述">
+          <el-input v-model="generateTaskForm.description" type="textarea" :rows="3" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="generateTaskVisible = false">取消</el-button>
+        <el-button type="primary" :loading="saving" @click="submitGenerateTask">保存</el-button>
+      </template>
+    </el-dialog>
+
     <el-dialog v-model="iterationStartVisible" title="开始迭代" width="480px">
       <el-form label-position="top">
         <el-form-item label="实际开始日期" required><el-date-picker v-model="iterationStartForm.effective_time" type="datetime" value-format="YYYY-MM-DDTHH:mm:ss" /></el-form-item>
@@ -282,7 +320,7 @@ import {
   unlinkIterationTask
 } from '../api/iterations'
 import { createBugFromTestCase, executeTestCase, fetchTestCaseExecutions } from '../api/testCases'
-import { activateRequirement, closeRequirement, deleteRequirement, fetchRequirementStatusOperations } from '../api/requirements'
+import { activateRequirement, closeRequirement, deleteRequirement, fetchRequirementStatusOperations, generateTask } from '../api/requirements'
 import { activateTask, closeTask, deleteTask, fetchTaskStatusOperations } from '../api/tasks'
 import { fetchUsers } from '../api/users'
 import RequirementPriorityBadge from '../components/RequirementPriorityBadge.vue'
@@ -308,6 +346,7 @@ const selectedRequirementIds = ref([])
 const selectedTaskIds = ref([])
 const requirementDialogVisible = ref(false)
 const taskDialogVisible = ref(false)
+const generateTaskVisible = ref(false)
 const iterationStartVisible = ref(false)
 const iterationFinishVisible = ref(false)
 const closeRequirementVisible = ref(false)
@@ -324,6 +363,7 @@ const iterationStartForm = ref({ effective_time: '', remark: '' })
 const iterationFinishForm = ref({ effective_time: '', remark: '' })
 const closeReasonByRequirement = ref({})
 const closeReasonByTask = ref({})
+const generatingRequirement = ref(null)
 const tabs = [
   { key: 'overview', label: '概览' },
   { key: 'requirements', label: '需求' },
@@ -398,6 +438,7 @@ const priorityLevelOptions = [
   { label: '⑤ 最低', value: '5' }
 ]
 const caseBugForm = ref({ title: '', bug_type: '代码错误', severity: '3', priority: '3', reproduce_steps: '', actual_result: '' })
+const generateTaskForm = reactive({ title: '', task_type: 'development', priority: 'medium', owner_id: null, due_date: null, description: '' })
 const closeRequirementForm = reactive({ reason: '', remark: '' })
 const closeTaskForm = reactive({ reason: '', remark: '' })
 const flatProjects = computed(() => flattenProjects(projects.value))
@@ -421,6 +462,8 @@ function tasksByProject(projectId) { return tasks.value.filter((item) => item.pr
 function testCasesByProject(projectId) { return testCases.value.filter((item) => item.project_id === projectId) }
 function requirementDetailLink(row) { return { name: 'requirement-detail', params: { id: row.id }, query: { from: 'iteration', iterationId: iterationId.value, tab: 'requirements' } } }
 function taskDetailLink(row) { return { name: 'task-detail', params: { id: row.id }, query: { from: 'iteration', iterationId: iterationId.value, tab: 'tasks' } } }
+function projectById(projectId) { return flatProjects.value.find((item) => item.id === projectId) || null }
+function taskOwnerForRequirement(requirement) { return requirement?.owner_id || projectById(requirement?.project_id)?.owner_id || null }
 function percent(value) { return `${Math.round((value || 0) * 100)}%` }
 function flattenProjects(items) { return items.flatMap((item) => [item, ...flattenProjects(item.children || [])]) }
 function formatDateTime(value) { return value ? new Date(value).toLocaleString('zh-CN', { hour12: false }) : '-' }
@@ -483,6 +526,37 @@ async function activateRequirementRow(id) { try { await activateRequirement(id);
 function openRequirementClose(row) { closingRequirementId.value = row.id; Object.assign(closeRequirementForm, { reason: '', remark: '' }); closeRequirementVisible.value = true }
 async function submitRequirementClose() { if (!closeRequirementForm.reason) return ElMessage.warning('请选择关闭原因'); saving.value = true; try { await closeRequirement(closingRequirementId.value, { ...closeRequirementForm }); closeRequirementVisible.value = false; await loadData(); ElMessage.success('需求已关闭') } catch (error) { showActionError(error, '需求关闭失败') } finally { saving.value = false } }
 async function deleteRequirementRow(id) { await deleteRequirement(id); await loadData() }
+
+function openGenerateTask(row) {
+  generatingRequirement.value = row
+  Object.assign(generateTaskForm, {
+    title: row.title || '',
+    task_type: 'development',
+    priority: row.priority || 'medium',
+    owner_id: taskOwnerForRequirement(row),
+    due_date: null,
+    description: ''
+  })
+  generateTaskVisible.value = true
+}
+async function submitGenerateTask() {
+  if (!generateTaskForm.title.trim()) return ElMessage.warning('请填写任务标题')
+  saving.value = true
+  try {
+    const payload = {
+      ...generateTaskForm,
+      owner_id: generateTaskForm.owner_id || null,
+      due_date: generateTaskForm.due_date || null
+    }
+    await generateTask(generatingRequirement.value.id, payload)
+    generateTaskVisible.value = false
+    await loadData()
+    setActiveTab('tasks')
+    ElMessage.success('任务已生成')
+  } finally {
+    saving.value = false
+  }
+}
 
 async function openTaskLink() {
   selectedTaskIds.value = []

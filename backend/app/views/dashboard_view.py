@@ -28,6 +28,7 @@ class WorkbenchItem(BaseModel):
     due_date: str | None = None
     last_execute_time: str | None = None
     last_execute_result: str | None = None
+    steps_json: dict | list | None = None
     requirement_id: int | None = None
     task_id: int | None = None
     test_case_id: int | None = None

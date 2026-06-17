@@ -175,6 +175,7 @@ def _test_case_item(item: TestCase, projects: dict[int, Project]) -> WorkbenchIt
         status=item.status,
         last_execute_time=_datetime_value(item.last_execute_time),
         last_execute_result=item.last_execute_result,
+        steps_json=item.steps_json,
         requirement_id=item.requirement_id,
         test_case_id=item.id,
     )

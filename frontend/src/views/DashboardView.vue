@@ -303,9 +303,10 @@ async function submitBugAction() {
 }
 function openCaseExecution(item) {
   selectedCase.value = item
+  const steps = Array.isArray(item.steps_json) && item.steps_json.length ? item.steps_json : [{ step: item.title, expected: '' }]
   Object.assign(caseExecutionForm, {
     execute_time: defaultExecutionTime(),
-    steps_result_json: [{ step: item.title, expected: '', result: 'passed', actual: '' }]
+    steps_result_json: steps.map((step) => ({ step: step.step || '', expected: step.expected || '', result: 'passed', actual: '' }))
   })
   caseExecutionVisible.value = true
 }

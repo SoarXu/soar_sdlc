@@ -6,6 +6,7 @@ from pydantic import BaseModel, ConfigDict
 class TestCaseBase(BaseModel):
     project_id: int | None = None
     requirement_id: int | None = None
+    iteration_id: int | None = None
     title: str
     case_type: str | None = None
     test_scope: str | None = None
@@ -23,6 +24,7 @@ class TestCaseCreate(TestCaseBase):
 class TestCaseUpdate(BaseModel):
     project_id: int | None = None
     requirement_id: int | None = None
+    iteration_id: int | None = None
     title: str | None = None
     case_type: str | None = None
     test_scope: str | None = None

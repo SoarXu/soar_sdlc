@@ -12,6 +12,7 @@ class TestCase(Base):
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     project_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     requirement_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    iteration_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     title: Mapped[str] = mapped_column(String(255))
     case_type: Mapped[str | None] = mapped_column(String(64), nullable=True)
     test_scope: Mapped[str | None] = mapped_column(String(64), nullable=True)

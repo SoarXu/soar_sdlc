@@ -121,6 +121,9 @@ def ensure_runtime_schema(engine: Engine) -> None:
     _ensure_column(engine, "test_cases", "source_project_id",
                    "ALTER TABLE test_cases ADD COLUMN source_project_id BIGINT UNSIGNED NULL COMMENT '来源项目 ID' AFTER project_id",
                    "CREATE INDEX idx_test_cases_source_project ON test_cases (source_project_id)")
+    _ensure_column(engine, "test_cases", "iteration_id",
+                   "ALTER TABLE test_cases ADD COLUMN iteration_id BIGINT UNSIGNED NULL COMMENT '直接关联迭代 ID' AFTER requirement_id",
+                   "CREATE INDEX idx_test_cases_iteration ON test_cases (iteration_id)")
     _ensure_column(engine, "test_cases", "test_scope",
                    "ALTER TABLE test_cases ADD COLUMN test_scope VARCHAR(64) NULL COMMENT '适用范围/测试环境' AFTER case_type")
     _ensure_column(engine, "test_cases", "last_execute_time",

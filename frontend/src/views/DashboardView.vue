@@ -401,6 +401,10 @@ watch([flatWorkbenchItems, listPageSize], () => {
   if (listPage.value > maxPage) listPage.value = maxPage
 })
 
+watch([viewMode, iterationFilter, ownerFilter, typeFilter, keywordFilter], () => {
+  listPage.value = 1
+}, { deep: true })
+
 const bugActionTitle = computed(() => ({
   start_fixing: '确认 Bug',
   resolve: '解决 Bug',

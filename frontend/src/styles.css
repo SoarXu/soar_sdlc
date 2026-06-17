@@ -597,6 +597,14 @@ body {
   width: 150px;
 }
 
+.workbench-filter.wide {
+  width: 220px;
+}
+
+.workbench-search {
+  width: 220px;
+}
+
 .workbench-summary {
   display: grid;
   grid-template-columns: repeat(5, minmax(120px, 1fr));
@@ -622,15 +630,15 @@ body {
 }
 
 .workbench-board {
-  display: flex;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));
   gap: 16px;
-  overflow-x: auto;
+  align-items: start;
   padding-bottom: 12px;
 }
 
 .iteration-board {
-  flex: 0 0 520px;
-  max-width: 520px;
+  min-width: 0;
   padding: 14px;
   background: #f7f9fc;
   border: 1px solid #d9e2ef;
@@ -655,9 +663,26 @@ body {
   font-size: 12px;
 }
 
+.iteration-board-tools {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.iteration-collapsed-summary {
+  width: 100%;
+  padding: 14px;
+  color: #0f4c81;
+  background: #edf6ff;
+  border: 1px dashed #9dc8f2;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
 .workbench-lanes {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
   gap: 12px;
 }
 
@@ -680,6 +705,9 @@ body {
 
 .workbench-card-list {
   min-height: 88px;
+  max-height: min(520px, 54vh);
+  padding-right: 4px;
+  overflow-y: auto;
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -743,6 +771,15 @@ body {
   padding-top: 6px;
   margin-top: 8px;
   border-top: 1px solid #edf2f7;
+}
+
+.workbench-actions .el-button {
+  margin-left: 0;
+}
+
+.workbench-more {
+  width: 100%;
+  margin-top: 8px;
 }
 
 .workbench-card-ghost {

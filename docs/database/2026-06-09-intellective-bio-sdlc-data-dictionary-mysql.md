@@ -255,6 +255,7 @@
 | id | BIGINT UNSIGNED | PK, AUTO_INCREMENT | 用例 ID |
 | project_id | BIGINT UNSIGNED | NULL | 所属项目 ID，NULL 表示全局用例 |
 | requirement_id | BIGINT UNSIGNED | NULL | 关联需求 ID |
+| iteration_id | BIGINT UNSIGNED | NULL | 直接关联迭代 ID |
 | title | VARCHAR(255) | NOT NULL | 用例标题 |
 | case_type | VARCHAR(64) | NULL | 用例类型 |
 | test_scope | VARCHAR(64) | NULL | 适用范围/测试环境 |
@@ -275,6 +276,7 @@
 
 - `idx_test_cases_project(project_id)`
 - `idx_test_cases_requirement(requirement_id)`
+- `idx_test_cases_iteration(iteration_id)`
 - `idx_test_cases_tester(default_tester_id)`
 
 ### 5.2 test_case_execution_log 测试用例执行记录表

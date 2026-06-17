@@ -28,7 +28,7 @@
         <header class="iteration-board-head">
           <div>
             <h2>{{ iteration.name }}</h2>
-            <span>{{ iterationStatusLabel(iteration.status) }} · {{ iteration.start_date || '-' }} 至 {{ iteration.end_date || '-' }}</span>
+            <span>{{ iterationStatusLabel(iteration.status) }} · {{ phaseLabel(iteration.lifecycle_phase) }} · {{ iteration.start_date || '-' }} 至 {{ iteration.end_date || '-' }}</span>
           </div>
           <el-tag>{{ boardTotal(iteration) }} 项</el-tag>
         </header>
@@ -57,7 +57,8 @@
                 <router-link class="workbench-title" :to="detailLink(item)">{{ item.title }}</router-link>
                 <p>{{ item.project_name || '-' }}</p>
                 <div class="workbench-meta">
-                  <span>{{ ownerName(item.owner_id) }}</span>
+                  <span class="owner-chip">负责人：{{ ownerName(item.owner_id) }}</span>
+                  <span>{{ phaseLabel(item.lifecycle_phase) }}</span>
                   <RequirementPriorityBadge v-if="item.priority || item.severity" :value="item.severity || item.priority" />
                   <span v-if="item.due_date">截止 {{ item.due_date }}</span>
                   <span v-if="item.last_execute_result">最近 {{ executionResultLabel(item.last_execute_result) }}</span>
@@ -245,7 +246,15 @@ const summaryCards = computed(() => {
   ]
 })
 
-const bugActionTitle = computed(() => ({ start_fixing: '确认 Bug', resolve: '解决 Bug', activate: '激活 Bug', suspend: '挂起 Bug', close: '关闭 Bug' }[bugActionType.value] || 'Bug 操作'))
+const bugActionTitle = computed(() => ({
+  start_fixing: '确认 Bug',
+  resolve: '解决 Bug',
+  activate: '激活 Bug',
+  suspend: '挂起 Bug',
+  close: '关闭 Bug',
+  verify_passed: '验证通过',
+  verify_failed: '验证失败'
+}[bugActionType.value] || 'Bug 操作'))
 
 function filterItems(items) {
   return items
@@ -266,6 +275,7 @@ function ownerName(id) { return owners.value.find((item) => item.id === id)?.ful
 function typeLabel(value) { return itemTypes.find((item) => item.value === value)?.label || value }
 function typeTag(value) { return { requirement: 'primary', task: 'success', test_case: 'warning', bug: 'danger' }[value] || 'info' }
 function iterationStatusLabel(value) { return statusOptions.iteration[value] || value || '-' }
+function phaseLabel(value) { return value === 'maintenance' ? '运维阶段' : '开发阶段' }
 function itemStatusLabel(item) { return item.object_type === 'test_case' ? executionResultLabel(item.last_execute_result) : (statusOptions[item.object_type]?.[item.status] || item.status || '-') }
 function executionResultLabel(value) { return executionResultOptions.find((item) => item.value === value)?.label || value || '未执行' }
 function canCreateBugFromCase(item) { return ['failed', 'blocked'].includes(item.last_execute_result) }

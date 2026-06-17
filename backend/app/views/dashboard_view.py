@@ -22,6 +22,7 @@ class WorkbenchItem(BaseModel):
     project_id: int | None = None
     project_name: str | None = None
     iteration_id: int | None = None
+    lifecycle_phase: str | None = None
     owner_id: int | None = None
     status: str | None = None
     priority: str | None = None
@@ -40,6 +41,7 @@ class WorkbenchIteration(BaseModel):
     id: int
     name: str
     status: str
+    lifecycle_phase: str | None = None
     owner_id: int | None = None
     start_date: str | None = None
     end_date: str | None = None

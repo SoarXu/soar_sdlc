@@ -153,3 +153,20 @@ def test_requirement_and_task_can_be_completed_with_status_history(client: TestC
     task_history = client.get(f"/api/v1/tasks/{task['id']}/status-operations").json()
     assert requirement_history[-1]["action"] == "complete"
     assert task_history[-1]["action"] == "complete"
+
+
+def test_requirement_complete_requires_linked_tasks_done(client: TestClient):
+    project_id = _create_project(client, "Requirement Guard Project")
+    requirement = client.post(
+        "/api/v1/requirements",
+        json={"project_id": project_id, "title": "Requirement with open task"},
+    ).json()
+    client.post(
+        "/api/v1/tasks",
+        json={"project_id": project_id, "requirement_id": requirement["id"], "title": "Open linked task"},
+    )
+
+    completed = client.post(f"/api/v1/requirements/{requirement['id']}/complete")
+
+    assert completed.status_code == 400
+    assert "关联任务" in completed.json()["detail"]

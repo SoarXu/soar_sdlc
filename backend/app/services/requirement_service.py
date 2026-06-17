@@ -110,6 +110,13 @@ def close_requirement(db: Session, requirement_id: int, payload: StatusOperation
 def complete_requirement(db: Session, requirement_id: int) -> Requirement:
     requirement = _get_active_requirement(db, requirement_id)
     _ensure_project_open_for_requirement(db, requirement)
+    open_tasks = (
+        db.query(Task)
+        .filter(Task.requirement_id == requirement.id, Task.deleted == 0, Task.status.notin_(["done", "closed"]))
+        .count()
+    )
+    if open_tasks:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="存在关联任务未完成，需求不允许完成")
     if requirement.status == "done":
         return requirement
     from_status = requirement.status

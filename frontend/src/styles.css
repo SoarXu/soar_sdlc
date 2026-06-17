@@ -718,6 +718,13 @@ body {
   font-size: 12px;
 }
 
+.owner-chip {
+  padding: 2px 6px;
+  color: #0f4c81;
+  background: #e8f3ff;
+  border-radius: 6px;
+}
+
 .workbench-title {
   display: block;
   margin-bottom: 4px;

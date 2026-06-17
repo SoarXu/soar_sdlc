@@ -5,7 +5,11 @@ from app.core.config import settings
 
 
 connect_args = {"check_same_thread": False} if settings.database_url.startswith("sqlite") else {}
-engine = create_engine(settings.database_url, connect_args=connect_args)
+engine_options = {"connect_args": connect_args}
+if settings.database_url.startswith("mysql"):
+    engine_options.update({"pool_pre_ping": True, "pool_recycle": 1800})
+
+engine = create_engine(settings.database_url, **engine_options)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 

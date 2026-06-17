@@ -6,12 +6,20 @@
         <p>按迭代和负责人聚合当前需要处理的需求、任务、测试用例和 Bug。</p>
       </div>
       <div class="page-actions">
+        <el-radio-group v-model="viewMode" size="small">
+          <el-radio-button label="mine">我的工作</el-radio-button>
+          <el-radio-button label="all">全部工作</el-radio-button>
+        </el-radio-group>
+        <el-select v-model="iterationFilter" multiple collapse-tags collapse-tags-tooltip clearable filterable placeholder="迭代" class="workbench-filter wide">
+          <el-option v-for="iteration in iterations" :key="iteration.id" :label="iteration.name" :value="iteration.id" />
+        </el-select>
         <el-select v-model="ownerFilter" clearable filterable placeholder="负责人" class="workbench-filter">
           <el-option v-for="owner in owners" :key="owner.id" :label="owner.full_name" :value="owner.id" />
         </el-select>
         <el-select v-model="typeFilter" clearable placeholder="类型" class="workbench-filter">
           <el-option v-for="type in itemTypes" :key="type.value" :label="type.label" :value="type.value" />
         </el-select>
+        <el-input v-model="keywordFilter" clearable placeholder="搜索标题/项目" class="workbench-search" />
         <el-button :loading="loading" @click="loadWorkbench">刷新</el-button>
       </div>
     </div>
@@ -180,8 +188,11 @@ const loading = ref(false)
 const saving = ref(false)
 const iterations = ref([])
 const owners = ref([])
+const viewMode = ref('mine')
+const iterationFilter = ref([])
 const ownerFilter = ref(null)
 const typeFilter = ref('')
+const keywordFilter = ref('')
 const dragSnapshot = ref(null)
 const selectedRequirement = ref(null)
 const selectedTask = ref(null)
@@ -227,13 +238,25 @@ const statusOptions = {
   bug: { open: '待确认', fixing: '修复中', resolved: '已解决', verifying: '待验证', closed: '已关闭', reopened: '重新打开', suspended: '已挂起' }
 }
 
-const filteredIterations = computed(() => iterations.value.map((iteration) => ({
-  ...iteration,
-  requirements: filterItems(iteration.requirements || []),
-  tasks: filterItems(iteration.tasks || []),
-  test_cases: filterItems(iteration.test_cases || []),
-  bugs: filterItems(iteration.bugs || [])
-})).filter((iteration) => boardTotal(iteration) > 0))
+const currentUserId = computed(() => {
+  const storedId = Number(localStorage.getItem('current_user_id'))
+  if (storedId) return storedId
+  const username = localStorage.getItem('current_username') || ''
+  const fullName = localStorage.getItem('current_full_name') || ''
+  const user = owners.value.find((item) => item.username === username || item.full_name === fullName)
+  return user?.id || null
+})
+
+const filteredIterations = computed(() => iterations.value
+  .filter((iteration) => !iterationFilter.value.length || iterationFilter.value.includes(iteration.id))
+  .map((iteration) => ({
+    ...iteration,
+    requirements: filterItems(iteration.requirements || []),
+    tasks: filterItems(iteration.tasks || []),
+    test_cases: filterItems(iteration.test_cases || []),
+    bugs: filterItems(iteration.bugs || [])
+  }))
+  .filter((iteration) => boardTotal(iteration) > 0))
 
 const summaryCards = computed(() => {
   const boards = filteredIterations.value
@@ -257,9 +280,12 @@ const bugActionTitle = computed(() => ({
 }[bugActionType.value] || 'Bug 操作'))
 
 function filterItems(items) {
+  const keyword = keywordFilter.value.trim().toLowerCase()
+  const effectiveOwnerId = viewMode.value === 'mine' && currentUserId.value ? currentUserId.value : ownerFilter.value
   return items
-    .filter((item) => !ownerFilter.value || item.owner_id === ownerFilter.value)
+    .filter((item) => !effectiveOwnerId || item.owner_id === effectiveOwnerId)
     .filter((item) => !typeFilter.value || item.object_type === typeFilter.value)
+    .filter((item) => !keyword || `${item.title || ''} ${item.project_name || ''}`.toLowerCase().includes(keyword))
     .map((item) => ({ ...item, drag_key: `${item.object_type}-${item.id}` }))
 }
 function visibleGroups(iteration) {

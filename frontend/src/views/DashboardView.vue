@@ -38,10 +38,15 @@
             <h2>{{ iteration.name }}</h2>
             <span>{{ iterationStatusLabel(iteration.status) }} · {{ phaseLabel(iteration.lifecycle_phase) }} · {{ iteration.start_date || '-' }} 至 {{ iteration.end_date || '-' }}</span>
           </div>
-          <el-tag>{{ boardTotal(iteration) }} 项</el-tag>
+          <div class="iteration-board-tools">
+            <el-tag>{{ boardTotal(iteration) }} 项</el-tag>
+            <el-button link type="primary" @click="toggleIteration(iteration.id)">
+              {{ isIterationExpanded(iteration.id) ? '收起' : '展开' }}
+            </el-button>
+          </div>
         </header>
 
-        <div class="workbench-lanes">
+        <div v-if="isIterationExpanded(iteration.id)" class="workbench-lanes">
           <section v-for="group in visibleGroups(iteration)" :key="`${iteration.id}-${group.key}`" class="workbench-lane">
             <header>
               <span>{{ group.label }}</span>
@@ -57,7 +62,7 @@
               @start="onDragStart"
               @add="(event) => onDragAdd(event, group.key, iteration.id)"
             >
-              <div v-for="item in group.items" :key="item.drag_key" class="workbench-card" :data-id="item.id">
+              <div v-for="item in visibleLaneItems(iteration.id, group.key, group.items)" :key="item.drag_key" class="workbench-card" :data-id="item.id">
                 <div class="workbench-card-top">
                   <el-tag size="small" :type="typeTag(item.object_type)">{{ typeLabel(item.object_type) }}</el-tag>
                   <span class="workbench-status">{{ itemStatusLabel(item) }}</span>
@@ -98,8 +103,20 @@
                 </div>
               </div>
             </VueDraggable>
+            <el-button
+              v-if="hasHiddenLaneItems(iteration.id, group.key, group.items)"
+              class="workbench-more"
+              link
+              type="primary"
+              @click="showMoreLaneItems(iteration.id, group.key)"
+            >
+              显示更多 {{ hiddenLaneCount(iteration.id, group.key, group.items) }} 项
+            </el-button>
           </section>
         </div>
+        <button v-else class="iteration-collapsed-summary" type="button" @click="toggleIteration(iteration.id)">
+          展开查看 {{ boardTotal(iteration) }} 个工作项
+        </button>
       </article>
     </div>
 
@@ -173,7 +190,7 @@
 </template>
 
 <script setup>
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { VueDraggable } from 'vue-draggable-plus'
 import { ElMessage, ElMessageBox } from 'element-plus'
 
@@ -193,6 +210,8 @@ const iterationFilter = ref([])
 const ownerFilter = ref(null)
 const typeFilter = ref('')
 const keywordFilter = ref('')
+const expandedIterationIds = ref(new Set())
+const laneLimits = reactive({})
 const dragSnapshot = ref(null)
 const selectedRequirement = ref(null)
 const selectedTask = ref(null)
@@ -237,6 +256,8 @@ const statusOptions = {
   task: { todo: '待办', doing: '进行中', done: '完成', closed: '关闭' },
   bug: { open: '待确认', fixing: '修复中', resolved: '已解决', verifying: '待验证', closed: '已关闭', reopened: '重新打开', suspended: '已挂起' }
 }
+const INITIAL_LANE_LIMIT = 8
+const LANE_LIMIT_STEP = 8
 
 const currentUserId = computed(() => {
   const storedId = Number(localStorage.getItem('current_user_id'))
@@ -269,6 +290,15 @@ const summaryCards = computed(() => {
   ]
 })
 
+watch(filteredIterations, () => {
+  const visibleIds = new Set(filteredIterations.value.map((iteration) => iteration.id))
+  const hasVisibleExpanded = [...expandedIterationIds.value].some((id) => visibleIds.has(id))
+  if (!hasVisibleExpanded) {
+    const first = filteredIterations.value[0]
+    expandedIterationIds.value = first ? new Set([first.id]) : new Set()
+  }
+})
+
 const bugActionTitle = computed(() => ({
   start_fixing: '确认 Bug',
   resolve: '解决 Bug',
@@ -297,6 +327,24 @@ function visibleGroups(iteration) {
   ].filter((group) => !typeFilter.value || group.key === typeFilter.value)
 }
 function boardTotal(iteration) { return (iteration.requirements?.length || 0) + (iteration.tasks?.length || 0) + (iteration.test_cases?.length || 0) + (iteration.bugs?.length || 0) }
+function laneKey(iterationId, groupKey) { return `${iterationId}-${groupKey}` }
+function laneLimit(iterationId, groupKey) { return laneLimits[laneKey(iterationId, groupKey)] || INITIAL_LANE_LIMIT }
+function visibleLaneItems(iterationId, groupKey, items) { return items.slice(0, laneLimit(iterationId, groupKey)) }
+function hiddenLaneCount(iterationId, groupKey, items) { return Math.max(0, items.length - laneLimit(iterationId, groupKey)) }
+function hasHiddenLaneItems(iterationId, groupKey, items) { return hiddenLaneCount(iterationId, groupKey, items) > 0 }
+function showMoreLaneItems(iterationId, groupKey) { laneLimits[laneKey(iterationId, groupKey)] = laneLimit(iterationId, groupKey) + LANE_LIMIT_STEP }
+function isIterationExpanded(iterationId) { return expandedIterationIds.value.has(iterationId) }
+function toggleIteration(iterationId) {
+  const next = new Set(expandedIterationIds.value)
+  if (next.has(iterationId)) next.delete(iterationId)
+  else next.add(iterationId)
+  expandedIterationIds.value = next
+}
+function ensureExpandedIteration() {
+  if (expandedIterationIds.value.size) return
+  const first = filteredIterations.value[0]
+  if (first) expandedIterationIds.value = new Set([first.id])
+}
 function ownerName(id) { return owners.value.find((item) => item.id === id)?.full_name || '未分配' }
 function typeLabel(value) { return itemTypes.find((item) => item.value === value)?.label || value }
 function typeTag(value) { return { requirement: 'primary', task: 'success', test_case: 'warning', bug: 'danger' }[value] || 'info' }
@@ -323,6 +371,7 @@ async function loadWorkbench() {
     const { data } = await fetchWorkbench()
     iterations.value = data.iterations || []
     owners.value = data.owners || []
+    ensureExpandedIteration()
   } catch (error) {
     ElMessage.error('工作台加载失败，请确认后端服务已启动')
   } finally {

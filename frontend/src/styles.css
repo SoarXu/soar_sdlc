@@ -629,11 +629,32 @@ body {
   font-size: 24px;
 }
 
+.workbench-mode {
+  margin-bottom: 14px;
+}
+
 .workbench-empty {
   padding: 48px 0;
   background: #f7f9fc;
   border: 1px dashed #d9e2ef;
   border-radius: 8px;
+}
+
+.workbench-list,
+.workbench-stats {
+  min-width: 0;
+}
+
+.workbench-title-button {
+  max-width: 100%;
+  padding: 0;
+  white-space: normal;
+  text-align: left;
+}
+
+.workbench-pagination {
+  justify-content: flex-end;
+  margin-top: 14px;
 }
 
 .workbench-board {
@@ -729,6 +750,10 @@ body {
   cursor: grab;
 }
 
+.workbench-mini-card {
+  padding: 8px;
+}
+
 .workbench-card:active {
   cursor: grabbing;
 }
@@ -768,6 +793,19 @@ body {
   line-height: 1.4;
 }
 
+.workbench-card-button {
+  width: 100%;
+  padding: 0;
+  text-align: left;
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+}
+
+.workbench-card-button:hover {
+  color: #1677ff;
+}
+
 .workbench-card p {
   margin: 0 0 8px;
   color: var(--text-secondary);
@@ -787,6 +825,17 @@ body {
 .workbench-more {
   width: 100%;
   margin-top: 8px;
+}
+
+.workbench-drawer-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding-top: 16px;
+}
+
+.workbench-drawer-actions .el-button {
+  margin-left: 0;
 }
 
 .workbench-card-ghost {

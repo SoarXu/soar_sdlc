@@ -31,7 +31,61 @@
       </el-card>
     </div>
 
+    <el-radio-group v-model="displayMode" class="workbench-mode" size="large">
+      <el-radio-button label="list">列表</el-radio-button>
+      <el-radio-button label="board">看板</el-radio-button>
+      <el-radio-button label="stats">统计</el-radio-button>
+    </el-radio-group>
+
     <el-empty v-if="!loading && !filteredIterations.length" class="workbench-empty" :description="emptyDescription" />
+
+    <div v-else-if="displayMode === 'list'" v-loading="loading" class="workbench-list">
+      <el-table :data="pagedWorkbenchItems" border stripe>
+        <el-table-column label="类型" width="100">
+          <template #default="{ row }"><el-tag size="small" :type="typeTag(row.object_type)">{{ typeLabel(row.object_type) }}</el-tag></template>
+        </el-table-column>
+        <el-table-column label="标题" min-width="220" show-overflow-tooltip>
+          <template #default="{ row }">
+            <el-button link type="primary" class="workbench-title-button" @click="openWorkItemDrawer(row)">{{ row.title }}</el-button>
+          </template>
+        </el-table-column>
+        <el-table-column prop="project_name" label="项目" min-width="140" show-overflow-tooltip />
+        <el-table-column prop="iteration_name" label="迭代" min-width="120" show-overflow-tooltip />
+        <el-table-column label="负责人" width="120"><template #default="{ row }">{{ ownerName(row.owner_id) }}</template></el-table-column>
+        <el-table-column label="状态" width="110"><template #default="{ row }">{{ itemStatusLabel(row) }}</template></el-table-column>
+        <el-table-column label="优先级/结果" width="120">
+          <template #default="{ row }">
+            <RequirementPriorityBadge v-if="row.priority || row.severity" :value="row.severity || row.priority" />
+            <span v-else>{{ executionResultLabel(row.last_execute_result) }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="操作" width="100" fixed="right">
+          <template #default="{ row }"><el-button link type="primary" @click="openWorkItemDrawer(row)">处理</el-button></template>
+        </el-table-column>
+      </el-table>
+      <el-pagination
+        v-model:current-page="listPage"
+        v-model:page-size="listPageSize"
+        class="workbench-pagination"
+        background
+        layout="total, sizes, prev, pager, next"
+        :page-sizes="[10, 20, 50, 100]"
+        :total="flatWorkbenchItems.length"
+      />
+    </div>
+
+    <div v-else-if="displayMode === 'stats'" v-loading="loading" class="workbench-stats">
+      <el-table :data="filteredIterations" border stripe>
+        <el-table-column prop="name" label="迭代" min-width="180" />
+        <el-table-column label="状态" width="110"><template #default="{ row }">{{ iterationStatusLabel(row.status) }}</template></el-table-column>
+        <el-table-column label="阶段" width="110"><template #default="{ row }">{{ phaseLabel(row.lifecycle_phase) }}</template></el-table-column>
+        <el-table-column label="需求" width="90"><template #default="{ row }">{{ row.requirements.length }}</template></el-table-column>
+        <el-table-column label="任务" width="90"><template #default="{ row }">{{ row.tasks.length }}</template></el-table-column>
+        <el-table-column label="用例" width="90"><template #default="{ row }">{{ row.test_cases.length }}</template></el-table-column>
+        <el-table-column label="Bug" width="90"><template #default="{ row }">{{ row.bugs.length }}</template></el-table-column>
+        <el-table-column label="合计" width="90"><template #default="{ row }">{{ boardTotal(row) }}</template></el-table-column>
+      </el-table>
+    </div>
 
     <div v-else v-loading="loading" class="workbench-board">
       <article v-for="iteration in filteredIterations" :key="iteration.id" class="iteration-board">
@@ -64,44 +118,16 @@
               @start="onDragStart"
               @add="(event) => onDragAdd(event, group.key, iteration.id)"
             >
-              <div v-for="item in visibleLaneItems(iteration.id, group.key, group.items)" :key="item.drag_key" class="workbench-card" :data-id="item.id">
+              <div v-for="item in visibleLaneItems(iteration.id, group.key, group.items)" :key="item.drag_key" class="workbench-card workbench-mini-card" :data-id="item.id">
                 <div class="workbench-card-top">
                   <el-tag size="small" :type="typeTag(item.object_type)">{{ typeLabel(item.object_type) }}</el-tag>
                   <span class="workbench-status">{{ itemStatusLabel(item) }}</span>
                 </div>
-                <router-link class="workbench-title" :to="detailLink(item)">{{ item.title }}</router-link>
-                <p>{{ item.project_name || '-' }}</p>
+                <button class="workbench-title workbench-card-button" type="button" @click="openWorkItemDrawer(item, iteration)">{{ item.title }}</button>
                 <div class="workbench-meta">
                   <span class="owner-chip">负责人：{{ ownerName(item.owner_id) }}</span>
-                  <span>{{ phaseLabel(item.lifecycle_phase) }}</span>
+                  <span>{{ item.project_name || '-' }}</span>
                   <RequirementPriorityBadge v-if="item.priority || item.severity" :value="item.severity || item.priority" />
-                  <span v-if="item.due_date">截止 {{ item.due_date }}</span>
-                  <span v-if="item.last_execute_result">最近 {{ executionResultLabel(item.last_execute_result) }}</span>
-                </div>
-                <div class="workbench-actions">
-                  <template v-if="item.object_type === 'requirement'">
-                    <el-button v-if="['draft', 'closed'].includes(item.status)" link type="warning" @click="activateRequirementRow(item)">激活</el-button>
-                    <el-button v-if="item.status === 'active'" link type="success" @click="completeRequirementRow(item)">完成</el-button>
-                    <el-button v-if="item.status === 'active'" link type="danger" @click="openRequirementClose(item)">关闭</el-button>
-                  </template>
-                  <template v-else-if="item.object_type === 'task'">
-                    <el-button v-if="['todo', 'closed'].includes(item.status)" link type="warning" @click="activateTaskRow(item)">激活</el-button>
-                    <el-button v-if="item.status === 'doing'" link type="success" @click="completeTaskRow(item)">完成</el-button>
-                    <el-button v-if="item.status !== 'closed'" link type="danger" @click="openTaskClose(item)">关闭</el-button>
-                  </template>
-                  <template v-else-if="item.object_type === 'test_case'">
-                    <el-button link type="success" @click="openCaseExecution(item)">执行</el-button>
-                    <el-button link type="warning" :disabled="!canCreateBugFromCase(item)" @click="openCaseBug(item)">提 Bug</el-button>
-                  </template>
-                  <template v-else-if="item.object_type === 'bug'">
-                    <el-button v-if="['open', 'reopened', 'suspended'].includes(item.status)" link type="success" @click="openBugAction(item, 'start_fixing')">确认</el-button>
-                    <el-button v-if="item.status === 'fixing'" link type="success" @click="openBugAction(item, 'resolve')">解决</el-button>
-                    <el-button v-if="item.status === 'verifying'" link type="success" @click="openBugAction(item, 'verify_passed')">验证通过</el-button>
-                    <el-button v-if="item.status === 'verifying'" link type="danger" @click="openBugAction(item, 'verify_failed')">验证失败</el-button>
-                    <el-button v-if="['verifying', 'closed'].includes(item.status)" link type="warning" @click="openBugAction(item, 'activate')">激活</el-button>
-                    <el-button v-if="['open', 'fixing', 'reopened'].includes(item.status)" link type="warning" @click="openBugAction(item, 'suspend')">挂起</el-button>
-                    <el-button v-if="['open', 'suspended', 'verifying'].includes(item.status)" link type="danger" @click="openBugAction(item, 'close')">关闭</el-button>
-                  </template>
                 </div>
               </div>
             </VueDraggable>
@@ -121,6 +147,48 @@
         </button>
       </article>
     </div>
+
+    <el-drawer v-model="workItemDrawerVisible" title="工作项处理" size="420px">
+      <template v-if="selectedWorkItem">
+        <el-descriptions :column="1" border>
+          <el-descriptions-item label="类型">{{ typeLabel(selectedWorkItem.object_type) }}</el-descriptions-item>
+          <el-descriptions-item label="标题">{{ selectedWorkItem.title }}</el-descriptions-item>
+          <el-descriptions-item label="项目">{{ selectedWorkItem.project_name || '-' }}</el-descriptions-item>
+          <el-descriptions-item label="迭代">{{ selectedWorkItem.iteration_name || '-' }}</el-descriptions-item>
+          <el-descriptions-item label="负责人">{{ ownerName(selectedWorkItem.owner_id) }}</el-descriptions-item>
+          <el-descriptions-item label="状态">{{ itemStatusLabel(selectedWorkItem) }}</el-descriptions-item>
+          <el-descriptions-item label="阶段">{{ phaseLabel(selectedWorkItem.lifecycle_phase) }}</el-descriptions-item>
+        </el-descriptions>
+        <div class="workbench-drawer-actions">
+          <router-link :to="detailLink(selectedWorkItem)">
+            <el-button type="primary">查看详情</el-button>
+          </router-link>
+          <template v-if="selectedWorkItem.object_type === 'requirement'">
+            <el-button v-if="['draft', 'closed'].includes(selectedWorkItem.status)" type="warning" @click="activateRequirementRow(selectedWorkItem)">激活</el-button>
+            <el-button v-if="selectedWorkItem.status === 'active'" type="success" @click="completeRequirementRow(selectedWorkItem)">完成</el-button>
+            <el-button v-if="selectedWorkItem.status === 'active'" type="danger" @click="openRequirementClose(selectedWorkItem)">关闭</el-button>
+          </template>
+          <template v-else-if="selectedWorkItem.object_type === 'task'">
+            <el-button v-if="['todo', 'closed'].includes(selectedWorkItem.status)" type="warning" @click="activateTaskRow(selectedWorkItem)">激活</el-button>
+            <el-button v-if="selectedWorkItem.status === 'doing'" type="success" @click="completeTaskRow(selectedWorkItem)">完成</el-button>
+            <el-button v-if="selectedWorkItem.status !== 'closed'" type="danger" @click="openTaskClose(selectedWorkItem)">关闭</el-button>
+          </template>
+          <template v-else-if="selectedWorkItem.object_type === 'test_case'">
+            <el-button type="success" @click="openCaseExecution(selectedWorkItem)">执行</el-button>
+            <el-button type="warning" :disabled="!canCreateBugFromCase(selectedWorkItem)" @click="openCaseBug(selectedWorkItem)">提 Bug</el-button>
+          </template>
+          <template v-else-if="selectedWorkItem.object_type === 'bug'">
+            <el-button v-if="['open', 'reopened', 'suspended'].includes(selectedWorkItem.status)" type="success" @click="openBugAction(selectedWorkItem, 'start_fixing')">确认</el-button>
+            <el-button v-if="selectedWorkItem.status === 'fixing'" type="success" @click="openBugAction(selectedWorkItem, 'resolve')">解决</el-button>
+            <el-button v-if="selectedWorkItem.status === 'verifying'" type="success" @click="openBugAction(selectedWorkItem, 'verify_passed')">验证通过</el-button>
+            <el-button v-if="selectedWorkItem.status === 'verifying'" type="danger" @click="openBugAction(selectedWorkItem, 'verify_failed')">验证失败</el-button>
+            <el-button v-if="['verifying', 'closed'].includes(selectedWorkItem.status)" type="warning" @click="openBugAction(selectedWorkItem, 'activate')">激活</el-button>
+            <el-button v-if="['open', 'fixing', 'reopened'].includes(selectedWorkItem.status)" type="warning" @click="openBugAction(selectedWorkItem, 'suspend')">挂起</el-button>
+            <el-button v-if="['open', 'suspended', 'verifying'].includes(selectedWorkItem.status)" type="danger" @click="openBugAction(selectedWorkItem, 'close')">关闭</el-button>
+          </template>
+        </div>
+      </template>
+    </el-drawer>
 
     <el-dialog v-model="closeRequirementVisible" title="关闭需求" width="480px">
       <el-form label-position="top">
@@ -208,17 +276,22 @@ const saving = ref(false)
 const iterations = ref([])
 const owners = ref([])
 const viewMode = ref('mine')
+const displayMode = ref('list')
 const iterationFilter = ref([])
 const ownerFilter = ref(null)
 const typeFilter = ref('')
 const keywordFilter = ref('')
 const expandedIterationIds = ref(new Set())
 const laneLimits = reactive({})
+const listPage = ref(1)
+const listPageSize = ref(20)
 const dragSnapshot = ref(null)
+const selectedWorkItem = ref(null)
 const selectedRequirement = ref(null)
 const selectedTask = ref(null)
 const selectedBug = ref(null)
 const selectedCase = ref(null)
+const workItemDrawerVisible = ref(false)
 const closeRequirementVisible = ref(false)
 const closeTaskVisible = ref(false)
 const bugActionVisible = ref(false)
@@ -292,6 +365,21 @@ const summaryCards = computed(() => {
   ]
 })
 
+const flatWorkbenchItems = computed(() => filteredIterations.value.flatMap((iteration) => [
+  ...(iteration.requirements || []).map((item) => decorateListItem(item, iteration)),
+  ...(iteration.tasks || []).map((item) => decorateListItem(item, iteration)),
+  ...(iteration.test_cases || []).map((item) => decorateListItem(item, iteration)),
+  ...(iteration.bugs || []).map((item) => decorateListItem(item, iteration))
+]).sort((a, b) => {
+  if (a.iteration_id !== b.iteration_id) return (b.iteration_id || 0) - (a.iteration_id || 0)
+  return b.id - a.id
+}))
+
+const pagedWorkbenchItems = computed(() => {
+  const start = (listPage.value - 1) * listPageSize.value
+  return flatWorkbenchItems.value.slice(start, start + listPageSize.value)
+})
+
 const emptyDescription = computed(() => {
   if (viewMode.value === 'mine' && !currentUserId.value) {
     return '无法识别当前登录用户，请重新登录，或切换到全部工作查看数据'
@@ -306,6 +394,11 @@ watch(filteredIterations, () => {
     const first = filteredIterations.value[0]
     expandedIterationIds.value = first ? new Set([first.id]) : new Set()
   }
+})
+
+watch([flatWorkbenchItems, listPageSize], () => {
+  const maxPage = Math.max(1, Math.ceil(flatWorkbenchItems.value.length / listPageSize.value))
+  if (listPage.value > maxPage) listPage.value = maxPage
 })
 
 const bugActionTitle = computed(() => ({
@@ -327,6 +420,14 @@ function filterItems(items) {
     .filter((item) => !typeFilter.value || item.object_type === typeFilter.value)
     .filter((item) => !keyword || `${item.title || ''} ${item.project_name || ''}`.toLowerCase().includes(keyword))
     .map((item) => ({ ...item, drag_key: `${item.object_type}-${item.id}` }))
+}
+function decorateListItem(item, iteration) {
+  return {
+    ...item,
+    iteration_name: iteration.name,
+    iteration_status: iteration.status,
+    iteration_phase: iteration.lifecycle_phase
+  }
 }
 function visibleGroups(iteration) {
   return [
@@ -363,6 +464,10 @@ function phaseLabel(value) { return value === 'maintenance' ? '运维阶段' : '
 function itemStatusLabel(item) { return item.object_type === 'test_case' ? executionResultLabel(item.last_execute_result) : (statusOptions[item.object_type]?.[item.status] || item.status || '-') }
 function executionResultLabel(value) { return executionResultOptions.find((item) => item.value === value)?.label || value || '未执行' }
 function canCreateBugFromCase(item) { return ['failed', 'blocked'].includes(item.last_execute_result) }
+function openWorkItemDrawer(item, iteration = null) {
+  selectedWorkItem.value = iteration ? decorateListItem(item, iteration) : item
+  workItemDrawerVisible.value = true
+}
 function detailLink(item) {
   if (item.object_type === 'requirement') return { name: 'requirement-detail', params: { id: item.id }, query: { from: 'dashboard' } }
   if (item.object_type === 'task') return { name: 'task-detail', params: { id: item.id }, query: { from: 'dashboard' } }
@@ -382,11 +487,19 @@ async function loadWorkbench() {
     iterations.value = data.iterations || []
     owners.value = data.owners || []
     ensureExpandedIteration()
+    refreshSelectedWorkItem()
   } catch (error) {
     ElMessage.error('工作台加载失败，请确认后端服务已启动')
   } finally {
     loading.value = false
   }
+}
+
+function refreshSelectedWorkItem() {
+  if (!selectedWorkItem.value) return
+  const latest = flatWorkbenchItems.value.find((item) => item.object_type === selectedWorkItem.value.object_type && item.id === selectedWorkItem.value.id)
+  if (latest) selectedWorkItem.value = latest
+  else workItemDrawerVisible.value = false
 }
 
 watch(viewMode, (value) => {

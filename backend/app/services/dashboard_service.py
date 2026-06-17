@@ -3,7 +3,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.models.bug import Bug
-from app.models.iteration import Iteration
+from app.models.iteration import Iteration, IterationProject
 from app.models.program import Program
 from app.models.project import Project
 from app.models.requirement import Requirement
@@ -27,21 +27,34 @@ def get_dashboard_summary(db: Session) -> DashboardSummary:
 def get_workbench(db: Session) -> WorkbenchResponse:
     iterations = db.query(Iteration).filter(Iteration.deleted == 0).order_by(Iteration.id.desc()).all()
     iteration_ids = [item.id for item in iterations]
+    iteration_phases = {item.id: item.lifecycle_phase for item in iterations}
     projects = {item.id: item for item in db.query(Project).filter(Project.deleted == 0).all()}
     requirements = _items_by_iteration(
-        db.query(Requirement).filter(Requirement.deleted == 0, Requirement.iteration_id.in_(iteration_ids)).all(),
+        [
+            item for item in db.query(Requirement).filter(Requirement.deleted == 0, Requirement.iteration_id.in_(iteration_ids)).all()
+            if _phase_matches(item, iteration_phases)
+        ],
         lambda item: _requirement_item(item, projects),
     )
     tasks = _items_by_iteration(
-        db.query(Task).filter(Task.deleted == 0, Task.iteration_id.in_(iteration_ids)).all(),
+        [
+            item for item in db.query(Task).filter(Task.deleted == 0, Task.iteration_id.in_(iteration_ids)).all()
+            if _phase_matches(item, iteration_phases)
+        ],
         lambda item: _task_item(item, projects),
     )
     test_cases = _items_by_iteration(
-        db.query(TestCase).filter(TestCase.deleted == 0, TestCase.iteration_id.in_(iteration_ids)).all(),
+        [
+            item for item in db.query(TestCase).filter(TestCase.deleted == 0, TestCase.iteration_id.in_(iteration_ids)).all()
+            if _phase_matches(item, iteration_phases)
+        ],
         lambda item: _test_case_item(item, projects),
     )
     bugs = _items_by_iteration(
-        db.query(Bug).filter(Bug.deleted == 0, Bug.iteration_id.in_(iteration_ids)).all(),
+        [
+            item for item in db.query(Bug).filter(Bug.deleted == 0, Bug.iteration_id.in_(iteration_ids)).all()
+            if _phase_matches(item, iteration_phases)
+        ],
         lambda item: _bug_item(item, projects),
     )
 
@@ -100,6 +113,8 @@ def move_workbench_item(db: Session, object_type: str, object_id: int, target_it
     item = db.query(model).filter(model.id == object_id, model.deleted == 0).first()
     if not item:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="工作项不存在")
+    if item.project_id not in _iteration_scoped_project_ids(db, target_iteration_id):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="工作项不在目标迭代的项目范围内")
     item.iteration_id = target_iteration_id
     db.commit()
     db.refresh(item)
@@ -119,6 +134,28 @@ def _items_by_iteration(items, mapper) -> dict[int, list[WorkbenchItem]]:
         result.setdefault(item.iteration_id, []).append(mapper(item))
     for values in result.values():
         values.sort(key=lambda item: item.id, reverse=True)
+    return result
+
+
+def _phase_matches(item, iteration_phases: dict[int, str]) -> bool:
+    return item.iteration_id in iteration_phases and (item.lifecycle_phase or "development") == iteration_phases[item.iteration_id]
+
+
+def _iteration_scoped_project_ids(db: Session, iteration_id: int) -> set[int]:
+    root_ids = [
+        row.project_id for row in db.query(IterationProject).filter(IterationProject.iteration_id == iteration_id).all()
+    ]
+    result = set(root_ids)
+    for project_id in root_ids:
+        result.update(_collect_descendant_project_ids(db, project_id))
+    return result
+
+
+def _collect_descendant_project_ids(db: Session, project_id: int) -> set[int]:
+    children = db.query(Project).filter(Project.parent_id == project_id, Project.deleted == 0).all()
+    result = {child.id for child in children}
+    for child in children:
+        result.update(_collect_descendant_project_ids(db, child.id))
     return result
 
 

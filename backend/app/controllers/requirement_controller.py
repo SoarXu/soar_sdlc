@@ -5,6 +5,7 @@ from app.db.session import get_db
 from app.services.requirement_service import (
     activate_requirement,
     close_requirement,
+    complete_requirement,
     create_requirement,
     delete_requirement,
     generate_task_from_requirement,
@@ -51,6 +52,11 @@ def activate_requirement_status(requirement_id: int, db: Session = Depends(get_d
 @router.post("/{requirement_id}/close", response_model=RequirementRead)
 def close_requirement_status(requirement_id: int, payload: StatusOperationCreate, db: Session = Depends(get_db)):
     return close_requirement(db, requirement_id, payload)
+
+
+@router.post("/{requirement_id}/complete", response_model=RequirementRead)
+def complete_requirement_status(requirement_id: int, db: Session = Depends(get_db)):
+    return complete_requirement(db, requirement_id)
 
 
 @router.get("/{requirement_id}/status-operations", response_model=list[StatusOperationRead])

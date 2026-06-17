@@ -65,18 +65,23 @@
                 <div class="workbench-actions">
                   <template v-if="item.object_type === 'requirement'">
                     <el-button v-if="['draft', 'closed'].includes(item.status)" link type="warning" @click="activateRequirementRow(item)">激活</el-button>
+                    <el-button v-if="item.status === 'active'" link type="success" @click="completeRequirementRow(item)">完成</el-button>
                     <el-button v-if="item.status === 'active'" link type="danger" @click="openRequirementClose(item)">关闭</el-button>
                   </template>
                   <template v-else-if="item.object_type === 'task'">
                     <el-button v-if="['todo', 'closed'].includes(item.status)" link type="warning" @click="activateTaskRow(item)">激活</el-button>
+                    <el-button v-if="item.status === 'doing'" link type="success" @click="completeTaskRow(item)">完成</el-button>
                     <el-button v-if="item.status !== 'closed'" link type="danger" @click="openTaskClose(item)">关闭</el-button>
                   </template>
                   <template v-else-if="item.object_type === 'test_case'">
                     <el-button link type="success" @click="openCaseExecution(item)">执行</el-button>
+                    <el-button link type="warning" :disabled="!canCreateBugFromCase(item)" @click="openCaseBug(item)">提 Bug</el-button>
                   </template>
                   <template v-else-if="item.object_type === 'bug'">
                     <el-button v-if="['open', 'reopened', 'suspended'].includes(item.status)" link type="success" @click="openBugAction(item, 'start_fixing')">确认</el-button>
                     <el-button v-if="item.status === 'fixing'" link type="success" @click="openBugAction(item, 'resolve')">解决</el-button>
+                    <el-button v-if="item.status === 'verifying'" link type="success" @click="openBugAction(item, 'verify_passed')">验证通过</el-button>
+                    <el-button v-if="item.status === 'verifying'" link type="danger" @click="openBugAction(item, 'verify_failed')">验证失败</el-button>
                     <el-button v-if="['verifying', 'closed'].includes(item.status)" link type="warning" @click="openBugAction(item, 'activate')">激活</el-button>
                     <el-button v-if="['open', 'fixing', 'reopened'].includes(item.status)" link type="warning" @click="openBugAction(item, 'suspend')">挂起</el-button>
                     <el-button v-if="['open', 'suspended', 'verifying'].includes(item.status)" link type="danger" @click="openBugAction(item, 'close')">关闭</el-button>
@@ -142,6 +147,19 @@
       </el-form>
       <template #footer><el-button @click="caseExecutionVisible = false">取消</el-button><el-button type="primary" :loading="saving" @click="submitCaseExecution">保存</el-button></template>
     </el-dialog>
+
+    <el-dialog v-model="caseBugVisible" title="提交 Bug" width="620px">
+      <el-form label-position="top">
+        <el-form-item label="Bug 标题" required><el-input v-model="caseBugForm.title" /></el-form-item>
+        <div class="form-grid">
+          <el-form-item label="Bug 类型"><el-select v-model="caseBugForm.bug_type"><el-option v-for="option in bugTypeOptions" :key="option" :label="option" :value="option" /></el-select></el-form-item>
+          <el-form-item label="严重程度"><el-select v-model="caseBugForm.severity"><el-option v-for="option in priorityLevelOptions" :key="option.value" :label="option.label" :value="option.value" /></el-select></el-form-item>
+        </div>
+        <el-form-item label="重现步骤"><el-input v-model="caseBugForm.reproduce_steps" type="textarea" :rows="6" /></el-form-item>
+        <el-form-item label="实际结果"><el-input v-model="caseBugForm.actual_result" type="textarea" :rows="2" /></el-form-item>
+      </el-form>
+      <template #footer><el-button @click="caseBugVisible = false">取消</el-button><el-button type="primary" :loading="saving" @click="submitCaseBug">提交</el-button></template>
+    </el-dialog>
   </section>
 </template>
 
@@ -151,10 +169,10 @@ import { VueDraggable } from 'vue-draggable-plus'
 import { ElMessage, ElMessageBox } from 'element-plus'
 
 import { fetchWorkbench, moveWorkbenchItem } from '../api/dashboard'
-import { activateRequirement, closeRequirement } from '../api/requirements'
-import { activateTask, closeTask } from '../api/tasks'
-import { executeTestCase } from '../api/testCases'
-import { activateBug, closeBug, resolveBug, startFixingBug, suspendBug } from '../api/bugs'
+import { activateRequirement, closeRequirement, completeRequirement } from '../api/requirements'
+import { activateTask, closeTask, completeTask } from '../api/tasks'
+import { createBugFromTestCase, executeTestCase } from '../api/testCases'
+import { activateBug, closeBug, resolveBug, startFixingBug, suspendBug, verifyBugFailed, verifyBugPassed } from '../api/bugs'
 import RequirementPriorityBadge from '../components/RequirementPriorityBadge.vue'
 
 const loading = ref(false)
@@ -173,9 +191,11 @@ const closeTaskVisible = ref(false)
 const bugActionVisible = ref(false)
 const bugActionType = ref('')
 const caseExecutionVisible = ref(false)
+const caseBugVisible = ref(false)
 const closeForm = reactive({ reason: '', remark: '' })
 const bugActionForm = reactive({ iteration_id: null, resolution: '已解决', remark: '' })
 const caseExecutionForm = reactive({ execute_time: '', steps_result_json: [] })
+const caseBugForm = reactive({ title: '', bug_type: '代码错误', severity: '3', priority: '3', reproduce_steps: '', actual_result: '' })
 
 const itemTypes = [
   { label: '需求', value: 'requirement' },
@@ -185,6 +205,14 @@ const itemTypes = [
 ]
 const closeReasons = ['已完成', '不做', '重复', '延期', '其他']
 const bugResolutionOptions = ['设计如此', '重复Bug', '外部原因', '已解决', '无法重现', '延期处理', '不予解决']
+const bugTypeOptions = ['代码错误', '配置相关', '安装部署', '安全相关', '性能问题', '标准规范', '测试脚本', '设计缺陷', '其他']
+const priorityLevelOptions = [
+  { label: '① 最高', value: '1' },
+  { label: '② 高', value: '2' },
+  { label: '③ 中', value: '3' },
+  { label: '④ 低', value: '4' },
+  { label: '⑤ 最低', value: '5' }
+]
 const executionResultOptions = [
   { label: '忽略', value: 'ignored' },
   { label: '通过', value: 'passed' },
@@ -240,6 +268,7 @@ function typeTag(value) { return { requirement: 'primary', task: 'success', test
 function iterationStatusLabel(value) { return statusOptions.iteration[value] || value || '-' }
 function itemStatusLabel(item) { return item.object_type === 'test_case' ? executionResultLabel(item.last_execute_result) : (statusOptions[item.object_type]?.[item.status] || item.status || '-') }
 function executionResultLabel(value) { return executionResultOptions.find((item) => item.value === value)?.label || value || '未执行' }
+function canCreateBugFromCase(item) { return ['failed', 'blocked'].includes(item.last_execute_result) }
 function detailLink(item) {
   if (item.object_type === 'requirement') return { name: 'requirement-detail', params: { id: item.id }, query: { from: 'dashboard' } }
   if (item.object_type === 'task') return { name: 'task-detail', params: { id: item.id }, query: { from: 'dashboard' } }
@@ -280,16 +309,18 @@ async function onDragAdd(event, objectType, targetIterationId) {
   }
 }
 async function activateRequirementRow(item) { try { await activateRequirement(item.id); await loadWorkbench(); ElMessage.success('需求已激活') } catch (error) { showActionError(error, '需求激活失败') } }
+async function completeRequirementRow(item) { try { await completeRequirement(item.id); await loadWorkbench(); ElMessage.success('需求已完成') } catch (error) { showActionError(error, '需求完成失败') } }
 function openRequirementClose(item) { selectedRequirement.value = item; Object.assign(closeForm, { reason: '', remark: '' }); closeRequirementVisible.value = true }
 async function submitRequirementClose() { if (!closeForm.reason) return ElMessage.warning('请选择关闭原因'); saving.value = true; try { await closeRequirement(selectedRequirement.value.id, { ...closeForm }); closeRequirementVisible.value = false; await loadWorkbench(); ElMessage.success('需求已关闭') } catch (error) { showActionError(error, '需求关闭失败') } finally { saving.value = false } }
 async function activateTaskRow(item) { try { await activateTask(item.id); await loadWorkbench(); ElMessage.success('任务已激活') } catch (error) { showActionError(error, '任务激活失败') } }
+async function completeTaskRow(item) { try { await completeTask(item.id); await loadWorkbench(); ElMessage.success('任务已完成') } catch (error) { showActionError(error, '任务完成失败') } }
 function openTaskClose(item) { selectedTask.value = item; Object.assign(closeForm, { reason: '', remark: '' }); closeTaskVisible.value = true }
 async function submitTaskClose() { if (!closeForm.reason) return ElMessage.warning('请选择关闭原因'); saving.value = true; try { await closeTask(selectedTask.value.id, { ...closeForm }); closeTaskVisible.value = false; await loadWorkbench(); ElMessage.success('任务已关闭') } catch (error) { showActionError(error, '任务关闭失败') } finally { saving.value = false } }
 function openBugAction(item, action) { selectedBug.value = item; bugActionType.value = action; Object.assign(bugActionForm, { iteration_id: item.iteration_id || null, resolution: '已解决', remark: '' }); bugActionVisible.value = true }
 async function submitBugAction() {
   saving.value = true
   try {
-    const actions = { start_fixing: startFixingBug, resolve: resolveBug, activate: activateBug, suspend: suspendBug, close: closeBug }
+    const actions = { start_fixing: startFixingBug, resolve: resolveBug, activate: activateBug, suspend: suspendBug, close: closeBug, verify_passed: verifyBugPassed, verify_failed: verifyBugFailed }
     const payload = ['activate', 'close'].includes(bugActionType.value) ? { remark: bugActionForm.remark } : { ...bugActionForm }
     await actions[bugActionType.value](selectedBug.value.id, payload)
     bugActionVisible.value = false
@@ -310,6 +341,19 @@ function openCaseExecution(item) {
   })
   caseExecutionVisible.value = true
 }
+function openCaseBug(item) {
+  if (!canCreateBugFromCase(item)) return
+  selectedCase.value = item
+  Object.assign(caseBugForm, {
+    title: item.title,
+    bug_type: '代码错误',
+    severity: '3',
+    priority: '3',
+    reproduce_steps: buildCaseReproduceText(item),
+    actual_result: executionResultLabel(item.last_execute_result)
+  })
+  caseBugVisible.value = true
+}
 async function submitCaseExecution() {
   saving.value = true
   try {
@@ -320,6 +364,32 @@ async function submitCaseExecution() {
   } finally {
     saving.value = false
   }
+}
+async function submitCaseBug() {
+  if (!caseBugForm.title.trim()) return ElMessage.warning('请填写 Bug 标题')
+  saving.value = true
+  try {
+    await createBugFromTestCase(selectedCase.value.id, { ...caseBugForm })
+    caseBugVisible.value = false
+    await loadWorkbench()
+    ElMessage.success('Bug 已提交')
+  } finally {
+    saving.value = false
+  }
+}
+function buildCaseReproduceText(item) {
+  const steps = Array.isArray(item.steps_json) ? item.steps_json : []
+  if (!steps.length) return item.title
+  return [
+    '[步骤]',
+    ...steps.map((step, index) => `${index + 1}. ${step.step || ''}`),
+    '',
+    '[预期]',
+    ...steps.map((step, index) => `${index + 1}. ${step.expected || ''}`),
+    '',
+    '[最近执行结果]',
+    executionResultLabel(item.last_execute_result)
+  ].join('\n')
 }
 function showActionError(error, fallback) {
   ElMessageBox.alert(error?.response?.data?.detail || fallback, '提示', { type: 'warning' })

@@ -24,6 +24,10 @@ export function closeTask(id, payload) {
   return http.post(`/tasks/${id}/close`, payload)
 }
 
+export function completeTask(id) {
+  return http.post(`/tasks/${id}/complete`)
+}
+
 export function fetchTaskStatusOperations(id) {
   return http.get(`/tasks/${id}/status-operations`)
 }

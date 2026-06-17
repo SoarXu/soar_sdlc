@@ -5,6 +5,7 @@ from app.db.session import get_db
 from app.services.task_service import (
     activate_task,
     close_task,
+    complete_task,
     create_task,
     delete_task,
     get_task,
@@ -49,6 +50,11 @@ def activate_task_status(task_id: int, db: Session = Depends(get_db)):
 @router.post("/{task_id}/close", response_model=TaskRead)
 def close_task_status(task_id: int, payload: StatusOperationCreate, db: Session = Depends(get_db)):
     return close_task(db, task_id, payload)
+
+
+@router.post("/{task_id}/complete", response_model=TaskRead)
+def complete_task_status(task_id: int, db: Session = Depends(get_db)):
+    return complete_task(db, task_id)
 
 
 @router.get("/{task_id}/status-operations", response_model=list[StatusOperationRead])

@@ -24,6 +24,10 @@ export function closeRequirement(id, payload) {
   return http.post(`/requirements/${id}/close`, payload)
 }
 
+export function completeRequirement(id) {
+  return http.post(`/requirements/${id}/complete`)
+}
+
 export function fetchRequirementStatusOperations(id) {
   return http.get(`/requirements/${id}/status-operations`)
 }

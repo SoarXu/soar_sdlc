@@ -107,6 +107,27 @@ def close_requirement(db: Session, requirement_id: int, payload: StatusOperation
     return requirement
 
 
+def complete_requirement(db: Session, requirement_id: int) -> Requirement:
+    requirement = _get_active_requirement(db, requirement_id)
+    _ensure_project_open_for_requirement(db, requirement)
+    if requirement.status == "done":
+        return requirement
+    from_status = requirement.status
+    requirement.status = "done"
+    create_status_operation(
+        db,
+        object_type="requirement",
+        object_id=requirement.id,
+        action="complete",
+        from_status=from_status,
+        to_status=requirement.status,
+        payload=None,
+    )
+    db.commit()
+    db.refresh(requirement)
+    return requirement
+
+
 def close_requirement_record(db: Session, requirement: Requirement, payload: StatusOperationCreate) -> Requirement:
     tasks = (
         db.query(Task)

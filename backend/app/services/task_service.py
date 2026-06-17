@@ -94,6 +94,27 @@ def close_task(db: Session, task_id: int, payload: StatusOperationCreate) -> Tas
     return task
 
 
+def complete_task(db: Session, task_id: int) -> Task:
+    task = _get_active_task(db, task_id)
+    _ensure_project_open_for_task(db, task)
+    if task.status == "done":
+        return task
+    from_status = task.status
+    task.status = "done"
+    create_status_operation(
+        db,
+        object_type="task",
+        object_id=task.id,
+        action="complete",
+        from_status=from_status,
+        to_status=task.status,
+        payload=None,
+    )
+    db.commit()
+    db.refresh(task)
+    return task
+
+
 def close_task_record(db: Session, task: Task, payload: StatusOperationCreate) -> Task:
     if task.status == "closed":
         return task

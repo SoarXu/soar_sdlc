@@ -2,6 +2,12 @@ from uuid import uuid4
 
 from fastapi.testclient import TestClient
 
+from app.services.bug_service import BUG_RESOLUTIONS
+
+
+def _valid_resolution() -> str:
+    return sorted(BUG_RESOLUTIONS)[0]
+
 
 def _create_bug(client: TestClient) -> int:
     project = client.post("/api/v1/projects", json={"name": f"Bug Flow Project {uuid4().hex[:8]}"})
@@ -75,6 +81,37 @@ def test_bug_resolve_requires_resolution(client: TestClient):
     response = client.post(f"/api/v1/bugs/{bug_id}/resolve", json={})
 
     assert response.status_code == 422
+
+
+def test_verify_passed_endpoint_closes_verifying_bug(client: TestClient):
+    bug_id = _create_bug(client)
+    client.post(f"/api/v1/bugs/{bug_id}/start-fixing", json={})
+    client.post(f"/api/v1/bugs/{bug_id}/resolve", json={"resolution": _valid_resolution()})
+
+    response = client.post(f"/api/v1/bugs/{bug_id}/verify-passed", json={"remark": "verified"})
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "closed"
+    assert response.json()["verify_result"] == "passed"
+    assert response.json()["verify_time"] is not None
+    history = client.get(f"/api/v1/bugs/{bug_id}/status-operations")
+    assert [item["action"] for item in history.json()] == ["start_fixing", "resolve", "verify_passed"]
+
+
+def test_verify_failed_endpoint_reopens_verifying_bug(client: TestClient):
+    bug_id = _create_bug(client)
+    client.post(f"/api/v1/bugs/{bug_id}/start-fixing", json={})
+    client.post(f"/api/v1/bugs/{bug_id}/resolve", json={"resolution": _valid_resolution()})
+
+    response = client.post(f"/api/v1/bugs/{bug_id}/verify-failed", json={"remark": "still failed"})
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "reopened"
+    assert response.json()["verify_result"] == "failed"
+    assert response.json()["verify_time"] is not None
+    assert response.json()["reopen_count"] == 1
+    history = client.get(f"/api/v1/bugs/{bug_id}/status-operations")
+    assert [item["action"] for item in history.json()] == ["start_fixing", "resolve", "verify_failed"]
 
 
 def test_bug_detail_and_resolution_options(client: TestClient):

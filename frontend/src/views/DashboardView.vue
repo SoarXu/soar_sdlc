@@ -13,7 +13,7 @@
         <el-select v-model="iterationFilter" multiple collapse-tags collapse-tags-tooltip clearable filterable placeholder="迭代" class="workbench-filter wide">
           <el-option v-for="iteration in iterations" :key="iteration.id" :label="iteration.name" :value="iteration.id" />
         </el-select>
-        <el-select v-model="ownerFilter" clearable filterable placeholder="负责人" class="workbench-filter">
+        <el-select v-if="viewMode === 'all'" v-model="ownerFilter" clearable filterable placeholder="负责人" class="workbench-filter">
           <el-option v-for="owner in owners" :key="owner.id" :label="owner.full_name" :value="owner.id" />
         </el-select>
         <el-select v-model="typeFilter" clearable placeholder="类型" class="workbench-filter">
@@ -31,7 +31,9 @@
       </el-card>
     </div>
 
-    <div v-loading="loading" class="workbench-board">
+    <el-empty v-if="!loading && !filteredIterations.length" class="workbench-empty" :description="emptyDescription" />
+
+    <div v-else v-loading="loading" class="workbench-board">
       <article v-for="iteration in filteredIterations" :key="iteration.id" class="iteration-board">
         <header class="iteration-board-head">
           <div>
@@ -290,6 +292,13 @@ const summaryCards = computed(() => {
   ]
 })
 
+const emptyDescription = computed(() => {
+  if (viewMode.value === 'mine' && !currentUserId.value) {
+    return '无法识别当前登录用户，请重新登录，或切换到全部工作查看数据'
+  }
+  return '暂无符合筛选条件的工作项'
+})
+
 watch(filteredIterations, () => {
   const visibleIds = new Set(filteredIterations.value.map((iteration) => iteration.id))
   const hasVisibleExpanded = [...expandedIterationIds.value].some((id) => visibleIds.has(id))
@@ -311,8 +320,9 @@ const bugActionTitle = computed(() => ({
 
 function filterItems(items) {
   const keyword = keywordFilter.value.trim().toLowerCase()
-  const effectiveOwnerId = viewMode.value === 'mine' && currentUserId.value ? currentUserId.value : ownerFilter.value
+  const effectiveOwnerId = viewMode.value === 'mine' ? currentUserId.value : ownerFilter.value
   return items
+    .filter((item) => viewMode.value !== 'mine' || Boolean(effectiveOwnerId))
     .filter((item) => !effectiveOwnerId || item.owner_id === effectiveOwnerId)
     .filter((item) => !typeFilter.value || item.object_type === typeFilter.value)
     .filter((item) => !keyword || `${item.title || ''} ${item.project_name || ''}`.toLowerCase().includes(keyword))
@@ -378,6 +388,10 @@ async function loadWorkbench() {
     loading.value = false
   }
 }
+
+watch(viewMode, (value) => {
+  if (value === 'mine') ownerFilter.value = null
+})
 function onDragStart() {
   dragSnapshot.value = JSON.parse(JSON.stringify(iterations.value))
 }

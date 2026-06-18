@@ -20,6 +20,7 @@
           <el-option v-for="type in itemTypes" :key="type.value" :label="type.label" :value="type.value" />
         </el-select>
         <el-input v-model="keywordFilter" clearable placeholder="搜索标题/项目" class="workbench-search" />
+        <el-checkbox v-model="hideEmptyIterations">仅显示有工作项</el-checkbox>
         <el-button :loading="loading" @click="loadWorkbench">刷新</el-button>
       </div>
     </div>
@@ -310,6 +311,7 @@ const iterationFilter = ref([])
 const ownerFilter = ref(null)
 const typeFilter = ref('')
 const keywordFilter = ref('')
+const hideEmptyIterations = ref(false)
 const expandedIterationIds = ref(new Set())
 const laneLimits = reactive({})
 const listPage = ref(1)
@@ -381,7 +383,7 @@ const filteredIterations = computed(() => iterations.value
     test_cases: filterItems(iteration.test_cases || []),
     bugs: filterItems(iteration.bugs || [])
   }))
-  .filter((iteration) => boardTotal(iteration) > 0))
+  .filter((iteration) => !hideEmptyIterations.value || boardTotal(iteration) > 0))
 
 const summaryCards = computed(() => {
   const boards = filteredIterations.value
@@ -473,7 +475,7 @@ watch([flatWorkbenchItems, listPageSize], () => {
   if (listPage.value > maxPage) listPage.value = maxPage
 })
 
-watch([viewMode, iterationFilter, ownerFilter, typeFilter, keywordFilter], () => {
+watch([viewMode, iterationFilter, ownerFilter, typeFilter, keywordFilter, hideEmptyIterations], () => {
   listPage.value = 1
 }, { deep: true })
 

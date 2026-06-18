@@ -37,6 +37,12 @@ def get_workbench(db: Session) -> WorkbenchResponse:
         ],
         lambda item: _requirement_item(item, projects),
     )
+    requirement_iteration_ids = {
+        item.requirement_id: iteration_id
+        for iteration_id, values in requirements.items()
+        for item in values
+        if item.requirement_id
+    }
     tasks = _items_by_iteration(
         [
             item for item in db.query(Task).filter(Task.deleted == 0, Task.iteration_id.in_(iteration_ids)).all()
@@ -44,12 +50,30 @@ def get_workbench(db: Session) -> WorkbenchResponse:
         ],
         lambda item: _task_item(item, projects),
     )
+    _merge_requirement_linked_items(
+        tasks,
+        [
+            item for item in db.query(Task).filter(Task.deleted == 0, Task.requirement_id.in_(requirement_iteration_ids)).all()
+            if _linked_item_phase_matches(item, requirement_iteration_ids, iteration_phases)
+        ],
+        requirement_iteration_ids,
+        lambda item, iteration_id: _task_item(item, projects, iteration_id),
+    )
     test_cases = _items_by_iteration(
         [
             item for item in db.query(TestCase).filter(TestCase.deleted == 0, TestCase.iteration_id.in_(iteration_ids)).all()
             if _phase_matches(item, iteration_phases)
         ],
         lambda item: _test_case_item(item, projects),
+    )
+    _merge_requirement_linked_items(
+        test_cases,
+        [
+            item for item in db.query(TestCase).filter(TestCase.deleted == 0, TestCase.requirement_id.in_(requirement_iteration_ids)).all()
+            if _linked_item_phase_matches(item, requirement_iteration_ids, iteration_phases)
+        ],
+        requirement_iteration_ids,
+        lambda item, iteration_id: _test_case_item(item, projects, iteration_id),
     )
     bugs = _items_by_iteration(
         [
@@ -140,8 +164,32 @@ def _items_by_iteration(items, mapper) -> dict[int, list[WorkbenchItem]]:
     return result
 
 
+def _merge_requirement_linked_items(result: dict[int, list[WorkbenchItem]], items, requirement_iteration_ids: dict[int, int], mapper) -> None:
+    existing = {
+        (item.object_type, item.id)
+        for values in result.values()
+        for item in values
+    }
+    for item in items:
+        iteration_id = requirement_iteration_ids.get(item.requirement_id)
+        if not iteration_id:
+            continue
+        workbench_item = mapper(item, iteration_id)
+        if (workbench_item.object_type, workbench_item.id) in existing:
+            continue
+        result.setdefault(iteration_id, []).append(workbench_item)
+        existing.add((workbench_item.object_type, workbench_item.id))
+    for values in result.values():
+        values.sort(key=lambda item: item.id, reverse=True)
+
+
 def _phase_matches(item, iteration_phases: dict[int, str]) -> bool:
     return item.iteration_id in iteration_phases and (item.lifecycle_phase or "development") == iteration_phases[item.iteration_id]
+
+
+def _linked_item_phase_matches(item, requirement_iteration_ids: dict[int, int], iteration_phases: dict[int, str]) -> bool:
+    iteration_id = requirement_iteration_ids.get(item.requirement_id)
+    return iteration_id in iteration_phases and (item.lifecycle_phase or "development") == iteration_phases[iteration_id]
 
 
 def _iteration_projects(db: Session, iteration_ids: list[int], projects: dict[int, Project]) -> dict[int, list[dict]]:
@@ -202,14 +250,14 @@ def _requirement_item(item: Requirement, projects: dict[int, Project]) -> Workbe
     )
 
 
-def _task_item(item: Task, projects: dict[int, Project]) -> WorkbenchItem:
+def _task_item(item: Task, projects: dict[int, Project], iteration_id: int | None = None) -> WorkbenchItem:
     return WorkbenchItem(
         id=item.id,
         object_type="task",
         title=item.title,
         project_id=item.project_id,
         project_name=_project_name(projects, item.project_id),
-        iteration_id=item.iteration_id,
+        iteration_id=iteration_id if iteration_id is not None else item.iteration_id,
         lifecycle_phase=item.lifecycle_phase,
         owner_id=item.owner_id,
         status=item.status,
@@ -219,14 +267,14 @@ def _task_item(item: Task, projects: dict[int, Project]) -> WorkbenchItem:
     )
 
 
-def _test_case_item(item: TestCase, projects: dict[int, Project]) -> WorkbenchItem:
+def _test_case_item(item: TestCase, projects: dict[int, Project], iteration_id: int | None = None) -> WorkbenchItem:
     return WorkbenchItem(
         id=item.id,
         object_type="test_case",
         title=item.title,
         project_id=item.project_id,
         project_name=_project_name(projects, item.project_id),
-        iteration_id=item.iteration_id,
+        iteration_id=iteration_id if iteration_id is not None else item.iteration_id,
         lifecycle_phase=item.lifecycle_phase,
         owner_id=item.default_tester_id,
         status=item.status,

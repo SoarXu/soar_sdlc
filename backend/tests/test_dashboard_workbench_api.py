@@ -64,6 +64,55 @@ def test_workbench_iteration_includes_related_projects(client: TestClient):
     assert board["projects"] == [{"id": project_id, "name": "Scope Visible Project"}]
 
 
+def test_workbench_includes_empty_iterations(client: TestClient):
+    project_id = _create_project(client, "Empty Board Project")
+    iteration_id = _create_iteration(client, project_id, "Empty Board Iteration")
+
+    response = client.get("/api/v1/dashboard/workbench")
+
+    assert response.status_code == 200
+    board = next(item for item in response.json()["iterations"] if item["id"] == iteration_id)
+    assert board["counts"] == {"requirements": 0, "tasks": 0, "test_cases": 0, "bugs": 0}
+
+
+def test_workbench_includes_tasks_and_cases_from_linked_requirements(client: TestClient):
+    project_id = _create_project(client, "Requirement Derived Workbench Project")
+    iteration_id = _create_iteration(client, project_id, "Requirement Derived Workbench Iteration")
+    requirement = client.post(
+        "/api/v1/requirements",
+        json={
+            "project_id": project_id,
+            "iteration_id": iteration_id,
+            "title": "Requirement that carries implementation and case",
+        },
+    ).json()
+    task = client.post(
+        "/api/v1/tasks",
+        json={
+            "project_id": project_id,
+            "requirement_id": requirement["id"],
+            "title": "Task inherited from requirement iteration",
+        },
+    ).json()
+    test_case = client.post(
+        "/api/v1/test-cases",
+        json={
+            "project_id": project_id,
+            "requirement_id": requirement["id"],
+            "title": "Case inherited from requirement iteration",
+        },
+    ).json()
+
+    response = client.get("/api/v1/dashboard/workbench")
+
+    assert response.status_code == 200
+    board = next(item for item in response.json()["iterations"] if item["id"] == iteration_id)
+    assert {item["id"] for item in board["tasks"]} == {task["id"]}
+    assert {item["id"] for item in board["test_cases"]} == {test_case["id"]}
+    assert board["counts"]["tasks"] == 1
+    assert board["counts"]["test_cases"] == 1
+
+
 def test_workbench_move_updates_iteration_id_for_supported_objects(client: TestClient):
     project_id = _create_project(client, "Move Project")
     source_iteration = _create_iteration(client, project_id, "Source Iteration")

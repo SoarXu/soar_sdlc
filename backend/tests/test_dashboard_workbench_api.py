@@ -62,6 +62,7 @@ def test_workbench_iteration_includes_related_projects(client: TestClient):
     assert response.status_code == 200
     board = next(item for item in response.json()["iterations"] if item["id"] == iteration_id)
     assert board["projects"] == [{"id": project_id, "name": "Scope Visible Project"}]
+    assert board["create_time"]
 
 
 def test_workbench_includes_empty_iterations(client: TestClient):

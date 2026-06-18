@@ -383,7 +383,8 @@ const filteredIterations = computed(() => iterations.value
     test_cases: filterItems(iteration.test_cases || []),
     bugs: filterItems(iteration.bugs || [])
   }))
-  .filter((iteration) => !hideEmptyIterations.value || boardTotal(iteration) > 0))
+  .filter((iteration) => !hideEmptyIterations.value || boardTotal(iteration) > 0)
+  .sort(compareIterationsForWorkbench))
 
 const summaryCards = computed(() => {
   const boards = filteredIterations.value
@@ -508,12 +509,17 @@ function decorateListItem(item, iteration) {
   }
 }
 function sortIterationsForBoard(items) {
-  return [...items].sort((a, b) => {
-    const aDate = a.start_date || ''
-    const bDate = b.start_date || ''
-    if (aDate !== bDate) return aDate.localeCompare(bDate)
-    return b.id - a.id
-  })
+  return [...items].sort(compareIterationsForWorkbench)
+}
+function compareIterationsForWorkbench(a, b) {
+  const aHasStart = Boolean(a.start_date)
+  const bHasStart = Boolean(b.start_date)
+  if (aHasStart !== bHasStart) return aHasStart ? -1 : 1
+  if (aHasStart && a.start_date !== b.start_date) return a.start_date.localeCompare(b.start_date)
+  const aCreated = a.create_time || ''
+  const bCreated = b.create_time || ''
+  if (aCreated !== bCreated) return aCreated.localeCompare(bCreated)
+  return a.id - b.id
 }
 function visibleGroups(iteration) {
   return [

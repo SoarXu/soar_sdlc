@@ -50,6 +50,7 @@ class WorkbenchIteration(BaseModel):
     owner_id: int | None = None
     start_date: str | None = None
     end_date: str | None = None
+    create_time: str | None = None
     projects: list[WorkbenchProject] = Field(default_factory=list)
     requirements: list[WorkbenchItem]
     tasks: list[WorkbenchItem]

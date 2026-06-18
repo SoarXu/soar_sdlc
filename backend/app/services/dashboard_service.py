@@ -109,6 +109,7 @@ def get_workbench(db: Session) -> WorkbenchResponse:
             "owner_id": iteration.owner_id,
             "start_date": _date_value(iteration.start_date),
             "end_date": _date_value(iteration.end_date),
+            "create_time": _datetime_value(iteration.create_time),
             "projects": iteration_projects.get(iteration.id, []),
             "requirements": reqs,
             "tasks": task_items,

@@ -29,6 +29,7 @@ def get_workbench(db: Session) -> WorkbenchResponse:
     iteration_ids = [item.id for item in iterations]
     iteration_phases = {item.id: item.lifecycle_phase for item in iterations}
     projects = {item.id: item for item in db.query(Project).filter(Project.deleted == 0).all()}
+    iteration_projects = _iteration_projects(db, iteration_ids, projects)
     requirements = _items_by_iteration(
         [
             item for item in db.query(Requirement).filter(Requirement.deleted == 0, Requirement.iteration_id.in_(iteration_ids)).all()
@@ -84,6 +85,7 @@ def get_workbench(db: Session) -> WorkbenchResponse:
             "owner_id": iteration.owner_id,
             "start_date": _date_value(iteration.start_date),
             "end_date": _date_value(iteration.end_date),
+            "projects": iteration_projects.get(iteration.id, []),
             "requirements": reqs,
             "tasks": task_items,
             "test_cases": case_items,
@@ -140,6 +142,20 @@ def _items_by_iteration(items, mapper) -> dict[int, list[WorkbenchItem]]:
 
 def _phase_matches(item, iteration_phases: dict[int, str]) -> bool:
     return item.iteration_id in iteration_phases and (item.lifecycle_phase or "development") == iteration_phases[item.iteration_id]
+
+
+def _iteration_projects(db: Session, iteration_ids: list[int], projects: dict[int, Project]) -> dict[int, list[dict]]:
+    result: dict[int, list[dict]] = {iteration_id: [] for iteration_id in iteration_ids}
+    if not iteration_ids:
+        return result
+    rows = db.query(IterationProject).filter(IterationProject.iteration_id.in_(iteration_ids)).all()
+    for row in rows:
+        project = projects.get(row.project_id)
+        if project:
+            result.setdefault(row.iteration_id, []).append({"id": project.id, "name": project.name})
+    for values in result.values():
+        values.sort(key=lambda item: item["name"])
+    return result
 
 
 def _iteration_scoped_project_ids(db: Session, iteration_id: int) -> set[int]:

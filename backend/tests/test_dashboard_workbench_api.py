@@ -53,6 +53,17 @@ def test_workbench_groups_items_by_iteration_and_supports_test_case_iteration(cl
     assert board["counts"] == {"requirements": 1, "tasks": 1, "test_cases": 1, "bugs": 1}
 
 
+def test_workbench_iteration_includes_related_projects(client: TestClient):
+    project_id = _create_project(client, "Scope Visible Project")
+    iteration_id = _create_iteration(client, project_id, "Scope Visible Iteration")
+
+    response = client.get("/api/v1/dashboard/workbench")
+
+    assert response.status_code == 200
+    board = next(item for item in response.json()["iterations"] if item["id"] == iteration_id)
+    assert board["projects"] == [{"id": project_id, "name": "Scope Visible Project"}]
+
+
 def test_workbench_move_updates_iteration_id_for_supported_objects(client: TestClient):
     project_id = _create_project(client, "Move Project")
     source_iteration = _create_iteration(client, project_id, "Source Iteration")

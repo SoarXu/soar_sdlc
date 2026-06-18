@@ -691,6 +691,20 @@ body {
   font-size: 12px;
 }
 
+.iteration-project-scope {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  max-width: 100%;
+  margin-top: 8px;
+}
+
+.iteration-project-scope > span {
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
 .iteration-board-tools {
   display: flex;
   align-items: center;

@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class DashboardSummary(BaseModel):
@@ -37,6 +37,11 @@ class WorkbenchItem(BaseModel):
     severity: str | None = None
 
 
+class WorkbenchProject(BaseModel):
+    id: int
+    name: str
+
+
 class WorkbenchIteration(BaseModel):
     id: int
     name: str
@@ -45,6 +50,7 @@ class WorkbenchIteration(BaseModel):
     owner_id: int | None = None
     start_date: str | None = None
     end_date: str | None = None
+    projects: list[WorkbenchProject] = Field(default_factory=list)
     requirements: list[WorkbenchItem]
     tasks: list[WorkbenchItem]
     test_cases: list[WorkbenchItem]

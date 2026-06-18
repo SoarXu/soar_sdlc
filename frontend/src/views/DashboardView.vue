@@ -93,6 +93,13 @@
           <div>
             <h2>{{ iteration.name }}</h2>
             <span>{{ iterationStatusLabel(iteration.status) }} · {{ phaseLabel(iteration.lifecycle_phase) }} · {{ iteration.start_date || '-' }} 至 {{ iteration.end_date || '-' }}</span>
+            <div class="iteration-project-scope">
+              <span>关联项目</span>
+              <el-tag v-for="project in iteration.projects || []" :key="project.id" size="small" effect="plain">
+                {{ project.name }}
+              </el-tag>
+              <el-tag v-if="!(iteration.projects || []).length" size="small" type="info" effect="plain">未绑定项目</el-tag>
+            </div>
           </div>
           <div class="iteration-board-tools">
             <el-tag>{{ boardTotal(iteration) }} 项</el-tag>

@@ -87,8 +87,16 @@
       </el-table>
     </div>
 
-    <div v-else v-loading="loading" class="workbench-board">
-      <section v-for="section in boardSections" :key="section.key" class="workbench-board-section" :class="{ 'shared-board-section': section.kind === 'shared' }">
+    <div v-else v-loading="loading" class="workbench-board-wrap">
+      <el-radio-group v-model="boardTab" class="workbench-board-tabs" size="small">
+        <el-radio-button label="project">项目迭代 {{ boardGroups.projects.length }}</el-radio-button>
+        <el-radio-button label="shared">共享迭代 {{ boardGroups.shared.reduce((sum, section) => sum + section.iterations.length, 0) }}</el-radio-button>
+      </el-radio-group>
+
+      <el-empty v-if="!boardSections.length" class="workbench-empty" description="当前分类下暂无迭代" />
+
+      <div v-else class="workbench-board">
+        <section v-for="section in boardSections" :key="section.key" class="workbench-board-section" :class="{ 'shared-board-section': section.kind === 'shared' }">
         <header class="workbench-board-section-head">
           <div>
             <h2>{{ section.title }}</h2>
@@ -165,6 +173,7 @@
           </article>
         </div>
       </section>
+      </div>
     </div>
 
     <el-drawer v-model="workItemDrawerVisible" title="工作项处理" size="420px">
@@ -296,6 +305,7 @@ const iterations = ref([])
 const owners = ref([])
 const viewMode = ref('mine')
 const displayMode = ref('list')
+const boardTab = ref('project')
 const iterationFilter = ref([])
 const ownerFilter = ref(null)
 const typeFilter = ref('')
@@ -399,7 +409,7 @@ const pagedWorkbenchItems = computed(() => {
   return flatWorkbenchItems.value.slice(start, start + listPageSize.value)
 })
 
-const boardSections = computed(() => {
+const boardGroups = computed(() => {
   const shared = []
   const projectMap = new Map()
   for (const iteration of filteredIterations.value) {
@@ -420,24 +430,27 @@ const boardSections = computed(() => {
     }
     projectMap.get(project.id).iterations.push(iteration)
   }
-  const sections = []
-  if (shared.length) {
-    sections.push({
+  const projectSections = [...projectMap.values()]
+    .sort((a, b) => a.title.localeCompare(b.title, 'zh-Hans-CN'))
+    .map((section) => ({
+      ...section,
+      iterations: sortIterationsForBoard(section.iterations)
+    }))
+  return {
+    shared: shared.length
+      ? [{
       key: 'shared',
       kind: 'shared',
       title: '共享迭代',
       description: '绑定多个项目或未绑定项目的迭代集中展示',
       iterations: sortIterationsForBoard(shared)
-    })
+    }]
+      : [],
+    projects: projectSections
   }
-  sections.push(...[...projectMap.values()]
-    .sort((a, b) => a.title.localeCompare(b.title, 'zh-Hans-CN'))
-    .map((section) => ({
-      ...section,
-      iterations: sortIterationsForBoard(section.iterations)
-    })))
-  return sections
 })
+
+const boardSections = computed(() => boardTab.value === 'shared' ? boardGroups.value.shared : boardGroups.value.projects)
 
 const emptyDescription = computed(() => {
   if (viewMode.value === 'mine' && !currentUserId.value) {

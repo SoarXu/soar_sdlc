@@ -88,71 +88,83 @@
     </div>
 
     <div v-else v-loading="loading" class="workbench-board">
-      <article v-for="iteration in filteredIterations" :key="iteration.id" class="iteration-board">
-        <header class="iteration-board-head">
+      <section v-for="section in boardSections" :key="section.key" class="workbench-board-section" :class="{ 'shared-board-section': section.kind === 'shared' }">
+        <header class="workbench-board-section-head">
           <div>
-            <h2>{{ iteration.name }}</h2>
-            <span>{{ iterationStatusLabel(iteration.status) }} · {{ phaseLabel(iteration.lifecycle_phase) }} · {{ iteration.start_date || '-' }} 至 {{ iteration.end_date || '-' }}</span>
-            <div class="iteration-project-scope">
-              <span>关联项目</span>
-              <el-tag v-for="project in iteration.projects || []" :key="project.id" size="small" effect="plain">
-                {{ project.name }}
-              </el-tag>
-              <el-tag v-if="!(iteration.projects || []).length" size="small" type="info" effect="plain">未绑定项目</el-tag>
-            </div>
+            <h2>{{ section.title }}</h2>
+            <p>{{ section.description }}</p>
           </div>
-          <div class="iteration-board-tools">
-            <el-tag>{{ boardTotal(iteration) }} 项</el-tag>
-            <el-button link type="primary" @click="toggleIteration(iteration.id)">
-              {{ isIterationExpanded(iteration.id) ? '收起' : '展开' }}
-            </el-button>
-          </div>
+          <el-tag>{{ section.iterations.length }} 个迭代</el-tag>
         </header>
 
-        <div v-if="isIterationExpanded(iteration.id)" class="workbench-lanes">
-          <section v-for="group in visibleGroups(iteration)" :key="`${iteration.id}-${group.key}`" class="workbench-lane">
-            <header>
-              <span>{{ group.label }}</span>
-              <strong>{{ group.items.length }}</strong>
-            </header>
-            <VueDraggable
-              v-model="group.items"
-              class="workbench-card-list"
-              :group="{ name: group.key }"
-              item-key="drag_key"
-              ghost-class="workbench-card-ghost"
-              chosen-class="workbench-card-chosen"
-              @start="onDragStart"
-              @add="(event) => onDragAdd(event, group.key, iteration.id)"
-            >
-              <div v-for="item in visibleLaneItems(iteration.id, group.key, group.items)" :key="item.drag_key" class="workbench-card workbench-mini-card" :data-id="item.id">
-                <div class="workbench-card-top">
-                  <el-tag size="small" :type="typeTag(item.object_type)">{{ typeLabel(item.object_type) }}</el-tag>
-                  <span class="workbench-status">{{ itemStatusLabel(item) }}</span>
-                </div>
-                <button class="workbench-title workbench-card-button" type="button" @click="openWorkItemDrawer(item, iteration)">{{ item.title }}</button>
-                <div class="workbench-meta">
-                  <span class="owner-chip">负责人：{{ ownerName(item.owner_id) }}</span>
-                  <span>{{ item.project_name || '-' }}</span>
-                  <RequirementPriorityBadge v-if="item.priority || item.severity" :value="item.severity || item.priority" />
+        <div class="workbench-section-iterations">
+          <article v-for="iteration in section.iterations" :key="iteration.id" class="iteration-board">
+            <header class="iteration-board-head">
+              <div>
+                <h2>{{ iteration.name }}</h2>
+                <span>{{ iterationStatusLabel(iteration.status) }} · {{ phaseLabel(iteration.lifecycle_phase) }} · {{ iteration.start_date || '-' }} 至 {{ iteration.end_date || '-' }}</span>
+                <div class="iteration-project-scope">
+                  <span>关联项目</span>
+                  <el-tag v-for="project in iteration.projects || []" :key="project.id" size="small" effect="plain">
+                    {{ project.name }}
+                  </el-tag>
+                  <el-tag v-if="!(iteration.projects || []).length" size="small" type="info" effect="plain">未绑定项目</el-tag>
                 </div>
               </div>
-            </VueDraggable>
-            <el-button
-              v-if="hasHiddenLaneItems(iteration.id, group.key, group.items)"
-              class="workbench-more"
-              link
-              type="primary"
-              @click="showMoreLaneItems(iteration.id, group.key)"
-            >
-              显示更多 {{ hiddenLaneCount(iteration.id, group.key, group.items) }} 项
-            </el-button>
-          </section>
+              <div class="iteration-board-tools">
+                <el-tag>{{ boardTotal(iteration) }} 项</el-tag>
+                <el-button link type="primary" @click="toggleIteration(iteration.id)">
+                  {{ isIterationExpanded(iteration.id) ? '收起' : '展开' }}
+                </el-button>
+              </div>
+            </header>
+
+            <div v-if="isIterationExpanded(iteration.id)" class="workbench-lanes">
+              <section v-for="group in visibleGroups(iteration)" :key="`${iteration.id}-${group.key}`" class="workbench-lane">
+                <header>
+                  <span>{{ group.label }}</span>
+                  <strong>{{ group.items.length }}</strong>
+                </header>
+                <VueDraggable
+                  v-model="group.items"
+                  class="workbench-card-list"
+                  :group="{ name: group.key }"
+                  item-key="drag_key"
+                  ghost-class="workbench-card-ghost"
+                  chosen-class="workbench-card-chosen"
+                  @start="onDragStart"
+                  @add="(event) => onDragAdd(event, group.key, iteration.id)"
+                >
+                  <div v-for="item in visibleLaneItems(iteration.id, group.key, group.items)" :key="item.drag_key" class="workbench-card workbench-mini-card" :data-id="item.id">
+                    <div class="workbench-card-top">
+                      <el-tag size="small" :type="typeTag(item.object_type)">{{ typeLabel(item.object_type) }}</el-tag>
+                      <span class="workbench-status">{{ itemStatusLabel(item) }}</span>
+                    </div>
+                    <button class="workbench-title workbench-card-button" type="button" @click="openWorkItemDrawer(item, iteration)">{{ item.title }}</button>
+                    <div class="workbench-meta">
+                      <span class="owner-chip">负责人：{{ ownerName(item.owner_id) }}</span>
+                      <span>{{ item.project_name || '-' }}</span>
+                      <RequirementPriorityBadge v-if="item.priority || item.severity" :value="item.severity || item.priority" />
+                    </div>
+                  </div>
+                </VueDraggable>
+                <el-button
+                  v-if="hasHiddenLaneItems(iteration.id, group.key, group.items)"
+                  class="workbench-more"
+                  link
+                  type="primary"
+                  @click="showMoreLaneItems(iteration.id, group.key)"
+                >
+                  显示更多 {{ hiddenLaneCount(iteration.id, group.key, group.items) }} 项
+                </el-button>
+              </section>
+            </div>
+            <button v-else class="iteration-collapsed-summary" type="button" @click="toggleIteration(iteration.id)">
+              展开查看 {{ boardTotal(iteration) }} 个工作项
+            </button>
+          </article>
         </div>
-        <button v-else class="iteration-collapsed-summary" type="button" @click="toggleIteration(iteration.id)">
-          展开查看 {{ boardTotal(iteration) }} 个工作项
-        </button>
-      </article>
+      </section>
     </div>
 
     <el-drawer v-model="workItemDrawerVisible" title="工作项处理" size="420px">
@@ -387,6 +399,46 @@ const pagedWorkbenchItems = computed(() => {
   return flatWorkbenchItems.value.slice(start, start + listPageSize.value)
 })
 
+const boardSections = computed(() => {
+  const shared = []
+  const projectMap = new Map()
+  for (const iteration of filteredIterations.value) {
+    const projects = iteration.projects || []
+    if (projects.length !== 1) {
+      shared.push(iteration)
+      continue
+    }
+    const project = projects[0]
+    if (!projectMap.has(project.id)) {
+      projectMap.set(project.id, {
+        key: `project-${project.id}`,
+        kind: 'project',
+        title: project.name,
+        description: '单项目迭代',
+        iterations: []
+      })
+    }
+    projectMap.get(project.id).iterations.push(iteration)
+  }
+  const sections = []
+  if (shared.length) {
+    sections.push({
+      key: 'shared',
+      kind: 'shared',
+      title: '共享迭代',
+      description: '绑定多个项目或未绑定项目的迭代集中展示',
+      iterations: sortIterationsForBoard(shared)
+    })
+  }
+  sections.push(...[...projectMap.values()]
+    .sort((a, b) => a.title.localeCompare(b.title, 'zh-Hans-CN'))
+    .map((section) => ({
+      ...section,
+      iterations: sortIterationsForBoard(section.iterations)
+    })))
+  return sections
+})
+
 const emptyDescription = computed(() => {
   if (viewMode.value === 'mine' && !currentUserId.value) {
     return '无法识别当前登录用户，请重新登录，或切换到全部工作查看数据'
@@ -439,6 +491,14 @@ function decorateListItem(item, iteration) {
     iteration_status: iteration.status,
     iteration_phase: iteration.lifecycle_phase
   }
+}
+function sortIterationsForBoard(items) {
+  return [...items].sort((a, b) => {
+    const aDate = a.start_date || ''
+    const bDate = b.start_date || ''
+    if (aDate !== bDate) return aDate.localeCompare(bDate)
+    return b.id - a.id
+  })
 }
 function visibleGroups(iteration) {
   return [

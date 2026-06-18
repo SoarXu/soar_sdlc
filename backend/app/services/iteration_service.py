@@ -100,6 +100,8 @@ def update_iteration(db: Session, iteration_id: int, payload: IterationUpdate) -
         db.query(IterationProject).filter(IterationProject.iteration_id == iteration_id).delete()
         for pid in project_ids:
             db.add(IterationProject(iteration_id=iteration_id, project_id=pid))
+        db.flush()
+        _unlink_out_of_scope_iteration_items(db, iteration_id)
 
     for field, value in data.items():
         setattr(iteration, field, value)
@@ -307,6 +309,21 @@ def unlink_task(db: Session, iteration_id: int, task_id: int) -> None:
     if task and task.iteration_id == iteration_id:
         task.iteration_id = None
         db.commit()
+
+
+def _unlink_out_of_scope_iteration_items(db: Session, iteration_id: int) -> None:
+    scoped_project_ids = _iteration_scoped_project_ids(db, iteration_id)
+    _unlink_out_of_scope_model_items(db, Requirement, iteration_id, scoped_project_ids)
+    _unlink_out_of_scope_model_items(db, Task, iteration_id, scoped_project_ids)
+    _unlink_out_of_scope_model_items(db, TestCase, iteration_id, scoped_project_ids)
+    _unlink_out_of_scope_model_items(db, Bug, iteration_id, scoped_project_ids)
+
+
+def _unlink_out_of_scope_model_items(db: Session, model, iteration_id: int, scoped_project_ids: set[int]) -> None:
+    items = db.query(model).filter(model.deleted == 0, model.iteration_id == iteration_id).all()
+    for item in items:
+        if item.project_id not in scoped_project_ids:
+            item.iteration_id = None
 
 
 def _get_active_iteration(db: Session, iteration_id: int) -> Iteration:

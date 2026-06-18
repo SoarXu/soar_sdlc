@@ -82,6 +82,15 @@ def _create_case(client: TestClient, project_id: int, requirement_id: int, title
     return response.json()["id"]
 
 
+def _create_bug(client: TestClient, project_id: int, iteration_id: int, title: str | None = None) -> int:
+    response = client.post(
+        "/api/v1/bugs",
+        json={"project_id": project_id, "iteration_id": iteration_id, "title": title or f"Bug-{uuid4().hex[:8]}"},
+    )
+    assert response.status_code == 200
+    return response.json()["id"]
+
+
 def test_iteration_detail_links_requirements_tasks_and_metrics(client: TestClient):
     root_project = _create_project(client, "Root Project")
     child_project = _create_project(client, "Child Project", parent_id=root_project)
@@ -172,16 +181,22 @@ def test_generated_task_for_linked_requirement_appears_in_iteration_detail(clien
     assert tasks[0]["project_id"] == project_id
 
 
-def test_iteration_detail_includes_projects_from_linked_items_after_scope_changes(client: TestClient):
-    original_project = _create_project(client, "Original linked item project")
+def test_iteration_project_scope_update_unlinks_out_of_scope_work_items(client: TestClient):
+    removed_project = _create_project(client, "Removed linked item project")
     current_project = _create_project(client, "Current iteration project")
-    iteration_id = _create_iteration(client, [original_project])
-    requirement_id = _create_requirement(client, original_project, "Requirement kept after iteration project change")
+    iteration_id = _create_iteration(client, [removed_project, current_project])
+    requirement_id = _create_requirement(client, removed_project, "Requirement removed from iteration scope")
+    task_id = _create_task(client, removed_project, "Direct task removed from iteration scope")
+    case_id = _create_case(client, removed_project, requirement_id, "Case removed from iteration scope")
+    bug_id = _create_bug(client, removed_project, iteration_id, "Bug removed from iteration scope")
     linked_requirements = client.post(
         f"/api/v1/iterations/{iteration_id}/requirements",
         json={"requirement_ids": [requirement_id]},
     )
     assert linked_requirements.status_code == 200
+    linked_tasks = client.post(f"/api/v1/iterations/{iteration_id}/tasks", json={"task_ids": [task_id]})
+    assert linked_tasks.status_code == 200
+
     updated = client.patch(f"/api/v1/iterations/{iteration_id}", json={"project_ids": [current_project]})
     assert updated.status_code == 200
 
@@ -189,9 +204,16 @@ def test_iteration_detail_includes_projects_from_linked_items_after_scope_change
 
     assert detail.status_code == 200
     project_ids = {item["id"] for item in detail.json()["projects"]}
-    assert original_project in project_ids
+    assert removed_project not in project_ids
     assert current_project in project_ids
-    assert {item["id"] for item in detail.json()["requirements"]} == {requirement_id}
+    assert requirement_id not in {item["id"] for item in detail.json()["requirements"]}
+    assert task_id not in {item["id"] for item in detail.json()["tasks"]}
+    assert case_id not in {item["id"] for item in detail.json()["test_cases"]}
+    assert bug_id not in {item["id"] for item in detail.json()["bugs"]}
+    assert client.get(f"/api/v1/requirements/{requirement_id}").json()["iteration_id"] is None
+    assert client.get(f"/api/v1/tasks/{task_id}").json()["iteration_id"] is None
+    assert client.get(f"/api/v1/test-cases/{case_id}").json()["iteration_id"] is None
+    assert client.get(f"/api/v1/bugs/{bug_id}").json()["iteration_id"] is None
 
 
 def test_generate_task_accepts_default_owner_from_iteration_page(client: TestClient):

@@ -213,9 +213,10 @@ def get_iteration_detail(db: Session, iteration_id: int) -> dict:
     covered_requirement_ids = {case.requirement_id for case in test_cases if case.requirement_id}
     requirement_total = len(requirements)
     closed_requirement_total = len([item for item in requirements if item.status == "closed"])
+    detail_project_ids = _merge_detail_project_ids(project_ids, requirements, tasks_by_id.values(), test_cases, bugs)
     return {
         "iteration": _iteration_to_dict(iteration, project_ids),
-        "projects": _projects_to_tree(db, project_ids),
+        "projects": _projects_to_tree(db, detail_project_ids),
         "requirements": [_model_to_dict(item) for item in requirements],
         "tasks": [_model_to_dict(item) for item in sorted(tasks_by_id.values(), key=lambda item: item.id, reverse=True)],
         "test_cases": [_model_to_dict(item) for item in test_cases],
@@ -373,6 +374,15 @@ def _linked_requirements(db: Session, iteration_id: int) -> list[Requirement]:
 def _projects_to_tree(db: Session, root_project_ids: list[int]) -> list[dict]:
     roots = db.query(Project).filter(Project.deleted == 0, Project.id.in_(root_project_ids)).order_by(Project.id.asc()).all()
     return [_project_node(db, project) for project in roots]
+
+
+def _merge_detail_project_ids(project_ids: list[int], *item_groups) -> list[int]:
+    result = set(project_ids)
+    for items in item_groups:
+        for item in items:
+            if item.project_id:
+                result.add(item.project_id)
+    return sorted(result)
 
 
 def _project_node(db: Session, project: Project) -> dict:

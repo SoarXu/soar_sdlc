@@ -172,6 +172,28 @@ def test_generated_task_for_linked_requirement_appears_in_iteration_detail(clien
     assert tasks[0]["project_id"] == project_id
 
 
+def test_iteration_detail_includes_projects_from_linked_items_after_scope_changes(client: TestClient):
+    original_project = _create_project(client, "Original linked item project")
+    current_project = _create_project(client, "Current iteration project")
+    iteration_id = _create_iteration(client, [original_project])
+    requirement_id = _create_requirement(client, original_project, "Requirement kept after iteration project change")
+    linked_requirements = client.post(
+        f"/api/v1/iterations/{iteration_id}/requirements",
+        json={"requirement_ids": [requirement_id]},
+    )
+    assert linked_requirements.status_code == 200
+    updated = client.patch(f"/api/v1/iterations/{iteration_id}", json={"project_ids": [current_project]})
+    assert updated.status_code == 200
+
+    detail = client.get(f"/api/v1/iterations/{iteration_id}/detail")
+
+    assert detail.status_code == 200
+    project_ids = {item["id"] for item in detail.json()["projects"]}
+    assert original_project in project_ids
+    assert current_project in project_ids
+    assert {item["id"] for item in detail.json()["requirements"]} == {requirement_id}
+
+
 def test_generate_task_accepts_default_owner_from_iteration_page(client: TestClient):
     owner_id = _create_user(client)
     project_id = _create_project(client)

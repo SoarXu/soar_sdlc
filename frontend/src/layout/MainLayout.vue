@@ -54,7 +54,7 @@
       </el-menu>
     </aside>
 
-    <main class="main">
+    <main class="main" :class="{ 'main-workbench': $route.path === '/' || $route.path === '/dashboard' }">
       <router-view />
     </main>
   </div>

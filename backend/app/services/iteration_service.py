@@ -54,7 +54,7 @@ def create_iteration(db: Session, payload: IterationCreate) -> dict:
     project_ids = data.pop("project_ids", [])
     if project_id and not project_ids:
         project_ids = [project_id]
-    _validate_top_level_projects(db, project_ids)
+    _validate_iteration_projects(db, project_ids)
     data["lifecycle_phase"] = project_lifecycle_phase(db, project_ids[0] if project_ids else None)
 
     iteration = Iteration(**data)
@@ -96,7 +96,7 @@ def update_iteration(db: Session, iteration_id: int, payload: IterationUpdate) -
         project_ids = [project_id]
 
     if project_ids is not None:
-        _validate_top_level_projects(db, project_ids)
+        _validate_iteration_projects(db, project_ids)
         db.query(IterationProject).filter(IterationProject.iteration_id == iteration_id).delete()
         for pid in project_ids:
             db.add(IterationProject(iteration_id=iteration_id, project_id=pid))
@@ -421,12 +421,10 @@ def _rate(numerator: int, denominator: int) -> float:
     return round(numerator / denominator, 4) if denominator else 0
 
 
-def _validate_top_level_projects(db: Session, project_ids: list[int]) -> None:
+def _validate_iteration_projects(db: Session, project_ids: list[int]) -> None:
     if not project_ids:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="至少需要绑定一个项目")
     for pid in project_ids:
         project = db.query(Project).filter(Project.id == pid, Project.deleted == 0).first()
         if not project:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"项目 {pid} 不存在")
-        if project.parent_id is not None:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"项目 '{project.name}' 是子项目，只能绑定顶级项目")

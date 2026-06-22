@@ -51,7 +51,7 @@
         <div class="form-grid">
           <el-form-item label="项目" required>
             <el-select v-model="form.project_ids" multiple filterable placeholder="请选择项目">
-              <el-option v-for="project in topLevelProjects" :key="project.id" :label="project.name" :value="project.id" />
+              <el-option v-for="project in projectOptions" :key="project.id" :label="project.label" :value="project.id" />
             </el-select>
           </el-form-item>
           <el-form-item label="负责人">
@@ -133,7 +133,24 @@ const {
   total: iterationTotal,
   pagedItems: pagedIterations
 } = usePagination(iterations)
-const topLevelProjects = computed(() => projects.value.filter(p => !p.parent_id))
+const projectOptions = computed(() => {
+  const childrenByParent = projects.value.reduce((result, project) => {
+    const key = project.parent_id || 0
+    if (!result[key]) result[key] = []
+    result[key].push(project)
+    return result
+  }, {})
+  Object.values(childrenByParent).forEach(items => items.sort((a, b) => a.id - b.id))
+  const result = []
+  const walk = (items, depth = 0) => {
+    items.forEach(project => {
+      result.push({ ...project, label: `${'　'.repeat(depth)}${project.name}` })
+      walk(childrenByParent[project.id] || [], depth + 1)
+    })
+  }
+  walk(childrenByParent[0] || [])
+  return result
+})
 const form = reactive({ project_ids: [], name: '', owner_id: null, start_date: null, end_date: null, status: 'planning', goal: '' })
 const startForm = reactive({ effective_time: '', remark: '' })
 const finishForm = reactive({ effective_time: '', remark: '' })

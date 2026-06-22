@@ -2,12 +2,12 @@
 
 ## Goal
 
-Build iteration detail management around existing work items. Iterations can include requirements and standalone tasks from multiple linked top-level projects and their child projects, without creating tasks inside the iteration page.
+Build iteration detail management around existing work items. Iterations can include requirements and standalone tasks from multiple linked projects at any project-tree level, without creating tasks inside the iteration page.
 
 ## Confirmed Rules
 
-- An iteration can link to multiple top-level projects.
-- The selectable scope for requirements and tasks includes those top-level projects and all descendant projects.
+- An iteration can link to multiple projects at any project-tree level.
+- The selectable scope for requirements and tasks includes the linked projects and all descendant projects. If a child project is linked directly, the iteration remains attached to that child project after project tree moves.
 - Requirements are linked through `requirements.iteration_id`.
 - A requirement can belong to only one iteration.
 - Tasks can be directly linked to an iteration through `tasks.iteration_id`.
@@ -74,7 +74,7 @@ Keep `iteration_projects` as the iteration scope table.
 
 Backend tests cover:
 
-- Top-level project scope includes child projects.
+- Linked project scope includes descendant projects.
 - Linked requirements appear in iteration detail.
 - Requirements already in one iteration are excluded from another iteration's available list.
 - Directly linked tasks appear alongside tasks brought in by requirements.

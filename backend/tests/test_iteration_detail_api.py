@@ -216,6 +216,51 @@ def test_iteration_project_scope_update_unlinks_out_of_scope_work_items(client: 
     assert client.get(f"/api/v1/bugs/{bug_id}").json()["iteration_id"] is None
 
 
+def test_iteration_can_bind_child_project_after_project_tree_move(client: TestClient):
+    platform_project = _create_project(client, "InnovateX platform")
+    archive_project = _create_project(client, "QA archive management")
+    operations_project = _create_project(client, "InnovateX operations")
+
+    moved_project = client.patch(
+        f"/api/v1/projects/{archive_project}",
+        json={"name": "QA archive management", "parent_id": operations_project},
+    )
+    assert moved_project.status_code == 200
+    assert moved_project.json()["parent_id"] == operations_project
+
+    iteration_response = client.post(
+        "/api/v1/iterations",
+        json={
+            "project_ids": [archive_project],
+            "name": "QA archive maintenance iteration",
+            "status": "planning",
+        },
+    )
+    assert iteration_response.status_code == 200
+    iteration_id = iteration_response.json()["id"]
+    assert iteration_response.json()["project_ids"] == [archive_project]
+
+    requirement_id = _create_requirement(client, archive_project, "QA archive maintenance requirement")
+    linked_requirement = client.post(
+        f"/api/v1/iterations/{iteration_id}/requirements",
+        json={"requirement_ids": [requirement_id]},
+    )
+    assert linked_requirement.status_code == 200
+
+    standalone_task_id = _create_task(client, archive_project, "QA archive standalone maintenance task")
+    linked_task = client.post(f"/api/v1/iterations/{iteration_id}/tasks", json={"task_ids": [standalone_task_id]})
+    assert linked_task.status_code == 200
+
+    detail = client.get(f"/api/v1/iterations/{iteration_id}/detail")
+    assert detail.status_code == 200
+    data = detail.json()
+    assert data["iteration"]["project_ids"] == [archive_project]
+    assert {item["id"] for item in data["requirements"]} == {requirement_id}
+    assert {item["id"] for item in data["tasks"]} == {standalone_task_id}
+    assert archive_project in data["scoped_project_ids"]
+    assert platform_project not in data["scoped_project_ids"]
+
+
 def test_generate_task_accepts_default_owner_from_iteration_page(client: TestClient):
     owner_id = _create_user(client)
     project_id = _create_project(client)

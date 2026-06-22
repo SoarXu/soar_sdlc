@@ -41,38 +41,39 @@
     <el-empty v-if="!loading && !filteredIterations.length" class="workbench-empty" :description="emptyDescription" />
 
     <div v-else-if="displayMode === 'list'" v-loading="loading" class="workbench-list">
-      <el-table :data="pagedWorkbenchItems" border stripe>
-        <el-table-column label="类型" width="100">
-          <template #default="{ row }"><el-tag size="small" :type="typeTag(row.object_type)">{{ typeLabel(row.object_type) }}</el-tag></template>
-        </el-table-column>
-        <el-table-column label="标题" min-width="220" show-overflow-tooltip>
-          <template #default="{ row }">
-            <el-button link type="primary" class="workbench-title-button" @click="openWorkItemDrawer(row)">{{ row.title }}</el-button>
-          </template>
-        </el-table-column>
-        <el-table-column prop="project_name" label="项目" min-width="140" show-overflow-tooltip />
-        <el-table-column prop="iteration_name" label="迭代" min-width="120" show-overflow-tooltip />
-        <el-table-column label="负责人" width="120"><template #default="{ row }">{{ ownerName(row.owner_id) }}</template></el-table-column>
-        <el-table-column label="状态" width="110"><template #default="{ row }">{{ itemStatusLabel(row) }}</template></el-table-column>
-        <el-table-column label="优先级/结果" width="120">
-          <template #default="{ row }">
-            <RequirementPriorityBadge v-if="row.priority || row.severity" :value="row.severity || row.priority" />
-            <span v-else>{{ executionResultLabel(row.last_execute_result) }}</span>
-          </template>
-        </el-table-column>
-        <el-table-column label="操作" width="100" fixed="right">
-          <template #default="{ row }"><el-button link type="primary" @click="openWorkItemDrawer(row)">处理</el-button></template>
-        </el-table-column>
-      </el-table>
-      <el-pagination
-        v-model:current-page="listPage"
-        v-model:page-size="listPageSize"
-        class="workbench-pagination"
-        background
-        layout="total, sizes, prev, pager, next"
-        :page-sizes="[10, 20, 50, 100]"
-        :total="flatWorkbenchItems.length"
-      />
+      <section v-for="section in listSections" :key="section.key" class="workbench-list-section">
+        <header class="workbench-list-section-head">
+          <div>
+            <h2>{{ section.label }}</h2>
+            <p>{{ section.description }}</p>
+          </div>
+          <el-tag :type="section.tagType">{{ section.items.length }} 项</el-tag>
+        </header>
+        <el-table v-if="section.items.length" :data="section.items" border stripe>
+          <el-table-column label="类型" width="100">
+            <template #default="{ row }"><el-tag size="small" :type="typeTag(row.object_type)">{{ typeLabel(row.object_type) }}</el-tag></template>
+          </el-table-column>
+          <el-table-column label="标题" min-width="220" show-overflow-tooltip>
+            <template #default="{ row }">
+              <el-button link type="primary" class="workbench-title-button" @click="openWorkItemDrawer(row)">{{ row.title }}</el-button>
+            </template>
+          </el-table-column>
+          <el-table-column prop="project_name" label="项目" min-width="140" show-overflow-tooltip />
+          <el-table-column prop="iteration_name" label="迭代" min-width="120" show-overflow-tooltip />
+          <el-table-column label="负责人" width="120"><template #default="{ row }">{{ ownerName(row.owner_id) }}</template></el-table-column>
+          <el-table-column label="状态" width="110"><template #default="{ row }">{{ itemStatusLabel(row) }}</template></el-table-column>
+          <el-table-column label="优先级/结果" width="120">
+            <template #default="{ row }">
+              <RequirementPriorityBadge v-if="row.priority || row.severity" :value="row.severity || row.priority" />
+              <span v-else>{{ executionResultLabel(row.last_execute_result) }}</span>
+            </template>
+          </el-table-column>
+          <el-table-column label="操作" width="100" fixed="right">
+            <template #default="{ row }"><el-button link type="primary" @click="openWorkItemDrawer(row)">处理</el-button></template>
+          </el-table-column>
+        </el-table>
+        <el-empty v-else class="workbench-section-empty" :description="`${section.label}暂无工作项`" />
+      </section>
     </div>
 
     <div v-else-if="displayMode === 'stats'" v-loading="loading" class="workbench-stats">
@@ -314,8 +315,6 @@ const keywordFilter = ref('')
 const hideEmptyIterations = ref(false)
 const expandedIterationIds = ref(new Set())
 const laneLimits = reactive({})
-const listPage = ref(1)
-const listPageSize = ref(20)
 const dragSnapshot = ref(null)
 const selectedWorkItem = ref(null)
 const selectedRequirement = ref(null)
@@ -407,10 +406,12 @@ const flatWorkbenchItems = computed(() => filteredIterations.value.flatMap((iter
   return b.id - a.id
 }))
 
-const pagedWorkbenchItems = computed(() => {
-  const start = (listPage.value - 1) * listPageSize.value
-  return flatWorkbenchItems.value.slice(start, start + listPageSize.value)
-})
+const listSections = computed(() => [
+  { key: 'requirement', label: typeLabel('requirement'), description: '按迭代汇总需要推进的需求', tagType: '', items: flatWorkbenchItems.value.filter((item) => item.object_type === 'requirement') },
+  { key: 'task', label: typeLabel('task'), description: '按迭代汇总需要执行的任务', tagType: 'success', items: flatWorkbenchItems.value.filter((item) => item.object_type === 'task') },
+  { key: 'test_case', label: typeLabel('test_case'), description: '按迭代汇总需要执行的测试用例', tagType: 'warning', items: flatWorkbenchItems.value.filter((item) => item.object_type === 'test_case') },
+  { key: 'bug', label: typeLabel('bug'), description: '按迭代汇总需要处理的 Bug', tagType: 'danger', items: flatWorkbenchItems.value.filter((item) => item.object_type === 'bug') }
+].filter((section) => !typeFilter.value || section.key === typeFilter.value))
 
 const boardGroups = computed(() => {
   const shared = []
@@ -470,15 +471,6 @@ watch(filteredIterations, () => {
     expandedIterationIds.value = first ? new Set([first.id]) : new Set()
   }
 })
-
-watch([flatWorkbenchItems, listPageSize], () => {
-  const maxPage = Math.max(1, Math.ceil(flatWorkbenchItems.value.length / listPageSize.value))
-  if (listPage.value > maxPage) listPage.value = maxPage
-})
-
-watch([viewMode, iterationFilter, ownerFilter, typeFilter, keywordFilter, hideEmptyIterations], () => {
-  listPage.value = 1
-}, { deep: true })
 
 const bugActionTitle = computed(() => ({
   start_fixing: '确认 Bug',

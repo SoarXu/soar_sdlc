@@ -645,6 +645,46 @@ body {
   min-width: 0;
 }
 
+.workbench-list {
+  display: grid;
+  gap: 16px;
+}
+
+.workbench-list-section {
+  min-width: 0;
+  padding: 14px;
+  background: #fff;
+  border: 1px solid #dbe5f0;
+  border-radius: 8px;
+}
+
+.workbench-list-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.workbench-list-section-head h2 {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: 16px;
+}
+
+.workbench-list-section-head p {
+  margin: 4px 0 0;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.workbench-section-empty {
+  padding: 22px 0;
+  background: #f8fafc;
+  border: 1px dashed #d9e2ef;
+  border-radius: 8px;
+}
+
 .workbench-title-button {
   max-width: 100%;
   padding: 0;

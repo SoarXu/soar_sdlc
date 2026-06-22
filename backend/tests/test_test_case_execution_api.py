@@ -114,7 +114,7 @@ def test_test_case_execution_result_all_ignored(client: TestClient):
     assert executed.json()["result"] == "ignored"
 
 
-def test_failed_test_case_execution_creates_bug_without_fix_iteration(client: TestClient):
+def test_failed_test_case_execution_creates_bug_with_case_iteration_and_can_edit_iteration(client: TestClient):
     project_id = _create_project(client)
     requirement_id = _create_requirement(client, project_id, owner_id=1)
     iteration = client.post(
@@ -123,6 +123,12 @@ def test_failed_test_case_execution_creates_bug_without_fix_iteration(client: Te
     )
     assert iteration.status_code == 200
     iteration_id = iteration.json()["id"]
+    next_iteration = client.post(
+        "/api/v1/iterations",
+        json={"project_ids": [project_id], "name": f"Next Iteration-{uuid4().hex[:8]}"},
+    )
+    assert next_iteration.status_code == 200
+    next_iteration_id = next_iteration.json()["id"]
     linked = client.post(f"/api/v1/iterations/{iteration_id}/requirements", json={"requirement_ids": [requirement_id]})
     assert linked.status_code == 200
 
@@ -130,6 +136,7 @@ def test_failed_test_case_execution_creates_bug_without_fix_iteration(client: Te
         "/api/v1/test-cases",
         json={
             "project_id": project_id,
+            "iteration_id": iteration_id,
             "requirement_id": requirement_id,
             "title": "Submit order fails",
             "steps_json": [{"step": "submit order", "expected": "order created"}],
@@ -157,7 +164,7 @@ def test_failed_test_case_execution_creates_bug_without_fix_iteration(client: Te
     data = bug.json()
     assert data["project_id"] == project_id
     assert data["requirement_id"] == requirement_id
-    assert data["iteration_id"] is None
+    assert data["iteration_id"] == iteration_id
     assert data["test_case_id"] == case_id
     assert data["owner_id"] == 1
     assert data["bug_type"] == "代码错误"
@@ -166,19 +173,18 @@ def test_failed_test_case_execution_creates_bug_without_fix_iteration(client: Te
 
     detail = client.get(f"/api/v1/iterations/{iteration_id}/detail")
     assert detail.status_code == 200
-    assert all(item["id"] != data["id"] for item in detail.json()["bugs"])
+    assert any(item["id"] == data["id"] for item in detail.json()["bugs"])
 
-    confirmed = client.post(
-        f"/api/v1/bugs/{data['id']}/start-fixing",
-        json={"iteration_id": iteration_id, "remark": "confirm fix iteration"},
+    updated = client.patch(
+        f"/api/v1/bugs/{data['id']}",
+        json={"iteration_id": next_iteration_id},
     )
-    assert confirmed.status_code == 200
-    assert confirmed.json()["status"] == "fixing"
-    assert confirmed.json()["iteration_id"] == iteration_id
+    assert updated.status_code == 200
+    assert updated.json()["iteration_id"] == next_iteration_id
 
-    detail_after_confirm = client.get(f"/api/v1/iterations/{iteration_id}/detail")
-    assert detail_after_confirm.status_code == 200
-    assert any(item["id"] == data["id"] for item in detail_after_confirm.json()["bugs"])
+    detail_after_update = client.get(f"/api/v1/iterations/{next_iteration_id}/detail")
+    assert detail_after_update.status_code == 200
+    assert any(item["id"] == data["id"] for item in detail_after_update.json()["bugs"])
 
 
 def test_passed_test_case_execution_cannot_create_bug(client: TestClient):

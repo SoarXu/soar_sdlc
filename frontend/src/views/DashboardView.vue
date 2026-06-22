@@ -77,15 +77,14 @@
     </div>
 
     <div v-else-if="displayMode === 'stats'" v-loading="loading" class="workbench-stats">
-      <el-table :data="filteredIterations" border stripe>
-        <el-table-column prop="name" label="迭代" min-width="180" />
-        <el-table-column label="状态" width="110"><template #default="{ row }">{{ iterationStatusLabel(row.status) }}</template></el-table-column>
-        <el-table-column label="阶段" width="110"><template #default="{ row }">{{ phaseLabel(row.lifecycle_phase) }}</template></el-table-column>
-        <el-table-column label="需求" width="90"><template #default="{ row }">{{ row.requirements.length }}</template></el-table-column>
-        <el-table-column label="任务" width="90"><template #default="{ row }">{{ row.tasks.length }}</template></el-table-column>
-        <el-table-column label="用例" width="90"><template #default="{ row }">{{ row.test_cases.length }}</template></el-table-column>
-        <el-table-column label="Bug" width="90"><template #default="{ row }">{{ row.bugs.length }}</template></el-table-column>
-        <el-table-column label="合计" width="90"><template #default="{ row }">{{ boardTotal(row) }}</template></el-table-column>
+      <el-table :data="projectStatsRows" border stripe>
+        <el-table-column prop="project_name" label="项目" min-width="180" />
+        <el-table-column prop="iteration_total" label="迭代数" width="100" />
+        <el-table-column prop="requirements" label="需求" width="90" />
+        <el-table-column prop="tasks" label="任务" width="90" />
+        <el-table-column prop="test_cases" label="用例" width="90" />
+        <el-table-column prop="bugs" label="Bug" width="90" />
+        <el-table-column prop="total" label="合计" width="90" />
       </el-table>
     </div>
 
@@ -438,6 +437,16 @@ const boardColumns = computed(() => {
       }
     })
 })
+
+const projectStatsRows = computed(() => boardColumns.value.map((column) => ({
+  project_name: column.title,
+  iteration_total: column.iterations.length,
+  requirements: column.iterations.reduce((sum, iteration) => sum + (iteration.requirements?.length || 0), 0),
+  tasks: column.iterations.reduce((sum, iteration) => sum + (iteration.tasks?.length || 0), 0),
+  test_cases: column.iterations.reduce((sum, iteration) => sum + (iteration.test_cases?.length || 0), 0),
+  bugs: column.iterations.reduce((sum, iteration) => sum + (iteration.bugs?.length || 0), 0),
+  total: column.total
+})))
 
 const emptyDescription = computed(() => {
   if (viewMode.value === 'mine' && !currentUserId.value) {

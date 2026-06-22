@@ -225,6 +225,63 @@ def test_project_can_create_child_project_and_inherit_program(client: TestClient
     assert cycle.json()["detail"] == "项目不能选择下级项目作为上级项目"
 
 
+def test_project_delete_cascades_project_tree_work_items_and_iterations(client: TestClient):
+    parent = client.post("/api/v1/projects", json={"name": f"级联删除父项目-{uuid4().hex[:8]}"}).json()
+    child = client.post(
+        "/api/v1/projects",
+        json={"name": f"级联删除子项目-{uuid4().hex[:8]}", "parent_id": parent["id"]},
+    ).json()
+    iteration = client.post(
+        "/api/v1/iterations",
+        json={"project_ids": [parent["id"], child["id"]], "name": f"级联删除迭代-{uuid4().hex[:8]}"},
+    ).json()
+    parent_requirement = client.post(
+        "/api/v1/requirements",
+        json={"project_id": parent["id"], "iteration_id": iteration["id"], "title": "父项目需求随项目删除"},
+    ).json()
+    child_requirement = client.post(
+        "/api/v1/requirements",
+        json={"project_id": child["id"], "iteration_id": iteration["id"], "title": "子项目需求随项目删除"},
+    ).json()
+    task = client.post(
+        "/api/v1/tasks",
+        json={"project_id": child["id"], "requirement_id": child_requirement["id"], "title": "子项目任务随项目删除"},
+    ).json()
+    case = client.post(
+        "/api/v1/test-cases",
+        json={"project_id": child["id"], "requirement_id": child_requirement["id"], "title": "子项目用例随项目删除"},
+    ).json()
+    test_run = client.post(
+        "/api/v1/test-runs",
+        json={"project_id": child["id"], "iteration_id": iteration["id"], "name": "子项目测试单随项目删除"},
+    ).json()
+    bug = client.post(
+        "/api/v1/bugs",
+        json={
+            "project_id": child["id"],
+            "iteration_id": iteration["id"],
+            "requirement_id": child_requirement["id"],
+            "task_id": task["id"],
+            "test_case_id": case["id"],
+            "test_run_id": test_run["id"],
+            "title": "子项目Bug随项目删除",
+        },
+    ).json()
+
+    deleted = client.delete(f"/api/v1/projects/{parent['id']}")
+
+    assert deleted.status_code == 204
+    assert client.get(f"/api/v1/projects/{parent['id']}").status_code == 404
+    assert client.get(f"/api/v1/projects/{child['id']}").status_code == 404
+    assert client.get(f"/api/v1/requirements/{parent_requirement['id']}").status_code == 404
+    assert client.get(f"/api/v1/requirements/{child_requirement['id']}").status_code == 404
+    assert client.get(f"/api/v1/tasks/{task['id']}").status_code == 404
+    assert client.get(f"/api/v1/test-cases/{case['id']}").status_code == 404
+    assert client.get(f"/api/v1/bugs/{bug['id']}").status_code == 404
+    assert iteration["id"] not in {item["id"] for item in client.get("/api/v1/iterations").json()}
+    assert test_run["id"] not in {item["id"] for item in client.get("/api/v1/test-runs").json()}
+
+
 def test_open_project_move_only_changes_parent(client: TestClient):
     parent = client.post("/api/v1/projects", json={"name": f"父项目-{uuid4().hex[:8]}"}).json()
     project = client.post("/api/v1/projects", json={"name": f"移动项目-{uuid4().hex[:8]}"}).json()

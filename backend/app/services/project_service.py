@@ -4,10 +4,14 @@ from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 
 from app.models.audit_log import AuditLog
+from app.models.bug import Bug
+from app.models.iteration import Iteration, IterationProject
 from app.models.program import Program
 from app.models.project import Project
 from app.models.requirement import Requirement
 from app.models.task import Task
+from app.models.test_case import TestCase
+from app.models.test_run import TestRun
 from app.services.status_operation_service import create_status_operation, list_status_operations
 from app.services.requirement_service import close_requirement_record
 from app.services.workflow_engine import execute_workflows
@@ -116,7 +120,11 @@ def delete_project(db: Session, project_id: int) -> None:
     project = _get_active_project(db, project_id)
     now = datetime.now()
 
-    descendant_ids = _collect_descendant_project_ids(db, project_id)
+    project_ids = {project_id}
+    project_ids.update(_collect_descendant_project_ids(db, project_id))
+    _cascade_delete_project_work_items(db, project_ids, now)
+
+    descendant_ids = project_ids - {project_id}
     projects_to_delete = (
         db.query(Project)
         .filter(Project.id.in_(descendant_ids), Project.deleted == 0)
@@ -328,3 +336,41 @@ def _collect_descendant_project_ids(db: Session, project_id: int) -> set[int]:
         result.add(child.id)
         result.update(_collect_descendant_project_ids(db, child.id))
     return result
+
+
+def _cascade_delete_project_work_items(db: Session, project_ids: set[int], deleted_at: datetime) -> None:
+    _soft_delete_by_project_ids(db, Requirement, project_ids, deleted_at)
+    _soft_delete_by_project_ids(db, Task, project_ids, deleted_at)
+    _soft_delete_by_project_ids(db, TestCase, project_ids, deleted_at)
+    _soft_delete_by_project_ids(db, Bug, project_ids, deleted_at)
+    _soft_delete_by_project_ids(db, TestRun, project_ids, deleted_at)
+    _delete_iteration_project_scope(db, project_ids, deleted_at)
+
+
+def _soft_delete_by_project_ids(db: Session, model, project_ids: set[int], deleted_at: datetime) -> None:
+    items = db.query(model).filter(model.project_id.in_(project_ids), model.deleted == 0).all()
+    for item in items:
+        item.deleted = 1
+        item.delete_time = deleted_at
+
+
+def _delete_iteration_project_scope(db: Session, project_ids: set[int], deleted_at: datetime) -> None:
+    affected_iteration_ids = {
+        row.iteration_id
+        for row in db.query(IterationProject).filter(IterationProject.project_id.in_(project_ids)).all()
+    }
+    if not affected_iteration_ids:
+        return
+    db.query(IterationProject).filter(IterationProject.project_id.in_(project_ids)).delete(synchronize_session=False)
+    for iteration_id in affected_iteration_ids:
+        remaining_scope_exists = (
+            db.query(IterationProject)
+            .filter(IterationProject.iteration_id == iteration_id)
+            .first()
+            is not None
+        )
+        if not remaining_scope_exists:
+            iteration = db.query(Iteration).filter(Iteration.id == iteration_id, Iteration.deleted == 0).first()
+            if iteration:
+                iteration.deleted = 1
+                iteration.delete_time = deleted_at

@@ -70,7 +70,7 @@
               <el-button link type="primary" @click="openProjectEdit(row.id)">编辑</el-button>
               <el-button v-if="row.status === 'planning' || row.status === 'paused'" link type="success" @click="openStatusDialog(row, 'project', 'start')">启动</el-button>
               <el-button v-if="row.status === 'active'" link type="warning" @click="openStatusDialog(row, 'project', 'suspend')">挂起</el-button>
-              <el-button v-if="row.status === 'active' || row.status === 'paused' || row.status === 'maintenance'" link type="danger" @click="openStatusDialog(row, 'project', 'close')">关闭</el-button>
+              <el-button v-if="row.status === 'active' || row.status === 'paused'" link type="danger" @click="openStatusDialog(row, 'project', 'close')">关闭</el-button>
               <el-button v-if="row.status === 'closed'" link type="success" @click="openStatusDialog(row, 'project', 'activate')">激活</el-button>
               <el-button link type="success" @click="openSubProjectCreate(row)">新增项目</el-button>
             </template>
@@ -117,27 +117,6 @@
       <template #footer>
         <el-button @click="dialogVisible = false">取消</el-button>
         <el-button type="primary" :loading="saving" @click="submitProgram">保存</el-button>
-      </template>
-    </el-dialog>
-
-    <el-dialog v-model="maintenanceDialogVisible" title="确认转运维" width="560px">
-      <el-alert
-        type="warning"
-        show-icon
-        :closable="false"
-        title="该项目已关闭，移动到其他项目下后将进入运维阶段，后续新增需求默认标记为运维期。"
-      />
-      <el-form label-position="top" class="dialog-form">
-        <el-form-item label="转运维时间" required>
-          <el-date-picker v-model="maintenanceForm.effective_time" type="datetime" value-format="YYYY-MM-DDTHH:mm:ss" />
-        </el-form-item>
-        <el-form-item label="备注">
-          <el-input v-model="maintenanceForm.remark" type="textarea" :rows="4" placeholder="请输入本次转运维备注" />
-        </el-form-item>
-      </el-form>
-      <template #footer>
-        <el-button @click="maintenanceDialogVisible = false">取消</el-button>
-        <el-button type="primary" :loading="saving" @click="confirmMaintenanceMove">确认转运维</el-button>
       </template>
     </el-dialog>
 
@@ -254,7 +233,6 @@ const loading = ref(false)
 const saving = ref(false)
 const dialogVisible = ref(false)
 const projectDialogVisible = ref(false)
-const maintenanceDialogVisible = ref(false)
 const statusDialogVisible = ref(false)
 const editingId = ref(null)
 const projectEditingId = ref(null)
@@ -270,15 +248,13 @@ const projectStatusOptions = [
   { label: '规划中', value: 'planning' },
   { label: '进行中', value: 'active' },
   { label: '已挂起', value: 'paused' },
-  { label: '运维中', value: 'maintenance' },
   { label: '已关闭', value: 'closed' }
 ]
 const statusActionOptions = {
   start: '启动',
   suspend: '挂起',
   close: '关闭',
-  activate: '激活',
-  move_to_maintenance: '转运维'
+  activate: '激活'
 }
 const form = reactive({
   parent_id: null,
@@ -302,7 +278,6 @@ const projectForm = reactive({
   description: ''
 })
 const statusForm = reactive({ effective_time: '', remark: '' })
-const maintenanceForm = reactive({ effective_time: '', remark: '', payload: null })
 
 const dialogTitle = computed(() => {
   if (editingId.value) return '编辑项目集'
@@ -568,43 +543,11 @@ async function submitProject() {
       end_date: projectForm.is_long_term ? null : projectForm.end_date
     }
     delete payload.status
-    if (needsProjectMaintenanceConfirm(payload)) {
-      saving.value = false
-      Object.assign(maintenanceForm, { effective_time: currentDateTimeValue(), remark: '', payload })
-      maintenanceDialogVisible.value = true
-      return
-    }
     if (projectEditingId.value) {
       await updateProject(projectEditingId.value, payload)
     } else {
       await createProject(payload)
     }
-    projectDialogVisible.value = false
-    await loadData()
-  } finally {
-    saving.value = false
-  }
-}
-
-function needsProjectMaintenanceConfirm(payload) {
-  return Boolean(
-    projectEditingId.value
-    && projectEditingOriginal.value?.status === 'closed'
-    && payload.parent_id
-    && payload.parent_id !== projectEditingOriginal.value.parent_id
-  )
-}
-
-async function confirmMaintenanceMove() {
-  if (!maintenanceForm.effective_time) return ElMessage.warning('请选择转运维时间')
-  saving.value = true
-  try {
-    await updateProject(projectEditingId.value, {
-      ...maintenanceForm.payload,
-      maintenance_start_time: maintenanceForm.effective_time,
-      maintenance_remark: maintenanceForm.remark
-    })
-    maintenanceDialogVisible.value = false
     projectDialogVisible.value = false
     await loadData()
   } finally {

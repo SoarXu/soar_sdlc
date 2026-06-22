@@ -1,7 +1,6 @@
 from sqlalchemy.orm import Session
 
 from app.models.iteration import Iteration
-from app.models.project import Project
 from app.models.requirement import Requirement
 from app.models.test_case import TestCase
 
@@ -14,10 +13,7 @@ def normalize_lifecycle_phase(value: str | None) -> str:
 
 
 def project_lifecycle_phase(db: Session, project_id: int | None) -> str:
-    if not project_id:
-        return DEVELOPMENT_PHASE
-    project = db.query(Project).filter(Project.id == project_id, Project.deleted == 0).first()
-    return normalize_lifecycle_phase(project.lifecycle_phase if project else None)
+    return DEVELOPMENT_PHASE
 
 
 def requirement_lifecycle_phase(db: Session, requirement_id: int | None) -> str | None:

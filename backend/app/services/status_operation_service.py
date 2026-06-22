@@ -12,7 +12,6 @@ ACTION_LABELS = {
     "suspend": "挂起",
     "close": "关闭",
     "activate": "激活",
-    "move_to_maintenance": "转运维",
 }
 
 

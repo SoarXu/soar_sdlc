@@ -116,7 +116,7 @@
               <header class="iteration-board-head">
                 <div>
                   <h2>{{ iteration.name }}</h2>
-                  <span>{{ iterationStatusLabel(iteration.status) }} · {{ phaseLabel(iteration.lifecycle_phase) }} · {{ iteration.start_date || '-' }} 至 {{ iteration.end_date || '-' }}</span>
+                  <span>{{ iterationStatusLabel(iteration.status) }} · {{ iteration.start_date || '-' }} 至 {{ iteration.end_date || '-' }}</span>
                   <div class="iteration-project-scope">
                     <span>关联项目</span>
                     <el-tag v-for="project in iteration.projects || []" :key="project.id" size="small" effect="plain">
@@ -191,7 +191,6 @@
           <el-descriptions-item label="迭代">{{ selectedWorkItem.iteration_name || '-' }}</el-descriptions-item>
           <el-descriptions-item label="负责人">{{ ownerName(selectedWorkItem.owner_id) }}</el-descriptions-item>
           <el-descriptions-item label="状态">{{ itemStatusLabel(selectedWorkItem) }}</el-descriptions-item>
-          <el-descriptions-item label="阶段">{{ phaseLabel(selectedWorkItem.lifecycle_phase) }}</el-descriptions-item>
         </el-descriptions>
         <div class="workbench-drawer-actions">
           <router-link :to="detailLink(selectedWorkItem)">
@@ -526,8 +525,7 @@ function decorateListItem(item, iteration) {
   return {
     ...item,
     iteration_name: iteration.name,
-    iteration_status: iteration.status,
-    iteration_phase: iteration.lifecycle_phase
+    iteration_status: iteration.status
   }
 }
 function sortIterationsForBoard(items) {
@@ -574,7 +572,6 @@ function ownerName(id) { return owners.value.find((item) => item.id === id)?.ful
 function typeLabel(value) { return itemTypes.find((item) => item.value === value)?.label || value }
 function typeTag(value) { return { requirement: 'primary', task: 'success', test_case: 'warning', bug: 'danger' }[value] || 'info' }
 function iterationStatusLabel(value) { return statusOptions.iteration[value] || value || '-' }
-function phaseLabel(value) { return value === 'maintenance' ? '运维阶段' : '开发阶段' }
 function itemStatusLabel(item) { return item.object_type === 'test_case' ? executionResultLabel(item.last_execute_result) : (statusOptions[item.object_type]?.[item.status] || item.status || '-') }
 function executionResultLabel(value) { return executionResultOptions.find((item) => item.value === value)?.label || value || '未执行' }
 function canCreateBugFromCase(item) { return ['failed', 'blocked'].includes(item.last_execute_result) }

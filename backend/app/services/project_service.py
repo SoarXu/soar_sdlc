@@ -19,11 +19,6 @@ from app.views.project_view import ProjectCreate, ProjectUpdate
 from app.views.status_operation_view import StatusOperationCreate
 
 
-MAINTENANCE_STATUS = "maintenance"
-DEVELOPMENT_PHASE = "development"
-MAINTENANCE_PHASE = "maintenance"
-
-
 def list_projects(db: Session) -> list[Project]:
     return db.query(Project).filter(Project.deleted == 0).order_by(Project.id.asc()).all()
 
@@ -34,8 +29,6 @@ def get_project(db: Session, project_id: int) -> Project:
 
 def create_project(db: Session, payload: ProjectCreate) -> Project:
     data = payload.model_dump()
-    data["lifecycle_phase"] = DEVELOPMENT_PHASE
-    data["maintenance_start_time"] = None
     parent = None
     if data.get("parent_id"):
         parent = _get_active_project(db, data["parent_id"])
@@ -54,17 +47,11 @@ def create_project(db: Session, payload: ProjectCreate) -> Project:
 def update_project(db: Session, project_id: int, payload: ProjectUpdate) -> Project:
     project = _get_active_project(db, project_id)
     data = payload.model_dump(exclude_unset=True)
-    maintenance_remark = data.pop("maintenance_remark", None)
     data.pop("lifecycle_phase", None)
+    data.pop("maintenance_start_time", None)
+    data.pop("maintenance_remark", None)
     if data.get("parent_id") == project_id:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="项目不能选择自身作为上级项目")
-    old_parent_id = project.parent_id
-    should_move_to_maintenance = (
-        "parent_id" in data
-        and data.get("parent_id") is not None
-        and data.get("parent_id") != old_parent_id
-        and project.status == "closed"
-    )
     if data.get("parent_id"):
         parent = _get_active_project(db, data["parent_id"])
         if _is_project_descendant_of(db, parent, project_id):
@@ -72,7 +59,6 @@ def update_project(db: Session, project_id: int, payload: ProjectUpdate) -> Proj
     if data.get("is_long_term"):
         data["end_date"] = None
     data.pop("status", None)
-    maintenance_start_time = data.pop("maintenance_start_time", None)
     before_data, after_data = _project_change_data(project, data)
     for field, value in data.items():
         setattr(project, field, value)
@@ -85,21 +71,6 @@ def update_project(db: Session, project_id: int, payload: ProjectUpdate) -> Proj
                 before_data=before_data,
                 after_data=after_data,
             )
-        )
-    if should_move_to_maintenance:
-        effective_time = maintenance_start_time or datetime.now()
-        from_status = project.status
-        project.status = MAINTENANCE_STATUS
-        project.lifecycle_phase = MAINTENANCE_PHASE
-        project.maintenance_start_time = effective_time
-        create_status_operation(
-            db,
-            object_type="project",
-            object_id=project.id,
-            action="move_to_maintenance",
-            from_status=from_status,
-            to_status=project.status,
-            payload=StatusOperationCreate(effective_time=effective_time, remark=maintenance_remark),
         )
     db.commit()
     db.refresh(project)
@@ -183,7 +154,7 @@ def suspend_project(db: Session, project_id: int, payload: StatusOperationCreate
 
 def close_project(db: Session, project_id: int, payload: StatusOperationCreate | None = None) -> Project:
     project = _get_active_project(db, project_id)
-    _require_status(project.status, {"active", "paused", MAINTENANCE_STATUS}, "只有进行中、已挂起或运维中的项目可以关闭")
+    _require_status(project.status, {"active", "paused"}, "只有进行中或已挂起的项目可以关闭")
     from_status = project.status
     _require_effective_time(payload, "请选择实际完成日期")
     workflow_result = execute_workflows(
@@ -240,8 +211,6 @@ def activate_project(db: Session, project_id: int, payload: StatusOperationCreat
     from_status = project.status
     project.status = "active"
     project.actual_end_date = None
-    project.lifecycle_phase = DEVELOPMENT_PHASE
-    project.maintenance_start_time = None
     _activate_program_tree(db, project.program_id)
     create_status_operation(
         db,

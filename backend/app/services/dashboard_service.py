@@ -27,14 +27,10 @@ def get_dashboard_summary(db: Session) -> DashboardSummary:
 def get_workbench(db: Session) -> WorkbenchResponse:
     iterations = db.query(Iteration).filter(Iteration.deleted == 0).order_by(Iteration.id.desc()).all()
     iteration_ids = [item.id for item in iterations]
-    iteration_phases = {item.id: item.lifecycle_phase for item in iterations}
     projects = {item.id: item for item in db.query(Project).filter(Project.deleted == 0).all()}
     iteration_projects = _iteration_projects(db, iteration_ids, projects)
     requirements = _items_by_iteration(
-        [
-            item for item in db.query(Requirement).filter(Requirement.deleted == 0, Requirement.iteration_id.in_(iteration_ids)).all()
-            if _phase_matches(item, iteration_phases)
-        ],
+        db.query(Requirement).filter(Requirement.deleted == 0, Requirement.iteration_id.in_(iteration_ids)).all(),
         lambda item: _requirement_item(item, projects),
     )
     requirement_iteration_ids = {
@@ -44,42 +40,27 @@ def get_workbench(db: Session) -> WorkbenchResponse:
         if item.requirement_id
     }
     tasks = _items_by_iteration(
-        [
-            item for item in db.query(Task).filter(Task.deleted == 0, Task.iteration_id.in_(iteration_ids)).all()
-            if _phase_matches(item, iteration_phases)
-        ],
+        db.query(Task).filter(Task.deleted == 0, Task.iteration_id.in_(iteration_ids)).all(),
         lambda item: _task_item(item, projects),
     )
     _merge_requirement_linked_items(
         tasks,
-        [
-            item for item in db.query(Task).filter(Task.deleted == 0, Task.requirement_id.in_(requirement_iteration_ids)).all()
-            if _linked_item_phase_matches(item, requirement_iteration_ids, iteration_phases)
-        ],
+        db.query(Task).filter(Task.deleted == 0, Task.requirement_id.in_(requirement_iteration_ids)).all(),
         requirement_iteration_ids,
         lambda item, iteration_id: _task_item(item, projects, iteration_id),
     )
     test_cases = _items_by_iteration(
-        [
-            item for item in db.query(TestCase).filter(TestCase.deleted == 0, TestCase.iteration_id.in_(iteration_ids)).all()
-            if _phase_matches(item, iteration_phases)
-        ],
+        db.query(TestCase).filter(TestCase.deleted == 0, TestCase.iteration_id.in_(iteration_ids)).all(),
         lambda item: _test_case_item(item, projects),
     )
     _merge_requirement_linked_items(
         test_cases,
-        [
-            item for item in db.query(TestCase).filter(TestCase.deleted == 0, TestCase.requirement_id.in_(requirement_iteration_ids)).all()
-            if _linked_item_phase_matches(item, requirement_iteration_ids, iteration_phases)
-        ],
+        db.query(TestCase).filter(TestCase.deleted == 0, TestCase.requirement_id.in_(requirement_iteration_ids)).all(),
         requirement_iteration_ids,
         lambda item, iteration_id: _test_case_item(item, projects, iteration_id),
     )
     bugs = _items_by_iteration(
-        [
-            item for item in db.query(Bug).filter(Bug.deleted == 0, Bug.iteration_id.in_(iteration_ids)).all()
-            if _phase_matches(item, iteration_phases)
-        ],
+        db.query(Bug).filter(Bug.deleted == 0, Bug.iteration_id.in_(iteration_ids)).all(),
         lambda item: _bug_item(item, projects),
     )
 
@@ -182,15 +163,6 @@ def _merge_requirement_linked_items(result: dict[int, list[WorkbenchItem]], item
         existing.add((workbench_item.object_type, workbench_item.id))
     for values in result.values():
         values.sort(key=lambda item: item.id, reverse=True)
-
-
-def _phase_matches(item, iteration_phases: dict[int, str]) -> bool:
-    return item.iteration_id in iteration_phases and (item.lifecycle_phase or "development") == iteration_phases[item.iteration_id]
-
-
-def _linked_item_phase_matches(item, requirement_iteration_ids: dict[int, int], iteration_phases: dict[int, str]) -> bool:
-    iteration_id = requirement_iteration_ids.get(item.requirement_id)
-    return iteration_id in iteration_phases and (item.lifecycle_phase or "development") == iteration_phases[iteration_id]
 
 
 def _iteration_projects(db: Session, iteration_ids: list[int], projects: dict[int, Project]) -> dict[int, list[dict]]:

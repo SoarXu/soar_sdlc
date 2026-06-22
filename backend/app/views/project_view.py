@@ -14,8 +14,6 @@ class ProjectBase(BaseModel):
     actual_end_date: date | None = None
     is_long_term: bool = False
     status: str = "planning"
-    lifecycle_phase: str = "development"
-    maintenance_start_time: datetime | None = None
     description: str | None = None
 
 
@@ -33,9 +31,6 @@ class ProjectUpdate(BaseModel):
     actual_start_date: date | None = None
     actual_end_date: date | None = None
     is_long_term: bool | None = None
-    lifecycle_phase: str | None = None
-    maintenance_start_time: datetime | None = None
-    maintenance_remark: str | None = None
     description: str | None = None
     workflow_config_id: int | None = None
     updater_id: int | None = None

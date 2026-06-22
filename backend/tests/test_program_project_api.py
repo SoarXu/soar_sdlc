@@ -292,20 +292,18 @@ def test_open_project_move_only_changes_parent(client: TestClient):
     assert moved.status_code == 200
     assert moved.json()["parent_id"] == parent["id"]
     assert moved.json()["status"] == "active"
-    assert moved.json()["lifecycle_phase"] == "development"
-    assert moved.json()["maintenance_start_time"] is None
 
 
-def test_closed_project_move_enters_maintenance(client: TestClient):
-    parent = client.post("/api/v1/projects", json={"name": f"运维父项目-{uuid4().hex[:8]}"}).json()
-    project = client.post("/api/v1/projects", json={"name": f"转运维项目-{uuid4().hex[:8]}"}).json()
+def test_closed_project_move_only_changes_parent_after_phase_removed(client: TestClient):
+    parent = client.post("/api/v1/projects", json={"name": f"最终规则父项目-{uuid4().hex[:8]}"}).json()
+    project = client.post("/api/v1/projects", json={"name": f"最终规则子项目-{uuid4().hex[:8]}"}).json()
     development_requirement = client.post(
         "/api/v1/requirements",
-        json={"project_id": project["id"], "title": f"开发需求-{uuid4().hex[:8]}"},
+        json={"project_id": project["id"], "title": f"转移前需求-{uuid4().hex[:8]}"},
     ).json()
     development_task = client.post(
         "/api/v1/tasks",
-        json={"project_id": project["id"], "title": f"开发任务-{uuid4().hex[:8]}"},
+        json={"project_id": project["id"], "title": f"转移前任务-{uuid4().hex[:8]}"},
     ).json()
     client.post(f"/api/v1/projects/{project['id']}/start", json={"effective_time": "2026-06-01T09:00:00"})
     client.post(f"/api/v1/projects/{project['id']}/close", json={"effective_time": "2026-06-10T18:00:00"})
@@ -315,39 +313,20 @@ def test_closed_project_move_enters_maintenance(client: TestClient):
         json={
             "parent_id": parent["id"],
             "maintenance_start_time": "2026-06-11T09:30:00",
-            "maintenance_remark": "关闭后纳入运维项目管理",
+            "maintenance_remark": "legacy payload should be ignored",
         },
     )
 
     assert moved.status_code == 200
     assert moved.json()["parent_id"] == parent["id"]
-    assert moved.json()["status"] == "maintenance"
-    assert moved.json()["lifecycle_phase"] == "maintenance"
-    assert moved.json()["maintenance_start_time"] == "2026-06-11T09:30:00"
-    assert client.get(f"/api/v1/requirements/{development_requirement['id']}").json()["lifecycle_phase"] == "development"
-    assert client.get(f"/api/v1/tasks/{development_task['id']}").json()["lifecycle_phase"] == "development"
-
-    maintenance_requirement = client.post(
-        "/api/v1/requirements",
-        json={"project_id": project["id"], "title": f"运维需求-{uuid4().hex[:8]}"},
-    )
-    maintenance_task = client.post(
-        "/api/v1/tasks",
-        json={"project_id": project["id"], "title": f"运维任务-{uuid4().hex[:8]}"},
-    )
-    assert maintenance_requirement.status_code == 200
-    assert maintenance_task.status_code == 200
-    assert maintenance_requirement.json()["lifecycle_phase"] == "maintenance"
-    assert maintenance_task.json()["lifecycle_phase"] == "maintenance"
+    assert moved.json()["status"] == "closed"
+    assert "lifecycle_phase" not in moved.json()
+    assert "maintenance_start_time" not in moved.json()
+    assert client.get(f"/api/v1/requirements/{development_requirement['id']}").status_code == 200
+    assert client.get(f"/api/v1/tasks/{development_task['id']}").status_code == 200
 
     history = client.get(f"/api/v1/projects/{project['id']}/status-operations").json()
-    assert any(
-        item["action"] == "move_to_maintenance"
-        and item["from_status"] == "closed"
-        and item["to_status"] == "maintenance"
-        and item["remark"] == "关闭后纳入运维项目管理"
-        for item in history
-    )
+    assert all(item["action"] != "move_to_maintenance" for item in history)
 
 
 def test_dashboard_summary_reads_database_counts(client: TestClient):

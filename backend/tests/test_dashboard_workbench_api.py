@@ -153,7 +153,7 @@ def test_workbench_move_rejects_items_outside_target_iteration_project_scope(cli
     assert "项目范围" in moved.json()["detail"]
 
 
-def test_workbench_only_shows_items_matching_iteration_lifecycle_phase(client: TestClient):
+def test_workbench_shows_items_by_iteration_even_when_lifecycle_phase_differs(client: TestClient):
     project_id = _create_project(client, "Phase Project")
     iteration_id = _create_iteration(client, project_id, "Development Iteration")
     visible_requirement = client.post(
@@ -165,7 +165,7 @@ def test_workbench_only_shows_items_matching_iteration_lifecycle_phase(client: T
             "lifecycle_phase": "development",
         },
     ).json()
-    hidden_requirement = client.post(
+    different_phase_requirement = client.post(
         "/api/v1/requirements",
         json={
             "project_id": project_id,
@@ -178,7 +178,7 @@ def test_workbench_only_shows_items_matching_iteration_lifecycle_phase(client: T
     try:
         from sqlalchemy import text
 
-        db.execute(text("update requirements set lifecycle_phase = 'maintenance' where id = :id"), {"id": hidden_requirement["id"]})
+        db.execute(text("update requirements set lifecycle_phase = 'maintenance' where id = :id"), {"id": different_phase_requirement["id"]})
         db.commit()
     finally:
         db.close()
@@ -189,7 +189,36 @@ def test_workbench_only_shows_items_matching_iteration_lifecycle_phase(client: T
     board = next(item for item in response.json()["iterations"] if item["id"] == iteration_id)
     requirement_ids = {item["id"] for item in board["requirements"]}
     assert visible_requirement["id"] in requirement_ids
-    assert hidden_requirement["id"] not in requirement_ids
+    assert different_phase_requirement["id"] in requirement_ids
+
+
+def test_workbench_uses_iteration_membership_not_lifecycle_phase(client: TestClient):
+    project_id = _create_project(client, "Iteration Membership Project")
+    iteration_id = _create_iteration(client, project_id, "Iteration Membership Board")
+    requirement = client.post(
+        "/api/v1/requirements",
+        json={
+            "project_id": project_id,
+            "iteration_id": iteration_id,
+            "title": "Requirement visible by iteration membership",
+            "lifecycle_phase": "development",
+        },
+    ).json()
+    db = SessionLocal()
+    try:
+        from sqlalchemy import text
+
+        db.execute(text("update iterations set lifecycle_phase = 'maintenance' where id = :id"), {"id": iteration_id})
+        db.execute(text("update requirements set lifecycle_phase = 'development' where id = :id"), {"id": requirement["id"]})
+        db.commit()
+    finally:
+        db.close()
+
+    response = client.get("/api/v1/dashboard/workbench")
+
+    assert response.status_code == 200
+    board = next(item for item in response.json()["iterations"] if item["id"] == iteration_id)
+    assert requirement["id"] in {item["id"] for item in board["requirements"]}
 
 
 def test_requirement_and_task_can_be_completed_with_status_history(client: TestClient):

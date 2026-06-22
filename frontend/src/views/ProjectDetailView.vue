@@ -24,10 +24,6 @@
         {{ tab.label }}
       </button>
     </div>
-    <div class="project-phase-switch">
-      <el-segmented v-model="activeLifecyclePhase" :options="lifecyclePhaseOptions" />
-    </div>
-
     <el-card v-loading="loading" shadow="never" class="project-detail-card">
       <template v-if="activeTab === 'overview'">
         <div class="project-overview">
@@ -414,8 +410,6 @@ const projectId = computed(() => Number(route.params.id))
 const loading = ref(false)
 const saving = ref(false)
 const activeTab = ref(normalizeProjectTab(route.query.tab))
-const activeLifecyclePhase = ref('development')
-const lifecyclePhaseInitialized = ref(false)
 const testTab = ref('cases')
 const project = ref({})
 const programs = ref([])
@@ -453,15 +447,10 @@ const tabs = [
   { key: 'members', label: '成员' },
   { key: 'settings', label: '配置' }
 ]
-const lifecyclePhaseOptions = [
-  { label: '开发阶段', value: 'development' },
-  { label: '运维阶段', value: 'maintenance' }
-]
 const projectStatusOptions = [
   { label: '规划中', value: 'planning' },
   { label: '进行中', value: 'active' },
   { label: '已挂起', value: 'paused' },
-  { label: '运维中', value: 'maintenance' },
   { label: '已关闭', value: 'closed' }
 ]
 const iterationStatusOptions = [
@@ -553,14 +542,13 @@ const bugResolutionOptions = [
   { label: '不予解决', value: '不予解决' }
 ]
 
-const matchesLifecyclePhase = (item) => (item.lifecycle_phase || 'development') === activeLifecyclePhase.value
-const projectIterations = computed(() => iterations.value.filter((item) => (item.project_ids || []).includes(projectId.value) && matchesLifecyclePhase(item)))
-const projectRequirements = computed(() => requirements.value.filter((item) => item.project_id === projectId.value && matchesLifecyclePhase(item)))
-const projectTasks = computed(() => tasks.value.filter((item) => item.project_id === projectId.value && matchesLifecyclePhase(item)))
+const projectIterations = computed(() => iterations.value.filter((item) => (item.project_ids || []).includes(projectId.value)))
+const projectRequirements = computed(() => requirements.value.filter((item) => item.project_id === projectId.value))
+const projectTasks = computed(() => tasks.value.filter((item) => item.project_id === projectId.value))
 const projectClosed = computed(() => project.value.status === 'closed')
-const projectTestCases = computed(() => testCases.value.filter((item) => item.project_id === projectId.value && matchesLifecyclePhase(item)))
-const projectTestRuns = computed(() => testRuns.value.filter((item) => item.project_id === projectId.value && matchesLifecyclePhase(item)))
-const projectBugs = computed(() => bugs.value.filter((item) => item.project_id === projectId.value && matchesLifecyclePhase(item)))
+const projectTestCases = computed(() => testCases.value.filter((item) => item.project_id === projectId.value))
+const projectTestRuns = computed(() => testRuns.value.filter((item) => item.project_id === projectId.value))
+const projectBugs = computed(() => bugs.value.filter((item) => item.project_id === projectId.value))
 const activeTabLabel = computed(() => tabs.find((tab) => tab.key === activeTab.value)?.label || '')
 const projectEndDateLabel = computed(() => project.value.is_long_term ? '长期' : project.value.end_date || '未设置结束')
 const metrics = computed(() => [
@@ -632,7 +620,7 @@ function reviewStatusLabel(value) { return optionLabel(reviewStatusOptions, valu
 function taskStatusLabel(value) { return optionLabel(taskStatusOptions, value) }
 function testRunStatusLabel(value) { return optionLabel(testRunStatusOptions, value) }
 function bugStatusLabel(value) { return optionLabel(bugStatusOptions, value) }
-function operationActionLabel(value) { return optionLabel([{ label: '启动', value: 'start' }, { label: '挂起', value: 'suspend' }, { label: '关闭', value: 'close' }, { label: '激活', value: 'activate' }, { label: '转运维', value: 'move_to_maintenance' }], value) }
+function operationActionLabel(value) { return optionLabel([{ label: '启动', value: 'start' }, { label: '挂起', value: 'suspend' }, { label: '关闭', value: 'close' }, { label: '激活', value: 'activate' }], value) }
 function canActivateRequirement(row) { return ['draft', 'closed'].includes(row.status) }
 function canActivateTask(row) { return ['todo', 'closed'].includes(row.status) }
 function apiErrorMessage(error, fallback) { return error?.response?.data?.detail || fallback }
@@ -752,10 +740,6 @@ async function loadData() {
       fetchProjectStatusOperations(projectId.value)
     ])
     project.value = projectRes.data
-    if (!lifecyclePhaseInitialized.value) {
-      activeLifecyclePhase.value = project.value.lifecycle_phase === 'maintenance' ? 'maintenance' : 'development'
-      lifecyclePhaseInitialized.value = true
-    }
     programs.value = programRes.data; users.value = userRes.data; iterations.value = iterationRes.data
     requirements.value = requirementRes.data; tasks.value = taskRes.data; testCases.value = caseRes.data; testRuns.value = runRes.data; bugs.value = bugRes.data
     projectAuditLogs.value = auditRes.data; projectStatusOperations.value = statusRes.data
@@ -823,7 +807,6 @@ async function removeBug(id) { await deleteBug(id); await loadData() }
 
 onMounted(loadData)
 watch(() => route.query.tab, (value) => { activeTab.value = normalizeProjectTab(value) })
-watch(() => projectId.value, () => { lifecyclePhaseInitialized.value = false })
 
 async function openNextCaseAfterExecution(currentId, rows) {
   const index = rows.findIndex((item) => item.id === currentId)

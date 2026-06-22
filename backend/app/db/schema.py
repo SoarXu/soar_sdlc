@@ -63,10 +63,6 @@ def ensure_runtime_schema(engine: Engine) -> None:
                    "ALTER TABLE projects ADD COLUMN actual_end_date DATE NULL COMMENT '实际结束日期' AFTER actual_start_date")
     _ensure_column(engine, "projects", "is_long_term",
                    "ALTER TABLE projects ADD COLUMN is_long_term TINYINT(1) NOT NULL DEFAULT 0 COMMENT '是否长期维护' AFTER actual_end_date")
-    _ensure_column(engine, "projects", "lifecycle_phase",
-                   "ALTER TABLE projects ADD COLUMN lifecycle_phase VARCHAR(32) NOT NULL DEFAULT 'development' COMMENT '生命周期阶段：development、maintenance' AFTER status")
-    _ensure_column(engine, "projects", "maintenance_start_time",
-                   "ALTER TABLE projects ADD COLUMN maintenance_start_time DATETIME NULL COMMENT '进入运维时间' AFTER lifecycle_phase")
     _ensure_column(engine, "projects", "deleted",
                    "ALTER TABLE projects ADD COLUMN deleted TINYINT(1) NOT NULL DEFAULT 0 COMMENT '是否删除 0否1是' AFTER delete_time")
 

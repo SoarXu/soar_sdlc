@@ -289,12 +289,15 @@ body {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  flex-wrap: wrap;
   gap: 12px;
   margin-bottom: 12px;
 }
 
 .project-tab-search {
-  width: clamp(180px, 24vw, 320px);
+  flex: 0 1 320px;
+  width: min(320px, 100%);
+  margin-right: auto;
 }
 
 .project-detail-page {
@@ -549,7 +552,10 @@ body {
 
 .project-tab-toolbar {
   display: flex;
-  justify-content: flex-end;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
   margin-bottom: 12px;
 }
 

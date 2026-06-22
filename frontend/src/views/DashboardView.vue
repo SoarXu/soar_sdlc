@@ -90,74 +90,85 @@
     </div>
 
     <div v-else v-loading="loading" class="workbench-board-wrap">
-      <el-empty v-if="!boardIterations.length" class="workbench-empty" description="当前筛选下暂无迭代" />
+      <el-empty v-if="!boardColumns.length" class="workbench-empty" description="当前筛选下暂无迭代" />
 
       <div v-else class="workbench-board">
-        <article v-for="iteration in boardIterations" :key="iteration.id" class="iteration-board">
-          <header class="iteration-board-head">
+        <section v-for="column in boardColumns" :key="column.key" class="workbench-project-column">
+          <header class="workbench-project-column-head">
             <div>
-              <h2>{{ iteration.name }}</h2>
-              <span>{{ iterationStatusLabel(iteration.status) }} · {{ phaseLabel(iteration.lifecycle_phase) }} · {{ iteration.start_date || '-' }} 至 {{ iteration.end_date || '-' }}</span>
-              <div class="iteration-project-scope">
-                <span>关联项目</span>
-                <el-tag v-for="project in iteration.projects || []" :key="project.id" size="small" effect="plain">
-                  {{ project.name }}
-                </el-tag>
-                <el-tag v-if="!(iteration.projects || []).length" size="small" type="info" effect="plain">未绑定项目</el-tag>
-              </div>
+              <h2>{{ column.title }}</h2>
+              <p>{{ column.iterations.length }} 个迭代</p>
             </div>
-            <div class="iteration-board-tools">
-              <el-tag>{{ boardTotal(iteration) }} 项</el-tag>
-              <el-button link type="primary" @click="toggleIteration(iteration.id)">
-                {{ isIterationExpanded(iteration.id) ? '收起' : '展开' }}
-              </el-button>
-            </div>
+            <el-tag>{{ column.total }} 项</el-tag>
           </header>
-
-          <div v-if="isIterationExpanded(iteration.id)" class="workbench-lanes">
-            <section v-for="group in visibleGroups(iteration)" :key="`${iteration.id}-${group.key}`" class="workbench-lane">
-              <header>
-                <span>{{ group.label }}</span>
-                <strong>{{ group.items.length }}</strong>
-              </header>
-              <VueDraggable
-                v-model="group.items"
-                class="workbench-card-list"
-                :group="{ name: group.key }"
-                item-key="drag_key"
-                ghost-class="workbench-card-ghost"
-                chosen-class="workbench-card-chosen"
-                @start="onDragStart"
-                @add="(event) => onDragAdd(event, group.key, iteration.id)"
-              >
-                <div v-for="item in visibleLaneItems(iteration.id, group.key, group.items)" :key="item.drag_key" class="workbench-card workbench-mini-card" :data-id="item.id">
-                  <div class="workbench-card-top">
-                    <el-tag size="small" :type="typeTag(item.object_type)">{{ typeLabel(item.object_type) }}</el-tag>
-                    <span class="workbench-status">{{ itemStatusLabel(item) }}</span>
-                  </div>
-                  <button class="workbench-title workbench-card-button" type="button" @click="openWorkItemDrawer(item, iteration)">{{ item.title }}</button>
-                  <div class="workbench-meta">
-                    <span class="owner-chip">负责人：{{ ownerName(item.owner_id) }}</span>
-                    <span>{{ item.project_name || '-' }}</span>
-                    <RequirementPriorityBadge v-if="item.priority || item.severity" :value="item.severity || item.priority" />
+          <div class="workbench-project-column-list">
+            <article v-for="iteration in column.iterations" :key="`${column.key}-${iteration.id}`" class="iteration-board">
+              <header class="iteration-board-head">
+                <div>
+                  <h2>{{ iteration.name }}</h2>
+                  <span>{{ iterationStatusLabel(iteration.status) }} · {{ phaseLabel(iteration.lifecycle_phase) }} · {{ iteration.start_date || '-' }} 至 {{ iteration.end_date || '-' }}</span>
+                  <div class="iteration-project-scope">
+                    <span>关联项目</span>
+                    <el-tag v-for="project in iteration.projects || []" :key="project.id" size="small" effect="plain">
+                      {{ project.name }}
+                    </el-tag>
+                    <el-tag v-if="!(iteration.projects || []).length" size="small" type="info" effect="plain">未绑定项目</el-tag>
                   </div>
                 </div>
-              </VueDraggable>
-              <el-button
-                v-if="hasHiddenLaneItems(iteration.id, group.key, group.items)"
-                class="workbench-more"
-                link
-                type="primary"
-                @click="showMoreLaneItems(iteration.id, group.key)"
-              >
-                显示更多 {{ hiddenLaneCount(iteration.id, group.key, group.items) }} 项
-              </el-button>
-            </section>
+                <div class="iteration-board-tools">
+                  <el-tag>{{ boardTotal(iteration) }} 项</el-tag>
+                  <el-button link type="primary" @click="toggleIteration(iteration.id)">
+                    {{ isIterationExpanded(iteration.id) ? '收起' : '展开' }}
+                  </el-button>
+                </div>
+              </header>
+
+              <div v-if="isIterationExpanded(iteration.id)" class="workbench-lanes">
+                <section v-for="group in visibleGroups(iteration)" :key="`${iteration.id}-${group.key}`" class="workbench-lane">
+                  <header>
+                    <span>{{ group.label }}</span>
+                    <strong>{{ group.items.length }}</strong>
+                  </header>
+                  <VueDraggable
+                    v-model="group.items"
+                    class="workbench-card-list"
+                    :group="{ name: group.key }"
+                    item-key="drag_key"
+                    ghost-class="workbench-card-ghost"
+                    chosen-class="workbench-card-chosen"
+                    @start="onDragStart"
+                    @add="(event) => onDragAdd(event, group.key, iteration.id)"
+                  >
+                    <div v-for="item in visibleLaneItems(iteration.id, group.key, group.items)" :key="item.drag_key" class="workbench-card workbench-mini-card" :data-id="item.id">
+                      <div class="workbench-card-top">
+                        <el-tag size="small" :type="typeTag(item.object_type)">{{ typeLabel(item.object_type) }}</el-tag>
+                        <span class="workbench-status">{{ itemStatusLabel(item) }}</span>
+                      </div>
+                      <button class="workbench-title workbench-card-button" type="button" @click="openWorkItemDrawer(item, iteration)">{{ item.title }}</button>
+                      <div class="workbench-meta">
+                        <span class="owner-chip">负责人：{{ ownerName(item.owner_id) }}</span>
+                        <span>{{ item.project_name || '-' }}</span>
+                        <RequirementPriorityBadge v-if="item.priority || item.severity" :value="item.severity || item.priority" />
+                      </div>
+                    </div>
+                  </VueDraggable>
+                  <el-button
+                    v-if="hasHiddenLaneItems(iteration.id, group.key, group.items)"
+                    class="workbench-more"
+                    link
+                    type="primary"
+                    @click="showMoreLaneItems(iteration.id, group.key)"
+                  >
+                    显示更多 {{ hiddenLaneCount(iteration.id, group.key, group.items) }} 项
+                  </el-button>
+                </section>
+              </div>
+              <button v-else class="iteration-collapsed-summary" type="button" @click="toggleIteration(iteration.id)">
+                展开查看 {{ boardTotal(iteration) }} 个工作项
+              </button>
+            </article>
           </div>
-          <button v-else class="iteration-collapsed-summary" type="button" @click="toggleIteration(iteration.id)">
-            展开查看 {{ boardTotal(iteration) }} 个工作项
-          </button>
-        </article>
+        </section>
       </div>
     </div>
 
@@ -395,7 +406,38 @@ const listSections = computed(() => [
   { key: 'bug', label: typeLabel('bug'), description: '按迭代汇总需要处理的 Bug', tagType: 'danger', items: flatWorkbenchItems.value.filter((item) => item.object_type === 'bug') }
 ].filter((section) => !typeFilter.value || section.key === typeFilter.value))
 
-const boardIterations = computed(() => sortIterationsForBoard(filteredIterations.value))
+const boardColumns = computed(() => {
+  const columns = new Map()
+  for (const iteration of filteredIterations.value) {
+    const projects = iteration.projects?.length ? iteration.projects : [{ id: 'unbound', name: '未绑定项目' }]
+    for (const project of projects) {
+      const key = `project-${project.id}`
+      if (!columns.has(key)) {
+        columns.set(key, {
+          key,
+          title: project.name,
+          projectId: project.id,
+          iterations: []
+        })
+      }
+      columns.get(key).iterations.push(iteration)
+    }
+  }
+  return [...columns.values()]
+    .sort((a, b) => {
+      if (a.projectId === 'unbound') return 1
+      if (b.projectId === 'unbound') return -1
+      return a.title.localeCompare(b.title, 'zh-Hans-CN')
+    })
+    .map((column) => {
+      const iterations = sortIterationsForBoard(column.iterations)
+      return {
+        ...column,
+        iterations,
+        total: iterations.reduce((sum, iteration) => sum + boardTotal(iteration), 0)
+      }
+    })
+})
 
 const emptyDescription = computed(() => {
   if (viewMode.value === 'mine' && !currentUserId.value) {

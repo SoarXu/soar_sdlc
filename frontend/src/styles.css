@@ -702,11 +702,46 @@ body {
 }
 
 .workbench-board {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(380px, 1fr));
+  display: flex;
   gap: 16px;
-  align-items: start;
+  align-items: flex-start;
+  overflow-x: auto;
   padding-bottom: 12px;
+}
+
+.workbench-project-column {
+  flex: 0 0 420px;
+  min-width: 360px;
+  max-width: 460px;
+  padding: 12px;
+  background: #f8fafc;
+  border: 1px solid #dbe5f0;
+  border-radius: 8px;
+}
+
+.workbench-project-column-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.workbench-project-column-head h2 {
+  margin: 0 0 4px;
+  color: var(--text-primary);
+  font-size: 16px;
+}
+
+.workbench-project-column-head p {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.workbench-project-column-list {
+  display: grid;
+  gap: 12px;
 }
 
 .iteration-board {

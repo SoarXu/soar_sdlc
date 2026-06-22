@@ -193,6 +193,51 @@ body {
   font-size: 13px;
 }
 
+.page-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  flex: 1 1 620px;
+  min-width: min(100%, 520px);
+}
+
+.workbench-action-view,
+.workbench-action-filters,
+.workbench-action-refresh {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+
+.workbench-action-filters {
+  flex: 1 1 auto;
+  gap: 8px;
+  padding: 6px;
+  background: #eef3f8;
+  border: 1px solid #d8e2ed;
+  border-radius: 6px;
+}
+
+.workbench-action-refresh {
+  flex: 0 0 auto;
+}
+
+.workbench-action-refresh .el-button {
+  height: 34px;
+  padding: 0 16px;
+}
+
+.workbench-checkbox {
+  flex: 0 0 auto;
+  height: 32px;
+  padding: 0 8px;
+  margin-right: 0;
+  background: #ffffff;
+  border: 1px solid #dce4ee;
+  border-radius: 4px;
+}
+
 .project-detail-head {
   display: flex;
   flex: 0 0 auto;
@@ -602,15 +647,23 @@ body {
 }
 
 .workbench-filter {
-  width: 150px;
+  flex: 1 1 140px;
+  min-width: 120px;
+  max-width: 180px;
+  width: auto;
 }
 
 .workbench-filter.wide {
-  width: 220px;
+  flex-basis: 210px;
+  max-width: 260px;
+  width: auto;
 }
 
 .workbench-search {
-  width: 220px;
+  flex: 1.2 1 190px;
+  min-width: 160px;
+  max-width: 260px;
+  width: auto;
 }
 
 .workbench-summary {
@@ -1122,6 +1175,23 @@ body {
   .main {
     padding: 12px;
   }
+
+  .page-actions {
+    justify-content: flex-start;
+    flex-basis: 100%;
+    min-width: 0;
+  }
+
+  .workbench-action-filters {
+    flex-wrap: wrap;
+  }
+
+  .workbench-filter,
+  .workbench-filter.wide,
+  .workbench-search {
+    flex: 1 1 180px;
+    max-width: none;
+  }
 }
 
 @media (max-width: 760px) {
@@ -1172,6 +1242,20 @@ body {
     grid-column: 1;
     grid-row: 3;
     padding: 10px;
+  }
+
+  .page-actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .workbench-action-view,
+  .workbench-action-refresh {
+    justify-content: flex-start;
+  }
+
+  .workbench-action-refresh .el-button {
+    width: 100%;
   }
 
   .workbench-board-wrap {

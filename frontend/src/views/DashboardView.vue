@@ -6,22 +6,28 @@
         <p>按迭代和负责人聚合当前需要处理的需求、任务、测试用例和 Bug。</p>
       </div>
       <div class="page-actions">
-        <el-radio-group v-model="viewMode" size="small">
-          <el-radio-button label="mine">我的工作</el-radio-button>
-          <el-radio-button label="all">全部工作</el-radio-button>
-        </el-radio-group>
-        <el-select v-model="iterationFilter" multiple collapse-tags collapse-tags-tooltip clearable filterable placeholder="迭代" class="workbench-filter wide">
-          <el-option v-for="iteration in iterations" :key="iteration.id" :label="iteration.name" :value="iteration.id" />
-        </el-select>
-        <el-select v-if="viewMode === 'all'" v-model="ownerFilter" clearable filterable placeholder="负责人" class="workbench-filter">
-          <el-option v-for="owner in owners" :key="owner.id" :label="owner.full_name" :value="owner.id" />
-        </el-select>
-        <el-select v-model="typeFilter" clearable placeholder="类型" class="workbench-filter">
-          <el-option v-for="type in itemTypes" :key="type.value" :label="type.label" :value="type.value" />
-        </el-select>
-        <el-input v-model="keywordFilter" clearable placeholder="搜索标题/项目" class="workbench-search" />
-        <el-checkbox v-model="hideEmptyIterations">仅显示有工作项</el-checkbox>
-        <el-button :loading="loading" @click="loadWorkbench">刷新</el-button>
+        <div class="workbench-action-view">
+          <el-radio-group v-model="viewMode" size="small">
+            <el-radio-button label="mine">我的工作</el-radio-button>
+            <el-radio-button label="all">全部工作</el-radio-button>
+          </el-radio-group>
+        </div>
+        <div class="workbench-action-filters">
+          <el-select v-model="iterationFilter" multiple collapse-tags collapse-tags-tooltip clearable filterable placeholder="迭代" class="workbench-filter wide">
+            <el-option v-for="iteration in iterations" :key="iteration.id" :label="iteration.name" :value="iteration.id" />
+          </el-select>
+          <el-select v-if="viewMode === 'all'" v-model="ownerFilter" clearable filterable placeholder="负责人" class="workbench-filter">
+            <el-option v-for="owner in owners" :key="owner.id" :label="owner.full_name" :value="owner.id" />
+          </el-select>
+          <el-select v-model="typeFilter" clearable placeholder="类型" class="workbench-filter">
+            <el-option v-for="type in itemTypes" :key="type.value" :label="type.label" :value="type.value" />
+          </el-select>
+          <el-input v-model="keywordFilter" clearable placeholder="搜索标题/项目" class="workbench-search" />
+          <el-checkbox v-model="hideEmptyIterations" class="workbench-checkbox">仅显示有工作项</el-checkbox>
+        </div>
+        <div class="workbench-action-refresh">
+          <el-button :loading="loading" @click="loadWorkbench">刷新</el-button>
+        </div>
       </div>
     </div>
 

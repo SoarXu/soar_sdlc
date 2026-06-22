@@ -63,7 +63,7 @@
               </div>
               <div v-if="item.type === 'audit' && expandedHistory[item.key]" class="project-history-detail">
                 <p v-for="change in item.changes" :key="change.field">
-                  修改了 <strong>{{ projectFieldLabel(change.field) }}</strong>，旧值为 "{{ displayHistoryValue(change.oldValue) }}"，新值为 "{{ displayHistoryValue(change.newValue) }}"。
+                  修改了 <strong>{{ projectFieldLabel(change.field) }}</strong>，旧值为 "{{ displayHistoryValue(change.field, change.oldValue) }}"，新值为 "{{ displayHistoryValue(change.field, change.newValue) }}"。
                 </p>
               </div>
             </div>
@@ -403,6 +403,7 @@ import RequirementPriorityBadge from '../components/RequirementPriorityBadge.vue
 import { currentUserId } from '../utils/currentUser'
 import { loadCloseReasonMap } from '../utils/closeReasonTooltip'
 import { labelById, userLabel } from '../utils/referenceLabels'
+import { formatAuditValue } from '../utils/auditHistoryLabels'
 
 const route = useRoute()
 const router = useRouter()
@@ -636,7 +637,18 @@ function defaultExecutionTime() {
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`
 }
 function currentDateTimeValue() { return defaultExecutionTime() }
-function displayHistoryValue(value) { return value === null || value === undefined || value === '' ? '-' : value }
+function displayHistoryValue(field, value) {
+  return formatAuditValue(field, value, {
+    users: users.value,
+    projects: projects.value,
+    programs: programs.value,
+    iterations: projectIterations.value,
+    requirements: projectRequirements.value,
+    tasks: projectTasks.value,
+    testCases: projectTestCases.value,
+    testRuns: projectTestRuns.value
+  })
+}
 function projectFieldLabel(field) {
   return optionLabel([
     { label: '项目名称', value: 'name' },

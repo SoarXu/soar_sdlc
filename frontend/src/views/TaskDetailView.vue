@@ -55,7 +55,7 @@
             </div>
             <div v-if="item.type === 'audit' && expandedHistory[item.key]" class="project-history-detail">
               <p v-for="change in item.changes" :key="change.field">
-                修改了 <strong>{{ taskFieldLabel(change.field) }}</strong>，旧值为 "{{ displayHistoryValue(change.oldValue) }}"，新值为 "{{ displayHistoryValue(change.newValue) }}"。
+                修改了 <strong>{{ taskFieldLabel(change.field) }}</strong>，旧值为 "{{ displayHistoryValue(change.field, change.oldValue) }}"，新值为 "{{ displayHistoryValue(change.field, change.newValue) }}"。
               </p>
             </div>
             <div v-if="item.type === 'status'" class="project-history-detail">
@@ -82,6 +82,7 @@ import { fetchRequirements } from '../api/requirements'
 import { fetchTask, fetchTaskAuditLogs, fetchTaskStatusOperations } from '../api/tasks'
 import { fetchUsers } from '../api/users'
 import { labelById, userLabel } from '../utils/referenceLabels'
+import { formatAuditValue } from '../utils/auditHistoryLabels'
 
 const route = useRoute()
 const router = useRouter()
@@ -132,7 +133,13 @@ function taskStatusLabel(value) { return optionLabel(taskStatusOptions, value) }
 function operationActionLabel(value) { return optionLabel([{ label: '激活', value: 'activate' }, { label: '关闭', value: 'close' }], value) }
 function toggleHistory(key) { expandedHistory[key] = !expandedHistory[key] }
 function formatDateTime(value) { return value ? new Date(value).toLocaleString('zh-CN', { hour12: false }) : '-' }
-function displayHistoryValue(value) { return value === null || value === undefined || value === '' ? '-' : value }
+function displayHistoryValue(field, value) {
+  return formatAuditValue(field, value, {
+    users: users.value,
+    projects: projects.value,
+    requirements: requirements.value
+  })
+}
 function taskFieldLabel(field) {
   return optionLabel([
     { label: '所属项目', value: 'project_id' },

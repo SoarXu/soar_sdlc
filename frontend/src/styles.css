@@ -712,18 +712,23 @@ body {
 }
 
 .workbench-page-board .workbench-board-wrap {
+  display: grid;
   height: auto;
   min-height: 0;
+  overflow: hidden;
 }
 
 .workbench-board {
   display: flex;
   gap: 16px;
   align-items: flex-start;
+  box-sizing: border-box;
   height: 100%;
+  min-height: 0;
   overflow: auto;
   padding: 0 0 12px;
   overscroll-behavior: contain;
+  scrollbar-gutter: stable;
 }
 
 .workbench-page-board .workbench-board {

@@ -721,6 +721,8 @@ body {
 
 .workbench-list {
   display: grid;
+  grid-auto-rows: max-content;
+  align-content: start;
   gap: 16px;
   height: 100%;
   min-height: 0;
@@ -735,6 +737,7 @@ body {
   flex-direction: column;
   min-width: 0;
   min-height: 0;
+  overflow: hidden;
   padding: 14px;
   background: #fff;
   border: 1px solid #dbe5f0;
@@ -762,6 +765,7 @@ body {
 }
 
 .workbench-list-table {
+  flex: 0 0 clamp(240px, 32vh, 420px);
   height: clamp(240px, 32vh, 420px);
   min-height: 0;
 }

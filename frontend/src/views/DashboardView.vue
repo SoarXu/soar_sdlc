@@ -1,5 +1,5 @@
 <template>
-  <section class="workbench-page">
+  <section class="workbench-page" :class="{ 'workbench-page-board': displayMode === 'board' }">
     <div class="page-head">
       <div>
         <h1>工作台</h1>

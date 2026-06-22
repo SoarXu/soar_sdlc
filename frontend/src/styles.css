@@ -593,6 +593,14 @@ body {
   min-width: 0;
 }
 
+.workbench-page-board {
+  display: grid;
+  grid-template-rows: auto auto auto minmax(0, 1fr);
+  height: calc(100vh - 86px);
+  min-height: 0;
+  overflow: hidden;
+}
+
 .workbench-filter {
   width: 150px;
 }
@@ -703,6 +711,11 @@ body {
   min-height: 0;
 }
 
+.workbench-page-board .workbench-board-wrap {
+  height: auto;
+  min-height: 0;
+}
+
 .workbench-board {
   display: flex;
   gap: 16px;
@@ -711,6 +724,10 @@ body {
   overflow: auto;
   padding: 0 0 12px;
   overscroll-behavior: contain;
+}
+
+.workbench-page-board .workbench-board {
+  height: 100%;
 }
 
 .workbench-project-column {

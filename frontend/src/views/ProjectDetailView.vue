@@ -78,7 +78,7 @@
 
       <template v-else-if="activeTab === 'iterations'">
         <div class="project-tab-toolbar"><el-button type="primary" @click="openIterationCreate">新增迭代</el-button></div>
-        <el-table :data="projectIterations" stripe width="100%">
+        <el-table :data="pagedProjectIterations" stripe width="100%">
           <el-table-column prop="id" label="ID" width="80" />
           <el-table-column prop="name" label="迭代名称" min-width="180" show-overflow-tooltip />
           <el-table-column label="负责人" width="150"><template #default="{ row }">{{ userLabel(users, row.owner_id) }}</template></el-table-column>
@@ -91,11 +91,20 @@
             <template #default="{ row }"><el-button v-if="row.status === 'planning'" link type="success" @click="openIterationStart(row)">开始</el-button><el-button v-if="row.status === 'active'" link type="warning" @click="openIterationFinish(row)">结束</el-button><el-button link type="primary" @click="openIterationEdit(row)">编辑</el-button><el-popconfirm title="确认删除该迭代？" @confirm="removeIteration(row.id)"><template #reference><el-button link type="danger">删除</el-button></template></el-popconfirm></template>
           </el-table-column>
         </el-table>
+        <div class="table-pagination">
+          <el-pagination
+            v-model:current-page="projectListPagination.iterations.currentPage"
+            v-model:page-size="projectListPagination.iterations.pageSize"
+            :page-sizes="projectPageSizes"
+            :total="projectIterations.length"
+            layout="total, sizes, prev, pager, next, jumper"
+          />
+        </div>
       </template>
 
       <template v-else-if="activeTab === 'requirements'">
         <div class="project-tab-toolbar"><el-button type="primary" :disabled="projectClosed" @click="openRequirementCreate">新增需求</el-button></div>
-        <el-table :data="projectRequirements" stripe width="100%">
+        <el-table :data="pagedProjectRequirements" stripe width="100%">
           <el-table-column prop="id" label="ID" width="80" />
           <el-table-column label="需求标题" min-width="180" show-overflow-tooltip>
             <template #default="{ row }"><router-link class="table-link" :to="`/requirements/${row.id}`">{{ row.title }}</router-link></template>
@@ -125,11 +134,20 @@
             </template>
           </el-table-column>
         </el-table>
+        <div class="table-pagination">
+          <el-pagination
+            v-model:current-page="projectListPagination.requirements.currentPage"
+            v-model:page-size="projectListPagination.requirements.pageSize"
+            :page-sizes="projectPageSizes"
+            :total="projectRequirements.length"
+            layout="total, sizes, prev, pager, next, jumper"
+          />
+        </div>
       </template>
 
       <template v-else-if="activeTab === 'tasks'">
         <div class="project-tab-toolbar"><el-button type="primary" :disabled="projectClosed" @click="openTaskCreate">新增任务</el-button></div>
-        <el-table :data="projectTasks" stripe width="100%">
+        <el-table :data="pagedProjectTasks" stripe width="100%">
           <el-table-column prop="id" label="ID" width="80" />
           <el-table-column label="任务标题" min-width="180" show-overflow-tooltip>
             <template #default="{ row }"><router-link class="table-link" :to="`/tasks/${row.id}`">{{ row.title }}</router-link></template>
@@ -150,13 +168,22 @@
             <template #default="{ row }"><el-button link type="primary" :disabled="projectClosed" @click="openTaskEdit(row)">编辑</el-button><el-button v-if="canActivateTask(row)" link type="warning" @click="activateTaskRow(row.id)">激活</el-button><el-button v-if="row.status !== 'closed'" link type="danger" @click="openTaskClose(row)">关闭</el-button><el-popconfirm title="确认删除该任务？" :disabled="projectClosed" @confirm="removeTask(row.id)"><template #reference><el-button link type="danger" :disabled="projectClosed">删除</el-button></template></el-popconfirm></template>
           </el-table-column>
         </el-table>
+        <div class="table-pagination">
+          <el-pagination
+            v-model:current-page="projectListPagination.tasks.currentPage"
+            v-model:page-size="projectListPagination.tasks.pageSize"
+            :page-sizes="projectPageSizes"
+            :total="projectTasks.length"
+            layout="total, sizes, prev, pager, next, jumper"
+          />
+        </div>
       </template>
 
       <template v-else-if="activeTab === 'tests'">
         <el-tabs v-model="testTab">
           <el-tab-pane label="测试用例" name="cases">
             <div class="project-tab-toolbar"><el-button type="primary" @click="openCaseCreate">新增用例</el-button></div>
-            <el-table :data="projectTestCases" stripe width="100%">
+            <el-table :data="pagedProjectTestCases" stripe width="100%">
               <el-table-column prop="id" label="ID" width="80" />
               <el-table-column label="用例标题" min-width="180" show-overflow-tooltip><template #default="{ row }"><router-link class="table-link" :to="{ name: 'test-case-detail', params: { id: row.id }, query: { from: 'project' } }">{{ row.title }}</router-link></template></el-table-column>
               <el-table-column label="需求" width="180"><template #default="{ row }">{{ labelById(projectRequirements, row.requirement_id, 'title') }}</template></el-table-column>
@@ -164,10 +191,19 @@
               <el-table-column label="最近结果" width="110"><template #default="{ row }">{{ executionResultLabel(row.last_execute_result) }}</template></el-table-column>
               <el-table-column label="操作" width="280" fixed="right"><template #default="{ row }"><el-button link type="success" @click="openCaseExecution(row)">执行</el-button><el-button link type="warning" :disabled="!canCreateBugFromCase(row)" @click="openCaseBug(row)">提 Bug</el-button><el-button link type="primary" @click="openCaseEdit(row)">编辑</el-button><el-popconfirm title="确认删除该用例？" @confirm="removeCase(row.id)"><template #reference><el-button link type="danger">删除</el-button></template></el-popconfirm></template></el-table-column>
             </el-table>
+            <div class="table-pagination">
+              <el-pagination
+                v-model:current-page="projectListPagination.testCases.currentPage"
+                v-model:page-size="projectListPagination.testCases.pageSize"
+                :page-sizes="projectPageSizes"
+                :total="projectTestCases.length"
+                layout="total, sizes, prev, pager, next, jumper"
+              />
+            </div>
           </el-tab-pane>
           <el-tab-pane label="测试单" name="runs">
             <div class="project-tab-toolbar"><el-button type="primary" @click="openRunCreate">新增测试单</el-button></div>
-            <el-table :data="projectTestRuns" stripe width="100%">
+            <el-table :data="pagedProjectTestRuns" stripe width="100%">
               <el-table-column prop="id" label="ID" width="80" />
               <el-table-column prop="name" label="测试单名称" min-width="180" show-overflow-tooltip />
               <el-table-column label="迭代" width="160"><template #default="{ row }">{{ labelById(projectIterations, row.iteration_id) }}</template></el-table-column>
@@ -175,13 +211,22 @@
               <el-table-column label="状态" width="110"><template #default="{ row }">{{ testRunStatusLabel(row.status) }}</template></el-table-column>
               <el-table-column label="操作" width="150" fixed="right"><template #default="{ row }"><el-button link type="primary" @click="openRunEdit(row)">编辑</el-button><el-popconfirm title="确认删除该测试单？" @confirm="removeRun(row.id)"><template #reference><el-button link type="danger">删除</el-button></template></el-popconfirm></template></el-table-column>
             </el-table>
+            <div class="table-pagination">
+              <el-pagination
+                v-model:current-page="projectListPagination.testRuns.currentPage"
+                v-model:page-size="projectListPagination.testRuns.pageSize"
+                :page-sizes="projectPageSizes"
+                :total="projectTestRuns.length"
+                layout="total, sizes, prev, pager, next, jumper"
+              />
+            </div>
           </el-tab-pane>
         </el-tabs>
       </template>
 
       <template v-else-if="activeTab === 'bugs'">
         <div class="project-tab-toolbar"><el-button type="primary" @click="openBugCreate">新增 Bug</el-button></div>
-        <el-table :data="projectBugs" stripe width="100%">
+        <el-table :data="pagedProjectBugs" stripe width="100%">
           <el-table-column prop="id" label="ID" width="80" />
           <el-table-column label="Bug 标题" min-width="180" show-overflow-tooltip><template #default="{ row }"><router-link class="table-link" :to="{ name: 'bug-detail', params: { id: row.id }, query: { from: 'project' } }">{{ row.title }}</router-link></template></el-table-column>
           <el-table-column label="需求" width="180"><template #default="{ row }">{{ labelById(projectRequirements, row.requirement_id, 'title') }}</template></el-table-column>
@@ -205,6 +250,15 @@
             </template>
           </el-table-column>
         </el-table>
+        <div class="table-pagination">
+          <el-pagination
+            v-model:current-page="projectListPagination.bugs.currentPage"
+            v-model:page-size="projectListPagination.bugs.pageSize"
+            :page-sizes="projectPageSizes"
+            :total="projectBugs.length"
+            layout="total, sizes, prev, pager, next, jumper"
+          />
+        </div>
       </template>
 
       <template v-else>
@@ -431,6 +485,15 @@ const projectStatusOperations = ref([])
 const closeReasonByRequirement = ref({})
 const closeReasonByTask = ref({})
 const expandedHistoryKeys = ref(new Set())
+const projectPageSizes = [10, 20, 50, 100]
+const projectListPagination = reactive({
+  iterations: { currentPage: 1, pageSize: 10 },
+  requirements: { currentPage: 1, pageSize: 10 },
+  tasks: { currentPage: 1, pageSize: 10 },
+  testCases: { currentPage: 1, pageSize: 10 },
+  testRuns: { currentPage: 1, pageSize: 10 },
+  bugs: { currentPage: 1, pageSize: 10 }
+})
 
 const iterationDialogVisible = ref(false), iterationStartVisible = ref(false), iterationFinishVisible = ref(false), requirementDialogVisible = ref(false), closeRequirementVisible = ref(false), taskDialogVisible = ref(false), closeTaskVisible = ref(false)
 const caseDialogVisible = ref(false), runDialogVisible = ref(false), bugDialogVisible = ref(false), bugActionVisible = ref(false), caseExecutionVisible = ref(false), caseBugVisible = ref(false)
@@ -555,6 +618,12 @@ const projectClosed = computed(() => project.value.status === 'closed')
 const projectTestCases = computed(() => testCases.value.filter((item) => item.project_id === projectId.value))
 const projectTestRuns = computed(() => testRuns.value.filter((item) => item.project_id === projectId.value))
 const projectBugs = computed(() => bugs.value.filter((item) => item.project_id === projectId.value))
+const pagedProjectIterations = computed(() => paginateProjectList(projectIterations.value, 'iterations'))
+const pagedProjectRequirements = computed(() => paginateProjectList(projectRequirements.value, 'requirements'))
+const pagedProjectTasks = computed(() => paginateProjectList(projectTasks.value, 'tasks'))
+const pagedProjectTestCases = computed(() => paginateProjectList(projectTestCases.value, 'testCases'))
+const pagedProjectTestRuns = computed(() => paginateProjectList(projectTestRuns.value, 'testRuns'))
+const pagedProjectBugs = computed(() => paginateProjectList(projectBugs.value, 'bugs'))
 const activeTabLabel = computed(() => tabs.find((tab) => tab.key === activeTab.value)?.label || '')
 const projectEndDateLabel = computed(() => project.value.is_long_term ? '长期' : project.value.end_date || '未设置结束')
 const metrics = computed(() => [
@@ -587,6 +656,50 @@ const projectHistory = computed(() => {
   }))
   return [...statusItems, ...auditItems].sort((a, b) => new Date(a.time) - new Date(b.time))
 })
+
+watch(
+  [
+    () => projectIterations.value.length,
+    () => projectListPagination.iterations.pageSize
+  ],
+  ([total]) => clampProjectListPage('iterations', total)
+)
+watch(
+  [
+    () => projectRequirements.value.length,
+    () => projectListPagination.requirements.pageSize
+  ],
+  ([total]) => clampProjectListPage('requirements', total)
+)
+watch(
+  [
+    () => projectTasks.value.length,
+    () => projectListPagination.tasks.pageSize
+  ],
+  ([total]) => clampProjectListPage('tasks', total)
+)
+watch(
+  [
+    () => projectTestCases.value.length,
+    () => projectListPagination.testCases.pageSize
+  ],
+  ([total]) => clampProjectListPage('testCases', total)
+)
+watch(
+  [
+    () => projectTestRuns.value.length,
+    () => projectListPagination.testRuns.pageSize
+  ],
+  ([total]) => clampProjectListPage('testRuns', total)
+)
+watch(
+  [
+    () => projectBugs.value.length,
+    () => projectListPagination.bugs.pageSize
+  ],
+  ([total]) => clampProjectListPage('bugs', total)
+)
+
 const failedExecutionCount = computed(() => caseExecutionHistory.value.filter((item) => item.result === 'failed').length)
 const bugActionTitle = computed(() => ({
   start_fixing: '确认 Bug',
@@ -617,6 +730,16 @@ function normalizeProjectTab(value) {
 function setActiveTab(key) {
   activeTab.value = key
   router.replace({ name: 'project-detail', params: { id: projectId.value }, query: { ...route.query, tab: key } })
+}
+function paginateProjectList(items, key) {
+  const pager = projectListPagination[key]
+  const start = (pager.currentPage - 1) * pager.pageSize
+  return items.slice(start, start + pager.pageSize)
+}
+function clampProjectListPage(key, total) {
+  const pager = projectListPagination[key]
+  const maxPage = Math.max(1, Math.ceil(total / pager.pageSize))
+  if (pager.currentPage > maxPage) pager.currentPage = maxPage
 }
 function projectStatusLabel(value) { return optionLabel(projectStatusOptions, value) }
 function iterationStatusLabel(value) { return optionLabel(iterationStatusOptions, value) }

@@ -53,7 +53,7 @@
             <h2>{{ section.label }}</h2>
             <p>{{ section.description }}</p>
           </div>
-          <el-tag :type="section.tagType">{{ section.items.length }} 项</el-tag>
+          <el-tag :type="section.tagType || undefined">{{ section.items.length }} 项</el-tag>
         </header>
         <el-table v-if="section.items.length" :data="section.items" border stripe>
           <el-table-column label="类型" width="100">
@@ -149,15 +149,21 @@
                     @start="onDragStart"
                     @add="(event) => onDragAdd(event, group.key, iteration.id)"
                   >
-                    <div v-for="item in visibleLaneItems(iteration.context_key, group.key, group.items)" :key="item.drag_key" class="workbench-card workbench-mini-card" :data-id="item.id">
+                    <div
+                      v-for="item in visibleLaneItems(iteration.context_key, group.key, group.items)"
+                      :key="item.drag_key"
+                      class="workbench-card workbench-mini-card"
+                      :class="`workbench-card-${item.object_type}`"
+                      :data-id="item.id"
+                    >
                       <div class="workbench-card-top">
-                        <el-tag size="small" :type="typeTag(item.object_type)">{{ typeLabel(item.object_type) }}</el-tag>
+                        <span class="workbench-type-dot" :class="`type-${item.object_type}`">{{ typeShortLabel(item.object_type) }}</span>
+                        <button class="workbench-title workbench-card-button" type="button" @click="openWorkItemDrawer(item, iteration)">{{ item.title }}</button>
                         <span class="workbench-status">{{ itemStatusLabel(item) }}</span>
                       </div>
-                      <button class="workbench-title workbench-card-button" type="button" @click="openWorkItemDrawer(item, iteration)">{{ item.title }}</button>
                       <div class="workbench-meta">
-                        <span class="owner-chip">负责人：{{ ownerName(item.owner_id) }}</span>
-                        <span>{{ item.project_name || '-' }}</span>
+                        <span class="owner-chip">{{ ownerName(item.owner_id) }}</span>
+                        <span class="workbench-project-name">{{ item.project_name || '-' }}</span>
                         <RequirementPriorityBadge v-if="item.priority || item.severity" :value="item.severity || item.priority" />
                       </div>
                     </div>
@@ -570,6 +576,7 @@ function ensureExpandedIteration() {
 }
 function ownerName(id) { return owners.value.find((item) => item.id === id)?.full_name || '未分配' }
 function typeLabel(value) { return itemTypes.find((item) => item.value === value)?.label || value }
+function typeShortLabel(value) { return { requirement: '需', task: '任', test_case: '测', bug: 'Bug' }[value] || typeLabel(value) }
 function typeTag(value) { return { requirement: 'primary', task: 'success', test_case: 'warning', bug: 'danger' }[value] || 'info' }
 function iterationStatusLabel(value) { return statusOptions.iteration[value] || value || '-' }
 function itemStatusLabel(item) { return item.object_type === 'test_case' ? executionResultLabel(item.last_execute_result) : (statusOptions[item.object_type]?.[item.status] || item.status || '-') }

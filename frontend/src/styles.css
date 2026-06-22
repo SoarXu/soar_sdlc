@@ -701,59 +701,12 @@ body {
   min-width: 0;
 }
 
-.workbench-board-tabs {
-  margin-bottom: 14px;
-}
-
 .workbench-board {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(380px, 1fr));
   gap: 16px;
   align-items: start;
   padding-bottom: 12px;
-}
-
-.workbench-board-section {
-  min-width: 0;
-  padding: 14px;
-  background: #f8fafc;
-  border: 1px solid #dbe5f0;
-  border-radius: 8px;
-}
-
-.shared-board-section {
-  grid-column: 1 / -1;
-  background: #f4f8ff;
-  border-color: #bdd7ff;
-}
-
-.workbench-board-section-head {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 12px;
-  margin-bottom: 12px;
-}
-
-.workbench-board-section-head h2 {
-  margin: 0 0 4px;
-  font-size: 18px;
-}
-
-.workbench-board-section-head p {
-  margin: 0;
-  color: var(--text-secondary);
-  font-size: 12px;
-}
-
-.workbench-section-iterations {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
-  gap: 12px;
-}
-
-.workbench-board-section:not(.shared-board-section) .workbench-section-iterations {
-  grid-template-columns: 1fr;
 }
 
 .iteration-board {

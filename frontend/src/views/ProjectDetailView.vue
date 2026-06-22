@@ -49,19 +49,23 @@
           <el-empty v-if="!projectHistory.length" description="暂无历史记录" />
           <div v-else class="project-history-list">
             <div v-for="(item, index) in projectHistory" :key="item.key" class="project-history-entry">
-              <div class="project-history-line">
+              <div
+                class="project-history-line"
+                :class="{ expandable: item.type === 'audit' }"
+                @click="item.type === 'audit' && toggleHistory(item.key)"
+              >
                 <span class="project-history-index">{{ index + 1 }}</span>
                 <span>{{ formatDateTime(item.time) }}，由 {{ item.actor }} {{ item.actionLabel }}。</span>
                 <button
                   v-if="item.type === 'audit'"
                   class="project-history-toggle"
                   type="button"
-                  @click="toggleHistory(item.key)"
+                  @click.stop="toggleHistory(item.key)"
                 >
-                  {{ expandedHistory[item.key] ? '-' : '+' }}
+                  {{ isHistoryExpanded(item.key) ? '-' : '+' }}
                 </button>
               </div>
-              <div v-if="item.type === 'audit' && expandedHistory[item.key]" class="project-history-detail">
+              <div v-if="item.type === 'audit' && isHistoryExpanded(item.key)" class="project-history-detail">
                 <p v-for="change in item.changes" :key="change.field">
                   修改了 <strong>{{ projectFieldLabel(change.field) }}</strong>，旧值为 "{{ displayHistoryValue(change.field, change.oldValue) }}"，新值为 "{{ displayHistoryValue(change.field, change.newValue) }}"。
                 </p>
@@ -425,7 +429,7 @@ const projectAuditLogs = ref([])
 const projectStatusOperations = ref([])
 const closeReasonByRequirement = ref({})
 const closeReasonByTask = ref({})
-const expandedHistory = reactive({})
+const expandedHistoryKeys = ref(new Set())
 
 const iterationDialogVisible = ref(false), iterationStartVisible = ref(false), iterationFinishVisible = ref(false), requirementDialogVisible = ref(false), closeRequirementVisible = ref(false), taskDialogVisible = ref(false), closeTaskVisible = ref(false)
 const caseDialogVisible = ref(false), runDialogVisible = ref(false), bugDialogVisible = ref(false), bugActionVisible = ref(false), caseExecutionVisible = ref(false), caseBugVisible = ref(false)
@@ -626,7 +630,15 @@ function canActivateRequirement(row) { return ['draft', 'closed'].includes(row.s
 function canActivateTask(row) { return ['todo', 'closed'].includes(row.status) }
 function apiErrorMessage(error, fallback) { return error?.response?.data?.detail || fallback }
 function showActionError(error, fallback) { ElMessageBox.alert(apiErrorMessage(error, fallback), '提示', { type: 'warning' }) }
-function toggleHistory(key) { expandedHistory[key] = !expandedHistory[key] }
+function isHistoryExpanded(key) {
+  return expandedHistoryKeys.value.has(key)
+}
+function toggleHistory(key) {
+  const next = new Set(expandedHistoryKeys.value)
+  if (next.has(key)) next.delete(key)
+  else next.add(key)
+  expandedHistoryKeys.value = next
+}
 function formatDateTime(value) { return value ? new Date(value).toLocaleString('zh-CN', { hour12: false }) : '-' }
 function executionResultLabel(value) { return executionResultOptions.find((option) => option.value === value)?.label || '-' }
 function canCreateBugFromCase(row) { return ['failed', 'blocked'].includes(row.last_execute_result) }

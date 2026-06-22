@@ -1124,6 +1124,14 @@ body {
   color: #243047;
 }
 
+.project-history-line.expandable {
+  cursor: pointer;
+}
+
+.project-history-line.expandable:hover {
+  color: #1d4ed8;
+}
+
 .project-history-index {
   display: inline-flex;
   width: 22px;

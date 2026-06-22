@@ -699,14 +699,18 @@ body {
 
 .workbench-board-wrap {
   min-width: 0;
+  height: clamp(420px, calc(100vh - 260px), 720px);
+  min-height: 0;
 }
 
 .workbench-board {
   display: flex;
   gap: 16px;
   align-items: flex-start;
-  overflow-x: auto;
-  padding-bottom: 12px;
+  height: 100%;
+  overflow: auto;
+  padding: 0 0 12px;
+  overscroll-behavior: contain;
 }
 
 .workbench-project-column {
@@ -1146,6 +1150,11 @@ body {
     grid-column: 1;
     grid-row: 3;
     padding: 10px;
+  }
+
+  .workbench-board-wrap {
+    height: calc(100vh - 300px);
+    min-height: 360px;
   }
 
   .page-head {

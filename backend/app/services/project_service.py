@@ -1,6 +1,7 @@
 from datetime import date, datetime
 
 from fastapi import HTTPException, status
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from app.models.audit_log import AuditLog
@@ -21,6 +22,145 @@ from app.views.status_operation_view import StatusOperationCreate
 
 def list_projects(db: Session) -> list[Project]:
     return db.query(Project).filter(Project.deleted == 0).order_by(Project.id.asc()).all()
+
+
+def list_project_iterations_page(
+    db: Session,
+    project_id: int,
+    page: int = 1,
+    page_size: int = 10,
+    keyword: str | None = None,
+    status: str | None = None,
+    owner_id: int | None = None,
+) -> dict:
+    _get_active_project(db, project_id)
+    query = (
+        db.query(Iteration)
+        .join(IterationProject, IterationProject.iteration_id == Iteration.id)
+        .filter(Iteration.deleted == 0, IterationProject.project_id == project_id)
+    )
+    if keyword:
+        query = query.filter(Iteration.name.like(f"%{keyword}%"))
+    if status:
+        query = query.filter(Iteration.status == status)
+    if owner_id:
+        query = query.filter(Iteration.owner_id == owner_id)
+    page_data = _paginate(query.order_by(Iteration.id.desc()), page, page_size)
+    page_data["items"] = [_iteration_to_dict(db, item) for item in page_data["items"]]
+    return page_data
+
+
+def list_project_requirements_page(
+    db: Session,
+    project_id: int,
+    page: int = 1,
+    page_size: int = 10,
+    keyword: str | None = None,
+    status: str | None = None,
+    owner_id: int | None = None,
+    iteration_id: int | None = None,
+) -> dict:
+    _get_active_project(db, project_id)
+    query = db.query(Requirement).filter(Requirement.deleted == 0, Requirement.project_id == project_id)
+    if keyword:
+        query = query.filter(Requirement.title.like(f"%{keyword}%"))
+    if status:
+        query = query.filter(Requirement.status == status)
+    if owner_id:
+        query = query.filter(Requirement.owner_id == owner_id)
+    if iteration_id:
+        query = query.filter(Requirement.iteration_id == iteration_id)
+    return _paginate(query.order_by(Requirement.id.desc()), page, page_size)
+
+
+def list_project_tasks_page(
+    db: Session,
+    project_id: int,
+    page: int = 1,
+    page_size: int = 10,
+    keyword: str | None = None,
+    status: str | None = None,
+    owner_id: int | None = None,
+    requirement_id: int | None = None,
+) -> dict:
+    _get_active_project(db, project_id)
+    query = db.query(Task).filter(Task.deleted == 0, Task.project_id == project_id)
+    if keyword:
+        query = query.filter(Task.title.like(f"%{keyword}%"))
+    if status:
+        query = query.filter(Task.status == status)
+    if owner_id:
+        query = query.filter(Task.owner_id == owner_id)
+    if requirement_id:
+        query = query.filter(Task.requirement_id == requirement_id)
+    return _paginate(query.order_by(Task.id.desc()), page, page_size)
+
+
+def list_project_test_cases_page(
+    db: Session,
+    project_id: int,
+    page: int = 1,
+    page_size: int = 10,
+    keyword: str | None = None,
+    result: str | None = None,
+    requirement_id: int | None = None,
+) -> dict:
+    _get_active_project(db, project_id)
+    query = db.query(TestCase).filter(TestCase.deleted == 0, TestCase.project_id == project_id)
+    if keyword:
+        query = query.filter(TestCase.title.like(f"%{keyword}%"))
+    if result:
+        query = query.filter(TestCase.last_execute_result == result)
+    if requirement_id:
+        query = query.filter(TestCase.requirement_id == requirement_id)
+    return _paginate(query.order_by(TestCase.id.desc()), page, page_size)
+
+
+def list_project_test_runs_page(
+    db: Session,
+    project_id: int,
+    page: int = 1,
+    page_size: int = 10,
+    keyword: str | None = None,
+    status: str | None = None,
+    owner_id: int | None = None,
+    iteration_id: int | None = None,
+) -> dict:
+    _get_active_project(db, project_id)
+    query = db.query(TestRun).filter(TestRun.deleted == 0, TestRun.project_id == project_id)
+    if keyword:
+        query = query.filter(TestRun.name.like(f"%{keyword}%"))
+    if status:
+        query = query.filter(TestRun.status == status)
+    if owner_id:
+        query = query.filter(TestRun.test_owner_id == owner_id)
+    if iteration_id:
+        query = query.filter(TestRun.iteration_id == iteration_id)
+    return _paginate(query.order_by(TestRun.id.desc()), page, page_size)
+
+
+def list_project_bugs_page(
+    db: Session,
+    project_id: int,
+    page: int = 1,
+    page_size: int = 10,
+    keyword: str | None = None,
+    status: str | None = None,
+    owner_id: int | None = None,
+    iteration_id: int | None = None,
+) -> dict:
+    _get_active_project(db, project_id)
+    query = db.query(Bug).filter(Bug.deleted == 0, Bug.project_id == project_id)
+    if keyword:
+        like = f"%{keyword}%"
+        query = query.filter(or_(Bug.title.like(like), Bug.bug_type.like(like)))
+    if status:
+        query = query.filter(Bug.status == status)
+    if owner_id:
+        query = query.filter(Bug.owner_id == owner_id)
+    if iteration_id:
+        query = query.filter(Bug.iteration_id == iteration_id)
+    return _paginate(query.order_by(Bug.id.desc()), page, page_size)
 
 
 def get_project(db: Session, project_id: int) -> Project:
@@ -296,6 +436,45 @@ def _audit_value(value):
     if isinstance(value, (date, datetime)):
         return value.isoformat()
     return value
+
+
+def _paginate(query, page: int, page_size: int) -> dict:
+    normalized_page = max(page or 1, 1)
+    normalized_page_size = min(max(page_size or 10, 1), 100)
+    total = query.count()
+    items = query.offset((normalized_page - 1) * normalized_page_size).limit(normalized_page_size).all()
+    return {
+        "items": items,
+        "total": total,
+        "page": normalized_page,
+        "page_size": normalized_page_size,
+    }
+
+
+def _iteration_to_dict(db: Session, iteration: Iteration) -> dict:
+    project_ids = [
+        item.project_id
+        for item in db.query(IterationProject).filter(IterationProject.iteration_id == iteration.id).all()
+    ]
+    return {
+        "id": iteration.id,
+        "project_id": project_ids[0] if project_ids else None,
+        "project_ids": project_ids,
+        "name": iteration.name,
+        "owner_id": iteration.owner_id,
+        "start_date": iteration.start_date,
+        "end_date": iteration.end_date,
+        "actual_start_date": iteration.actual_start_date,
+        "actual_end_date": iteration.actual_end_date,
+        "status": iteration.status,
+        "lifecycle_phase": iteration.lifecycle_phase,
+        "goal": iteration.goal,
+        "creator_id": iteration.creator_id,
+        "updater_id": iteration.updater_id,
+        "create_time": iteration.create_time,
+        "update_time": iteration.update_time,
+        "delete_time": iteration.delete_time,
+    }
 
 
 def _collect_descendant_project_ids(db: Session, project_id: int) -> set[int]:

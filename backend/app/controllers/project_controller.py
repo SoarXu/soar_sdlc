@@ -9,13 +9,29 @@ from app.services.project_service import (
     delete_project,
     get_project,
     list_project_audit_logs,
+    list_project_bugs_page,
+    list_project_iterations_page,
+    list_project_requirements_page,
     list_project_status_operations,
+    list_project_tasks_page,
+    list_project_test_cases_page,
+    list_project_test_runs_page,
     list_projects,
     start_project,
     suspend_project,
     update_project,
 )
-from app.views.project_view import ProjectCreate, ProjectRead, ProjectUpdate
+from app.views.project_view import (
+    ProjectBugPage,
+    ProjectCreate,
+    ProjectIterationPage,
+    ProjectRead,
+    ProjectRequirementPage,
+    ProjectTaskPage,
+    ProjectTestCasePage,
+    ProjectTestRunPage,
+    ProjectUpdate,
+)
 from app.views.audit_log_view import AuditLogRead
 from app.views.status_operation_view import StatusOperationCreate, StatusOperationRead
 
@@ -31,6 +47,88 @@ def get_projects(db: Session = Depends(get_db)):
 @router.get("/{project_id}", response_model=ProjectRead)
 def get_project_detail(project_id: int, db: Session = Depends(get_db)):
     return get_project(db, project_id)
+
+
+@router.get("/{project_id}/iterations", response_model=ProjectIterationPage)
+def get_project_iterations(
+    project_id: int,
+    page: int = 1,
+    page_size: int = 10,
+    keyword: str | None = None,
+    status: str | None = None,
+    owner_id: int | None = None,
+    db: Session = Depends(get_db),
+):
+    return list_project_iterations_page(db, project_id, page, page_size, keyword, status, owner_id)
+
+
+@router.get("/{project_id}/requirements", response_model=ProjectRequirementPage)
+def get_project_requirements(
+    project_id: int,
+    page: int = 1,
+    page_size: int = 10,
+    keyword: str | None = None,
+    status: str | None = None,
+    owner_id: int | None = None,
+    iteration_id: int | None = None,
+    db: Session = Depends(get_db),
+):
+    return list_project_requirements_page(db, project_id, page, page_size, keyword, status, owner_id, iteration_id)
+
+
+@router.get("/{project_id}/tasks", response_model=ProjectTaskPage)
+def get_project_tasks(
+    project_id: int,
+    page: int = 1,
+    page_size: int = 10,
+    keyword: str | None = None,
+    status: str | None = None,
+    owner_id: int | None = None,
+    requirement_id: int | None = None,
+    db: Session = Depends(get_db),
+):
+    return list_project_tasks_page(db, project_id, page, page_size, keyword, status, owner_id, requirement_id)
+
+
+@router.get("/{project_id}/test-cases", response_model=ProjectTestCasePage)
+def get_project_test_cases(
+    project_id: int,
+    page: int = 1,
+    page_size: int = 10,
+    keyword: str | None = None,
+    result: str | None = None,
+    requirement_id: int | None = None,
+    db: Session = Depends(get_db),
+):
+    return list_project_test_cases_page(db, project_id, page, page_size, keyword, result, requirement_id)
+
+
+@router.get("/{project_id}/test-runs", response_model=ProjectTestRunPage)
+def get_project_test_runs(
+    project_id: int,
+    page: int = 1,
+    page_size: int = 10,
+    keyword: str | None = None,
+    status: str | None = None,
+    owner_id: int | None = None,
+    iteration_id: int | None = None,
+    db: Session = Depends(get_db),
+):
+    return list_project_test_runs_page(db, project_id, page, page_size, keyword, status, owner_id, iteration_id)
+
+
+@router.get("/{project_id}/bugs", response_model=ProjectBugPage)
+def get_project_bugs(
+    project_id: int,
+    page: int = 1,
+    page_size: int = 10,
+    keyword: str | None = None,
+    status: str | None = None,
+    owner_id: int | None = None,
+    iteration_id: int | None = None,
+    db: Session = Depends(get_db),
+):
+    return list_project_bugs_page(db, project_id, page, page_size, keyword, status, owner_id, iteration_id)
 
 
 @router.post("", response_model=ProjectRead)

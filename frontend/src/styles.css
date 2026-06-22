@@ -285,6 +285,18 @@ body {
   padding: 0 18px 12px;
 }
 
+.project-tab-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.project-tab-search {
+  width: clamp(180px, 24vw, 320px);
+}
+
 .project-detail-page {
   display: flex;
   flex-direction: column;

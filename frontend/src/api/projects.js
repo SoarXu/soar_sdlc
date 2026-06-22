@@ -8,6 +8,30 @@ export function fetchProject(id) {
   return http.get(`/projects/${id}`)
 }
 
+export function fetchProjectIterations(id, params) {
+  return http.get(`/projects/${id}/iterations`, { params })
+}
+
+export function fetchProjectRequirements(id, params) {
+  return http.get(`/projects/${id}/requirements`, { params })
+}
+
+export function fetchProjectTasks(id, params) {
+  return http.get(`/projects/${id}/tasks`, { params })
+}
+
+export function fetchProjectTestCases(id, params) {
+  return http.get(`/projects/${id}/test-cases`, { params })
+}
+
+export function fetchProjectTestRuns(id, params) {
+  return http.get(`/projects/${id}/test-runs`, { params })
+}
+
+export function fetchProjectBugs(id, params) {
+  return http.get(`/projects/${id}/bugs`, { params })
+}
+
 export function createProject(payload) {
   return http.post('/projects', payload)
 }

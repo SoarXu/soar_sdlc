@@ -2,6 +2,13 @@ from datetime import date, datetime
 
 from pydantic import BaseModel, ConfigDict
 
+from app.views.bug_view import BugRead
+from app.views.iteration_view import IterationRead
+from app.views.requirement_view import RequirementRead
+from app.views.task_view import TaskRead
+from app.views.test_case_view import TestCaseRead
+from app.views.test_run_view import TestRunRead
+
 
 class ProjectBase(BaseModel):
     name: str
@@ -46,3 +53,45 @@ class ProjectRead(ProjectBase):
     create_time: datetime | None = None
     update_time: datetime | None = None
     delete_time: datetime | None = None
+
+
+class ProjectIterationPage(BaseModel):
+    items: list[IterationRead]
+    total: int
+    page: int
+    page_size: int
+
+
+class ProjectRequirementPage(BaseModel):
+    items: list[RequirementRead]
+    total: int
+    page: int
+    page_size: int
+
+
+class ProjectTaskPage(BaseModel):
+    items: list[TaskRead]
+    total: int
+    page: int
+    page_size: int
+
+
+class ProjectTestCasePage(BaseModel):
+    items: list[TestCaseRead]
+    total: int
+    page: int
+    page_size: int
+
+
+class ProjectTestRunPage(BaseModel):
+    items: list[TestRunRead]
+    total: int
+    page: int
+    page_size: int
+
+
+class ProjectBugPage(BaseModel):
+    items: list[BugRead]
+    total: int
+    page: int
+    page_size: int

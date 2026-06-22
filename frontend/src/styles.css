@@ -904,6 +904,10 @@ body {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
   gap: 12px;
+  padding: 8px;
+  background: #f8fafc;
+  border: 1px dashed #d9e2ef;
+  border-radius: 8px;
 }
 
 .workbench-lane {

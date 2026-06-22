@@ -144,12 +144,12 @@
                   <VueDraggable
                     v-model="group.items"
                     class="workbench-card-list"
-                    :group="{ name: group.key }"
+                    :group="{ name: 'workbench-items' }"
                     item-key="drag_key"
                     ghost-class="workbench-card-ghost"
                     chosen-class="workbench-card-chosen"
                     @start="onDragStart"
-                    @add="(event) => onDragAdd(event, group.key, iteration.id)"
+                    @add="(event) => onDragAdd(event, iteration.id)"
                   >
                     <div
                       v-for="item in visibleLaneItems(iteration.context_key, group.key, group.items)"
@@ -157,6 +157,7 @@
                       class="workbench-card workbench-mini-card"
                       :class="`workbench-card-${item.object_type}`"
                       :data-id="item.id"
+                      :data-type="item.object_type"
                     >
                       <div class="workbench-card-top">
                         <span class="workbench-type-dot" :class="`type-${item.object_type}`">{{ typeShortLabel(item.object_type) }}</span>
@@ -628,17 +629,31 @@ watch(viewMode, (value) => {
 function onDragStart() {
   dragSnapshot.value = JSON.parse(JSON.stringify(iterations.value))
 }
-async function onDragAdd(event, objectType, targetIterationId) {
+async function onDragAdd(event, targetIterationId) {
   const objectId = Number(event?.item?.dataset?.id)
-  if (!objectId) return loadWorkbench()
+  const objectType = event?.item?.dataset?.type
+  if (!objectId || !objectType) return loadWorkbench()
+  const draggedItem = findWorkbenchItem(objectType, objectId)
+  const targetIteration = iterations.value.find((item) => item.id === targetIterationId)
+  if (!draggedItem || !targetIteration) return loadWorkbench()
+  if (draggedItem.iteration_id === targetIterationId) return loadWorkbench()
   try {
+    await ElMessageBox.confirm(
+      `确认将「${draggedItem.title}」从「${draggedItem.iteration_name || '-'}」转移到「${targetIteration.name}」吗？`,
+      '确认转移迭代',
+      { type: 'warning', confirmButtonText: '确认转移', cancelButtonText: '取消' }
+    )
     await moveWorkbenchItem({ object_type: objectType, object_id: objectId, target_iteration_id: targetIterationId })
     await loadWorkbench()
     ElMessage.success('已移动到目标迭代')
   } catch (error) {
     if (dragSnapshot.value) iterations.value = dragSnapshot.value
+    if (error === 'cancel' || error === 'close') return
     ElMessageBox.alert(error?.response?.data?.detail || '移动失败', '提示', { type: 'warning' })
   }
+}
+function findWorkbenchItem(objectType, objectId) {
+  return flatWorkbenchItems.value.find((item) => item.object_type === objectType && item.id === objectId)
 }
 async function activateRequirementRow(item) { try { await activateRequirement(item.id); await loadWorkbench(); ElMessage.success('需求已激活') } catch (error) { showActionError(error, '需求激活失败') } }
 async function completeRequirementRow(item) { try { await completeRequirement(item.id); await loadWorkbench(); ElMessage.success('需求已完成') } catch (error) { showActionError(error, '需求完成失败') } }

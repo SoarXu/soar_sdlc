@@ -397,7 +397,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { activateBug, closeBug, createBug, deleteBug, fetchBugs, resolveBug, startFixingBug, suspendBug, updateBug } from '../api/bugs'
 import { createIteration, deleteIteration, fetchIterations, finishIteration, startIteration, updateIteration } from '../api/iterations'
 import { fetchPrograms } from '../api/programs'
-import { fetchProject, fetchProjectAuditLogs, fetchProjectStatusOperations } from '../api/projects'
+import { fetchProject, fetchProjectAuditLogs, fetchProjectStatusOperations, fetchProjects } from '../api/projects'
 import { activateRequirement, closeRequirement, createRequirement, deleteRequirement, fetchRequirements, fetchRequirementStatusOperations, updateRequirement } from '../api/requirements'
 import { activateTask, closeTask, createTask, deleteTask, fetchTasks, fetchTaskStatusOperations, updateTask } from '../api/tasks'
 import { createBugFromTestCase, createTestCase, deleteTestCase, executeTestCase, fetchTestCaseExecutions, fetchTestCases, updateTestCase } from '../api/testCases'
@@ -417,6 +417,7 @@ const saving = ref(false)
 const activeTab = ref(normalizeProjectTab(route.query.tab))
 const testTab = ref('cases')
 const project = ref({})
+const projects = ref([])
 const programs = ref([])
 const users = ref([])
 const iterations = ref([])
@@ -750,8 +751,9 @@ function openBugAction(row, actionType) {
 async function loadData() {
   loading.value = true
   try {
-    const [projectRes, programRes, userRes, iterationRes, requirementRes, taskRes, caseRes, runRes, bugRes, auditRes, statusRes] = await Promise.all([
+    const [projectRes, projectsRes, programRes, userRes, iterationRes, requirementRes, taskRes, caseRes, runRes, bugRes, auditRes, statusRes] = await Promise.all([
       fetchProject(projectId.value),
+      fetchProjects(),
       fetchPrograms(),
       fetchUsers(),
       fetchIterations({ project_id: projectId.value }),
@@ -764,6 +766,7 @@ async function loadData() {
       fetchProjectStatusOperations(projectId.value)
     ])
     project.value = projectRes.data
+    projects.value = projectsRes.data
     programs.value = programRes.data; users.value = userRes.data; iterations.value = iterationRes.data
     requirements.value = requirementRes.data; tasks.value = taskRes.data; testCases.value = caseRes.data; testRuns.value = runRes.data; bugs.value = bugRes.data
     projectAuditLogs.value = auditRes.data; projectStatusOperations.value = statusRes.data

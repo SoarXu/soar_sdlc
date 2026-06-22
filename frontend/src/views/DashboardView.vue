@@ -55,29 +55,31 @@
           </div>
           <el-tag :type="section.tagType || undefined">{{ section.items.length }} 项</el-tag>
         </header>
-        <el-table v-if="section.items.length" :data="section.items" border stripe>
-          <el-table-column label="类型" width="100">
-            <template #default="{ row }"><el-tag size="small" :type="typeTag(row.object_type)">{{ typeLabel(row.object_type) }}</el-tag></template>
-          </el-table-column>
-          <el-table-column label="标题" min-width="220" show-overflow-tooltip>
-            <template #default="{ row }">
-              <el-button link type="primary" class="workbench-title-button" @click="openWorkItemDrawer(row)">{{ row.title }}</el-button>
-            </template>
-          </el-table-column>
-          <el-table-column prop="project_name" label="项目" min-width="140" show-overflow-tooltip />
-          <el-table-column prop="iteration_name" label="迭代" min-width="120" show-overflow-tooltip />
-          <el-table-column label="负责人" width="120"><template #default="{ row }">{{ ownerName(row.owner_id) }}</template></el-table-column>
-          <el-table-column label="状态" width="110"><template #default="{ row }">{{ itemStatusLabel(row) }}</template></el-table-column>
-          <el-table-column label="优先级/结果" width="120">
-            <template #default="{ row }">
-              <RequirementPriorityBadge v-if="row.priority || row.severity" :value="row.severity || row.priority" />
-              <span v-else>{{ executionResultLabel(row.last_execute_result) }}</span>
-            </template>
-          </el-table-column>
-          <el-table-column label="操作" width="100" fixed="right">
-            <template #default="{ row }"><el-button link type="primary" @click="openWorkItemDrawer(row)">处理</el-button></template>
-          </el-table-column>
-        </el-table>
+        <div v-if="section.items.length" class="workbench-list-table">
+          <el-table :data="section.items" border stripe height="100%">
+            <el-table-column label="类型" width="100">
+              <template #default="{ row }"><el-tag size="small" :type="typeTag(row.object_type)">{{ typeLabel(row.object_type) }}</el-tag></template>
+            </el-table-column>
+            <el-table-column label="标题" min-width="220" show-overflow-tooltip>
+              <template #default="{ row }">
+                <el-button link type="primary" class="workbench-title-button" @click="openWorkItemDrawer(row)">{{ row.title }}</el-button>
+              </template>
+            </el-table-column>
+            <el-table-column prop="project_name" label="项目" min-width="140" show-overflow-tooltip />
+            <el-table-column prop="iteration_name" label="迭代" min-width="120" show-overflow-tooltip />
+            <el-table-column label="负责人" width="120"><template #default="{ row }">{{ ownerName(row.owner_id) }}</template></el-table-column>
+            <el-table-column label="状态" width="110"><template #default="{ row }">{{ itemStatusLabel(row) }}</template></el-table-column>
+            <el-table-column label="优先级/结果" width="120">
+              <template #default="{ row }">
+                <RequirementPriorityBadge v-if="row.priority || row.severity" :value="row.severity || row.priority" />
+                <span v-else>{{ executionResultLabel(row.last_execute_result) }}</span>
+              </template>
+            </el-table-column>
+            <el-table-column label="操作" width="100" fixed="right">
+              <template #default="{ row }"><el-button link type="primary" @click="openWorkItemDrawer(row)">处理</el-button></template>
+            </el-table-column>
+          </el-table>
+        </div>
         <el-empty v-else class="workbench-section-empty" :description="`${section.label}暂无工作项`" />
       </section>
     </div>

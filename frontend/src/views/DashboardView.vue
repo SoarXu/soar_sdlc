@@ -77,9 +77,14 @@
     </div>
 
     <div v-else-if="displayMode === 'stats'" v-loading="loading" class="workbench-stats">
-      <el-table :data="projectStatsRows" border stripe>
-        <el-table-column prop="project_name" label="项目" min-width="180" />
-        <el-table-column prop="iteration_total" label="迭代数" width="100" />
+      <el-table :data="projectStatsRows" border stripe row-key="id" default-expand-all>
+        <el-table-column prop="name" label="项目 / 迭代" min-width="220" />
+        <el-table-column prop="iteration_total" label="迭代数" width="100">
+          <template #default="{ row }">{{ row.type === 'project' ? row.iteration_total : '-' }}</template>
+        </el-table-column>
+        <el-table-column label="状态" width="110">
+          <template #default="{ row }">{{ row.type === 'iteration' ? iterationStatusLabel(row.status) : '-' }}</template>
+        </el-table-column>
         <el-table-column prop="requirements" label="需求" width="90" />
         <el-table-column prop="tasks" label="任务" width="90" />
         <el-table-column prop="test_cases" label="用例" width="90" />
@@ -439,13 +444,26 @@ const boardColumns = computed(() => {
 })
 
 const projectStatsRows = computed(() => boardColumns.value.map((column) => ({
-  project_name: column.title,
+  id: column.key,
+  type: 'project',
+  name: column.title,
   iteration_total: column.iterations.length,
   requirements: column.iterations.reduce((sum, iteration) => sum + (iteration.requirements?.length || 0), 0),
   tasks: column.iterations.reduce((sum, iteration) => sum + (iteration.tasks?.length || 0), 0),
   test_cases: column.iterations.reduce((sum, iteration) => sum + (iteration.test_cases?.length || 0), 0),
   bugs: column.iterations.reduce((sum, iteration) => sum + (iteration.bugs?.length || 0), 0),
-  total: column.total
+  total: column.total,
+  children: column.iterations.map((iteration) => ({
+    id: `${column.key}-${iteration.id}`,
+    type: 'iteration',
+    name: iteration.name,
+    status: iteration.status,
+    requirements: iteration.requirements?.length || 0,
+    tasks: iteration.tasks?.length || 0,
+    test_cases: iteration.test_cases?.length || 0,
+    bugs: iteration.bugs?.length || 0,
+    total: boardTotal(iteration)
+  }))
 })))
 
 const emptyDescription = computed(() => {

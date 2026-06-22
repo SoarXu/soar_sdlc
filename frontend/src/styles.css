@@ -647,24 +647,29 @@ body {
 }
 
 .workbench-filter {
-  flex: 0 1 150px;
+  flex: 0 0 150px;
   min-width: 120px;
   max-width: 180px;
-  width: auto;
+  width: 150px;
 }
 
 .workbench-filter.wide {
   flex-grow: 0;
-  flex-basis: 210px;
+  flex-basis: 260px;
   max-width: 260px;
-  width: auto;
+  width: 260px;
 }
 
 .workbench-search {
-  flex: 0 1 210px;
+  flex: 0 0 260px;
   min-width: 160px;
   max-width: 260px;
-  width: auto;
+  width: 260px;
+}
+
+.workbench-filter .el-select__wrapper,
+.workbench-search .el-input__wrapper {
+  width: 100%;
 }
 
 .workbench-summary {

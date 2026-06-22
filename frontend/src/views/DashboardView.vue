@@ -117,13 +117,13 @@
                 </div>
                 <div class="iteration-board-tools">
                   <el-tag>{{ boardTotal(iteration) }} 项</el-tag>
-                  <el-button link type="primary" @click="toggleIteration(iteration.id)">
-                    {{ isIterationExpanded(iteration.id) ? '收起' : '展开' }}
+                  <el-button link type="primary" @click="toggleIteration(iteration.context_key)">
+                    {{ isIterationExpanded(iteration.context_key) ? '收起' : '展开' }}
                   </el-button>
                 </div>
               </header>
 
-              <div v-if="isIterationExpanded(iteration.id)" class="workbench-lanes">
+              <div v-if="isIterationExpanded(iteration.context_key)" class="workbench-lanes">
                 <section v-for="group in visibleGroups(iteration)" :key="`${iteration.id}-${group.key}`" class="workbench-lane">
                   <header>
                     <span>{{ group.label }}</span>
@@ -139,7 +139,7 @@
                     @start="onDragStart"
                     @add="(event) => onDragAdd(event, group.key, iteration.id)"
                   >
-                    <div v-for="item in visibleLaneItems(iteration.id, group.key, group.items)" :key="item.drag_key" class="workbench-card workbench-mini-card" :data-id="item.id">
+                    <div v-for="item in visibleLaneItems(iteration.context_key, group.key, group.items)" :key="item.drag_key" class="workbench-card workbench-mini-card" :data-id="item.id">
                       <div class="workbench-card-top">
                         <el-tag size="small" :type="typeTag(item.object_type)">{{ typeLabel(item.object_type) }}</el-tag>
                         <span class="workbench-status">{{ itemStatusLabel(item) }}</span>
@@ -153,17 +153,17 @@
                     </div>
                   </VueDraggable>
                   <el-button
-                    v-if="hasHiddenLaneItems(iteration.id, group.key, group.items)"
+                    v-if="hasHiddenLaneItems(iteration.context_key, group.key, group.items)"
                     class="workbench-more"
                     link
                     type="primary"
-                    @click="showMoreLaneItems(iteration.id, group.key)"
+                    @click="showMoreLaneItems(iteration.context_key, group.key)"
                   >
-                    显示更多 {{ hiddenLaneCount(iteration.id, group.key, group.items) }} 项
+                    显示更多 {{ hiddenLaneCount(iteration.context_key, group.key, group.items) }} 项
                   </el-button>
                 </section>
               </div>
-              <button v-else class="iteration-collapsed-summary" type="button" @click="toggleIteration(iteration.id)">
+              <button v-else class="iteration-collapsed-summary" type="button" @click="toggleIteration(iteration.context_key)">
                 展开查看 {{ boardTotal(iteration) }} 个工作项
               </button>
             </article>
@@ -420,7 +420,7 @@ const boardColumns = computed(() => {
           iterations: []
         })
       }
-      columns.get(key).iterations.push(iteration)
+      columns.get(key).iterations.push(iterationForProjectColumn(iteration, project, key))
     }
   }
   return [...columns.values()]
@@ -446,12 +446,12 @@ const emptyDescription = computed(() => {
   return '暂无符合筛选条件的工作项'
 })
 
-watch(filteredIterations, () => {
-  const visibleIds = new Set(filteredIterations.value.map((iteration) => iteration.id))
-  const hasVisibleExpanded = [...expandedIterationIds.value].some((id) => visibleIds.has(id))
+watch(boardColumns, () => {
+  const visibleKeys = new Set(boardColumns.value.flatMap((column) => column.iterations.map((iteration) => iteration.context_key)))
+  const hasVisibleExpanded = [...expandedIterationIds.value].some((key) => visibleKeys.has(key))
   if (!hasVisibleExpanded) {
-    const first = filteredIterations.value[0]
-    expandedIterationIds.value = first ? new Set([first.id]) : new Set()
+    const first = boardColumns.value[0]?.iterations?.[0]
+    expandedIterationIds.value = first ? new Set([first.context_key]) : new Set()
   }
 })
 
@@ -474,6 +474,20 @@ function filterItems(items) {
     .filter((item) => !typeFilter.value || item.object_type === typeFilter.value)
     .filter((item) => !keyword || `${item.title || ''} ${item.project_name || ''}`.toLowerCase().includes(keyword))
     .map((item) => ({ ...item, drag_key: `${item.object_type}-${item.id}` }))
+}
+function iterationForProjectColumn(iteration, project, columnKey) {
+  return {
+    ...iteration,
+    context_key: `${columnKey}-iteration-${iteration.id}`,
+    requirements: filterItemsForProject(iteration.requirements, project.id),
+    tasks: filterItemsForProject(iteration.tasks, project.id),
+    test_cases: filterItemsForProject(iteration.test_cases, project.id),
+    bugs: filterItemsForProject(iteration.bugs, project.id)
+  }
+}
+function filterItemsForProject(items = [], projectId) {
+  if (projectId === 'unbound') return items.filter((item) => !item.project_id)
+  return items.filter((item) => item.project_id === projectId)
 }
 function decorateListItem(item, iteration) {
   return {
@@ -520,8 +534,8 @@ function toggleIteration(iterationId) {
 }
 function ensureExpandedIteration() {
   if (expandedIterationIds.value.size) return
-  const first = filteredIterations.value[0]
-  if (first) expandedIterationIds.value = new Set([first.id])
+  const first = boardColumns.value[0]?.iterations?.[0]
+  if (first) expandedIterationIds.value = new Set([first.context_key])
 }
 function ownerName(id) { return owners.value.find((item) => item.id === id)?.full_name || '未分配' }
 function typeLabel(value) { return itemTypes.find((item) => item.value === value)?.label || value }

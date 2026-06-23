@@ -14,7 +14,10 @@
           <router-link v-if="bug.requirement_id" class="table-link" :to="`/requirements/${bug.requirement_id}`">{{ labelById(requirements, bug.requirement_id, 'title') }}</router-link>
           <span v-else>-</span>
         </el-descriptions-item>
-        <el-descriptions-item label="来源用例">{{ labelById(testCases, bug.test_case_id, 'title') }}</el-descriptions-item>
+        <el-descriptions-item label="来源用例">
+          <router-link v-if="bug.test_case_id" class="table-link" :to="{ name: 'test-case-detail', params: { id: bug.test_case_id } }">{{ labelById(testCases, bug.test_case_id, 'title') }}</router-link>
+          <span v-else>-</span>
+        </el-descriptions-item>
         <el-descriptions-item label="负责人">{{ userLabel(users, bug.owner_id) }}</el-descriptions-item>
         <el-descriptions-item label="提出人">{{ userLabel(users, bug.reporter_id) }}</el-descriptions-item>
         <el-descriptions-item label="状态">{{ bugStatusLabel(bug.status) }}</el-descriptions-item>

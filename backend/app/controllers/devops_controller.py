@@ -9,6 +9,8 @@ from app.views.devops_view import (
     DevopsCommitDetail,
     DevopsCommitIngest,
     DevopsCommitRead,
+    DevopsJenkinsBuildCreate,
+    DevopsJenkinsBuildRead,
     DevopsJenkinsJobCreate,
     DevopsJenkinsJobRead,
     DevopsJenkinsJobUpdate,
@@ -45,6 +47,21 @@ def delete_repository(repository_id: int, db: Session = Depends(get_db)):
 @router.get("/jenkins-jobs", response_model=list[DevopsJenkinsJobRead])
 def list_jenkins_jobs(db: Session = Depends(get_db)):
     return devops_service.list_jenkins_jobs(db)
+
+
+@router.get("/jenkins-builds", response_model=list[DevopsJenkinsBuildRead])
+def list_jenkins_builds(job_id: int | None = None, commit_sha: str | None = None, db: Session = Depends(get_db)):
+    return devops_service.list_jenkins_builds(db, job_id, commit_sha)
+
+
+@router.post("/jenkins-builds", response_model=DevopsJenkinsBuildRead, status_code=status.HTTP_201_CREATED)
+def create_jenkins_build(payload: DevopsJenkinsBuildCreate, db: Session = Depends(get_db)):
+    return devops_service.create_jenkins_build(db, payload)
+
+
+@router.post("/jenkins/webhook", response_model=DevopsJenkinsBuildRead)
+def jenkins_webhook(payload: dict[str, Any], db: Session = Depends(get_db)):
+    return devops_service.ingest_jenkins_webhook(db, payload)
 
 
 @router.post("/jenkins-jobs", response_model=DevopsJenkinsJobRead, status_code=status.HTTP_201_CREATED)

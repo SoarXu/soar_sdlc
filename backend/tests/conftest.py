@@ -19,6 +19,7 @@ TRACKED_TABLES = [
     "devops_code_review_tasks",
     "devops_commit_links",
     "devops_commits",
+    "devops_jenkins_builds",
     "devops_jenkins_jobs",
     "devops_repositories",
     "status_operation_log",

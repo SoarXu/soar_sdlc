@@ -619,6 +619,29 @@ CREATE TABLE IF NOT EXISTS devops_commit_links (
   KEY idx_devops_commit_link_object (object_type, object_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='DevOps 提交对象关联表';
 
+CREATE TABLE IF NOT EXISTS devops_jenkins_builds (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT 'Jenkins 构建记录 ID',
+  job_id BIGINT UNSIGNED NULL COMMENT 'Jenkins Job ID',
+  job_name VARCHAR(150) NOT NULL COMMENT 'Job 名称',
+  build_number VARCHAR(64) NOT NULL COMMENT '构建编号',
+  build_url VARCHAR(1000) NULL COMMENT '构建地址',
+  branch_name VARCHAR(255) NULL COMMENT '分支',
+  commit_sha VARCHAR(128) NULL COMMENT 'Git 提交 SHA',
+  commit_id BIGINT UNSIGNED NULL COMMENT '关联提交 ID',
+  status VARCHAR(32) NOT NULL DEFAULT 'running' COMMENT 'running、success、failed、aborted',
+  trigger_user VARCHAR(150) NULL COMMENT '触发人',
+  duration_seconds INT NULL COMMENT '耗时秒数',
+  started_at DATETIME NULL COMMENT '开始时间',
+  finished_at DATETIME NULL COMMENT '结束时间',
+  raw_payload JSON NULL COMMENT '原始载荷',
+  create_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  update_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (id),
+  UNIQUE KEY uk_devops_jenkins_build (job_id, build_number),
+  KEY idx_devops_jenkins_build_job (job_id),
+  KEY idx_devops_jenkins_build_commit (commit_sha),
+  KEY idx_devops_jenkins_build_status (status)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='DevOps Jenkins 构建记录表';
 CREATE TABLE IF NOT EXISTS devops_code_review_tasks (
   id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT 'Code Review 任务 ID',
   commit_id BIGINT UNSIGNED NOT NULL COMMENT '提交 ID',

@@ -108,3 +108,29 @@ class DevopsCodeReviewTask(Base):
         server_onupdate=text("CURRENT_TIMESTAMP"),
     )
     finish_time: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+
+class DevopsJenkinsBuild(Base):
+    __tablename__ = "devops_jenkins_builds"
+    __table_args__ = (UniqueConstraint("job_id", "build_number", name="uk_devops_jenkins_build"),)
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    job_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    job_name: Mapped[str] = mapped_column(String(150))
+    build_number: Mapped[str] = mapped_column(String(64))
+    build_url: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    branch_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    commit_sha: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    commit_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    status: Mapped[str] = mapped_column(String(32), default="running")
+    trigger_user: Mapped[str | None] = mapped_column(String(150), nullable=True)
+    duration_seconds: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    raw_payload: Mapped[dict | list | None] = mapped_column(JSON, nullable=True)
+    create_time: Mapped[datetime] = mapped_column(DateTime, server_default=text("CURRENT_TIMESTAMP"))
+    update_time: Mapped[datetime] = mapped_column(
+        DateTime,
+        server_default=text("CURRENT_TIMESTAMP"),
+        server_onupdate=text("CURRENT_TIMESTAMP"),
+    )

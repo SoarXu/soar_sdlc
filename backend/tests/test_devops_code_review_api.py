@@ -49,3 +49,47 @@ def test_commit_ingest_links_objects_and_creates_review_task(client):
         assert any(item["commit_id"] == commit_id and item["status"] == "pending" for item in reviews.json())
     finally:
         db.close()
+
+
+def test_jenkins_webhook_records_build_and_links_commit(client):
+    commit_response = client.post(
+        "/api/v1/devops/commits",
+        json={
+            "commit_sha": "def1234567890abc",
+            "message": "prepare jenkins integration",
+        },
+    )
+    assert commit_response.status_code == 201
+    commit_id = commit_response.json()["id"]
+
+    job_response = client.post(
+        "/api/v1/devops/jenkins-jobs",
+        json={
+            "job_name": "soar-sdlc-backend",
+            "jenkins_url": "http://jenkins.example/job/soar-sdlc-backend",
+        },
+    )
+    assert job_response.status_code == 201
+    job_id = job_response.json()["id"]
+
+    build_response = client.post(
+        "/api/v1/devops/jenkins/webhook",
+        json={
+            "job_name": "soar-sdlc-backend",
+            "build_number": "42",
+            "build_url": "http://jenkins.example/job/soar-sdlc-backend/42",
+            "branch_name": "main",
+            "commit_sha": "def1234567890abc",
+            "status": "success",
+            "duration_seconds": 35,
+        },
+    )
+    assert build_response.status_code == 200
+    build = build_response.json()
+    assert build["job_id"] == job_id
+    assert build["commit_id"] == commit_id
+    assert build["status"] == "success"
+
+    list_response = client.get(f"/api/v1/devops/jenkins-builds?job_id={job_id}")
+    assert list_response.status_code == 200
+    assert [item["build_number"] for item in list_response.json()] == ["42"]

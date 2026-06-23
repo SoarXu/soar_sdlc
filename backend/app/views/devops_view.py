@@ -130,3 +130,35 @@ class DevopsReviewTaskRead(BaseModel):
 class DevopsReviewRequest(BaseModel):
     reviewer_id: int | None = None
     remark: str | None = None
+
+
+class DevopsJenkinsBuildBase(BaseModel):
+    job_id: int | None = None
+    job_name: str
+    build_number: str
+    build_url: str | None = None
+    branch_name: str | None = None
+    commit_sha: str | None = None
+    status: str = "running"
+    trigger_user: str | None = None
+    duration_seconds: int | None = None
+    started_at: datetime | None = None
+    finished_at: datetime | None = None
+    raw_payload: Any | None = None
+
+
+class DevopsJenkinsBuildCreate(DevopsJenkinsBuildBase):
+    pass
+
+
+class DevopsJenkinsBuildRead(DevopsJenkinsBuildBase):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    commit_id: int | None = None
+    create_time: datetime | None = None
+    update_time: datetime | None = None
+
+
+class JenkinsWebhookPayload(BaseModel):
+    model_config = ConfigDict(extra="allow")

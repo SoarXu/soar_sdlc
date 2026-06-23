@@ -56,13 +56,24 @@
       </el-tab-pane>
 
       <el-tab-pane label="Jenkins" name="jenkins">
-        <div class="project-tab-toolbar"><el-button type="primary" @click="openJobDialog">新增 Job</el-button></div>
+        <div class="project-tab-toolbar"><el-button type="primary" @click="openJobDialog">新增 Job</el-button><el-button @click="openBuildDialog">录入构建</el-button></div>
         <el-table :data="jenkinsJobs" stripe>
           <el-table-column prop="job_name" label="Job 名称" min-width="180" />
           <el-table-column prop="jenkins_url" label="Jenkins 地址" min-width="260" show-overflow-tooltip />
           <el-table-column label="仓库" min-width="180"><template #default="{ row }">{{ repoName(row.repository_id) }}</template></el-table-column>
           <el-table-column prop="branch_pattern" label="分支规则" width="160" />
           <el-table-column label="操作" width="130"><template #default="{ row }"><el-button link type="primary" @click="editJob(row)">编辑</el-button><el-button link type="danger" @click="removeJob(row)">删除</el-button></template></el-table-column>
+        </el-table>
+        <h2 class="devops-subtitle">Jenkins 构建记录</h2>
+        <el-table :data="jenkinsBuilds" stripe>
+          <el-table-column prop="job_name" label="Job" min-width="180" />
+          <el-table-column prop="build_number" label="构建号" width="100" />
+          <el-table-column label="状态" width="110"><template #default="{ row }">{{ buildStatusLabel(row.status) }}</template></el-table-column>
+          <el-table-column prop="branch_name" label="分支" width="140" />
+          <el-table-column label="Commit" width="150"><template #default="{ row }">{{ row.commit_sha ? row.commit_sha.slice(0, 8) : '-' }}</template></el-table-column>
+          <el-table-column prop="trigger_user" label="触发人" width="130" />
+          <el-table-column label="耗时" width="100"><template #default="{ row }">{{ row.duration_seconds ?? '-' }}s</template></el-table-column>
+          <el-table-column label="构建链接" min-width="180"><template #default="{ row }"><a v-if="row.build_url" :href="row.build_url" target="_blank" rel="noreferrer">打开 Jenkins</a><span v-else>-</span></template></el-table-column>
         </el-table>
       </el-tab-pane>
     </el-tabs>
@@ -113,6 +124,23 @@
       </el-form>
       <template #footer><el-button @click="jobDialogVisible = false">取消</el-button><el-button type="primary" :loading="saving" @click="submitJob">保存</el-button></template>
     </el-dialog>
+
+    <el-dialog v-model="buildDialogVisible" title="录入 Jenkins 构建" width="620px">
+      <el-form label-position="top">
+        <div class="form-grid">
+          <el-form-item label="Job"><el-select v-model="buildForm.job_id" clearable filterable @change="onBuildJobChange"><el-option v-for="job in jenkinsJobs" :key="job.id" :label="job.job_name" :value="job.id" /></el-select></el-form-item>
+          <el-form-item label="Job 名称" required><el-input v-model="buildForm.job_name" /></el-form-item>
+          <el-form-item label="构建号" required><el-input v-model="buildForm.build_number" /></el-form-item>
+          <el-form-item label="状态"><el-select v-model="buildForm.status"><el-option label="运行中" value="running" /><el-option label="成功" value="success" /><el-option label="失败" value="failed" /><el-option label="中止" value="aborted" /></el-select></el-form-item>
+          <el-form-item label="分支"><el-input v-model="buildForm.branch_name" /></el-form-item>
+          <el-form-item label="Commit SHA"><el-input v-model="buildForm.commit_sha" /></el-form-item>
+          <el-form-item label="触发人"><el-input v-model="buildForm.trigger_user" /></el-form-item>
+          <el-form-item label="耗时秒数"><el-input-number v-model="buildForm.duration_seconds" :min="0" controls-position="right" /></el-form-item>
+        </div>
+        <el-form-item label="构建地址"><el-input v-model="buildForm.build_url" /></el-form-item>
+      </el-form>
+      <template #footer><el-button @click="buildDialogVisible = false">取消</el-button><el-button type="primary" :loading="saving" @click="submitBuild">保存</el-button></template>
+    </el-dialog>
   </section>
 </template>
 
@@ -123,6 +151,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import CommitDiffViewer from '../components/CommitDiffViewer.vue'
 import {
   createDevopsRepository,
+  createJenkinsBuild,
   createJenkinsJob,
   deleteDevopsRepository,
   deleteJenkinsJob,
@@ -130,6 +159,7 @@ import {
   fetchDevopsCommit,
   fetchDevopsCommits,
   fetchDevopsRepositories,
+  fetchJenkinsBuilds,
   fetchJenkinsJobs,
   ingestDevopsCommit,
   markDevopsCommitReviewed,
@@ -140,6 +170,7 @@ import {
 const activeTab = ref('commits')
 const repositories = ref([])
 const jenkinsJobs = ref([])
+const jenkinsBuilds = ref([])
 const commits = ref([])
 const reviewTasks = ref([])
 const selectedCommit = ref(null)
@@ -148,15 +179,18 @@ const commitDialogVisible = ref(false)
 const diffDialogVisible = ref(false)
 const repositoryDialogVisible = ref(false)
 const jobDialogVisible = ref(false)
+const buildDialogVisible = ref(false)
 const editingRepositoryId = ref(null)
 const editingJobId = ref(null)
 
 const commitForm = reactive({ repository_id: null, commit_sha: '', branch_name: '', author_name: '', message: '', diff_text: '' })
 const repositoryForm = reactive({ provider: 'gitlab', name: '', repository_url: '', external_project_id: '', default_branch: '', enabled: 1 })
 const jobForm = reactive({ job_name: '', jenkins_url: '', repository_id: null, branch_pattern: '', enabled: 1 })
+const buildForm = reactive({ job_id: null, job_name: '', build_number: '', build_url: '', branch_name: '', commit_sha: '', status: 'running', trigger_user: '', duration_seconds: null })
 
 function reviewStatusLabel(value) { return { pending: '待评审', reviewed: '已评审' }[value] || value || '-' }
 function repoName(id) { return repositories.value.find((repo) => repo.id === id)?.name || '-' }
+function buildStatusLabel(value) { return { running: '运行中', success: '成功', failed: '失败', aborted: '中止' }[value] || value || '-' }
 function openCommitDialog() {
   Object.assign(commitForm, { repository_id: null, commit_sha: '', branch_name: '', author_name: '', message: '', diff_text: '' })
   commitDialogVisible.value = true
@@ -184,6 +218,15 @@ function editJob(row) {
   editingJobId.value = row.id
   Object.assign(jobForm, row)
   jobDialogVisible.value = true
+}
+function openBuildDialog() {
+  Object.assign(buildForm, { job_id: null, job_name: '', build_number: '', build_url: '', branch_name: '', commit_sha: '', status: 'running', trigger_user: '', duration_seconds: null })
+  buildDialogVisible.value = true
+}
+
+function onBuildJobChange(jobId) {
+  const job = jenkinsJobs.value.find((item) => item.id === jobId)
+  if (job) buildForm.job_name = job.job_name
 }
 
 async function submitCommit() {
@@ -226,6 +269,18 @@ async function submitJob() {
   }
 }
 
+async function submitBuild() {
+  if (!buildForm.job_name.trim()) return ElMessage.warning('请填写 Job 名称')
+  if (!buildForm.build_number.trim()) return ElMessage.warning('请填写构建号')
+  saving.value = true
+  try {
+    await createJenkinsBuild({ ...buildForm, job_id: buildForm.job_id || null, duration_seconds: buildForm.duration_seconds ?? null })
+    buildDialogVisible.value = false
+    await loadData()
+  } finally {
+    saving.value = false
+  }
+}
 async function removeRepository(row) {
   await ElMessageBox.confirm(`确认删除仓库「${row.name}」？`, '提示', { type: 'warning' })
   await deleteDevopsRepository(row.id)
@@ -253,14 +308,16 @@ async function reviewCommit(row) {
 }
 
 async function loadData() {
-  const [repoRes, jobRes, commitRes, reviewRes] = await Promise.all([
+  const [repoRes, jobRes, buildRes, commitRes, reviewRes] = await Promise.all([
     fetchDevopsRepositories(),
     fetchJenkinsJobs(),
+    fetchJenkinsBuilds(),
     fetchDevopsCommits(),
     fetchCodeReviewTasks()
   ])
   repositories.value = repoRes.data
   jenkinsJobs.value = jobRes.data
+  jenkinsBuilds.value = buildRes.data
   commits.value = commitRes.data
   reviewTasks.value = reviewRes.data
 }

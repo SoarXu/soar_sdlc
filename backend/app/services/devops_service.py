@@ -10,6 +10,7 @@ from app.models.devops import (
     DevopsCodeReviewTask,
     DevopsCommit,
     DevopsCommitLink,
+    DevopsJenkinsBuild,
     DevopsJenkinsJob,
     DevopsRepository,
 )
@@ -17,6 +18,7 @@ from app.models.requirement import Requirement
 from app.models.task import Task
 from app.views.devops_view import (
     DevopsCommitIngest,
+    DevopsJenkinsBuildCreate,
     DevopsJenkinsJobCreate,
     DevopsJenkinsJobUpdate,
     DevopsRepositoryCreate,
@@ -61,6 +63,79 @@ def delete_repository(db: Session, repository_id: int) -> None:
 
 def list_jenkins_jobs(db: Session) -> list[DevopsJenkinsJob]:
     return db.query(DevopsJenkinsJob).filter(DevopsJenkinsJob.deleted == 0).order_by(DevopsJenkinsJob.id.desc()).all()
+
+
+def list_jenkins_builds(db: Session, job_id: int | None = None, commit_sha: str | None = None) -> list[DevopsJenkinsBuild]:
+    query = db.query(DevopsJenkinsBuild)
+    if job_id:
+        query = query.filter(DevopsJenkinsBuild.job_id == job_id)
+    if commit_sha:
+        query = query.filter(DevopsJenkinsBuild.commit_sha == commit_sha)
+    return query.order_by(DevopsJenkinsBuild.id.desc()).limit(200).all()
+
+
+def create_jenkins_build(db: Session, payload: DevopsJenkinsBuildCreate) -> DevopsJenkinsBuild:
+    data = payload.model_dump()
+    data["commit_id"] = _commit_id_for_sha(db, data.get("commit_sha"))
+    build = (
+        db.query(DevopsJenkinsBuild)
+        .filter(
+            DevopsJenkinsBuild.job_id == data.get("job_id"),
+            DevopsJenkinsBuild.build_number == data["build_number"],
+        )
+        .first()
+    )
+    if build:
+        for field, value in data.items():
+            setattr(build, field, value)
+    else:
+        build = DevopsJenkinsBuild(**data)
+        db.add(build)
+    db.commit()
+    db.refresh(build)
+    return build
+
+
+def ingest_jenkins_webhook(db: Session, payload: dict[str, Any]) -> DevopsJenkinsBuild:
+    job_name = (
+        payload.get("job_name")
+        or payload.get("name")
+        or payload.get("job", {}).get("name")
+        or payload.get("full_project_name")
+        or "Jenkins Job"
+    )
+    build_number = str(
+        payload.get("build_number")
+        or payload.get("number")
+        or payload.get("build", {}).get("number")
+        or payload.get("build", {}).get("full_url")
+        or datetime.now().timestamp()
+    )
+    job = _find_jenkins_job_by_name(db, job_name)
+    status_value = payload.get("status") or payload.get("result") or payload.get("build", {}).get("status") or "running"
+    commit_sha = (
+        payload.get("commit_sha")
+        or payload.get("sha")
+        or payload.get("git_commit")
+        or payload.get("build", {}).get("commit_sha")
+    )
+    return create_jenkins_build(
+        db,
+        DevopsJenkinsBuildCreate(
+            job_id=job.id if job else None,
+            job_name=job_name,
+            build_number=build_number,
+            build_url=payload.get("build_url") or payload.get("url") or payload.get("build", {}).get("full_url"),
+            branch_name=payload.get("branch_name") or payload.get("branch") or payload.get("git_branch"),
+            commit_sha=commit_sha,
+            status=str(status_value).lower(),
+            trigger_user=payload.get("trigger_user") or payload.get("user_name") or payload.get("user"),
+            duration_seconds=_duration_seconds(payload),
+            started_at=_parse_datetime(payload.get("started_at") or payload.get("timestamp")),
+            finished_at=_parse_datetime(payload.get("finished_at")),
+            raw_payload=payload,
+        ),
+    )
 
 
 def create_jenkins_job(db: Session, payload: DevopsJenkinsJobCreate) -> DevopsJenkinsJob:
@@ -238,6 +313,38 @@ def _get_jenkins_job(db: Session, job_id: int) -> DevopsJenkinsJob:
     if not job:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Jenkins job not found")
     return job
+
+
+def _find_jenkins_job_by_name(db: Session, job_name: str) -> DevopsJenkinsJob | None:
+    return (
+        db.query(DevopsJenkinsJob)
+        .filter(DevopsJenkinsJob.job_name == job_name, DevopsJenkinsJob.deleted == 0)
+        .first()
+    )
+
+
+def _commit_id_for_sha(db: Session, commit_sha: str | None) -> int | None:
+    if not commit_sha:
+        return None
+    commit = (
+        db.query(DevopsCommit)
+        .filter(DevopsCommit.commit_sha == commit_sha, DevopsCommit.deleted == 0)
+        .first()
+    )
+    return commit.id if commit else None
+
+
+def _duration_seconds(payload: dict[str, Any]) -> int | None:
+    value = payload.get("duration_seconds") or payload.get("duration")
+    if value is None and isinstance(payload.get("build"), dict):
+        value = payload["build"].get("duration")
+    if value is None:
+        return None
+    try:
+        number = int(value)
+    except (TypeError, ValueError):
+        return None
+    return number // 1000 if number > 100000 else number
 
 
 def _get_commit(db: Session, commit_id: int) -> DevopsCommit:

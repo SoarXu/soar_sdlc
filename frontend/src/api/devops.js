@@ -20,6 +20,14 @@ export function fetchJenkinsJobs() {
   return http.get('/devops/jenkins-jobs')
 }
 
+export function fetchJenkinsBuilds(params = {}) {
+  return http.get('/devops/jenkins-builds', { params })
+}
+
+export function createJenkinsBuild(data) {
+  return http.post('/devops/jenkins-builds', data)
+}
+
 export function createJenkinsJob(data) {
   return http.post('/devops/jenkins-jobs', data)
 }

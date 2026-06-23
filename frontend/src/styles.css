@@ -699,6 +699,13 @@ body {
   min-height: 0;
 }
 
+.devops-subtitle {
+  margin: 18px 0 10px;
+  color: #1f2937;
+  font-size: 16px;
+  font-weight: 700;
+}
+
 .commit-summary {
   display: flex;
   gap: 12px;

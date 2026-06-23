@@ -35,7 +35,9 @@
       </div>
     </el-card>
 
-    <el-card shadow="never" class="detail-panel requirement-history-card">
+        <CommitRecordsPanel object-type="task" :object-id="taskId" />
+
+<el-card shadow="never" class="detail-panel requirement-history-card">
       <template #header>历史记录</template>
       <div class="project-history requirement-history">
         <el-empty v-if="!taskHistory.length" description="暂无历史记录" />
@@ -81,6 +83,7 @@ import { fetchProjects } from '../api/projects'
 import { fetchRequirements } from '../api/requirements'
 import { fetchTask, fetchTaskAuditLogs, fetchTaskStatusOperations } from '../api/tasks'
 import { fetchUsers } from '../api/users'
+import CommitRecordsPanel from '../components/CommitRecordsPanel.vue'
 import { labelById, userLabel } from '../utils/referenceLabels'
 import { formatAuditValue } from '../utils/auditHistoryLabels'
 

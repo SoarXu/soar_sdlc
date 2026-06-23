@@ -303,6 +303,7 @@
 
 <script setup>
 import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { useRouter } from 'vue-router'
 import { VueDraggable } from 'vue-draggable-plus'
 import { ElMessage, ElMessageBox } from 'element-plus'
 
@@ -316,8 +317,10 @@ import RichTextPasteEditor from '../components/RichTextPasteEditor.vue'
 
 const loading = ref(false)
 const saving = ref(false)
+const router = useRouter()
 const iterations = ref([])
 const owners = ref([])
+const reviewTasks = ref([])
 const viewMode = ref('mine')
 const displayMode = ref('list')
 const iterationFilter = ref([])
@@ -349,7 +352,8 @@ const itemTypes = [
   { label: '需求', value: 'requirement' },
   { label: '任务', value: 'task' },
   { label: '测试用例', value: 'test_case' },
-  { label: 'Bug', value: 'bug' }
+  { label: 'Bug', value: 'bug' },
+  { label: 'Code Review', value: 'code_review' }
 ]
 const closeReasons = ['已完成', '不做', '重复', '延期', '其他']
 const bugResolutionOptions = ['设计如此', '重复Bug', '外部原因', '已解决', '无法重现', '延期处理', '不予解决']
@@ -404,10 +408,19 @@ const summaryCards = computed(() => {
     { key: 'requirements', label: '需求', value: boards.reduce((sum, item) => sum + item.requirements.length, 0) },
     { key: 'tasks', label: '任务', value: boards.reduce((sum, item) => sum + item.tasks.length, 0) },
     { key: 'test_cases', label: '测试用例', value: boards.reduce((sum, item) => sum + item.test_cases.length, 0) },
-    { key: 'bugs', label: 'Bug', value: boards.reduce((sum, item) => sum + item.bugs.length, 0) }
+    { key: 'bugs', label: 'Bug', value: boards.reduce((sum, item) => sum + item.bugs.length, 0) },
+    { key: 'code_review', label: 'Code Review', value: filteredReviewTasks.value.length }
   ]
 })
 
+const filteredReviewTasks = computed(() => {
+  const keyword = keywordFilter.value.trim().toLowerCase()
+  const effectiveOwnerId = viewMode.value === 'mine' ? currentUserId.value : ownerFilter.value
+  return reviewTasks.value
+    .filter((item) => viewMode.value !== 'mine' || Boolean(effectiveOwnerId))
+    .filter((item) => !effectiveOwnerId || item.owner_id === effectiveOwnerId)
+    .filter((item) => !keyword || `${item.title || ''} ${item.short_sha || ''} ${item.branch_name || ''}`.toLowerCase().includes(keyword))
+})
 const flatWorkbenchItems = computed(() => filteredIterations.value.flatMap((iteration) => [
   ...(iteration.requirements || []).map((item) => decorateListItem(item, iteration)),
   ...(iteration.tasks || []).map((item) => decorateListItem(item, iteration)),
@@ -422,7 +435,8 @@ const listSections = computed(() => [
   { key: 'requirement', label: typeLabel('requirement'), description: '按迭代汇总需要推进的需求', tagType: '', items: flatWorkbenchItems.value.filter((item) => item.object_type === 'requirement') },
   { key: 'task', label: typeLabel('task'), description: '按迭代汇总需要执行的任务', tagType: 'success', items: flatWorkbenchItems.value.filter((item) => item.object_type === 'task') },
   { key: 'test_case', label: typeLabel('test_case'), description: '按迭代汇总需要执行的测试用例', tagType: 'warning', items: flatWorkbenchItems.value.filter((item) => item.object_type === 'test_case') },
-  { key: 'bug', label: typeLabel('bug'), description: '按迭代汇总需要处理的 Bug', tagType: 'danger', items: flatWorkbenchItems.value.filter((item) => item.object_type === 'bug') }
+  { key: 'bug', label: typeLabel('bug'), description: '按迭代汇总需要处理的 Bug', tagType: 'danger', items: flatWorkbenchItems.value.filter((item) => item.object_type === 'bug') },
+  { key: 'code_review', label: typeLabel('code_review'), description: '需要完成代码评审的提交', tagType: 'info', items: filteredReviewTasks.value }
 ].filter((section) => !typeFilter.value || section.key === typeFilter.value))
 
 const boardColumns = computed(() => {
@@ -580,13 +594,17 @@ function ensureExpandedIteration() {
 }
 function ownerName(id) { return owners.value.find((item) => item.id === id)?.full_name || '未分配' }
 function typeLabel(value) { return itemTypes.find((item) => item.value === value)?.label || value }
-function typeShortLabel(value) { return { requirement: '需', task: '任', test_case: '测', bug: 'Bug' }[value] || typeLabel(value) }
-function typeTag(value) { return { requirement: 'primary', task: 'success', test_case: 'warning', bug: 'danger' }[value] || 'info' }
+function typeShortLabel(value) { return { requirement: '需', task: '任', test_case: '测', bug: 'Bug', code_review: 'CR' }[value] || typeLabel(value) }
+function typeTag(value) { return { requirement: 'primary', task: 'success', test_case: 'warning', bug: 'danger', code_review: 'info' }[value] || 'info' }
 function iterationStatusLabel(value) { return statusOptions.iteration[value] || value || '-' }
 function itemStatusLabel(item) { return item.object_type === 'test_case' ? executionResultLabel(item.last_execute_result) : (statusOptions[item.object_type]?.[item.status] || item.status || '-') }
 function executionResultLabel(value) { return executionResultOptions.find((item) => item.value === value)?.label || value || '未执行' }
 function canCreateBugFromCase(item) { return ['failed', 'blocked'].includes(item.last_execute_result) }
 function openWorkItemDrawer(item, iteration = null) {
+  if (item.object_type === 'code_review') {
+    router.push({ name: 'devops' })
+    return
+  }
   selectedWorkItem.value = iteration ? decorateListItem(item, iteration) : item
   workItemDrawerVisible.value = true
 }
@@ -608,6 +626,7 @@ async function loadWorkbench() {
     const { data } = await fetchWorkbench()
     iterations.value = data.iterations || []
     owners.value = data.owners || []
+    reviewTasks.value = data.review_tasks || []
     ensureExpandedIteration()
     refreshSelectedWorkItem()
   } catch (error) {

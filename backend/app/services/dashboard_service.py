@@ -3,6 +3,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.models.bug import Bug
+from app.models.devops import DevopsCodeReviewTask, DevopsCommit, DevopsCommitLink
 from app.models.iteration import Iteration, IterationProject
 from app.models.program import Program
 from app.models.project import Project
@@ -64,6 +65,7 @@ def get_workbench(db: Session) -> WorkbenchResponse:
         lambda item: _bug_item(item, projects),
     )
 
+    review_tasks = _review_tasks(db)
     owner_ids = {
         item.owner_id
         for group in [requirements, tasks, test_cases, bugs]
@@ -71,6 +73,7 @@ def get_workbench(db: Session) -> WorkbenchResponse:
         for item in values
         if item.owner_id
     }
+    owner_ids.update(item.get("owner_id") for item in review_tasks if item.get("owner_id"))
     owners = [
         {"id": user.id, "full_name": user.full_name}
         for user in db.query(User).filter(User.deleted == 0, User.id.in_(owner_ids)).order_by(User.full_name.asc()).all()
@@ -103,7 +106,7 @@ def get_workbench(db: Session) -> WorkbenchResponse:
                 "bugs": len(bug_items),
             },
         })
-    return WorkbenchResponse(iterations=boards, owners=owners)
+    return WorkbenchResponse(iterations=boards, owners=owners, review_tasks=review_tasks)
 
 
 def move_workbench_item(db: Session, object_type: str, object_id: int, target_iteration_id: int) -> WorkbenchItem:
@@ -194,6 +197,37 @@ def _collect_descendant_project_ids(db: Session, project_id: int) -> set[int]:
     result = {child.id for child in children}
     for child in children:
         result.update(_collect_descendant_project_ids(db, child.id))
+    return result
+
+
+def _review_tasks(db: Session) -> list[dict]:
+    tasks = db.query(DevopsCodeReviewTask).order_by(DevopsCodeReviewTask.id.desc()).limit(100).all()
+    commit_ids = [item.commit_id for item in tasks]
+    commits = {
+        item.id: item
+        for item in db.query(DevopsCommit).filter(DevopsCommit.id.in_(commit_ids), DevopsCommit.deleted == 0).all()
+    } if commit_ids else {}
+    link_rows = db.query(DevopsCommitLink).filter(DevopsCommitLink.commit_id.in_(commit_ids)).all() if commit_ids else []
+    links: dict[int, list[dict]] = {}
+    for row in link_rows:
+        links.setdefault(row.commit_id, []).append({"object_type": row.object_type, "object_id": row.object_id})
+    result = []
+    for task in tasks:
+        commit = commits.get(task.commit_id)
+        result.append({
+            "id": task.id,
+            "object_type": "code_review",
+            "title": task.title,
+            "owner_id": task.owner_id,
+            "status": task.status,
+            "commit_id": task.commit_id,
+            "commit_sha": commit.commit_sha if commit else None,
+            "short_sha": commit.short_sha if commit else None,
+            "branch_name": commit.branch_name if commit else None,
+            "author_name": commit.author_name if commit else None,
+            "committed_at": _datetime_value(commit.committed_at) if commit else None,
+            "links": links.get(task.commit_id, []),
+        })
     return result
 
 

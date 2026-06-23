@@ -4,6 +4,7 @@ import MainLayout from '../layout/MainLayout.vue'
 import BugDetailView from '../views/BugDetailView.vue'
 import BugsView from '../views/BugsView.vue'
 import DashboardView from '../views/DashboardView.vue'
+import DevopsView from '../views/DevopsView.vue'
 import IterationsView from '../views/IterationsView.vue'
 import IterationDetailView from '../views/IterationDetailView.vue'
 import LoginView from '../views/LoginView.vue'
@@ -38,6 +39,7 @@ const routes = [
       { path: 'tasks', name: 'tasks', component: TasksView },
       { path: 'tests', name: 'tests', component: TestsView },
       { path: 'bugs', name: 'bugs', component: BugsView },
+      { path: 'devops', name: 'devops', component: DevopsView },
       { path: 'workflow', name: 'workflow', component: WorkflowView }
     ]
   }

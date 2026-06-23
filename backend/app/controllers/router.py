@@ -4,6 +4,7 @@ from app.controllers import (
     auth_controller,
     bug_controller,
     dashboard_controller,
+    devops_controller,
     health_controller,
     iteration_controller,
     program_controller,
@@ -31,6 +32,7 @@ api_router.include_router(task_controller.router, prefix="/tasks", tags=["tasks"
 api_router.include_router(test_case_controller.router, prefix="/test-cases", tags=["test-cases"])
 api_router.include_router(test_run_controller.router, tags=["test-runs"])
 api_router.include_router(bug_controller.router, prefix="/bugs", tags=["bugs"])
+api_router.include_router(devops_controller.router, prefix="/devops", tags=["devops"])
 api_router.include_router(workflow_controller.router, prefix="/workflow-rules", tags=["workflow-rules"])
 api_router.include_router(workflow_component_controller.component_router, prefix="/workflow-components", tags=["workflow-components"])
 api_router.include_router(workflow_component_controller.handler_router, prefix="/workflow-handlers", tags=["workflow-handlers"])

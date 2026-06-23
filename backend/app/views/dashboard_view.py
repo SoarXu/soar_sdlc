@@ -62,3 +62,4 @@ class WorkbenchIteration(BaseModel):
 class WorkbenchResponse(BaseModel):
     iterations: list[WorkbenchIteration]
     owners: list[dict]
+    review_tasks: list[dict] = Field(default_factory=list)

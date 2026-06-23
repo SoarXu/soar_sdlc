@@ -16,6 +16,11 @@ def client() -> TestClient:
 
 
 TRACKED_TABLES = [
+    "devops_code_review_tasks",
+    "devops_commit_links",
+    "devops_commits",
+    "devops_jenkins_jobs",
+    "devops_repositories",
     "status_operation_log",
     "iteration_projects",
     "test_case_execution_log",

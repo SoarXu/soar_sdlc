@@ -47,6 +47,10 @@
           <el-icon><Warning /></el-icon>
           <span>Bug</span>
         </el-menu-item>
+        <el-menu-item index="/devops">
+          <el-icon><Connection /></el-icon>
+          <span>DevOps</span>
+        </el-menu-item>
         <el-menu-item index="/workflow">
           <el-icon><Setting /></el-icon>
           <span>工作流配置</span>
@@ -65,6 +69,7 @@ import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import {
   ArrowDown,
+  Connection,
   DataAnalysis,
   Folder,
   FolderOpened,

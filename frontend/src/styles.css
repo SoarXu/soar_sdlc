@@ -695,6 +695,28 @@ body {
   pointer-events: none;
 }
 
+.devops-tabs {
+  min-height: 0;
+}
+
+.commit-summary {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  margin-bottom: 12px;
+  color: #1f2937;
+}
+
+.diff-viewer {
+  max-height: 560px;
+  padding: 14px;
+  overflow: auto;
+  color: #d8dee9;
+  white-space: pre-wrap;
+  background: #1f2937;
+  border-radius: 6px;
+}
+
 .workbench-page {
   display: grid;
   grid-template-rows: auto auto auto minmax(0, 1fr);

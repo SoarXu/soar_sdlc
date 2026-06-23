@@ -45,7 +45,9 @@
       </div>
     </el-card>
 
-    <el-card shadow="never" class="detail-panel requirement-history-card">
+        <CommitRecordsPanel object-type="bug" :object-id="bugId" />
+
+<el-card shadow="never" class="detail-panel requirement-history-card">
       <template #header>历史记录</template>
       <div class="project-history requirement-history">
         <el-empty v-if="!history.length" description="暂无历史记录" />
@@ -79,6 +81,7 @@ import { fetchProjects } from '../api/projects'
 import { fetchRequirements } from '../api/requirements'
 import { fetchTestCases } from '../api/testCases'
 import { fetchUsers } from '../api/users'
+import CommitRecordsPanel from '../components/CommitRecordsPanel.vue'
 import RequirementPriorityBadge from '../components/RequirementPriorityBadge.vue'
 import { labelById, userLabel } from '../utils/referenceLabels'
 

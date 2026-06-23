@@ -544,6 +544,94 @@ CREATE TABLE IF NOT EXISTS external_integration_mapping (
   KEY idx_external_mapping_external (provider, external_project_id, external_object_type, external_iid)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='外部系统映射表';
 
+
+CREATE TABLE IF NOT EXISTS devops_repositories (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '代码仓库 ID',
+  provider VARCHAR(32) NOT NULL DEFAULT 'gitlab' COMMENT 'gitlab',
+  name VARCHAR(150) NOT NULL COMMENT '仓库名称',
+  repository_url VARCHAR(1000) NULL COMMENT '仓库地址',
+  external_project_id VARCHAR(128) NULL COMMENT 'GitLab project ID',
+  default_branch VARCHAR(128) NULL COMMENT '默认分支',
+  access_token_encrypted VARCHAR(1000) NULL COMMENT '访问令牌，加密存储',
+  enabled INT NOT NULL DEFAULT 1 COMMENT '是否启用',
+  create_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  update_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  deleted INT NOT NULL DEFAULT 0 COMMENT '是否删除',
+  delete_time DATETIME NULL COMMENT '删除时间',
+  PRIMARY KEY (id),
+  KEY idx_devops_repo_provider_project (provider, external_project_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='DevOps 代码仓库表';
+
+CREATE TABLE IF NOT EXISTS devops_jenkins_jobs (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT 'Jenkins Job ID',
+  job_name VARCHAR(150) NOT NULL COMMENT 'Job 名称',
+  jenkins_url VARCHAR(1000) NULL COMMENT 'Jenkins 地址',
+  repository_id BIGINT UNSIGNED NULL COMMENT '关联仓库 ID',
+  branch_pattern VARCHAR(255) NULL COMMENT '分支匹配规则',
+  enabled INT NOT NULL DEFAULT 1 COMMENT '是否启用',
+  create_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  update_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  deleted INT NOT NULL DEFAULT 0 COMMENT '是否删除',
+  delete_time DATETIME NULL COMMENT '删除时间',
+  PRIMARY KEY (id),
+  KEY idx_devops_jenkins_repo (repository_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='DevOps Jenkins Job 表';
+
+CREATE TABLE IF NOT EXISTS devops_commits (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '提交 ID',
+  provider VARCHAR(32) NOT NULL DEFAULT 'gitlab' COMMENT 'gitlab',
+  repository_id BIGINT UNSIGNED NULL COMMENT '仓库 ID',
+  external_project_id VARCHAR(128) NULL COMMENT 'GitLab project ID',
+  commit_sha VARCHAR(128) NOT NULL COMMENT 'Git 提交 SHA',
+  short_sha VARCHAR(32) NULL COMMENT '短 SHA',
+  branch_name VARCHAR(255) NULL COMMENT '分支',
+  title VARCHAR(500) NULL COMMENT '提交标题',
+  message TEXT NULL COMMENT '提交消息',
+  author_name VARCHAR(150) NULL COMMENT '提交人',
+  author_email VARCHAR(255) NULL COMMENT '提交人邮箱',
+  committed_at DATETIME NULL COMMENT '提交时间',
+  web_url VARCHAR(1000) NULL COMMENT 'GitLab 提交链接',
+  diff_text MEDIUMTEXT NULL COMMENT '提交 diff 文本',
+  diff_json JSON NULL COMMENT '提交 diff 结构',
+  raw_payload JSON NULL COMMENT '原始载荷',
+  review_status VARCHAR(32) NOT NULL DEFAULT 'pending' COMMENT 'pending、reviewed',
+  reviewer_id BIGINT UNSIGNED NULL COMMENT '评审人',
+  review_time DATETIME NULL COMMENT '评审时间',
+  review_remark TEXT NULL COMMENT '评审备注',
+  create_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  update_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  deleted INT NOT NULL DEFAULT 0 COMMENT '是否删除',
+  delete_time DATETIME NULL COMMENT '删除时间',
+  PRIMARY KEY (id),
+  UNIQUE KEY uk_devops_commit_repo_sha (provider, repository_id, commit_sha),
+  KEY idx_devops_commit_sha (commit_sha),
+  KEY idx_devops_commit_status (review_status)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='DevOps 代码提交表';
+
+CREATE TABLE IF NOT EXISTS devops_commit_links (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '提交关联 ID',
+  commit_id BIGINT UNSIGNED NOT NULL COMMENT '提交 ID',
+  object_type VARCHAR(64) NOT NULL COMMENT 'requirement、task、bug',
+  object_id BIGINT UNSIGNED NOT NULL COMMENT '对象 ID',
+  create_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  PRIMARY KEY (id),
+  UNIQUE KEY uk_devops_commit_link (commit_id, object_type, object_id),
+  KEY idx_devops_commit_link_object (object_type, object_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='DevOps 提交对象关联表';
+
+CREATE TABLE IF NOT EXISTS devops_code_review_tasks (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT 'Code Review 任务 ID',
+  commit_id BIGINT UNSIGNED NOT NULL COMMENT '提交 ID',
+  title VARCHAR(500) NOT NULL COMMENT '任务标题',
+  owner_id BIGINT UNSIGNED NULL COMMENT '负责人',
+  status VARCHAR(32) NOT NULL DEFAULT 'pending' COMMENT 'pending、reviewed',
+  create_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  update_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  finish_time DATETIME NULL COMMENT '完成时间',
+  PRIMARY KEY (id),
+  UNIQUE KEY uk_devops_review_commit (commit_id),
+  KEY idx_devops_review_status (status)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='DevOps Code Review 任务表';
 INSERT INTO roles (role_key, role_name, description, is_system, enabled)
 VALUES
   ('system_admin', '系统管理员', '系统初始化、用户、角色、基础配置', 1, 1),

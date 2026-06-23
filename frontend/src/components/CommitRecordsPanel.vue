@@ -19,7 +19,7 @@
         <strong>{{ selectedCommit.short_sha || selectedCommit.commit_sha }}</strong>
         <span>{{ selectedCommit.title || selectedCommit.message }}</span>
       </div>
-      <pre class="diff-viewer">{{ selectedCommit?.diff_text || formatDiffJson(selectedCommit?.diff_json) || '暂无 diff 内容' }}</pre>
+      <CommitDiffViewer :diff-text="selectedCommit?.diff_text" :diff-json="selectedCommit?.diff_json" />
     </el-dialog>
   </el-card>
 </template>
@@ -28,6 +28,7 @@
 import { onMounted, ref, watch } from 'vue'
 
 import { fetchDevopsCommit, fetchDevopsCommits } from '../api/devops'
+import CommitDiffViewer from './CommitDiffViewer.vue'
 
 const props = defineProps({
   objectType: { type: String, required: true },
@@ -39,8 +40,6 @@ const selectedCommit = ref(null)
 const diffDialogVisible = ref(false)
 
 function formatDateTime(value) { return value ? new Date(value).toLocaleString('zh-CN', { hour12: false }) : '-' }
-function formatDiffJson(value) { return value ? JSON.stringify(value, null, 2) : '' }
-
 async function openDiff(row) {
   const { data } = await fetchDevopsCommit(row.id)
   selectedCommit.value = data

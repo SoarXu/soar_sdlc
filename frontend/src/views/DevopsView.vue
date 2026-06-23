@@ -86,7 +86,7 @@
         <strong>{{ selectedCommit.short_sha || selectedCommit.commit_sha }}</strong>
         <span>{{ selectedCommit.title || selectedCommit.message }}</span>
       </div>
-      <pre class="diff-viewer">{{ selectedCommit?.diff_text || formatDiffJson(selectedCommit?.diff_json) || '暂无 diff 内容' }}</pre>
+      <CommitDiffViewer :diff-text="selectedCommit?.diff_text" :diff-json="selectedCommit?.diff_json" />
       <template #footer><el-button @click="diffDialogVisible = false">关闭</el-button><el-button v-if="selectedCommit?.review_status !== 'reviewed'" type="success" @click="reviewCommit(selectedCommit)">标记已评审</el-button></template>
     </el-dialog>
 
@@ -120,6 +120,7 @@
 import { onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 
+import CommitDiffViewer from '../components/CommitDiffViewer.vue'
 import {
   createDevopsRepository,
   createJenkinsJob,
@@ -156,8 +157,6 @@ const jobForm = reactive({ job_name: '', jenkins_url: '', repository_id: null, b
 
 function reviewStatusLabel(value) { return { pending: '待评审', reviewed: '已评审' }[value] || value || '-' }
 function repoName(id) { return repositories.value.find((repo) => repo.id === id)?.name || '-' }
-function formatDiffJson(value) { return value ? JSON.stringify(value, null, 2) : '' }
-
 function openCommitDialog() {
   Object.assign(commitForm, { repository_id: null, commit_sha: '', branch_name: '', author_name: '', message: '', diff_text: '' })
   commitDialogVisible.value = true

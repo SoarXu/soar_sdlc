@@ -717,6 +717,97 @@ body {
   border-radius: 6px;
 }
 
+.commit-diff-viewer {
+  display: grid;
+  gap: 14px;
+  max-height: 620px;
+  overflow: auto;
+}
+
+.diff-file {
+  overflow: hidden;
+  border: 1px solid #d8e1ec;
+  border-radius: 6px;
+  background: #fff;
+}
+
+.diff-file-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  background: #f4f7fb;
+  border-bottom: 1px solid #d8e1ec;
+}
+
+.diff-file-head span {
+  color: #64748b;
+  font-size: 12px;
+}
+
+.diff-table {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  overflow: auto;
+}
+
+.diff-table-head {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding: 8px 12px;
+  font-weight: 700;
+  border-bottom: 1px solid #d8e1ec;
+}
+
+.diff-old {
+  background: #fff1f2;
+  color: #9f1239;
+}
+
+.diff-new {
+  background: #ecfdf5;
+  color: #047857;
+}
+
+.diff-cell {
+  min-height: 24px;
+  margin: 0;
+  padding: 4px 10px;
+  overflow: visible;
+  color: #263142;
+  font-family: Consolas, "Liberation Mono", monospace;
+  font-size: 12px;
+  line-height: 1.4;
+  white-space: pre-wrap;
+  border-bottom: 1px solid #eef2f7;
+}
+
+.diff-context {
+  background: #fff;
+}
+
+.diff-removed {
+  background: #fff1f2;
+  color: #9f1239;
+}
+
+.diff-added {
+  background: #ecfdf5;
+  color: #047857;
+}
+
+.diff-hunk {
+  background: #eef4ff;
+  color: #1d4ed8;
+  font-weight: 700;
+}
+
+.diff-empty {
+  background: #f8fafc;
+}
+
 .workbench-page {
   display: grid;
   grid-template-rows: auto auto auto minmax(0, 1fr);

@@ -14,6 +14,12 @@
 
 <script setup>
 import { nextTick, onMounted, ref, watch } from 'vue'
+import {
+  clipboardHtmlFromDataTransfer,
+  getClipboardImageFiles,
+  imageDataUrlToHtml,
+  sanitizeHtml
+} from '../utils/clipboardHtml'
 
 const props = defineProps({
   modelValue: { type: String, default: '' },
@@ -47,16 +53,17 @@ function emitValue() {
 }
 
 async function handlePaste(event) {
-  const items = Array.from(event.clipboardData?.items || [])
-  const imageItems = items.filter((item) => item.type.startsWith('image/'))
-  if (!imageItems.length) return
+  const imageFiles = getClipboardImageFiles(event.clipboardData)
+  const html = clipboardHtmlFromDataTransfer(event.clipboardData)
+  if (!imageFiles.length && !html) return
 
   event.preventDefault()
-  for (const item of imageItems) {
-    const file = item.getAsFile()
-    if (!file) continue
+  if (html) {
+    insertHtmlAtCursor(html)
+  }
+  for (const file of imageFiles) {
     const dataUrl = await readFileAsDataUrl(file)
-    insertHtmlAtCursor(`<img src="${dataUrl}" alt="pasted image" />`)
+    insertHtmlAtCursor(imageDataUrlToHtml(dataUrl))
   }
   emitValue()
 }
@@ -71,9 +78,10 @@ function readFileAsDataUrl(file) {
 }
 
 function insertHtmlAtCursor(html) {
+  const editor = editorRef.value
   const selection = window.getSelection()
-  if (!selection || !selection.rangeCount) {
-    editorRef.value?.insertAdjacentHTML('beforeend', html)
+  if (!editor || !selection || !selection.rangeCount || !editor.contains(selection.anchorNode)) {
+    editor?.insertAdjacentHTML('beforeend', html)
     return
   }
   const range = selection.getRangeAt(0)
@@ -87,20 +95,5 @@ function insertHtmlAtCursor(html) {
     selection.removeAllRanges()
     selection.addRange(range)
   }
-}
-
-function sanitizeHtml(value) {
-  const template = document.createElement('template')
-  template.innerHTML = value || ''
-  template.content.querySelectorAll('script, style, iframe, object, embed').forEach((node) => node.remove())
-  template.content.querySelectorAll('*').forEach((node) => {
-    Array.from(node.attributes).forEach((attr) => {
-      const name = attr.name.toLowerCase()
-      const value = attr.value || ''
-      if (name.startsWith('on')) node.removeAttribute(attr.name)
-      if ((name === 'href' || name === 'src') && /^javascript:/i.test(value)) node.removeAttribute(attr.name)
-    })
-  })
-  return template.innerHTML
 }
 </script>

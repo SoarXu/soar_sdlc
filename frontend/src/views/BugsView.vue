@@ -60,7 +60,7 @@
           <el-form-item label="严重程度"><el-select v-model="form.severity"><el-option v-for="option in priorityLevelOptions" :key="option.value" :label="option.label" :value="option.value"><RequirementPriorityBadge :value="option.value" /></el-option></el-select></el-form-item>
           <el-form-item label="优先级"><el-select v-model="form.priority"><el-option v-for="option in priorityLevelOptions" :key="option.value" :label="option.label" :value="option.value"><RequirementPriorityBadge :value="option.value" /></el-option></el-select></el-form-item>
         </div>
-        <el-form-item label="复现步骤"><el-input v-model="form.reproduce_steps" type="textarea" :rows="3" /></el-form-item>
+        <el-form-item label="复现步骤"><RichTextPasteEditor v-model="form.reproduce_steps" /></el-form-item>
         <el-form-item label="期望结果"><el-input v-model="form.expected_result" type="textarea" :rows="2" /></el-form-item>
         <el-form-item label="实际结果"><el-input v-model="form.actual_result" type="textarea" :rows="2" /></el-form-item>
       </el-form>
@@ -103,6 +103,7 @@ import { fetchTestRuns } from '../api/testRuns'
 import { fetchUsers } from '../api/users'
 import { fetchIterations } from '../api/iterations'
 import RequirementPriorityBadge from '../components/RequirementPriorityBadge.vue'
+import RichTextPasteEditor from '../components/RichTextPasteEditor.vue'
 import { labelById, userLabel } from '../utils/referenceLabels'
 import { usePagination } from '../utils/usePagination'
 

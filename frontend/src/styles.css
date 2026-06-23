@@ -658,6 +658,43 @@ body {
   border: 1px solid #e1e7ef;
 }
 
+.rich-text img,
+.rich-text-paste-editor__surface img {
+  display: block;
+  max-width: 100%;
+  max-height: 420px;
+  margin: 8px 0;
+}
+
+.rich-text-paste-editor {
+  width: 100%;
+}
+
+.rich-text-paste-editor__surface {
+  min-height: 150px;
+  max-height: 320px;
+  overflow: auto;
+  padding: 10px 12px;
+  color: #303133;
+  line-height: 1.6;
+  background: #fff;
+  border: 1px solid #dcdfe6;
+  border-radius: 4px;
+  outline: none;
+  transition: border-color .2s, box-shadow .2s;
+}
+
+.rich-text-paste-editor__surface:focus {
+  border-color: #409eff;
+  box-shadow: 0 0 0 1px rgba(64, 158, 255, .15);
+}
+
+.rich-text-paste-editor__surface:empty::before {
+  color: #a8abb2;
+  content: attr(data-placeholder);
+  pointer-events: none;
+}
+
 .workbench-page {
   display: grid;
   grid-template-rows: auto auto auto minmax(0, 1fr);

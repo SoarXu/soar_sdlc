@@ -285,7 +285,7 @@ CREATE TABLE IF NOT EXISTS bugs (
   priority VARCHAR(32) NOT NULL DEFAULT '3' COMMENT '优先级：1 最高，5 最低',
   owner_id BIGINT UNSIGNED NULL COMMENT '负责人 ID',
   reporter_id BIGINT UNSIGNED NULL COMMENT '提出人 ID',
-  reproduce_steps TEXT NULL COMMENT '复现步骤',
+  reproduce_steps MEDIUMTEXT NULL COMMENT '复现步骤，支持富文本和粘贴图片',
   expected_result TEXT NULL COMMENT '期望结果',
   actual_result TEXT NULL COMMENT '实际结果',
   status VARCHAR(32) NOT NULL DEFAULT 'open' COMMENT 'open、fixing、verifying、closed、reopened',

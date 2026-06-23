@@ -296,7 +296,7 @@
           <el-form-item label="严重程度"><el-select v-model="caseBugForm.severity"><el-option v-for="option in priorityLevelOptions" :key="option.value" :label="option.label" :value="option.value"><RequirementPriorityBadge :value="option.value" /></el-option></el-select></el-form-item>
           <el-form-item label="优先级"><el-select v-model="caseBugForm.priority"><el-option v-for="option in priorityLevelOptions" :key="option.value" :label="option.label" :value="option.value"><RequirementPriorityBadge :value="option.value" /></el-option></el-select></el-form-item>
         </div>
-        <el-form-item label="重现步骤"><el-input v-model="caseBugForm.reproduce_steps" type="textarea" :rows="8" /></el-form-item>
+        <el-form-item label="重现步骤"><RichTextPasteEditor v-model="caseBugForm.reproduce_steps" /></el-form-item>
         <el-form-item label="实际结果"><el-input v-model="caseBugForm.actual_result" type="textarea" :rows="2" /></el-form-item>
       </el-form>
       <template #footer><el-button @click="caseBugVisible = false">取消</el-button><el-button type="primary" :loading="saving" @click="submitCaseBug">保存</el-button></template>
@@ -324,6 +324,7 @@ import { activateRequirement, closeRequirement, deleteRequirement, fetchRequirem
 import { activateTask, closeTask, deleteTask, fetchTaskStatusOperations } from '../api/tasks'
 import { fetchUsers } from '../api/users'
 import RequirementPriorityBadge from '../components/RequirementPriorityBadge.vue'
+import RichTextPasteEditor from '../components/RichTextPasteEditor.vue'
 import { labelById, userLabel } from '../utils/referenceLabels'
 
 const route = useRoute()

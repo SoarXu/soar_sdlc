@@ -293,7 +293,7 @@
           <el-form-item label="Bug 类型"><el-select v-model="caseBugForm.bug_type"><el-option v-for="option in bugTypeOptions" :key="option" :label="option" :value="option" /></el-select></el-form-item>
           <el-form-item label="严重程度"><el-select v-model="caseBugForm.severity"><el-option v-for="option in priorityLevelOptions" :key="option.value" :label="option.label" :value="option.value" /></el-select></el-form-item>
         </div>
-        <el-form-item label="重现步骤"><el-input v-model="caseBugForm.reproduce_steps" type="textarea" :rows="6" /></el-form-item>
+        <el-form-item label="重现步骤"><RichTextPasteEditor v-model="caseBugForm.reproduce_steps" /></el-form-item>
         <el-form-item label="实际结果"><el-input v-model="caseBugForm.actual_result" type="textarea" :rows="2" /></el-form-item>
       </el-form>
       <template #footer><el-button @click="caseBugVisible = false">取消</el-button><el-button type="primary" :loading="saving" @click="submitCaseBug">提交</el-button></template>
@@ -312,6 +312,7 @@ import { activateTask, closeTask, completeTask } from '../api/tasks'
 import { createBugFromTestCase, executeTestCase } from '../api/testCases'
 import { activateBug, closeBug, resolveBug, startFixingBug, suspendBug, verifyBugFailed, verifyBugPassed } from '../api/bugs'
 import RequirementPriorityBadge from '../components/RequirementPriorityBadge.vue'
+import RichTextPasteEditor from '../components/RichTextPasteEditor.vue'
 
 const loading = ref(false)
 const saving = ref(false)

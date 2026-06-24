@@ -318,9 +318,21 @@ def test_project_delete_cascades_project_tree_work_items_and_iterations(client: 
         "/api/v1/test-cases",
         json={"project_id": child["id"], "requirement_id": child_requirement["id"], "title": "子项目用例随项目删除"},
     ).json()
+    client.post(
+        f"/api/v1/test-cases/{case['id']}/executions",
+        json={
+            "steps_result_json": [
+                {"step": "open page", "expected": "page shown", "result": "passed", "actual": "page shown"}
+            ]
+        },
+    )
     test_run = client.post(
         "/api/v1/test-runs",
         json={"project_id": child["id"], "iteration_id": iteration["id"], "name": "子项目测试单随项目删除"},
+    ).json()
+    selected = client.post(
+        f"/api/v1/test-runs/{test_run['id']}/cases",
+        json={"test_case_ids": [case["id"]]},
     ).json()
     bug = client.post(
         "/api/v1/bugs",
@@ -347,7 +359,35 @@ def test_project_delete_cascades_project_tree_work_items_and_iterations(client: 
     assert client.get(f"/api/v1/bugs/{bug['id']}").status_code == 404
     assert iteration["id"] not in {item["id"] for item in client.get("/api/v1/iterations").json()}
     assert test_run["id"] not in {item["id"] for item in client.get("/api/v1/test-runs").json()}
+    assert selected[0]["id"] not in {item["id"] for item in client.get("/api/v1/test-run-cases").json()}
+    assert client.get(f"/api/v1/test-cases/{case['id']}/executions").status_code == 404
 
+
+
+def test_project_delete_keeps_shared_iteration_and_removes_deleted_project_scope(client: TestClient):
+    deleted_project = client.post("/api/v1/projects", json={"name": f"Shared Delete Project-{uuid4().hex[:8]}"}).json()
+    kept_project = client.post("/api/v1/projects", json={"name": f"Shared Keep Project-{uuid4().hex[:8]}"}).json()
+    iteration = client.post(
+        "/api/v1/iterations",
+        json={"project_ids": [deleted_project["id"], kept_project["id"]], "name": f"Shared Iteration-{uuid4().hex[:8]}"},
+    ).json()
+    deleted_requirement = client.post(
+        "/api/v1/requirements",
+        json={"project_id": deleted_project["id"], "iteration_id": iteration["id"], "title": "Deleted project requirement"},
+    ).json()
+    kept_requirement = client.post(
+        "/api/v1/requirements",
+        json={"project_id": kept_project["id"], "iteration_id": iteration["id"], "title": "Kept project requirement"},
+    ).json()
+
+    deleted = client.delete(f"/api/v1/projects/{deleted_project['id']}")
+
+    assert deleted.status_code == 204
+    listed_iterations = client.get("/api/v1/iterations").json()
+    kept_iteration = next(item for item in listed_iterations if item["id"] == iteration["id"])
+    assert kept_iteration["project_ids"] == [kept_project["id"]]
+    assert client.get(f"/api/v1/requirements/{deleted_requirement['id']}").status_code == 404
+    assert client.get(f"/api/v1/requirements/{kept_requirement['id']}").status_code == 200
 
 def test_open_project_move_only_changes_parent(client: TestClient):
     parent = client.post("/api/v1/projects", json={"name": f"父项目-{uuid4().hex[:8]}"}).json()

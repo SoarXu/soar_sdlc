@@ -13,7 +13,8 @@ from app.models.project_member import ProjectMember
 from app.models.requirement import Requirement
 from app.models.task import Task
 from app.models.test_case import TestCase
-from app.models.test_run import TestRun
+from app.models.test_case_execution import TestCaseExecutionLog
+from app.models.test_run import TestRun, TestRunCase
 from app.services.status_operation_service import create_status_operation, list_status_operations
 from app.services.requirement_service import close_requirement_record
 from app.services.workflow_engine import execute_workflows
@@ -511,6 +512,19 @@ def _collect_descendant_project_ids(db: Session, project_id: int) -> set[int]:
 
 
 def _cascade_delete_project_work_items(db: Session, project_ids: set[int], deleted_at: datetime) -> None:
+    test_case_ids = {
+        row.id for row in db.query(TestCase.id).filter(TestCase.project_id.in_(project_ids), TestCase.deleted == 0).all()
+    }
+    test_run_ids = {
+        row.id for row in db.query(TestRun.id).filter(TestRun.project_id.in_(project_ids), TestRun.deleted == 0).all()
+    }
+    if test_case_ids:
+        db.query(TestCaseExecutionLog).filter(TestCaseExecutionLog.test_case_id.in_(test_case_ids)).delete(
+            synchronize_session=False
+        )
+        db.query(TestRunCase).filter(TestRunCase.test_case_id.in_(test_case_ids)).delete(synchronize_session=False)
+    if test_run_ids:
+        db.query(TestRunCase).filter(TestRunCase.test_run_id.in_(test_run_ids)).delete(synchronize_session=False)
     _soft_delete_by_project_ids(db, Requirement, project_ids, deleted_at)
     _soft_delete_by_project_ids(db, Task, project_ids, deleted_at)
     _soft_delete_by_project_ids(db, TestCase, project_ids, deleted_at)

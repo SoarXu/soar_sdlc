@@ -5,13 +5,14 @@
         <h1>工作台</h1>
         <p>按迭代和负责人聚合当前需要处理的需求、任务、测试用例和 Bug。</p>
       </div>
+      <div class="workbench-view-switch">
+        <span>工作范围</span>
+        <el-radio-group v-model="viewMode" size="small">
+          <el-radio-button label="mine">我的工作</el-radio-button>
+          <el-radio-button label="all">全部工作</el-radio-button>
+        </el-radio-group>
+      </div>
       <div class="page-actions">
-        <div class="workbench-action-view">
-          <el-radio-group v-model="viewMode" size="small">
-            <el-radio-button label="mine">我的工作</el-radio-button>
-            <el-radio-button label="all">全部工作</el-radio-button>
-          </el-radio-group>
-        </div>
         <div class="workbench-action-filters">
           <el-select v-model="iterationFilter" multiple collapse-tags collapse-tags-tooltip clearable filterable placeholder="迭代" class="workbench-filter wide">
             <el-option v-for="iteration in iterations" :key="iteration.id" :label="iteration.name" :value="iteration.id" />

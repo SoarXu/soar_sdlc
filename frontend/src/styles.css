@@ -197,6 +197,12 @@ body {
   font-size: 13px;
 }
 
+.page-head > .el-button {
+  justify-self: flex-end;
+  width: auto;
+  min-width: 88px;
+}
+
 .page-actions {
   display: flex;
   align-items: center;
@@ -1635,10 +1641,6 @@ body {
 
   .product-right span {
     display: none;
-  }
-
-  .page-head > .el-button {
-    width: 100%;
   }
 
   .el-dialog {

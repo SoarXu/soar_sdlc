@@ -1034,6 +1034,15 @@ function openBugAction(row, actionType) {
   bugActionVisible.value = true
 }
 
+async function safeFetchProjectMembers(id) {
+  try {
+    return await fetchProjectMembers(id)
+  } catch (error) {
+    console.warn('Failed to load project members, fallback to empty list.', error)
+    return { data: [] }
+  }
+}
+
 async function loadData() {
   loading.value = true
   try {
@@ -1062,7 +1071,7 @@ async function loadData() {
       fetchIterations({ project_id: projectId.value }),
       fetchRequirements(),
       fetchTasks(),
-      fetchProjectMembers(projectId.value),
+      safeFetchProjectMembers(projectId.value),
       fetchProjectAuditLogs(projectId.value),
       fetchProjectStatusOperations(projectId.value),
       fetchProjectIterations(projectId.value, projectListParams('iterations')),

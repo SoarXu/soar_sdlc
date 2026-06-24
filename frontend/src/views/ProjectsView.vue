@@ -11,6 +11,7 @@
     <el-card shadow="never">
       <el-table
         v-loading="loading"
+        class="project-tree-table"
         :data="pagedProjectTree"
         row-key="id"
         stripe

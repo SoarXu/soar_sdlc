@@ -617,6 +617,17 @@ body {
   margin-left: 0;
 }
 
+.project-tree-table .el-table__body .el-table__cell:first-child .cell {
+  display: flex;
+  align-items: center;
+  min-height: 36px;
+}
+
+.project-tree-table .el-table__placeholder,
+.project-tree-table .el-table__expand-icon {
+  flex: 0 0 auto;
+}
+
 .iteration-project-block {
   margin-bottom: 18px;
 }

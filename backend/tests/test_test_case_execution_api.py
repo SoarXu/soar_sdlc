@@ -187,6 +187,42 @@ def test_failed_test_case_execution_creates_bug_with_case_iteration_and_can_edit
     assert any(item["id"] == data["id"] for item in detail_after_update.json()["bugs"])
 
 
+def test_failed_test_case_bug_uses_requirement_iteration_when_case_has_no_direct_iteration(client: TestClient):
+    project_id = _create_project(client)
+    requirement_id = _create_requirement(client, project_id, owner_id=1)
+    iteration = client.post(
+        "/api/v1/iterations",
+        json={"project_ids": [project_id], "name": f"Requirement Iteration-{uuid4().hex[:8]}"},
+    )
+    assert iteration.status_code == 200
+    iteration_id = iteration.json()["id"]
+    linked = client.post(f"/api/v1/iterations/{iteration_id}/requirements", json={"requirement_ids": [requirement_id]})
+    assert linked.status_code == 200
+
+    case = client.post(
+        "/api/v1/test-cases",
+        json={
+            "project_id": project_id,
+            "requirement_id": requirement_id,
+            "title": "Case inherits requirement iteration",
+            "steps_json": [{"step": "submit form", "expected": "success"}],
+        },
+    )
+    assert case.status_code == 200
+    assert case.json()["iteration_id"] is None
+    case_id = case.json()["id"]
+    executed = client.post(
+        f"/api/v1/test-cases/{case_id}/executions",
+        json={"steps_result_json": [{"step": "submit form", "expected": "success", "result": "failed", "actual": "500"}]},
+    )
+    assert executed.status_code == 200
+
+    bug = client.post(f"/api/v1/test-cases/{case_id}/bugs", json={"title": "Inherited iteration bug"})
+
+    assert bug.status_code == 200
+    assert bug.json()["iteration_id"] == iteration_id
+
+
 def test_passed_test_case_execution_cannot_create_bug(client: TestClient):
     project_id = _create_project(client)
     case_id = _create_test_case(client, project_id)

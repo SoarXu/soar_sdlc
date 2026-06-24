@@ -35,6 +35,7 @@ class WorkbenchItem(BaseModel):
     test_case_id: int | None = None
     bug_type: str | None = None
     severity: str | None = None
+    marker: str | None = None
 
 
 class WorkbenchProject(BaseModel):
@@ -63,3 +64,5 @@ class WorkbenchResponse(BaseModel):
     iterations: list[WorkbenchIteration]
     owners: list[dict]
     review_tasks: list[dict] = Field(default_factory=list)
+    role_keys: list[str] = Field(default_factory=list)
+    view_mode: str = "all"

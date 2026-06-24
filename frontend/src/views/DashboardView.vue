@@ -597,7 +597,10 @@ function typeLabel(value) { return itemTypes.find((item) => item.value === value
 function typeShortLabel(value) { return { requirement: '需', task: '任', test_case: '测', bug: 'Bug', code_review: 'CR' }[value] || typeLabel(value) }
 function typeTag(value) { return { requirement: 'primary', task: 'success', test_case: 'warning', bug: 'danger', code_review: 'info' }[value] || 'info' }
 function iterationStatusLabel(value) { return statusOptions.iteration[value] || value || '-' }
-function itemStatusLabel(item) { return item.object_type === 'test_case' ? executionResultLabel(item.last_execute_result) : (statusOptions[item.object_type]?.[item.status] || item.status || '-') }
+function itemStatusLabel(item) {
+  const status = item.object_type === 'test_case' ? executionResultLabel(item.last_execute_result) : (statusOptions[item.object_type]?.[item.status] || item.status || '-')
+  return item.marker ? `${status} · ${item.marker}` : status
+}
 function executionResultLabel(value) { return executionResultOptions.find((item) => item.value === value)?.label || value || '未执行' }
 function canCreateBugFromCase(item) { return ['failed', 'blocked'].includes(item.last_execute_result) }
 function openWorkItemDrawer(item, iteration = null) {
@@ -623,7 +626,8 @@ function defaultExecutionTime() {
 async function loadWorkbench() {
   loading.value = true
   try {
-    const { data } = await fetchWorkbench()
+    const currentUserId = Number(localStorage.getItem('current_user_id') || 0) || undefined
+    const { data } = await fetchWorkbench(currentUserId ? { user_id: currentUserId } : {})
     iterations.value = data.iterations || []
     owners.value = data.owners || []
     reviewTasks.value = data.review_tasks || []

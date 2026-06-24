@@ -3,6 +3,32 @@ from uuid import uuid4
 from fastapi.testclient import TestClient
 
 from app.db.session import SessionLocal
+from app.core.security import get_password_hash
+from app.models.role import Role, UserRole
+from app.models.user import User
+
+
+def _create_user_with_role(username: str, role_key: str) -> int:
+    db = SessionLocal()
+    try:
+        role = db.query(Role).filter(Role.role_key == role_key).first()
+        if not role:
+            role = Role(role_key=role_key, role_name=role_key, enabled=True, is_system=True)
+            db.add(role)
+            db.flush()
+        user = User(
+            username=username,
+            full_name=username,
+            password_hash=get_password_hash("User123456"),
+            is_active=True,
+        )
+        db.add(user)
+        db.flush()
+        db.add(UserRole(user_id=user.id, role_id=role.id))
+        db.commit()
+        return user.id
+    finally:
+        db.close()
 
 
 def _create_project(client: TestClient, name: str | None = None) -> int:
@@ -51,6 +77,62 @@ def test_workbench_groups_items_by_iteration_and_supports_test_case_iteration(cl
     assert {item["id"] for item in board["test_cases"]} == {test_case["id"]}
     assert {item["id"] for item in board["bugs"]} == {bug["id"]}
     assert board["counts"] == {"requirements": 1, "tasks": 1, "test_cases": 1, "bugs": 1}
+
+
+def test_developer_workbench_defaults_to_owned_active_iteration_work(client: TestClient):
+    developer_id = _create_user_with_role("developer_user", "developer")
+    other_user_id = _create_user_with_role("other_developer", "developer")
+    project_id = _create_project(client, "Developer Workbench Project")
+    iteration_id = _create_iteration(client, project_id, "Developer Active Iteration")
+    client.post(f"/api/v1/iterations/{iteration_id}/start", json={"effective_time": "2026-06-24T10:00:00"})
+    mine = client.post(
+        "/api/v1/tasks",
+        json={"project_id": project_id, "iteration_id": iteration_id, "title": "My active task", "owner_id": developer_id},
+    ).json()
+    client.post(
+        "/api/v1/tasks",
+        json={"project_id": project_id, "iteration_id": iteration_id, "title": "Other active task", "owner_id": other_user_id},
+    )
+
+    response = client.get(f"/api/v1/dashboard/workbench?user_id={developer_id}")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["view_mode"] == "developer"
+    board = next(item for item in data["iterations"] if item["id"] == iteration_id)
+    assert {item["id"] for item in board["tasks"]} == {mine["id"]}
+    assert board["test_cases"] == []
+
+
+def test_tester_workbench_includes_linked_cases_with_completion_marker(client: TestClient):
+    tester_id = _create_user_with_role("tester_user", "tester")
+    project_id = _create_project(client, "Tester Workbench Project")
+    iteration_id = _create_iteration(client, project_id, "Tester Active Iteration")
+    client.post(f"/api/v1/iterations/{iteration_id}/start", json={"effective_time": "2026-06-24T10:00:00"})
+    requirement = client.post(
+        "/api/v1/requirements",
+        json={"project_id": project_id, "iteration_id": iteration_id, "title": "Done requirement", "owner_id": tester_id},
+    ).json()
+    client.post(f"/api/v1/requirements/{requirement['id']}/activate")
+    client.post(f"/api/v1/requirements/{requirement['id']}/complete")
+    test_case = client.post(
+        "/api/v1/test-cases",
+        json={
+            "project_id": project_id,
+            "requirement_id": requirement["id"],
+            "title": "Regression case for done requirement",
+            "default_tester_id": tester_id,
+        },
+    ).json()
+
+    response = client.get(f"/api/v1/dashboard/workbench?user_id={tester_id}")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["view_mode"] == "tester"
+    board = next(item for item in data["iterations"] if item["id"] == iteration_id)
+    case = next(item for item in board["test_cases"] if item["id"] == test_case["id"])
+    assert case["marker"] == "待回归"
 
 
 def test_workbench_iteration_includes_related_projects(client: TestClient):

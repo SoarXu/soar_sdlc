@@ -15,8 +15,8 @@ def summary(db: Session = Depends(get_db)):
 
 
 @router.get("/workbench", response_model=WorkbenchResponse)
-def workbench(db: Session = Depends(get_db)):
-    return get_workbench(db)
+def workbench(user_id: int | None = None, db: Session = Depends(get_db)):
+    return get_workbench(db, user_id=user_id)
 
 
 @router.post("/workbench/move", response_model=WorkbenchItem)

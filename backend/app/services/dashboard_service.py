@@ -8,6 +8,7 @@ from app.models.iteration import Iteration, IterationProject
 from app.models.program import Program
 from app.models.project import Project
 from app.models.requirement import Requirement
+from app.models.role import Role, UserRole
 from app.models.task import Task
 from app.models.test_case import TestCase
 from app.models.user import User
@@ -25,8 +26,12 @@ def get_dashboard_summary(db: Session) -> DashboardSummary:
     )
 
 
-def get_workbench(db: Session) -> WorkbenchResponse:
+def get_workbench(db: Session, user_id: int | None = None) -> WorkbenchResponse:
+    role_keys = _role_keys_for_user(db, user_id)
+    view_mode = _workbench_view_mode(role_keys)
     iterations = db.query(Iteration).filter(Iteration.deleted == 0).order_by(Iteration.id.desc()).all()
+    if view_mode in {"developer", "tester", "lead"}:
+        iterations = [iteration for iteration in iterations if iteration.status == "active"]
     iteration_ids = [item.id for item in iterations]
     projects = {item.id: item for item in db.query(Project).filter(Project.deleted == 0).all()}
     iteration_projects = _iteration_projects(db, iteration_ids, projects)
@@ -52,13 +57,13 @@ def get_workbench(db: Session) -> WorkbenchResponse:
     )
     test_cases = _items_by_iteration(
         db.query(TestCase).filter(TestCase.deleted == 0, TestCase.iteration_id.in_(iteration_ids)).all(),
-        lambda item: _test_case_item(item, projects),
+        lambda item: _test_case_item(item, projects, marker=_test_case_marker(item, requirements)),
     )
     _merge_requirement_linked_items(
         test_cases,
         db.query(TestCase).filter(TestCase.deleted == 0, TestCase.requirement_id.in_(requirement_iteration_ids)).all(),
         requirement_iteration_ids,
-        lambda item, iteration_id: _test_case_item(item, projects, iteration_id),
+        lambda item, iteration_id: _test_case_item(item, projects, iteration_id, _test_case_marker(item, requirements)),
     )
     bugs = _items_by_iteration(
         db.query(Bug).filter(Bug.deleted == 0, Bug.iteration_id.in_(iteration_ids)).all(),
@@ -85,6 +90,10 @@ def get_workbench(db: Session) -> WorkbenchResponse:
         task_items = tasks.get(iteration.id, [])
         case_items = test_cases.get(iteration.id, [])
         bug_items = bugs.get(iteration.id, [])
+        reqs = _filter_items_for_role(reqs, user_id, view_mode, include_test_cases=False)
+        task_items = _filter_items_for_role(task_items, user_id, view_mode, include_test_cases=False)
+        case_items = _filter_items_for_role(case_items, user_id, view_mode, include_test_cases=True)
+        bug_items = _filter_items_for_role(bug_items, user_id, view_mode, include_test_cases=False)
         boards.append({
             "id": iteration.id,
             "name": iteration.name,
@@ -106,7 +115,8 @@ def get_workbench(db: Session) -> WorkbenchResponse:
                 "bugs": len(bug_items),
             },
         })
-    return WorkbenchResponse(iterations=boards, owners=owners, review_tasks=review_tasks)
+    review_tasks = _filter_review_tasks_for_role(review_tasks, user_id, view_mode)
+    return WorkbenchResponse(iterations=boards, owners=owners, review_tasks=review_tasks, role_keys=role_keys, view_mode=view_mode)
 
 
 def move_workbench_item(db: Session, object_type: str, object_id: int, target_iteration_id: int) -> WorkbenchItem:
@@ -274,7 +284,12 @@ def _task_item(item: Task, projects: dict[int, Project], iteration_id: int | Non
     )
 
 
-def _test_case_item(item: TestCase, projects: dict[int, Project], iteration_id: int | None = None) -> WorkbenchItem:
+def _test_case_item(
+    item: TestCase,
+    projects: dict[int, Project],
+    iteration_id: int | None = None,
+    marker: str | None = None,
+) -> WorkbenchItem:
     return WorkbenchItem(
         id=item.id,
         object_type="test_case",
@@ -290,6 +305,7 @@ def _test_case_item(item: TestCase, projects: dict[int, Project], iteration_id: 
         steps_json=item.steps_json,
         requirement_id=item.requirement_id,
         test_case_id=item.id,
+        marker=marker,
     )
 
 
@@ -323,3 +339,72 @@ def _date_value(value) -> str | None:
 
 def _datetime_value(value) -> str | None:
     return value.isoformat() if value else None
+
+
+def _role_keys_for_user(db: Session, user_id: int | None) -> list[str]:
+    if not user_id:
+        return []
+    rows = (
+        db.query(Role.role_key)
+        .join(UserRole, UserRole.role_id == Role.id)
+        .filter(UserRole.user_id == user_id, Role.enabled.is_(True))
+        .order_by(Role.id.asc())
+        .all()
+    )
+    return [row.role_key for row in rows]
+
+
+def _workbench_view_mode(role_keys: list[str]) -> str:
+    role_set = set(role_keys)
+    if "system_admin" in role_set:
+        return "all"
+    if role_set & {"project_owner", "product_manager", "development_lead"}:
+        return "lead"
+    if "tester" in role_set:
+        return "tester"
+    if "developer" in role_set:
+        return "developer"
+    return "all"
+
+
+def _filter_items_for_role(
+    items: list[WorkbenchItem],
+    user_id: int | None,
+    view_mode: str,
+    include_test_cases: bool,
+) -> list[WorkbenchItem]:
+    if view_mode in {"all", "lead"} or not user_id:
+        return items
+    if view_mode == "tester":
+        if include_test_cases:
+            return [item for item in items if item.owner_id in {None, user_id}]
+        return [item for item in items if item.owner_id in {None, user_id}]
+    if view_mode == "developer":
+        if include_test_cases:
+            return []
+        return [item for item in items if item.owner_id == user_id]
+    return items
+
+
+def _filter_review_tasks_for_role(review_tasks: list[dict], user_id: int | None, view_mode: str) -> list[dict]:
+    if view_mode in {"all", "lead"} or not user_id:
+        return review_tasks
+    if view_mode == "developer":
+        return [item for item in review_tasks if item.get("owner_id") == user_id]
+    return []
+
+
+def _test_case_marker(item: TestCase, requirements: dict[int, list[WorkbenchItem]]) -> str | None:
+    requirement_items = {
+        requirement.id: requirement
+        for values in requirements.values()
+        for requirement in values
+    }
+    requirement = requirement_items.get(item.requirement_id)
+    if not requirement or requirement.status not in {"done", "closed"}:
+        return None
+    if item.last_execute_result == "passed":
+        return "最近通过"
+    if item.last_execute_result in {"failed", "blocked"}:
+        return "最近失败"
+    return "待回归"

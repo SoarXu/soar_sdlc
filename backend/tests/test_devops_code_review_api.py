@@ -2,7 +2,10 @@ from app.db.session import SessionLocal
 from app.models.bug import Bug
 from app.models.project import Project
 from app.models.requirement import Requirement
+from app.models.role import Role, UserRole
 from app.models.task import Task
+from app.models.user import User
+from app.core.security import get_password_hash
 
 
 def test_commit_ingest_links_objects_and_creates_review_task(client):
@@ -93,3 +96,35 @@ def test_jenkins_webhook_records_build_and_links_commit(client):
     list_response = client.get(f"/api/v1/devops/jenkins-builds?job_id={job_id}")
     assert list_response.status_code == 200
     assert [item["build_number"] for item in list_response.json()] == ["42"]
+
+
+def test_commit_review_task_assigns_development_lead(client):
+    db = SessionLocal()
+    try:
+        role = db.query(Role).filter(Role.role_key == "development_lead").first()
+        if not role:
+            role = Role(role_key="development_lead", role_name="Development Lead", enabled=True, is_system=True)
+            db.add(role)
+            db.flush()
+        user = User(
+            username="review_lead",
+            full_name="Review Lead",
+            password_hash=get_password_hash("User123456"),
+            is_active=True,
+        )
+        db.add(user)
+        db.flush()
+        db.add(UserRole(user_id=user.id, role_id=role.id))
+        db.commit()
+
+        response = client.post(
+            "/api/v1/devops/commits",
+            json={"commit_sha": "lead1234567890abc", "message": "TASK-999 no object still review"},
+        )
+
+        assert response.status_code == 201
+        reviews = client.get("/api/v1/devops/review-tasks")
+        task = next(item for item in reviews.json() if item["commit_id"] == response.json()["id"])
+        assert task["owner_id"] == user.id
+    finally:
+        db.close()

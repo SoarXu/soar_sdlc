@@ -63,7 +63,7 @@
             </el-table-column>
             <el-table-column label="标题" min-width="220" show-overflow-tooltip>
               <template #default="{ row }">
-                <el-button link type="primary" class="workbench-title-button" @click="openWorkItemDrawer(row)">{{ row.title }}</el-button>
+                <el-button link type="primary" class="workbench-title-button" @click="openWorkItemDetail(row)">{{ row.title }}</el-button>
               </template>
             </el-table-column>
             <el-table-column prop="project_name" label="项目" min-width="140" show-overflow-tooltip />
@@ -162,7 +162,7 @@
                     >
                       <div class="workbench-card-top">
                         <span class="workbench-type-dot" :class="`type-${item.object_type}`">{{ typeShortLabel(item.object_type) }}</span>
-                        <button class="workbench-title workbench-card-button" type="button" @click="openWorkItemDrawer(item, iteration)">{{ item.title }}</button>
+                        <button class="workbench-title workbench-card-button" type="button" @click="openWorkItemDetail(item)">{{ item.title }}</button>
                         <span class="workbench-status">{{ itemStatusLabel(item) }}</span>
                       </div>
                       <div class="workbench-meta">
@@ -611,6 +611,9 @@ function openWorkItemDrawer(item, iteration = null) {
   }
   selectedWorkItem.value = iteration ? decorateListItem(item, iteration) : item
   workItemDrawerVisible.value = true
+}
+function openWorkItemDetail(item) {
+  router.push(detailLink(item))
 }
 function detailLink(item) {
   if (item.object_type === 'requirement') return { name: 'requirement-detail', params: { id: item.id }, query: { from: 'dashboard' } }

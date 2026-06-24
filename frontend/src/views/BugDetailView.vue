@@ -124,6 +124,10 @@ function actionLabel(value) { return optionLabel(actionOptions, value) }
 function resolutionLabel(value) { return resolutionOptions.includes(value) ? value : value || '-' }
 function formatDateTime(value) { return value ? new Date(value).toLocaleString('zh-CN', { hour12: false }) : '-' }
 function goBack() {
+  if (route.query.from === 'dashboard') {
+    router.push({ name: 'dashboard' })
+    return
+  }
   if (route.query.from === 'project' && bug.value.project_id) {
     router.push({ name: 'project-detail', params: { id: bug.value.project_id }, query: { tab: 'bugs' } })
     return

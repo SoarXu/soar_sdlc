@@ -187,6 +187,10 @@ function requirementFieldLabel(field) {
   ], field)
 }
 function goBackToProjectRequirements() {
+  if (route.query.from === 'dashboard') {
+    router.push({ name: 'dashboard' })
+    return
+  }
   if (route.query.from === 'iteration' && route.query.iterationId) {
     router.push({ name: 'iteration-detail', params: { id: route.query.iterationId }, query: { tab: route.query.tab || 'requirements' } })
     return

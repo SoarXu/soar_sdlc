@@ -115,6 +115,10 @@ function testScopeLabel(value) { return optionLabel(testScopeOptions, value) }
 function executionResultLabel(value) { return optionLabel(executionResultOptions, value) }
 function formatDateTime(value) { return value ? new Date(value).toLocaleString('zh-CN', { hour12: false }) : '-' }
 function goBack() {
+  if (route.query.from === 'dashboard') {
+    router.push({ name: 'dashboard' })
+    return
+  }
   if (route.query.from === 'iteration' && route.query.iterationId) {
     router.push({ name: 'iteration-detail', params: { id: route.query.iterationId }, query: { tab: route.query.tab || 'cases' } })
     return

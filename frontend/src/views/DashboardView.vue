@@ -3,7 +3,7 @@
     <div class="page-head">
       <div>
         <h1>工作台</h1>
-        <p>按迭代和负责人聚合当前需要处理的需求、任务、测试用例和 Bug。</p>
+        <p>仅展示进行中迭代，按项目成员和负责人聚合当前需要处理的需求、任务、测试用例和 Bug。</p>
       </div>
       <div class="workbench-view-switch">
         <span>工作视图</span>

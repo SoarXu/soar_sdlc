@@ -31,9 +31,12 @@ def get_workbench(db: Session, user_id: int | None = None) -> WorkbenchResponse:
     role_keys = _role_keys_for_user(db, user_id)
     view_mode = _workbench_view_mode(role_keys)
     scoped_project_ids = workbench_project_ids_for_user(db, user_id) if user_id and view_mode != "all" else set()
-    iterations = db.query(Iteration).filter(Iteration.deleted == 0).order_by(Iteration.id.desc()).all()
-    if view_mode in {"developer", "tester", "lead"}:
-        iterations = [iteration for iteration in iterations if iteration.status == "active"]
+    iterations = (
+        db.query(Iteration)
+        .filter(Iteration.deleted == 0, Iteration.status == "active")
+        .order_by(Iteration.id.desc())
+        .all()
+    )
     if user_id and view_mode != "all" and not scoped_project_ids:
         iterations = []
     iteration_ids = [item.id for item in iterations]

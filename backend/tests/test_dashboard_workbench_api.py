@@ -47,9 +47,15 @@ def _create_iteration(client: TestClient, project_id: int, name: str | None = No
     return response.json()["id"]
 
 
+def _start_iteration(client: TestClient, iteration_id: int) -> None:
+    response = client.post(f"/api/v1/iterations/{iteration_id}/start", json={"effective_time": "2026-06-24T10:00:00"})
+    assert response.status_code == 200
+
+
 def test_workbench_groups_items_by_iteration_and_supports_test_case_iteration(client: TestClient):
     project_id = _create_project(client, "Workbench Project")
     iteration_id = _create_iteration(client, project_id, "Workbench Iteration")
+    _start_iteration(client, iteration_id)
 
     requirement = client.post(
         "/api/v1/requirements",
@@ -80,13 +86,35 @@ def test_workbench_groups_items_by_iteration_and_supports_test_case_iteration(cl
     assert board["counts"] == {"requirements": 1, "tasks": 1, "test_cases": 1, "bugs": 1}
 
 
+def test_workbench_only_shows_active_iterations_for_all_views(client: TestClient):
+    project_id = _create_project(client, "Active Only Workbench Project")
+    active_iteration_id = _create_iteration(client, project_id, "Active Workbench Iteration")
+    planning_iteration_id = _create_iteration(client, project_id, "Planning Workbench Iteration")
+    client.post(f"/api/v1/iterations/{active_iteration_id}/start", json={"effective_time": "2026-06-24T10:00:00"})
+    client.post(
+        "/api/v1/requirements",
+        json={"project_id": project_id, "iteration_id": active_iteration_id, "title": "Active iteration requirement"},
+    )
+    client.post(
+        "/api/v1/requirements",
+        json={"project_id": project_id, "iteration_id": planning_iteration_id, "title": "Planning iteration requirement"},
+    )
+
+    response = client.get("/api/v1/dashboard/workbench")
+
+    assert response.status_code == 200
+    board_ids = {item["id"] for item in response.json()["iterations"]}
+    assert active_iteration_id in board_ids
+    assert planning_iteration_id not in board_ids
+
+
 def test_developer_workbench_defaults_to_project_member_active_iteration_work(client: TestClient):
     developer_id = _create_user_with_role("developer_user", "developer")
     other_user_id = _create_user_with_role("other_developer", "developer")
     outsider_id = _create_user_with_role("outside_developer", "developer")
     project_id = _create_project(client, "Developer Workbench Project")
     iteration_id = _create_iteration(client, project_id, "Developer Active Iteration")
-    client.post(f"/api/v1/iterations/{iteration_id}/start", json={"effective_time": "2026-06-24T10:00:00"})
+    _start_iteration(client, iteration_id)
     requirement = client.post(
         "/api/v1/requirements",
         json={"project_id": project_id, "iteration_id": iteration_id, "title": "Team visible requirement"},
@@ -136,8 +164,8 @@ def test_development_lead_workbench_is_limited_to_project_team_scope(client: Tes
     outside_project_id = _create_project(client, "Lead Outside Project")
     scoped_iteration_id = _create_iteration(client, scoped_project_id, "Lead Scoped Iteration")
     outside_iteration_id = _create_iteration(client, outside_project_id, "Lead Outside Iteration")
-    client.post(f"/api/v1/iterations/{scoped_iteration_id}/start", json={"effective_time": "2026-06-24T10:00:00"})
-    client.post(f"/api/v1/iterations/{outside_iteration_id}/start", json={"effective_time": "2026-06-24T10:00:00"})
+    _start_iteration(client, scoped_iteration_id)
+    _start_iteration(client, outside_iteration_id)
     scoped_requirement = client.post(
         "/api/v1/requirements",
         json={"project_id": scoped_project_id, "iteration_id": scoped_iteration_id, "title": "Lead scoped requirement"},
@@ -177,7 +205,7 @@ def test_tester_workbench_includes_linked_cases_with_completion_marker(client: T
     tester_id = _create_user_with_role("tester_user", "tester")
     project_id = _create_project(client, "Tester Workbench Project")
     iteration_id = _create_iteration(client, project_id, "Tester Active Iteration")
-    client.post(f"/api/v1/iterations/{iteration_id}/start", json={"effective_time": "2026-06-24T10:00:00"})
+    _start_iteration(client, iteration_id)
     requirement = client.post(
         "/api/v1/requirements",
         json={"project_id": project_id, "iteration_id": iteration_id, "title": "Done requirement", "owner_id": tester_id},
@@ -220,6 +248,7 @@ def test_tester_workbench_includes_linked_cases_with_completion_marker(client: T
 def test_workbench_iteration_includes_related_projects(client: TestClient):
     project_id = _create_project(client, "Scope Visible Project")
     iteration_id = _create_iteration(client, project_id, "Scope Visible Iteration")
+    _start_iteration(client, iteration_id)
 
     response = client.get("/api/v1/dashboard/workbench")
 
@@ -232,6 +261,7 @@ def test_workbench_iteration_includes_related_projects(client: TestClient):
 def test_workbench_includes_empty_iterations(client: TestClient):
     project_id = _create_project(client, "Empty Board Project")
     iteration_id = _create_iteration(client, project_id, "Empty Board Iteration")
+    _start_iteration(client, iteration_id)
 
     response = client.get("/api/v1/dashboard/workbench")
 
@@ -243,6 +273,7 @@ def test_workbench_includes_empty_iterations(client: TestClient):
 def test_workbench_includes_tasks_and_cases_from_linked_requirements(client: TestClient):
     project_id = _create_project(client, "Requirement Derived Workbench Project")
     iteration_id = _create_iteration(client, project_id, "Requirement Derived Workbench Iteration")
+    _start_iteration(client, iteration_id)
     requirement = client.post(
         "/api/v1/requirements",
         json={
@@ -320,6 +351,7 @@ def test_workbench_move_rejects_items_outside_target_iteration_project_scope(cli
 def test_workbench_shows_items_by_iteration_even_when_lifecycle_phase_differs(client: TestClient):
     project_id = _create_project(client, "Phase Project")
     iteration_id = _create_iteration(client, project_id, "Development Iteration")
+    _start_iteration(client, iteration_id)
     visible_requirement = client.post(
         "/api/v1/requirements",
         json={
@@ -359,6 +391,7 @@ def test_workbench_shows_items_by_iteration_even_when_lifecycle_phase_differs(cl
 def test_workbench_uses_iteration_membership_not_lifecycle_phase(client: TestClient):
     project_id = _create_project(client, "Iteration Membership Project")
     iteration_id = _create_iteration(client, project_id, "Iteration Membership Board")
+    _start_iteration(client, iteration_id)
     requirement = client.post(
         "/api/v1/requirements",
         json={

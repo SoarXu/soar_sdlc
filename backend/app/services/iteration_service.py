@@ -157,6 +157,7 @@ def start_iteration(db: Session, iteration_id: int, payload: StatusOperationCrea
         to_status=iteration.status,
         payload=payload,
     )
+    _activate_iteration_work_items(db, iteration.id)
     db.commit()
     db.refresh(iteration)
     return _iteration_to_dict(iteration, _iteration_project_ids(db, iteration.id))
@@ -386,6 +387,48 @@ def _linked_requirements(db: Session, iteration_id: int) -> list[Requirement]:
         .order_by(Requirement.project_id.asc(), Requirement.id.desc())
         .all()
     )
+
+
+def _linked_tasks(db: Session, iteration_id: int, requirement_ids: list[int]) -> list[Task]:
+    tasks_by_id = {}
+    if requirement_ids:
+        for task in db.query(Task).filter(Task.deleted == 0, Task.requirement_id.in_(requirement_ids)).all():
+            tasks_by_id[task.id] = task
+    for task in db.query(Task).filter(Task.deleted == 0, Task.iteration_id == iteration_id).all():
+        tasks_by_id[task.id] = task
+    return list(tasks_by_id.values())
+
+
+def _activate_iteration_work_items(db: Session, iteration_id: int) -> None:
+    payload = StatusOperationCreate(remark="迭代开始自动激活")
+    requirements = _linked_requirements(db, iteration_id)
+    requirement_ids = [item.id for item in requirements]
+    for requirement in requirements:
+        if requirement.status == "draft":
+            from_status = requirement.status
+            requirement.status = "active"
+            create_status_operation(
+                db,
+                object_type="requirement",
+                object_id=requirement.id,
+                action="activate",
+                from_status=from_status,
+                to_status=requirement.status,
+                payload=payload,
+            )
+    for task in _linked_tasks(db, iteration_id, requirement_ids):
+        if task.status == "todo":
+            from_status = task.status
+            task.status = "doing"
+            create_status_operation(
+                db,
+                object_type="task",
+                object_id=task.id,
+                action="activate",
+                from_status=from_status,
+                to_status=task.status,
+                payload=payload,
+            )
 
 
 def _projects_to_tree(db: Session, root_project_ids: list[int]) -> list[dict]:

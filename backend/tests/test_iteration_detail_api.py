@@ -296,6 +296,51 @@ def test_iteration_can_start_with_actual_start_date(client: TestClient):
     assert operations.json()[0]["remark"] == "iteration kickoff"
 
 
+def test_iteration_start_activates_open_requirements_and_tasks(client: TestClient):
+    project_id = _create_project(client)
+    iteration_id = _create_iteration(client, [project_id])
+    requirement_id = _create_requirement(client, project_id, "Draft requirement for iteration start")
+    closed_requirement_id = _create_requirement(client, project_id, "Closed requirement remains closed", status="closed")
+    requirement_task_id = _create_task(client, project_id, "Task under draft requirement", requirement_id=requirement_id)
+    standalone_task_id = _create_task(client, project_id, "Standalone task linked to iteration")
+    closed_task_id = _create_task(client, project_id, "Closed task remains closed")
+    closed_task = client.post(
+        f"/api/v1/tasks/{closed_task_id}/close",
+        json={"reason": "done", "remark": "closed before iteration start"},
+    )
+    assert closed_task.status_code == 200
+
+    linked_requirements = client.post(
+        f"/api/v1/iterations/{iteration_id}/requirements",
+        json={"requirement_ids": [requirement_id, closed_requirement_id]},
+    )
+    assert linked_requirements.status_code == 200
+    linked_tasks = client.post(
+        f"/api/v1/iterations/{iteration_id}/tasks",
+        json={"task_ids": [standalone_task_id, closed_task_id]},
+    )
+    assert linked_tasks.status_code == 200
+
+    started = client.post(
+        f"/api/v1/iterations/{iteration_id}/start",
+        json={"effective_time": "2026-06-12T09:30:00", "remark": "iteration kickoff"},
+    )
+
+    assert started.status_code == 200
+    assert client.get(f"/api/v1/requirements/{requirement_id}").json()["status"] == "active"
+    assert client.get(f"/api/v1/requirements/{closed_requirement_id}").json()["status"] == "closed"
+    assert client.get(f"/api/v1/tasks/{requirement_task_id}").json()["status"] == "doing"
+    assert client.get(f"/api/v1/tasks/{standalone_task_id}").json()["status"] == "doing"
+    assert client.get(f"/api/v1/tasks/{closed_task_id}").json()["status"] == "closed"
+
+    requirement_history = client.get(f"/api/v1/requirements/{requirement_id}/status-operations").json()
+    task_history = client.get(f"/api/v1/tasks/{standalone_task_id}/status-operations").json()
+    assert requirement_history[-1]["action"] == "activate"
+    assert requirement_history[-1]["remark"] == "迭代开始自动激活"
+    assert task_history[-1]["action"] == "activate"
+    assert task_history[-1]["remark"] == "迭代开始自动激活"
+
+
 def test_iteration_can_finish_with_actual_end_date(client: TestClient):
     project_id = _create_project(client)
     iteration_id = _create_iteration(client, [project_id])

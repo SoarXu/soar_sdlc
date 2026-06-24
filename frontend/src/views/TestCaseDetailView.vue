@@ -5,9 +5,38 @@
       <el-tag effect="plain">#{{ testCase.id }}</el-tag>
       <h1>{{ testCase.title || '测试用例详情' }}</h1>
       <router-link v-if="testCase.project_id" class="detail-link" :to="`/projects/${testCase.project_id}?tab=tests`">进入项目</router-link>
+      <el-button v-if="!editing" type="primary" @click="startEdit">编辑</el-button>
+      <template v-else>
+        <el-button @click="cancelEdit">取消</el-button>
+        <el-button type="primary" :loading="saving" @click="saveTestCase">保存</el-button>
+      </template>
     </div>
 
     <el-card v-loading="loading" shadow="never" class="detail-panel">
+      <el-form v-if="editing" label-position="top">
+        <el-form-item label="用例标题" required><el-input v-model="caseForm.title" /></el-form-item>
+        <div class="form-grid">
+          <el-form-item label="所属项目"><el-select v-model="caseForm.project_id" clearable filterable><el-option v-for="project in projects" :key="project.id" :label="project.name" :value="project.id" /></el-select></el-form-item>
+          <el-form-item label="关联需求"><el-select v-model="caseForm.requirement_id" clearable filterable><el-option v-for="requirement in requirements" :key="requirement.id" :label="requirement.title" :value="requirement.id" /></el-select></el-form-item>
+          <el-form-item label="测试人"><el-select v-model="caseForm.default_tester_id" clearable filterable><el-option v-for="user in users" :key="user.id" :label="user.full_name" :value="user.id" /></el-select></el-form-item>
+          <el-form-item label="用例类型"><el-select v-model="caseForm.case_type"><el-option v-for="option in caseTypeOptions" :key="option.value" :label="option.label" :value="option.value" /></el-select></el-form-item>
+          <el-form-item label="适用范围"><el-select v-model="caseForm.test_scope"><el-option v-for="option in testScopeOptions" :key="option.value" :label="option.label" :value="option.value" /></el-select></el-form-item>
+        </div>
+        <el-form-item label="前置条件"><el-input v-model="caseForm.precondition" type="textarea" :rows="3" /></el-form-item>
+        <el-form-item label="用例步骤">
+          <div class="case-steps-editor">
+            <el-table :data="caseForm.steps_json" border>
+              <el-table-column label="步骤" min-width="260"><template #default="{ row, $index }"><el-input v-model="row.step" :placeholder="`步骤 ${$index + 1}`" /></template></el-table-column>
+              <el-table-column label="预期" min-width="260"><template #default="{ row }"><el-input v-model="row.expected" placeholder="预期结果" /></template></el-table-column>
+              <el-table-column label="操作" width="90"><template #default="{ $index }"><el-button link type="danger" :disabled="caseForm.steps_json.length === 1" @click="removeCaseStep($index)">删除</el-button></template></el-table-column>
+            </el-table>
+            <el-button class="case-step-add" @click="addCaseStep">增加步骤</el-button>
+          </div>
+        </el-form-item>
+        <el-form-item label="预期结果"><el-input v-model="caseForm.expected_result" type="textarea" :rows="3" /></el-form-item>
+      </el-form>
+
+      <template v-else>
       <el-descriptions :column="3" border>
         <el-descriptions-item label="所属项目">{{ labelById(projects, testCase.project_id) }}</el-descriptions-item>
         <el-descriptions-item label="关联需求">
@@ -36,6 +65,7 @@
         <el-table-column label="步骤" min-width="260"><template #default="{ row, $index }">{{ row.step || `步骤 ${$index + 1}` }}</template></el-table-column>
         <el-table-column prop="expected" label="预期" min-width="260" />
       </el-table>
+      </template>
     </el-card>
 
     <el-card shadow="never" class="detail-panel requirement-history-card">
@@ -64,13 +94,13 @@
 </template>
 
 <script setup>
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 
 import { fetchProjects } from '../api/projects'
 import { fetchRequirements } from '../api/requirements'
-import { fetchTestCase, fetchTestCaseExecutions } from '../api/testCases'
+import { fetchTestCase, fetchTestCaseExecutions, updateTestCase } from '../api/testCases'
 import { fetchUsers } from '../api/users'
 import { labelById, userLabel } from '../utils/referenceLabels'
 
@@ -78,12 +108,15 @@ const route = useRoute()
 const router = useRouter()
 const testCaseId = computed(() => Number(route.params.id))
 const loading = ref(false)
+const saving = ref(false)
+const editing = ref(false)
 const testCase = ref({})
 const executions = ref([])
 const projects = ref([])
 const requirements = ref([])
 const users = ref([])
 const caseSteps = computed(() => (Array.isArray(testCase.value.steps_json) && testCase.value.steps_json.length ? testCase.value.steps_json : []))
+const caseForm = reactive({ project_id: null, requirement_id: null, title: '', case_type: 'functional', test_scope: 'functional_test', default_tester_id: null, precondition: '', steps_json: [{ step: '', expected: '' }], expected_result: '' })
 
 const caseTypeOptions = [
   { label: '接口测试', value: 'api' },
@@ -130,6 +163,52 @@ function goBack() {
   router.push({ name: 'tests' })
 }
 
+function normalizeCaseSteps(value) {
+  return Array.isArray(value) && value.length ? value.map((item) => ({ step: item.step || '', expected: item.expected || '' })) : [{ step: '', expected: '' }]
+}
+function addCaseStep() { caseForm.steps_json.push({ step: '', expected: '' }) }
+function removeCaseStep(index) { if (caseForm.steps_json.length > 1) caseForm.steps_json.splice(index, 1) }
+function cleanCaseSteps() { return caseForm.steps_json.filter((item) => item.step.trim() || item.expected.trim()) }
+function fillCaseForm() {
+  Object.assign(caseForm, {
+    project_id: testCase.value.project_id || null,
+    requirement_id: testCase.value.requirement_id || null,
+    title: testCase.value.title || '',
+    case_type: testCase.value.case_type || 'functional',
+    test_scope: testCase.value.test_scope || 'functional_test',
+    default_tester_id: testCase.value.default_tester_id || null,
+    precondition: testCase.value.precondition || '',
+    steps_json: normalizeCaseSteps(testCase.value.steps_json),
+    expected_result: testCase.value.expected_result || ''
+  })
+}
+function startEdit() {
+  fillCaseForm()
+  editing.value = true
+}
+function cancelEdit() {
+  editing.value = false
+  fillCaseForm()
+}
+async function saveTestCase() {
+  if (!caseForm.title.trim()) return ElMessage.warning('请填写用例标题')
+  saving.value = true
+  try {
+    await updateTestCase(testCaseId.value, {
+      ...caseForm,
+      project_id: caseForm.project_id || null,
+      requirement_id: caseForm.requirement_id || null,
+      default_tester_id: caseForm.default_tester_id || null,
+      steps_json: cleanCaseSteps()
+    })
+    editing.value = false
+    await loadData()
+    ElMessage.success('用例已保存')
+  } finally {
+    saving.value = false
+  }
+}
+
 async function loadData() {
   loading.value = true
   try {
@@ -141,6 +220,7 @@ async function loadData() {
       fetchUsers()
     ])
     testCase.value = caseRes.data
+    fillCaseForm()
     executions.value = executionRes.data
     projects.value = projectRes.data
     requirements.value = requirementRes.data

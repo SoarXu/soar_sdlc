@@ -83,7 +83,11 @@
         </div>
         <el-table :data="pagedProjectIterations" stripe width="100%">
           <el-table-column prop="id" label="ID" width="80" />
-          <el-table-column prop="name" label="迭代名称" min-width="180" show-overflow-tooltip />
+          <el-table-column label="迭代名称" min-width="180" show-overflow-tooltip>
+            <template #default="{ row }">
+              <router-link class="table-link" :to="{ name: 'iteration-detail', params: { id: row.id }, query: { from: 'project', projectId, tab: 'iterations' } }">{{ row.name }}</router-link>
+            </template>
+          </el-table-column>
           <el-table-column label="负责人" width="150"><template #default="{ row }">{{ userLabel(users, row.owner_id) }}</template></el-table-column>
           <el-table-column prop="start_date" label="开始日期" width="130" />
           <el-table-column prop="end_date" label="结束日期" width="130" />

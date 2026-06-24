@@ -5,9 +5,29 @@
       <el-tag effect="plain">#{{ requirement.id }}</el-tag>
       <h1>{{ requirement.title || '需求详情' }}</h1>
       <router-link v-if="requirement.project_id" class="detail-link" :to="`/projects/${requirement.project_id}`">进入项目</router-link>
+      <el-button v-if="!editing" type="primary" @click="startEdit">编辑</el-button>
+      <template v-else>
+        <el-button @click="cancelEdit">取消</el-button>
+        <el-button type="primary" :loading="saving" @click="saveRequirement">保存</el-button>
+      </template>
     </div>
 
     <el-card v-loading="loading" shadow="never" class="detail-panel">
+      <el-form v-if="editing" label-position="top">
+        <el-form-item label="需求标题" required><el-input v-model="requirementForm.title" /></el-form-item>
+        <div class="form-grid">
+          <el-form-item label="迭代"><el-select v-model="requirementForm.iteration_id" clearable filterable><el-option v-for="iteration in iterations" :key="iteration.id" :label="iteration.name" :value="iteration.id" /></el-select></el-form-item>
+          <el-form-item label="负责人"><el-select v-model="requirementForm.owner_id" clearable filterable><el-option v-for="user in users" :key="user.id" :label="user.full_name" :value="user.id" /></el-select></el-form-item>
+          <el-form-item label="提出人"><el-select v-model="requirementForm.proposer_id" clearable filterable><el-option v-for="user in users" :key="user.id" :label="user.full_name" :value="user.id" /></el-select></el-form-item>
+          <el-form-item label="类型"><el-select v-model="requirementForm.requirement_type"><el-option v-for="option in requirementTypeOptions" :key="option" :label="option" :value="option" /></el-select></el-form-item>
+          <el-form-item label="优先级"><el-select v-model="requirementForm.priority"><el-option v-for="option in requirementPriorityOptions" :key="option.value" :label="option.label" :value="option.value"><RequirementPriorityBadge :value="option.value" /></el-option></el-select></el-form-item>
+          <el-form-item label="评审状态"><el-select v-model="requirementForm.review_status"><el-option v-for="option in reviewStatusOptions" :key="option.value" :label="option.label" :value="option.value" /></el-select></el-form-item>
+        </div>
+        <el-form-item label="需求描述"><el-input v-model="requirementForm.description" type="textarea" :rows="4" /></el-form-item>
+        <el-form-item label="验收标准"><el-input v-model="requirementForm.acceptance_criteria" type="textarea" :rows="4" /></el-form-item>
+      </el-form>
+
+      <template v-else>
       <el-descriptions :column="3" border>
         <el-descriptions-item label="所属项目">{{ labelById(projects, requirement.project_id) }}</el-descriptions-item>
         <el-descriptions-item label="迭代">{{ labelById(iterations, requirement.iteration_id) }}</el-descriptions-item>
@@ -30,6 +50,7 @@
           <div class="rich-text">{{ requirement.acceptance_criteria || '-' }}</div>
         </section>
       </div>
+      </template>
     </el-card>
 
     <el-card shadow="never" class="detail-panel">
@@ -90,7 +111,7 @@ import { ElMessage } from 'element-plus'
 
 import { fetchIterations } from '../api/iterations'
 import { fetchProjects } from '../api/projects'
-import { fetchRequirement, fetchRequirementAuditLogs, fetchRequirementStatusOperations } from '../api/requirements'
+import { fetchRequirement, fetchRequirementAuditLogs, fetchRequirementStatusOperations, updateRequirement } from '../api/requirements'
 import { fetchTasks } from '../api/tasks'
 import { fetchUsers } from '../api/users'
 import CommitRecordsPanel from '../components/CommitRecordsPanel.vue'
@@ -102,6 +123,8 @@ const route = useRoute()
 const router = useRouter()
 const requirementId = computed(() => Number(route.params.id))
 const loading = ref(false)
+const saving = ref(false)
+const editing = ref(false)
 const requirement = ref({})
 const projects = ref([])
 const iterations = ref([])
@@ -110,6 +133,7 @@ const tasks = ref([])
 const statusOperations = ref([])
 const auditLogs = ref([])
 const expandedHistory = reactive({})
+const requirementForm = reactive({ iteration_id: null, title: '', requirement_type: '功能', priority: '3', owner_id: null, proposer_id: null, review_status: 'not_required', description: '', acceptance_criteria: '' })
 const relatedTasks = computed(() => tasks.value.filter((item) => item.requirement_id === requirementId.value))
 const requirementHistory = computed(() => {
   const statusItems = statusOperations.value.map((item) => ({
@@ -152,6 +176,14 @@ const reviewStatusOptions = [
   { label: '待评审', value: 'pending' },
   { label: '已通过', value: 'approved' },
   { label: '已拒绝', value: 'rejected' }
+]
+const requirementTypeOptions = ['功能', '接口', '性能', '安全', '体验', '改进', '其他']
+const requirementPriorityOptions = [
+  { label: '1级', value: '1' },
+  { label: '2级', value: '2' },
+  { label: '3级', value: '3' },
+  { label: '4级', value: '4' },
+  { label: '5级', value: '5' }
 ]
 
 function optionLabel(options, value) { return options.find((option) => option.value === value)?.label || value || '-' }
@@ -202,6 +234,49 @@ function goBackToProjectRequirements() {
   }
 }
 
+function fillRequirementForm() {
+  Object.assign(requirementForm, {
+    iteration_id: requirement.value.iteration_id || null,
+    title: requirement.value.title || '',
+    requirement_type: requirement.value.requirement_type || '功能',
+    priority: String(requirement.value.priority || '3'),
+    owner_id: requirement.value.owner_id || null,
+    proposer_id: requirement.value.proposer_id || null,
+    review_status: requirement.value.review_status || 'not_required',
+    description: requirement.value.description || '',
+    acceptance_criteria: requirement.value.acceptance_criteria || ''
+  })
+}
+
+function startEdit() {
+  fillRequirementForm()
+  editing.value = true
+}
+
+function cancelEdit() {
+  editing.value = false
+  fillRequirementForm()
+}
+
+async function saveRequirement() {
+  if (!requirementForm.title.trim()) return ElMessage.warning('请填写需求标题')
+  saving.value = true
+  try {
+    await updateRequirement(requirementId.value, {
+      ...requirementForm,
+      project_id: requirement.value.project_id,
+      iteration_id: requirementForm.iteration_id || null,
+      owner_id: requirementForm.owner_id || null,
+      proposer_id: requirementForm.proposer_id || null
+    })
+    editing.value = false
+    await loadData()
+    ElMessage.success('需求已保存')
+  } finally {
+    saving.value = false
+  }
+}
+
 async function loadData() {
   loading.value = true
   try {
@@ -215,6 +290,7 @@ async function loadData() {
       fetchRequirementAuditLogs(requirementId.value)
     ])
     requirement.value = requirementRes.data
+    fillRequirementForm()
     projects.value = projectRes.data
     iterations.value = iterationRes.data
     users.value = userRes.data

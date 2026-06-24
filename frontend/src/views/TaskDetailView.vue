@@ -5,9 +5,29 @@
       <el-tag effect="plain">#{{ task.id }}</el-tag>
       <h1>{{ task.title || '任务详情' }}</h1>
       <router-link v-if="task.project_id" class="detail-link" :to="`/projects/${task.project_id}`">进入项目</router-link>
+      <el-button v-if="!editing" type="primary" @click="startEdit">编辑</el-button>
+      <template v-else>
+        <el-button @click="cancelEdit">取消</el-button>
+        <el-button type="primary" :loading="saving" @click="saveTask">保存</el-button>
+      </template>
     </div>
 
     <el-card v-loading="loading" shadow="never" class="detail-panel">
+      <el-form v-if="editing" label-position="top">
+        <el-form-item label="任务标题" required><el-input v-model="taskForm.title" /></el-form-item>
+        <div class="form-grid">
+          <el-form-item label="关联需求"><el-select v-model="taskForm.requirement_id" clearable filterable><el-option v-for="requirement in requirements" :key="requirement.id" :label="requirement.title" :value="requirement.id" /></el-select></el-form-item>
+          <el-form-item label="负责人"><el-select v-model="taskForm.owner_id" clearable filterable><el-option v-for="user in users" :key="user.id" :label="user.full_name" :value="user.id" /></el-select></el-form-item>
+          <el-form-item label="任务类型"><el-input v-model="taskForm.task_type" /></el-form-item>
+          <el-form-item label="优先级"><el-select v-model="taskForm.priority"><el-option label="高" value="high" /><el-option label="中" value="medium" /><el-option label="低" value="low" /></el-select></el-form-item>
+          <el-form-item label="预计工时"><el-input-number v-model="taskForm.estimated_hours" :min="0" /></el-form-item>
+          <el-form-item label="实际工时"><el-input-number v-model="taskForm.actual_hours" :min="0" /></el-form-item>
+          <el-form-item label="截止日期"><el-date-picker v-model="taskForm.due_date" value-format="YYYY-MM-DD" type="date" /></el-form-item>
+        </div>
+        <el-form-item label="描述"><el-input v-model="taskForm.description" type="textarea" :rows="4" /></el-form-item>
+      </el-form>
+
+      <template v-else>
       <el-descriptions :column="3" border>
         <el-descriptions-item label="所属项目">{{ labelById(projects, task.project_id) }}</el-descriptions-item>
         <el-descriptions-item label="关联需求">
@@ -33,6 +53,7 @@
           <div class="rich-text">{{ task.source_requirement_review_status || '-' }}</div>
         </section>
       </div>
+      </template>
     </el-card>
 
         <CommitRecordsPanel object-type="task" :object-id="taskId" />
@@ -81,7 +102,7 @@ import { ElMessage } from 'element-plus'
 
 import { fetchProjects } from '../api/projects'
 import { fetchRequirements } from '../api/requirements'
-import { fetchTask, fetchTaskAuditLogs, fetchTaskStatusOperations } from '../api/tasks'
+import { fetchTask, fetchTaskAuditLogs, fetchTaskStatusOperations, updateTask } from '../api/tasks'
 import { fetchUsers } from '../api/users'
 import CommitRecordsPanel from '../components/CommitRecordsPanel.vue'
 import { labelById, userLabel } from '../utils/referenceLabels'
@@ -91,6 +112,8 @@ const route = useRoute()
 const router = useRouter()
 const taskId = computed(() => Number(route.params.id))
 const loading = ref(false)
+const saving = ref(false)
+const editing = ref(false)
 const task = ref({})
 const projects = ref([])
 const requirements = ref([])
@@ -98,6 +121,7 @@ const users = ref([])
 const statusOperations = ref([])
 const auditLogs = ref([])
 const expandedHistory = reactive({})
+const taskForm = reactive({ requirement_id: null, title: '', task_type: '', priority: 'medium', owner_id: null, estimated_hours: null, actual_hours: null, due_date: null, description: '' })
 const taskStatusOptions = [
   { label: '待办', value: 'todo' },
   { label: '进行中', value: 'doing' },
@@ -176,6 +200,48 @@ function goBackToProjectTasks() {
   }
 }
 
+function fillTaskForm() {
+  Object.assign(taskForm, {
+    requirement_id: task.value.requirement_id || null,
+    title: task.value.title || '',
+    task_type: task.value.task_type || '',
+    priority: task.value.priority || 'medium',
+    owner_id: task.value.owner_id || null,
+    estimated_hours: task.value.estimated_hours ?? null,
+    actual_hours: task.value.actual_hours ?? null,
+    due_date: task.value.due_date || null,
+    description: task.value.description || ''
+  })
+}
+
+function startEdit() {
+  fillTaskForm()
+  editing.value = true
+}
+
+function cancelEdit() {
+  editing.value = false
+  fillTaskForm()
+}
+
+async function saveTask() {
+  if (!taskForm.title.trim()) return ElMessage.warning('请填写任务标题')
+  saving.value = true
+  try {
+    await updateTask(taskId.value, {
+      ...taskForm,
+      project_id: task.value.project_id,
+      requirement_id: taskForm.requirement_id || null,
+      owner_id: taskForm.owner_id || null
+    })
+    editing.value = false
+    await loadData()
+    ElMessage.success('任务已保存')
+  } finally {
+    saving.value = false
+  }
+}
+
 async function loadData() {
   loading.value = true
   try {
@@ -188,6 +254,7 @@ async function loadData() {
       fetchTaskAuditLogs(taskId.value)
     ])
     task.value = taskRes.data
+    fillTaskForm()
     projects.value = projectRes.data
     requirements.value = requirementRes.data
     users.value = userRes.data

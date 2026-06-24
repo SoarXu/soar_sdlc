@@ -380,13 +380,15 @@ body {
 }
 
 .table-link {
-  color: #2468d8;
+  color: #2f6b3f;
   font-weight: 600;
   text-decoration: none;
 }
 
 .table-link:hover {
+  color: #1f5f35;
   text-decoration: underline;
+  text-underline-offset: 3px;
 }
 
 .priority-badge {
@@ -530,6 +532,15 @@ body {
 .project-row-name {
   color: #2f6b3f;
   font-weight: 600;
+}
+
+.project-row-link {
+  color: #2f6b3f;
+  font-weight: 600;
+}
+
+.project-row-link:hover {
+  color: #1f5f35;
 }
 
 .muted-action {

@@ -9,33 +9,9 @@ from app.views.auth_view import RegisterRequest
 DEFAULT_USERS = [
     {
         "username": "admin",
-        "full_name": "系统管理员",
+        "full_name": "Admin",
         "password": "admin123",
-        "department": "系统管理",
-    },
-    {
-        "username": "pm_chen",
-        "full_name": "陈序",
-        "password": "User123456",
-        "department": "项目管理部",
-    },
-    {
-        "username": "rd_lin",
-        "full_name": "林航",
-        "password": "User123456",
-        "department": "研发中心",
-    },
-    {
-        "username": "qa_wang",
-        "full_name": "王晴",
-        "password": "User123456",
-        "department": "测试中心",
-    },
-    {
-        "username": "po_li",
-        "full_name": "李澄",
-        "password": "User123456",
-        "department": "产品部",
+        "department": "System",
     },
 ]
 
@@ -77,7 +53,6 @@ def seed_default_users(db: Session) -> list[User]:
 
 
 def authenticate_user(db: Session, username: str, password: str) -> User | None:
-    seed_default_users(db)
     user = db.query(User).filter(User.username == username, User.deleted == 0, User.is_active.is_(True)).first()
     if not user or not _password_matches(user.password_hash, password):
         return None
@@ -85,7 +60,6 @@ def authenticate_user(db: Session, username: str, password: str) -> User | None:
 
 
 def list_users(db: Session, user_id: int | None = None) -> list[dict]:
-    seed_default_users(db)
     query = db.query(User).filter(User.deleted == 0, User.is_active.is_(True))
     if user_id:
         query = query.filter(User.id == user_id)

@@ -76,8 +76,36 @@
                 <span v-else>{{ executionResultLabel(row.last_execute_result) }}</span>
               </template>
             </el-table-column>
-            <el-table-column label="操作" width="100" fixed="right">
-              <template #default="{ row }"><el-button link type="primary" @click="openWorkItemDrawer(row)">处理</el-button></template>
+            <el-table-column label="操作" min-width="220" fixed="right">
+              <template #default="{ row }">
+                <div class="workbench-list-actions">
+                  <el-button link type="primary" @click="openWorkItemDetail(row)">详情</el-button>
+                  <template v-if="row.object_type === 'requirement'">
+                    <el-button v-if="['draft', 'closed'].includes(row.status)" link type="warning" @click="activateRequirementRow(row)">激活</el-button>
+                    <el-button v-if="row.status === 'active'" link type="success" @click="completeRequirementRow(row)">完成</el-button>
+                    <el-button v-if="row.status === 'active'" link type="danger" @click="openRequirementClose(row)">关闭</el-button>
+                  </template>
+                  <template v-else-if="row.object_type === 'task'">
+                    <el-button v-if="['todo', 'closed'].includes(row.status)" link type="warning" @click="activateTaskRow(row)">激活</el-button>
+                    <el-button v-if="row.status === 'doing'" link type="success" @click="completeTaskRow(row)">完成</el-button>
+                    <el-button v-if="row.status !== 'closed'" link type="danger" @click="openTaskClose(row)">关闭</el-button>
+                  </template>
+                  <template v-else-if="row.object_type === 'test_case'">
+                    <el-button link type="success" @click="openCaseExecution(row)">执行</el-button>
+                    <el-button link type="warning" :disabled="!canCreateBugFromCase(row)" @click="openCaseBug(row)">提 Bug</el-button>
+                  </template>
+                  <template v-else-if="row.object_type === 'bug'">
+                    <el-button v-if="['open', 'reopened', 'suspended'].includes(row.status)" link type="success" @click="openBugAction(row, 'start_fixing')">确认</el-button>
+                    <el-button v-if="row.status === 'fixing'" link type="success" @click="openBugAction(row, 'resolve')">解决</el-button>
+                    <el-button v-if="row.status === 'verifying'" link type="success" @click="openBugAction(row, 'verify_passed')">验证通过</el-button>
+                    <el-button v-if="row.status === 'verifying'" link type="danger" @click="openBugAction(row, 'verify_failed')">验证失败</el-button>
+                    <el-button v-if="['verifying', 'closed'].includes(row.status)" link type="warning" @click="openBugAction(row, 'activate')">激活</el-button>
+                    <el-button v-if="['open', 'fixing', 'reopened'].includes(row.status)" link type="warning" @click="openBugAction(row, 'suspend')">挂起</el-button>
+                    <el-button v-if="['open', 'suspended', 'verifying'].includes(row.status)" link type="danger" @click="openBugAction(row, 'close')">关闭</el-button>
+                  </template>
+                  <el-button v-else-if="row.object_type === 'code_review'" link type="primary" @click="router.push({ name: 'devops' })">评审</el-button>
+                </div>
+              </template>
             </el-table-column>
           </el-table>
         </div>
@@ -192,47 +220,6 @@
       </div>
     </div>
 
-    <el-drawer v-model="workItemDrawerVisible" title="工作项处理" size="420px">
-      <template v-if="selectedWorkItem">
-        <el-descriptions :column="1" border>
-          <el-descriptions-item label="类型">{{ typeLabel(selectedWorkItem.object_type) }}</el-descriptions-item>
-          <el-descriptions-item label="标题">{{ selectedWorkItem.title }}</el-descriptions-item>
-          <el-descriptions-item label="项目">{{ selectedWorkItem.project_name || '-' }}</el-descriptions-item>
-          <el-descriptions-item label="迭代">{{ selectedWorkItem.iteration_name || '-' }}</el-descriptions-item>
-          <el-descriptions-item label="负责人">{{ ownerName(selectedWorkItem.owner_id) }}</el-descriptions-item>
-          <el-descriptions-item label="状态">{{ itemStatusLabel(selectedWorkItem) }}</el-descriptions-item>
-        </el-descriptions>
-        <div class="workbench-drawer-actions">
-          <router-link :to="detailLink(selectedWorkItem)">
-            <el-button type="primary">查看详情</el-button>
-          </router-link>
-          <template v-if="selectedWorkItem.object_type === 'requirement'">
-            <el-button v-if="['draft', 'closed'].includes(selectedWorkItem.status)" type="warning" @click="activateRequirementRow(selectedWorkItem)">激活</el-button>
-            <el-button v-if="selectedWorkItem.status === 'active'" type="success" @click="completeRequirementRow(selectedWorkItem)">完成</el-button>
-            <el-button v-if="selectedWorkItem.status === 'active'" type="danger" @click="openRequirementClose(selectedWorkItem)">关闭</el-button>
-          </template>
-          <template v-else-if="selectedWorkItem.object_type === 'task'">
-            <el-button v-if="['todo', 'closed'].includes(selectedWorkItem.status)" type="warning" @click="activateTaskRow(selectedWorkItem)">激活</el-button>
-            <el-button v-if="selectedWorkItem.status === 'doing'" type="success" @click="completeTaskRow(selectedWorkItem)">完成</el-button>
-            <el-button v-if="selectedWorkItem.status !== 'closed'" type="danger" @click="openTaskClose(selectedWorkItem)">关闭</el-button>
-          </template>
-          <template v-else-if="selectedWorkItem.object_type === 'test_case'">
-            <el-button type="success" @click="openCaseExecution(selectedWorkItem)">执行</el-button>
-            <el-button type="warning" :disabled="!canCreateBugFromCase(selectedWorkItem)" @click="openCaseBug(selectedWorkItem)">提 Bug</el-button>
-          </template>
-          <template v-else-if="selectedWorkItem.object_type === 'bug'">
-            <el-button v-if="['open', 'reopened', 'suspended'].includes(selectedWorkItem.status)" type="success" @click="openBugAction(selectedWorkItem, 'start_fixing')">确认</el-button>
-            <el-button v-if="selectedWorkItem.status === 'fixing'" type="success" @click="openBugAction(selectedWorkItem, 'resolve')">解决</el-button>
-            <el-button v-if="selectedWorkItem.status === 'verifying'" type="success" @click="openBugAction(selectedWorkItem, 'verify_passed')">验证通过</el-button>
-            <el-button v-if="selectedWorkItem.status === 'verifying'" type="danger" @click="openBugAction(selectedWorkItem, 'verify_failed')">验证失败</el-button>
-            <el-button v-if="['verifying', 'closed'].includes(selectedWorkItem.status)" type="warning" @click="openBugAction(selectedWorkItem, 'activate')">激活</el-button>
-            <el-button v-if="['open', 'fixing', 'reopened'].includes(selectedWorkItem.status)" type="warning" @click="openBugAction(selectedWorkItem, 'suspend')">挂起</el-button>
-            <el-button v-if="['open', 'suspended', 'verifying'].includes(selectedWorkItem.status)" type="danger" @click="openBugAction(selectedWorkItem, 'close')">关闭</el-button>
-          </template>
-        </div>
-      </template>
-    </el-drawer>
-
     <el-dialog v-model="closeRequirementVisible" title="关闭需求" width="480px">
       <el-form label-position="top">
         <el-form-item label="关闭原因" required>
@@ -332,12 +319,10 @@ const hideEmptyIterations = ref(false)
 const expandedIterationIds = ref(new Set())
 const laneLimits = reactive({})
 const dragSnapshot = ref(null)
-const selectedWorkItem = ref(null)
 const selectedRequirement = ref(null)
 const selectedTask = ref(null)
 const selectedBug = ref(null)
 const selectedCase = ref(null)
-const workItemDrawerVisible = ref(false)
 const closeRequirementVisible = ref(false)
 const closeTaskVisible = ref(false)
 const bugActionVisible = ref(false)
@@ -602,14 +587,6 @@ function itemStatusLabel(item) {
 }
 function executionResultLabel(value) { return executionResultOptions.find((item) => item.value === value)?.label || value || '未执行' }
 function canCreateBugFromCase(item) { return ['failed', 'blocked'].includes(item.last_execute_result) }
-function openWorkItemDrawer(item, iteration = null) {
-  if (item.object_type === 'code_review') {
-    router.push({ name: 'devops' })
-    return
-  }
-  selectedWorkItem.value = iteration ? decorateListItem(item, iteration) : item
-  workItemDrawerVisible.value = true
-}
 function openWorkItemDetail(item) {
   router.push(detailLink(item))
 }
@@ -634,19 +611,11 @@ async function loadWorkbench() {
     owners.value = data.owners || []
     reviewTasks.value = data.review_tasks || []
     ensureExpandedIteration()
-    refreshSelectedWorkItem()
   } catch (error) {
     ElMessage.error('工作台加载失败，请确认后端服务已启动')
   } finally {
     loading.value = false
   }
-}
-
-function refreshSelectedWorkItem() {
-  if (!selectedWorkItem.value) return
-  const latest = flatWorkbenchItems.value.find((item) => item.object_type === selectedWorkItem.value.object_type && item.id === selectedWorkItem.value.id)
-  if (latest) selectedWorkItem.value = latest
-  else workItemDrawerVisible.value = false
 }
 
 function onDragStart() {

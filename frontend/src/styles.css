@@ -1347,20 +1347,23 @@ body {
   margin-left: 0;
 }
 
+.workbench-list-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 10px;
+  align-items: center;
+  line-height: 1.6;
+}
+
+.workbench-list-actions .el-button {
+  margin-left: 0;
+  min-height: 24px;
+  padding: 0;
+}
+
 .workbench-more {
   width: 100%;
   margin-top: 8px;
-}
-
-.workbench-drawer-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
-  padding-top: 16px;
-}
-
-.workbench-drawer-actions .el-button {
-  margin-left: 0;
 }
 
 .workbench-card-ghost {

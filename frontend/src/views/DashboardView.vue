@@ -76,34 +76,29 @@
                 <span v-else>{{ executionResultLabel(row.last_execute_result) }}</span>
               </template>
             </el-table-column>
-            <el-table-column label="操作" min-width="220" fixed="right">
+            <el-table-column label="操作" width="150" fixed="right">
               <template #default="{ row }">
                 <div class="workbench-list-actions">
-                  <el-button link type="primary" @click="openWorkItemDetail(row)">详情</el-button>
-                  <template v-if="row.object_type === 'requirement'">
-                    <el-button v-if="['draft', 'closed'].includes(row.status)" link type="warning" @click="activateRequirementRow(row)">激活</el-button>
-                    <el-button v-if="row.status === 'active'" link type="success" @click="completeRequirementRow(row)">完成</el-button>
-                    <el-button v-if="row.status === 'active'" link type="danger" @click="openRequirementClose(row)">关闭</el-button>
-                  </template>
-                  <template v-else-if="row.object_type === 'task'">
-                    <el-button v-if="['todo', 'closed'].includes(row.status)" link type="warning" @click="activateTaskRow(row)">激活</el-button>
-                    <el-button v-if="row.status === 'doing'" link type="success" @click="completeTaskRow(row)">完成</el-button>
-                    <el-button v-if="row.status !== 'closed'" link type="danger" @click="openTaskClose(row)">关闭</el-button>
-                  </template>
-                  <template v-else-if="row.object_type === 'test_case'">
-                    <el-button link type="success" @click="openCaseExecution(row)">执行</el-button>
-                    <el-button link type="warning" :disabled="!canCreateBugFromCase(row)" @click="openCaseBug(row)">提 Bug</el-button>
-                  </template>
-                  <template v-else-if="row.object_type === 'bug'">
-                    <el-button v-if="['open', 'reopened', 'suspended'].includes(row.status)" link type="success" @click="openBugAction(row, 'start_fixing')">确认</el-button>
-                    <el-button v-if="row.status === 'fixing'" link type="success" @click="openBugAction(row, 'resolve')">解决</el-button>
-                    <el-button v-if="row.status === 'verifying'" link type="success" @click="openBugAction(row, 'verify_passed')">验证通过</el-button>
-                    <el-button v-if="row.status === 'verifying'" link type="danger" @click="openBugAction(row, 'verify_failed')">验证失败</el-button>
-                    <el-button v-if="['verifying', 'closed'].includes(row.status)" link type="warning" @click="openBugAction(row, 'activate')">激活</el-button>
-                    <el-button v-if="['open', 'fixing', 'reopened'].includes(row.status)" link type="warning" @click="openBugAction(row, 'suspend')">挂起</el-button>
-                    <el-button v-if="['open', 'suspended', 'verifying'].includes(row.status)" link type="danger" @click="openBugAction(row, 'close')">关闭</el-button>
-                  </template>
-                  <el-button v-else-if="row.object_type === 'code_review'" link type="primary" @click="router.push({ name: 'devops' })">评审</el-button>
+                  <el-button link type="primary" class="workbench-action-main" @click="openWorkItemDetail(row)">详情</el-button>
+                  <el-button
+                    v-if="workbenchActionGroup(row).primary"
+                    link
+                    :type="workbenchActionGroup(row).primary.type"
+                    class="workbench-action-main"
+                    @click="runWorkbenchAction(row, workbenchActionGroup(row).primary)"
+                  >
+                    {{ workbenchActionGroup(row).primary.label }}
+                  </el-button>
+                  <el-dropdown v-if="workbenchActionGroup(row).secondary.length" trigger="click" @command="(actionKey) => runWorkbenchActionByKey(row, actionKey)">
+                    <el-button link type="primary" class="workbench-action-more">更多</el-button>
+                    <template #dropdown>
+                      <el-dropdown-menu>
+                        <el-dropdown-item v-for="action in workbenchActionGroup(row).secondary" :key="action.key" :command="action.key">
+                          {{ action.label }}
+                        </el-dropdown-item>
+                      </el-dropdown-menu>
+                    </template>
+                  </el-dropdown>
                 </div>
               </template>
             </el-table-column>
@@ -587,6 +582,70 @@ function itemStatusLabel(item) {
 }
 function executionResultLabel(value) { return executionResultOptions.find((item) => item.value === value)?.label || value || '未执行' }
 function canCreateBugFromCase(item) { return ['failed', 'blocked'].includes(item.last_execute_result) }
+function workbenchActions(item) {
+  if (item.object_type === 'requirement') {
+    return [
+      ['draft', 'closed'].includes(item.status) && { key: 'activate_requirement', label: '激活', type: 'warning' },
+      item.status === 'active' && { key: 'complete_requirement', label: '完成', type: 'success' },
+      item.status === 'active' && { key: 'close_requirement', label: '关闭', type: 'danger' }
+    ].filter(Boolean)
+  }
+  if (item.object_type === 'task') {
+    return [
+      ['todo', 'closed'].includes(item.status) && { key: 'activate_task', label: '激活', type: 'warning' },
+      item.status === 'doing' && { key: 'complete_task', label: '完成', type: 'success' },
+      item.status !== 'closed' && { key: 'close_task', label: '关闭', type: 'danger' }
+    ].filter(Boolean)
+  }
+  if (item.object_type === 'test_case') {
+    return [
+      { key: 'execute_case', label: '执行', type: 'success' },
+      canCreateBugFromCase(item) && { key: 'create_case_bug', label: '提 Bug', type: 'warning' }
+    ].filter(Boolean)
+  }
+  if (item.object_type === 'bug') {
+    return [
+      ['open', 'reopened', 'suspended'].includes(item.status) && { key: 'bug_start_fixing', label: '确认', type: 'success' },
+      item.status === 'fixing' && { key: 'bug_resolve', label: '解决', type: 'success' },
+      item.status === 'verifying' && { key: 'bug_verify_passed', label: '验证通过', type: 'success' },
+      item.status === 'verifying' && { key: 'bug_verify_failed', label: '验证失败', type: 'danger' },
+      ['verifying', 'closed'].includes(item.status) && { key: 'bug_activate', label: '激活', type: 'warning' },
+      ['open', 'fixing', 'reopened'].includes(item.status) && { key: 'bug_suspend', label: '挂起', type: 'warning' },
+      ['open', 'suspended', 'verifying'].includes(item.status) && { key: 'bug_close', label: '关闭', type: 'danger' }
+    ].filter(Boolean)
+  }
+  if (item.object_type === 'code_review') return [{ key: 'devops_review', label: '评审', type: 'primary' }]
+  return []
+}
+function workbenchActionGroup(item) {
+  const actions = workbenchActions(item)
+  return { primary: actions[0] || null, secondary: actions.slice(1) }
+}
+function runWorkbenchActionByKey(item, actionKey) {
+  const action = workbenchActions(item).find((candidate) => candidate.key === actionKey)
+  if (action) runWorkbenchAction(item, action)
+}
+function runWorkbenchAction(item, action) {
+  const handlers = {
+    activate_requirement: activateRequirementRow,
+    complete_requirement: completeRequirementRow,
+    close_requirement: openRequirementClose,
+    activate_task: activateTaskRow,
+    complete_task: completeTaskRow,
+    close_task: openTaskClose,
+    execute_case: openCaseExecution,
+    create_case_bug: openCaseBug,
+    bug_start_fixing: (row) => openBugAction(row, 'start_fixing'),
+    bug_resolve: (row) => openBugAction(row, 'resolve'),
+    bug_verify_passed: (row) => openBugAction(row, 'verify_passed'),
+    bug_verify_failed: (row) => openBugAction(row, 'verify_failed'),
+    bug_activate: (row) => openBugAction(row, 'activate'),
+    bug_suspend: (row) => openBugAction(row, 'suspend'),
+    bug_close: (row) => openBugAction(row, 'close'),
+    devops_review: () => router.push({ name: 'devops' })
+  }
+  handlers[action.key]?.(item)
+}
 function openWorkItemDetail(item) {
   router.push(detailLink(item))
 }

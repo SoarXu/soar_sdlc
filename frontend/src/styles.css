@@ -1349,16 +1349,26 @@ body {
 
 .workbench-list-actions {
   display: flex;
-  flex-wrap: wrap;
-  gap: 0 10px;
+  flex-wrap: nowrap;
+  gap: 8px;
   align-items: center;
-  line-height: 1.6;
+  justify-content: flex-start;
+  white-space: nowrap;
+}
+
+.workbench-list-actions .el-button,
+.workbench-list-actions .el-dropdown {
+  margin-left: 0;
 }
 
 .workbench-list-actions .el-button {
-  margin-left: 0;
-  min-height: 24px;
-  padding: 0;
+  min-height: 22px;
+  padding: 0 2px;
+  font-size: 13px;
+}
+
+.workbench-action-more {
+  color: #64748b;
 }
 
 .workbench-more {

@@ -1,4 +1,5 @@
 from fastapi.testclient import TestClient
+from uuid import uuid4
 
 
 def test_roles_list_contains_default_business_roles(client: TestClient):
@@ -10,14 +11,15 @@ def test_roles_list_contains_default_business_roles(client: TestClient):
 
 
 def test_create_custom_role(client: TestClient):
+    role_key = f"release_manager_{uuid4().hex[:8]}"
     response = client.post(
         "/api/v1/roles",
-        json={"role_key": "release_manager", "role_name": "Release Manager", "description": "Owns releases"},
+        json={"role_key": role_key, "role_name": "Release Manager", "description": "Owns releases"},
     )
 
     assert response.status_code == 201
     data = response.json()
-    assert data["role_key"] == "release_manager"
+    assert data["role_key"] == role_key
     assert data["role_name"] == "Release Manager"
     assert data["enabled"] is True
 

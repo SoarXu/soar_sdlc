@@ -73,7 +73,7 @@
               <el-table-column label="操作" width="420" fixed="right">
                 <template #default="{ row }">
                   <div class="table-actions">
-                    <el-button link type="primary" @click="goProjectTab(row.project_id, 'requirements')">编辑</el-button>
+                    <el-button link type="primary" @click="openRequirementEdit(row)">编辑</el-button>
                     <el-button v-if="canActivateRequirement(row)" link type="warning" @click="activateRequirementRow(row.id)">激活</el-button>
                     <el-button v-if="row.status === 'active'" link type="danger" @click="openRequirementClose(row)">关闭</el-button>
                     <el-button link type="success" @click="openGenerateTask(row)">生成任务</el-button>
@@ -221,6 +221,45 @@
       </template>
     </el-dialog>
 
+    <el-dialog v-model="requirementEditVisible" title="编辑需求" width="640px">
+      <el-form label-position="top">
+        <el-form-item label="需求标题" required><el-input v-model="requirementForm.title" /></el-form-item>
+        <div class="form-grid">
+          <el-form-item label="负责人">
+            <el-select v-model="requirementForm.owner_id" clearable filterable>
+              <el-option v-for="user in users" :key="user.id" :label="user.full_name" :value="user.id" />
+            </el-select>
+          </el-form-item>
+          <el-form-item label="提出人">
+            <el-select v-model="requirementForm.proposer_id" clearable filterable>
+              <el-option v-for="user in users" :key="user.id" :label="user.full_name" :value="user.id" />
+            </el-select>
+          </el-form-item>
+          <el-form-item label="类型">
+            <el-select v-model="requirementForm.requirement_type">
+              <el-option v-for="option in requirementTypeOptions" :key="option" :label="option" :value="option" />
+            </el-select>
+          </el-form-item>
+          <el-form-item label="优先级">
+            <el-select v-model="requirementForm.priority" class="priority-select">
+              <template #prefix><RequirementPriorityBadge :value="requirementForm.priority" /></template>
+              <el-option v-for="option in requirementPriorityOptions" :key="option.value" :label="option.label" :value="option.value">
+                <RequirementPriorityBadge :value="option.value" />
+              </el-option>
+            </el-select>
+          </el-form-item>
+          <el-form-item label="评审状态">
+            <el-select v-model="requirementForm.review_status">
+              <el-option v-for="option in reviewStatusOptions" :key="option.value" :label="option.label" :value="option.value" />
+            </el-select>
+          </el-form-item>
+        </div>
+        <el-form-item label="需求描述"><el-input v-model="requirementForm.description" type="textarea" :rows="3" /></el-form-item>
+        <el-form-item label="验收标准"><el-input v-model="requirementForm.acceptance_criteria" type="textarea" :rows="3" /></el-form-item>
+      </el-form>
+      <template #footer><el-button @click="requirementEditVisible = false">取消</el-button><el-button type="primary" :loading="saving" @click="submitRequirementEdit">保存</el-button></template>
+    </el-dialog>
+
     <el-dialog v-model="iterationStartVisible" title="开始迭代" width="480px">
       <el-form label-position="top">
         <el-form-item label="实际开始日期" required><el-date-picker v-model="iterationStartForm.effective_time" type="datetime" value-format="YYYY-MM-DDTHH:mm:ss" /></el-form-item>
@@ -320,7 +359,7 @@ import {
   unlinkIterationTask
 } from '../api/iterations'
 import { createBugFromTestCase, executeTestCase, fetchTestCaseExecutions } from '../api/testCases'
-import { activateRequirement, closeRequirement, deleteRequirement, fetchRequirementStatusOperations, generateTask } from '../api/requirements'
+import { activateRequirement, closeRequirement, deleteRequirement, fetchRequirementStatusOperations, generateTask, updateRequirement } from '../api/requirements'
 import { activateTask, closeTask, deleteTask, fetchTaskStatusOperations } from '../api/tasks'
 import { fetchUsers } from '../api/users'
 import RequirementPriorityBadge from '../components/RequirementPriorityBadge.vue'
@@ -346,6 +385,7 @@ const availableTasks = ref([])
 const selectedRequirementIds = ref([])
 const selectedTaskIds = ref([])
 const requirementDialogVisible = ref(false)
+const requirementEditVisible = ref(false)
 const taskDialogVisible = ref(false)
 const generateTaskVisible = ref(false)
 const iterationStartVisible = ref(false)
@@ -431,6 +471,14 @@ const bugStatusOptions = [
   { label: '已挂起', value: 'suspended' }
 ]
 const bugTypeOptions = ['代码错误', '配置相关', '安装部署', '安全相关', '性能问题', '标准规范', '测试脚本', '设计缺陷', '其他']
+const requirementTypeOptions = ['功能', '接口', '性能', '安全', '体验', '改进', '其他']
+const requirementPriorityOptions = [
+  { label: '① 最高', value: '1' },
+  { label: '② 高', value: '2' },
+  { label: '③ 中', value: '3' },
+  { label: '④ 低', value: '4' },
+  { label: '⑤ 最低', value: '5' }
+]
 const priorityLevelOptions = [
   { label: '① 最高', value: '1' },
   { label: '② 高', value: '2' },
@@ -439,6 +487,8 @@ const priorityLevelOptions = [
   { label: '⑤ 最低', value: '5' }
 ]
 const caseBugForm = ref({ title: '', bug_type: '代码错误', severity: '3', priority: '3', reproduce_steps: '', actual_result: '' })
+const editingRequirementId = ref(null)
+const requirementForm = reactive({ project_id: null, iteration_id: null, title: '', requirement_type: '功能', priority: '3', owner_id: null, proposer_id: null, review_status: 'not_required', description: '', acceptance_criteria: '', source_reviewed: false })
 const generateTaskForm = reactive({ title: '', task_type: 'development', priority: 'medium', owner_id: null, due_date: null, description: '' })
 const closeRequirementForm = reactive({ reason: '', remark: '' })
 const closeTaskForm = reactive({ reason: '', remark: '' })
@@ -476,6 +526,7 @@ function defaultExecutionTime() {
 }
 function currentDateTimeValue() { return defaultExecutionTime() }
 function normalizeCaseSteps(value) { return Array.isArray(value) && value.length ? value.map((item) => ({ step: item.step || '', expected: item.expected || '' })) : [{ step: '', expected: '' }] }
+function normalizeRequirementPriority(value) { return ['1', '2', '3', '4', '5'].includes(String(value || '')) ? String(value) : '3' }
 function normalizeIterationTab(value) { return ['overview', 'requirements', 'tasks', 'cases', 'bugs'].includes(value) ? value : 'overview' }
 function setActiveTab(key) {
   activeTab.value = key
@@ -524,6 +575,40 @@ async function submitRequirements() {
 }
 async function removeRequirement(requirementId) { await unlinkIterationRequirement(iterationId.value, requirementId); await loadData() }
 async function activateRequirementRow(id) { try { await activateRequirement(id); await loadData(); ElMessage.success('需求已激活') } catch (error) { showActionError(error, '需求激活失败') } }
+function openRequirementEdit(row) {
+  editingRequirementId.value = row.id
+  Object.assign(requirementForm, {
+    ...row,
+    priority: normalizeRequirementPriority(row.priority),
+    requirement_type: row.requirement_type || '功能',
+    owner_id: row.owner_id || null,
+    proposer_id: row.proposer_id || null,
+    review_status: row.review_status || 'not_required',
+    description: row.description || '',
+    acceptance_criteria: row.acceptance_criteria || '',
+    source_reviewed: Boolean(row.source_reviewed)
+  })
+  requirementEditVisible.value = true
+}
+async function submitRequirementEdit() {
+  if (!requirementForm.title.trim()) return ElMessage.warning('请填写需求标题')
+  saving.value = true
+  try {
+    const { status: _status, ...formData } = requirementForm
+    await updateRequirement(editingRequirementId.value, {
+      ...formData,
+      project_id: requirementForm.project_id,
+      iteration_id: requirementForm.iteration_id || null,
+      owner_id: requirementForm.owner_id || null,
+      proposer_id: requirementForm.proposer_id || null
+    })
+    requirementEditVisible.value = false
+    await loadData()
+    ElMessage.success('需求已保存')
+  } finally {
+    saving.value = false
+  }
+}
 function openRequirementClose(row) { closingRequirementId.value = row.id; Object.assign(closeRequirementForm, { reason: '', remark: '' }); closeRequirementVisible.value = true }
 async function submitRequirementClose() { if (!closeRequirementForm.reason) return ElMessage.warning('请选择关闭原因'); saving.value = true; try { await closeRequirement(closingRequirementId.value, { ...closeRequirementForm }); closeRequirementVisible.value = false; await loadData(); ElMessage.success('需求已关闭') } catch (error) { showActionError(error, '需求关闭失败') } finally { saving.value = false } }
 async function deleteRequirementRow(id) { await deleteRequirement(id); await loadData() }

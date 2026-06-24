@@ -311,13 +311,21 @@
               </el-select>
             </template>
           </el-table-column>
-          <el-table-column label="默认分配" width="120" align="center">
-            <template #default="{ row }"><el-checkbox v-model="row.is_default_assignee" /></template>
+          <el-table-column label="默认负责人" width="130" align="center">
+            <template #default="{ row }">
+              <el-tooltip content="新增需求、任务、Bug、用例时优先作为该角色的默认负责人" placement="top">
+                <el-checkbox v-model="row.is_default_assignee" />
+              </el-tooltip>
+            </template>
           </el-table-column>
-          <el-table-column label="工作台" width="120" align="center">
-            <template #default="{ row }"><el-checkbox v-model="row.is_workbench_participant" /></template>
+          <el-table-column label="纳入工作台" width="130" align="center">
+            <template #default="{ row }">
+              <el-tooltip content="该成员可在工作台按项目团队范围看到相关进行中工作项" placement="top">
+                <el-checkbox v-model="row.is_workbench_participant" />
+              </el-tooltip>
+            </template>
           </el-table-column>
-          <el-table-column label="排序" width="120">
+          <el-table-column label="显示顺序" width="130">
             <template #default="{ row }"><el-input-number v-model="row.sort_order" :min="0" controls-position="right" /></template>
           </el-table-column>
           <el-table-column label="操作" width="100" fixed="right">
@@ -695,12 +703,12 @@ const testRunStatusOptions = [
   { label: '完成', value: 'finished' }
 ]
 const projectMemberRoleOptions = [
-  { label: '?????', value: 'product_owner' },
-  { label: '?????', value: 'tech_lead' },
-  { label: '??', value: 'developer' },
-  { label: '?????', value: 'test_lead' },
-  { label: '??', value: 'tester' },
-  { label: '???', value: 'viewer' }
+  { label: '产品经理', value: 'product_owner' },
+  { label: '开发主管', value: 'tech_lead' },
+  { label: '开发', value: 'developer' },
+  { label: '测试主管', value: 'test_lead' },
+  { label: '测试', value: 'tester' },
+  { label: '观察者', value: 'viewer' }
 ]
 const bugStatusOptions = [
   { label: '待确认', value: 'open' },

@@ -1,6 +1,7 @@
 from sqlalchemy.orm import Session
 
 from app.core.security import get_password_hash, verify_password
+from app.models.role import Role, UserRole
 from app.models.user import User
 from app.views.auth_view import RegisterRequest
 
@@ -83,6 +84,28 @@ def authenticate_user(db: Session, username: str, password: str) -> User | None:
     return user
 
 
+def list_users(db: Session, user_id: int | None = None) -> list[dict]:
+    seed_default_users(db)
+    query = db.query(User).filter(User.deleted == 0, User.is_active.is_(True))
+    if user_id:
+        query = query.filter(User.id == user_id)
+    users = query.order_by(User.id.asc()).all()
+    role_map = _roles_for_users(db, [user.id for user in users])
+    return [
+        {
+            "id": user.id,
+            "username": user.username,
+            "full_name": user.full_name,
+            "email": user.email,
+            "mobile": user.mobile,
+            "department": user.department,
+            "is_active": user.is_active,
+            "roles": role_map.get(user.id, []),
+        }
+        for user in users
+    ]
+
+
 def register_user(db: Session, payload: RegisterRequest) -> User:
     username = payload.username.strip()
     full_name = payload.full_name.strip()
@@ -106,6 +129,10 @@ def register_user(db: Session, payload: RegisterRequest) -> User:
         is_active=True,
     )
     db.add(user)
+    db.flush()
+    developer_role = db.query(Role).filter(Role.role_key == "developer", Role.enabled.is_(True)).first()
+    if developer_role:
+        db.add(UserRole(user_id=user.id, role_id=developer_role.id))
     db.commit()
     db.refresh(user)
     return user
@@ -121,3 +148,30 @@ def _password_matches(password_hash: str, password: str) -> bool:
         return verify_password(password, password_hash)
     except ValueError:
         return False
+
+
+def _roles_for_users(db: Session, user_ids: list[int]) -> dict[int, list[dict]]:
+    if not user_ids:
+        return {}
+    rows = (
+        db.query(UserRole.user_id, Role)
+        .join(Role, Role.id == UserRole.role_id)
+        .filter(UserRole.user_id.in_(user_ids), Role.enabled.is_(True))
+        .order_by(Role.id.asc())
+        .all()
+    )
+    result: dict[int, list[dict]] = {user_id: [] for user_id in user_ids}
+    for user_id, role in rows:
+        result.setdefault(user_id, []).append(
+            {
+                "id": role.id,
+                "role_key": role.role_key,
+                "role_name": role.role_name,
+                "description": role.description,
+                "is_system": role.is_system,
+                "enabled": role.enabled,
+                "create_time": role.create_time,
+                "update_time": role.update_time,
+            }
+        )
+    return result

@@ -12,6 +12,7 @@ from app.models.role import Role, UserRole
 from app.models.task import Task
 from app.models.test_case import TestCase
 from app.models.user import User
+from app.services.project_team_service import workbench_project_ids_for_user
 from app.views.dashboard_view import DashboardSummary, WorkbenchItem, WorkbenchResponse
 
 
@@ -29,12 +30,20 @@ def get_dashboard_summary(db: Session) -> DashboardSummary:
 def get_workbench(db: Session, user_id: int | None = None) -> WorkbenchResponse:
     role_keys = _role_keys_for_user(db, user_id)
     view_mode = _workbench_view_mode(role_keys)
+    scoped_project_ids = workbench_project_ids_for_user(db, user_id) if view_mode in {"lead", "tester"} else set()
     iterations = db.query(Iteration).filter(Iteration.deleted == 0).order_by(Iteration.id.desc()).all()
     if view_mode in {"developer", "tester", "lead"}:
         iterations = [iteration for iteration in iterations if iteration.status == "active"]
     iteration_ids = [item.id for item in iterations]
     projects = {item.id: item for item in db.query(Project).filter(Project.deleted == 0).all()}
     iteration_projects = _iteration_projects(db, iteration_ids, projects)
+    if scoped_project_ids:
+        iterations = [
+            iteration
+            for iteration in iterations
+            if any(item["id"] in scoped_project_ids for item in iteration_projects.get(iteration.id, []))
+        ]
+        iteration_ids = [item.id for item in iterations]
     requirements = _items_by_iteration(
         db.query(Requirement).filter(Requirement.deleted == 0, Requirement.iteration_id.in_(iteration_ids)).all(),
         lambda item: _requirement_item(item, projects),
@@ -90,10 +99,10 @@ def get_workbench(db: Session, user_id: int | None = None) -> WorkbenchResponse:
         task_items = tasks.get(iteration.id, [])
         case_items = test_cases.get(iteration.id, [])
         bug_items = bugs.get(iteration.id, [])
-        reqs = _filter_items_for_role(reqs, user_id, view_mode, include_test_cases=False)
-        task_items = _filter_items_for_role(task_items, user_id, view_mode, include_test_cases=False)
-        case_items = _filter_items_for_role(case_items, user_id, view_mode, include_test_cases=True)
-        bug_items = _filter_items_for_role(bug_items, user_id, view_mode, include_test_cases=False)
+        reqs = _filter_items_for_role(reqs, user_id, view_mode, include_test_cases=False, scoped_project_ids=scoped_project_ids)
+        task_items = _filter_items_for_role(task_items, user_id, view_mode, include_test_cases=False, scoped_project_ids=scoped_project_ids)
+        case_items = _filter_items_for_role(case_items, user_id, view_mode, include_test_cases=True, scoped_project_ids=scoped_project_ids)
+        bug_items = _filter_items_for_role(bug_items, user_id, view_mode, include_test_cases=False, scoped_project_ids=scoped_project_ids)
         boards.append({
             "id": iteration.id,
             "name": iteration.name,
@@ -372,7 +381,10 @@ def _filter_items_for_role(
     user_id: int | None,
     view_mode: str,
     include_test_cases: bool,
+    scoped_project_ids: set[int] | None = None,
 ) -> list[WorkbenchItem]:
+    if scoped_project_ids:
+        return [item for item in items if item.project_id in scoped_project_ids]
     if view_mode in {"all", "lead"} or not user_id:
         return items
     if view_mode == "tester":

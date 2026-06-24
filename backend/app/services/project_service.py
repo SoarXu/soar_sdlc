@@ -9,6 +9,7 @@ from app.models.bug import Bug
 from app.models.iteration import Iteration, IterationProject
 from app.models.program import Program
 from app.models.project import Project
+from app.models.project_member import ProjectMember
 from app.models.requirement import Requirement
 from app.models.task import Task
 from app.models.test_case import TestCase
@@ -16,7 +17,7 @@ from app.models.test_run import TestRun
 from app.services.status_operation_service import create_status_operation, list_status_operations
 from app.services.requirement_service import close_requirement_record
 from app.services.workflow_engine import execute_workflows
-from app.views.project_view import ProjectCreate, ProjectUpdate
+from app.views.project_view import ProjectCreate, ProjectMemberCreate, ProjectUpdate
 from app.views.status_operation_view import StatusOperationCreate
 
 
@@ -248,6 +249,29 @@ def delete_project(db: Session, project_id: int) -> None:
     project.deleted = 1
     project.delete_time = now
     db.commit()
+
+
+def list_project_members(db: Session, project_id: int) -> list[ProjectMember]:
+    _get_active_project(db, project_id)
+    return (
+        db.query(ProjectMember)
+        .filter(ProjectMember.project_id == project_id)
+        .order_by(ProjectMember.sort_order.asc(), ProjectMember.id.asc())
+        .all()
+    )
+
+
+def replace_project_members(db: Session, project_id: int, payload: list[ProjectMemberCreate]) -> list[ProjectMember]:
+    _get_active_project(db, project_id)
+    db.query(ProjectMember).filter(ProjectMember.project_id == project_id).delete(synchronize_session=False)
+    for index, item in enumerate(payload):
+        data = item.model_dump()
+        data["project_id"] = project_id
+        if not data.get("sort_order"):
+            data["sort_order"] = index
+        db.add(ProjectMember(**data))
+    db.commit()
+    return list_project_members(db, project_id)
 
 
 def start_project(db: Session, project_id: int, payload: StatusOperationCreate | None = None) -> Project:

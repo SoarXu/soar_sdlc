@@ -4,6 +4,8 @@ from fastapi.testclient import TestClient
 from sqlalchemy import text
 
 from app.db.session import SessionLocal
+from app.core.security import get_password_hash
+from app.models.user import User
 
 
 def test_program_crud_persists_to_database(client: TestClient):
@@ -165,6 +167,71 @@ def test_project_crud_uses_prd_fields(client: TestClient):
 
     deleted = client.delete(f"/api/v1/projects/{project_id}")
     assert deleted.status_code == 204
+
+
+def test_project_members_drive_default_assignees(client: TestClient):
+    db = SessionLocal()
+    try:
+        users = []
+        for username in ["product_owner_api", "default_developer_api", "default_tester_api"]:
+            user = User(
+                username=f"{username}_{uuid4().hex[:6]}",
+                full_name=username,
+                password_hash=get_password_hash("User123456"),
+                is_active=True,
+            )
+            db.add(user)
+            db.flush()
+            users.append(user)
+        db.commit()
+        product_owner_id, developer_id, tester_id = [user.id for user in users]
+    finally:
+        db.close()
+
+    project = client.post("/api/v1/projects", json={"name": f"Team Defaults Project-{uuid4().hex[:8]}"}).json()
+    project_id = project["id"]
+
+    saved_members = client.put(
+        f"/api/v1/projects/{project_id}/members",
+        json=[
+            {"user_id": product_owner_id, "project_role": "product_owner", "is_default_assignee": True},
+            {"user_id": developer_id, "project_role": "developer", "is_default_assignee": True},
+            {"user_id": tester_id, "project_role": "tester", "is_default_assignee": True},
+        ],
+    )
+    assert saved_members.status_code == 200
+    members = saved_members.json()
+    assert {item["project_role"] for item in members} == {"product_owner", "developer", "tester"}
+
+    requirement = client.post(
+        "/api/v1/requirements",
+        json={"project_id": project_id, "title": "Requirement uses product owner"},
+    ).json()
+    assert requirement["owner_id"] == product_owner_id
+
+    standalone_task = client.post(
+        "/api/v1/tasks",
+        json={"project_id": project_id, "title": "Standalone task uses default developer"},
+    ).json()
+    assert standalone_task["owner_id"] == developer_id
+
+    requirement_task = client.post(
+        "/api/v1/tasks",
+        json={"project_id": project_id, "requirement_id": requirement["id"], "title": "Requirement task keeps requirement owner"},
+    ).json()
+    assert requirement_task["owner_id"] == product_owner_id
+
+    test_case = client.post(
+        "/api/v1/test-cases",
+        json={"project_id": project_id, "requirement_id": requirement["id"], "title": "Case uses default tester"},
+    ).json()
+    assert test_case["default_tester_id"] == tester_id
+
+    bug = client.post(
+        "/api/v1/bugs",
+        json={"project_id": project_id, "requirement_id": requirement["id"], "title": "Bug uses team developer"},
+    ).json()
+    assert bug["owner_id"] == developer_id
 
 
 def test_project_update_records_only_changed_fields(client: TestClient):

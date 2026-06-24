@@ -32,6 +32,14 @@ export function fetchProjectBugs(id, params) {
   return http.get(`/projects/${id}/bugs`, { params })
 }
 
+export function fetchProjectMembers(id) {
+  return http.get(`/projects/${id}/members`)
+}
+
+export function saveProjectMembers(id, payload) {
+  return http.put(`/projects/${id}/members`, payload)
+}
+
 export function createProject(payload) {
   return http.post('/projects', payload)
 }

@@ -15,6 +15,7 @@ from app.services.lifecycle_service import (
     requirement_lifecycle_phase,
     test_case_lifecycle_phase,
 )
+from app.services.project_team_service import default_developer_id
 from app.services.status_operation_service import create_status_operation, list_status_operations
 from app.views.bug_view import BugCreate, BugFromTestRunCaseRequest, BugStatusActionRequest, BugUpdate
 
@@ -36,6 +37,8 @@ def create_bug(db: Session, payload: BugCreate) -> Bug:
         or test_case_lifecycle_phase(db, data.get("test_case_id"))
         or project_lifecycle_phase(db, data.get("project_id"))
     )
+    if not data.get("owner_id"):
+        data["owner_id"] = _default_bug_owner_id(db, data)
     bug = Bug(**data)
     db.add(bug)
     db.commit()
@@ -61,7 +64,9 @@ def create_bug_from_test_run_case(db: Session, run_case_id: int, payload: BugFro
         else None
     )
     project = db.query(Project).filter(Project.id == test_run.project_id, Project.deleted == 0).first()
-    owner_id = requirement.owner_id if requirement and requirement.owner_id else project.owner_id if project else None
+    owner_id = default_developer_id(db, test_run.project_id) or (requirement.owner_id if requirement else None)
+    if not owner_id and project:
+        owner_id = project.owner_id
 
     bug = Bug(
         project_id=test_run.project_id,
@@ -97,6 +102,25 @@ def update_bug(db: Session, bug_id: int, payload: BugUpdate) -> Bug:
     db.commit()
     db.refresh(bug)
     return bug
+
+
+def _default_bug_owner_id(db: Session, data: dict) -> int | None:
+    if data.get("task_id"):
+        from app.models.task import Task
+
+        task = db.query(Task).filter(Task.id == data["task_id"], Task.deleted == 0).first()
+        if task and task.owner_id:
+            return task.owner_id
+    project_id = data.get("project_id")
+    owner_id = default_developer_id(db, project_id)
+    if owner_id:
+        return owner_id
+    if data.get("requirement_id"):
+        requirement = db.query(Requirement).filter(Requirement.id == data["requirement_id"], Requirement.deleted == 0).first()
+        if requirement and requirement.owner_id:
+            return requirement.owner_id
+    project = db.query(Project).filter(Project.id == project_id, Project.deleted == 0).first() if project_id else None
+    return project.owner_id if project else None
 
 
 def start_fixing_bug(db: Session, bug_id: int, payload: BugStatusActionRequest | None = None) -> Bug:

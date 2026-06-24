@@ -82,7 +82,10 @@
 | id | BIGINT UNSIGNED | PK, AUTO_INCREMENT | 主键 |
 | project_id | BIGINT UNSIGNED | NOT NULL | 项目 ID |
 | user_id | BIGINT UNSIGNED | NOT NULL | 用户 ID |
-| project_role | VARCHAR(64) | NOT NULL | 项目角色：owner、developer、tester、viewer |
+| project_role | VARCHAR(64) | NOT NULL | 项目角色：product_owner、tech_lead、developer、test_lead、tester、viewer |
+| is_default_assignee | TINYINT(1) | NOT NULL DEFAULT 0 | 是否默认分配人 |
+| is_workbench_participant | TINYINT(1) | NOT NULL DEFAULT 1 | 是否进入工作台范围 |
+| sort_order | INT | NOT NULL DEFAULT 0 | 排序 |
 | join_time | DATETIME | NOT NULL | 加入时间 |
 | create_time | DATETIME | NOT NULL | 创建时间 |
 | update_time | DATETIME | NOT NULL | 更新时间 |

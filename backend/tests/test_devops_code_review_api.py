@@ -1,6 +1,7 @@
 from app.db.session import SessionLocal
 from app.models.bug import Bug
 from app.models.project import Project
+from app.models.project_member import ProjectMember
 from app.models.requirement import Requirement
 from app.models.role import Role, UserRole
 from app.models.task import Task
@@ -125,6 +126,66 @@ def test_commit_review_task_assigns_development_lead(client):
         assert response.status_code == 201
         reviews = client.get("/api/v1/devops/review-tasks")
         task = next(item for item in reviews.json() if item["commit_id"] == response.json()["id"])
-        assert task["owner_id"] == user.id
+        lead_ids = {
+            row.user_id
+            for row in db.query(UserRole.user_id)
+            .join(Role, Role.id == UserRole.role_id)
+            .filter(Role.role_key == "development_lead")
+            .all()
+        }
+        assert task["owner_id"] in lead_ids
+    finally:
+        db.close()
+
+
+def test_development_lead_commit_is_assigned_to_another_reviewer(client):
+    db = SessionLocal()
+    try:
+        role = db.query(Role).filter(Role.role_key == "development_lead").first()
+        if not role:
+            role = Role(role_key="development_lead", role_name="Development Lead", enabled=True, is_system=True)
+            db.add(role)
+            db.flush()
+        author = User(
+            username="lead_author",
+            full_name="Lead Author",
+            email="lead.author@example.com",
+            password_hash=get_password_hash("User123456"),
+            is_active=True,
+        )
+        reviewer = User(
+            username="lead_reviewer",
+            full_name="Lead Reviewer",
+            email="lead.reviewer@example.com",
+            password_hash=get_password_hash("User123456"),
+            is_active=True,
+        )
+        db.add_all([author, reviewer])
+        db.flush()
+        db.add_all([UserRole(user_id=author.id, role_id=role.id), UserRole(user_id=reviewer.id, role_id=role.id)])
+        project = Project(name="Lead Self Review Project", status="active")
+        db.add(project)
+        db.flush()
+        task = Task(project_id=project.id, title="Lead authored task", owner_id=author.id)
+        db.add(task)
+        db.flush()
+        db.add(ProjectMember(project_id=project.id, user_id=reviewer.id, project_role="tech_lead", is_default_assignee=True))
+        db.commit()
+
+        response = client.post(
+            "/api/v1/devops/commits",
+            json={
+                "commit_sha": "selfreview1234567890abc",
+                "message": f"TASK-{task.id} development lead change",
+                "author_name": "Lead Author",
+                "author_email": "lead.author@example.com",
+            },
+        )
+
+        assert response.status_code == 201
+        reviews = client.get("/api/v1/devops/review-tasks")
+        task = next(item for item in reviews.json() if item["commit_id"] == response.json()["id"])
+        assert task["owner_id"] == reviewer.id
+        assert task["owner_id"] != author.id
     finally:
         db.close()

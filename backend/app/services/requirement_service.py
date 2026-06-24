@@ -8,6 +8,7 @@ from app.models.project import Project
 from app.models.requirement import Requirement
 from app.models.task import Task
 from app.services.lifecycle_service import project_lifecycle_phase
+from app.services.project_team_service import default_requirement_owner_id
 from app.services.status_operation_service import create_status_operation, list_status_operations
 from app.services.task_service import close_task_record
 from app.services.workflow_engine import execute_workflows
@@ -27,6 +28,8 @@ def create_requirement(db: Session, payload: RequirementCreate) -> Requirement:
     data = payload.model_dump()
     data["status"] = "draft"
     data["lifecycle_phase"] = project_lifecycle_phase(db, data.get("project_id"))
+    if not data.get("owner_id"):
+        data["owner_id"] = default_requirement_owner_id(db, data.get("source_project_id") or data.get("project_id"))
     if data.get("source_project_id") and not data.get("owner_id"):
         source_project = db.query(Project).filter(Project.id == data["source_project_id"], Project.deleted == 0).first()
         if source_project and source_project.owner_id:

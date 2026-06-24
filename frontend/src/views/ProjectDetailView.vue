@@ -291,6 +291,41 @@
         </div>
       </template>
 
+      <template v-else-if="activeTab === 'members'">
+        <div class="project-tab-toolbar">
+          <el-button type="primary" @click="addProjectMember">添加成员</el-button>
+          <el-button type="success" :loading="saving" @click="submitProjectMembers">保存成员</el-button>
+        </div>
+        <el-table :data="projectMembers" stripe width="100%">
+          <el-table-column label="成员" min-width="180">
+            <template #default="{ row }">
+              <el-select v-model="row.user_id" clearable filterable>
+                <el-option v-for="user in users" :key="user.id" :label="user.full_name" :value="user.id" />
+              </el-select>
+            </template>
+          </el-table-column>
+          <el-table-column label="项目角色" min-width="180">
+            <template #default="{ row }">
+              <el-select v-model="row.project_role">
+                <el-option v-for="option in projectMemberRoleOptions" :key="option.value" :label="option.label" :value="option.value" />
+              </el-select>
+            </template>
+          </el-table-column>
+          <el-table-column label="默认分配" width="120" align="center">
+            <template #default="{ row }"><el-checkbox v-model="row.is_default_assignee" /></template>
+          </el-table-column>
+          <el-table-column label="工作台" width="120" align="center">
+            <template #default="{ row }"><el-checkbox v-model="row.is_workbench_participant" /></template>
+          </el-table-column>
+          <el-table-column label="排序" width="120">
+            <template #default="{ row }"><el-input-number v-model="row.sort_order" :min="0" controls-position="right" /></template>
+          </el-table-column>
+          <el-table-column label="操作" width="100" fixed="right">
+            <template #default="{ $index }"><el-button link type="danger" @click="removeProjectMember($index)">删除</el-button></template>
+          </el-table-column>
+        </el-table>
+      </template>
+
       <template v-else>
         <div class="project-tab-placeholder">
           <h2>{{ activeTabLabel }}</h2>
@@ -486,12 +521,14 @@ import {
   fetchProjectAuditLogs,
   fetchProjectBugs,
   fetchProjectIterations,
+  fetchProjectMembers,
   fetchProjectRequirements,
   fetchProjectStatusOperations,
   fetchProjectTasks,
   fetchProjectTestCases,
   fetchProjectTestRuns,
-  fetchProjects
+  fetchProjects,
+  saveProjectMembers
 } from '../api/projects'
 import { activateRequirement, closeRequirement, createRequirement, deleteRequirement, fetchRequirementStatusOperations, fetchRequirements, updateRequirement } from '../api/requirements'
 import { activateTask, closeTask, createTask, deleteTask, fetchTaskStatusOperations, fetchTasks, updateTask } from '../api/tasks'
@@ -528,6 +565,7 @@ const projectTaskRows = ref([])
 const projectTestCaseRows = ref([])
 const projectTestRunRows = ref([])
 const projectBugRows = ref([])
+const projectMembers = ref([])
 const projectAuditLogs = ref([])
 const projectStatusOperations = ref([])
 const closeReasonByRequirement = ref({})
@@ -656,6 +694,14 @@ const testRunStatusOptions = [
   { label: '执行中', value: 'running' },
   { label: '完成', value: 'finished' }
 ]
+const projectMemberRoleOptions = [
+  { label: '?????', value: 'product_owner' },
+  { label: '?????', value: 'tech_lead' },
+  { label: '??', value: 'developer' },
+  { label: '?????', value: 'test_lead' },
+  { label: '??', value: 'tester' },
+  { label: '???', value: 'viewer' }
+]
 const bugStatusOptions = [
   { label: '待确认', value: 'open' },
   { label: '修复中', value: 'fixing' },
@@ -742,10 +788,10 @@ const requirementForm = reactive({ project_id: null, iteration_id: null, title: 
 const closeRequirementForm = reactive({ reason: '', remark: '' })
 const taskForm = reactive({ project_id: null, requirement_id: null, title: '', task_type: '', priority: 'medium', owner_id: null, estimated_hours: null, actual_hours: null, due_date: null, status: 'todo', description: '' })
 const closeTaskForm = reactive({ reason: '', remark: '' })
-const caseForm = reactive({ project_id: null, requirement_id: null, title: '', case_type: 'functional', test_scope: 'functional_test', default_tester_id: null, precondition: '', steps_json: [{ step: '', expected: '' }], expected_result: '' })
+const caseForm = reactive({ project_id: null, requirement_id: null, title: '', case_type: 'functional', test_scope: 'functional_test', default_tester_id: defaultProjectMember(['tester', 'test_lead']), precondition: '', steps_json: [{ step: '', expected: '' }], expected_result: '' })
 const caseExecutionForm = reactive({ execute_time: '', steps_result_json: [] })
 const runForm = reactive({ project_id: null, iteration_id: null, name: '', test_owner_id: null, status: 'planning', remark: '' })
-const bugForm = reactive({ project_id: null, iteration_id: null, requirement_id: null, task_id: null, test_case_id: null, test_run_id: null, title: '', bug_type: '代码错误', severity: '3', priority: '3', owner_id: null, reporter_id: null, reproduce_steps: '', expected_result: '', actual_result: '', status: 'open' })
+const bugForm = reactive({ project_id: null, iteration_id: null, requirement_id: null, task_id: null, test_case_id: null, test_run_id: null, title: '', bug_type: '代码错误', severity: '3', priority: '3', owner_id: defaultProjectMember(['developer', 'tech_lead']), reporter_id: null, reproduce_steps: '', expected_result: '', actual_result: '', status: 'open' })
 const bugActionForm = reactive({ resolution: '', verify_result: '', iteration_id: null, reason: '', remark: '' })
 const caseBugForm = reactive({ title: '', bug_type: '代码错误', severity: '3', priority: '3', reproduce_steps: '', actual_result: '' })
 
@@ -883,12 +929,46 @@ function projectFieldLabel(field) {
     { label: '工作流配置', value: 'workflow_config_id' }
   ], field)
 }
+function defaultProjectMember(roles) {
+  const candidates = projectMembers.value.filter((item) => roles.includes(item.project_role) && item.user_id)
+  return (candidates.find((item) => item.is_default_assignee) || candidates[0])?.user_id || null
+}
+function addProjectMember() {
+  projectMembers.value.push({
+    user_id: null,
+    project_role: 'developer',
+    is_default_assignee: false,
+    is_workbench_participant: true,
+    sort_order: projectMembers.value.length
+  })
+}
+function removeProjectMember(index) {
+  projectMembers.value.splice(index, 1)
+}
+async function submitProjectMembers() {
+  const payload = projectMembers.value
+    .filter((item) => item.user_id && item.project_role)
+    .map((item, index) => ({
+      user_id: item.user_id,
+      project_role: item.project_role,
+      is_default_assignee: Boolean(item.is_default_assignee),
+      is_workbench_participant: item.is_workbench_participant !== false,
+      sort_order: item.sort_order ?? index
+    }))
+  saving.value = true
+  try {
+    projectMembers.value = (await saveProjectMembers(projectId.value, payload)).data
+    ElMessage.success('项目成员已保存')
+  } finally {
+    saving.value = false
+  }
+}
 function resetIterationForm() { Object.assign(iterationForm, { project_ids: [projectId.value], name: '', owner_id: null, start_date: null, end_date: null, status: 'planning', goal: '' }) }
-function resetRequirementForm() { Object.assign(requirementForm, { project_id: projectId.value, iteration_id: null, title: '', requirement_type: '功能', priority: '3', owner_id: project.value.owner_id || null, proposer_id: currentUserId(users.value), status: 'draft', review_status: 'not_required', description: '', acceptance_criteria: '', source_reviewed: false }) }
-function resetTaskForm() { Object.assign(taskForm, { project_id: projectId.value, requirement_id: null, title: '', task_type: '', priority: 'medium', owner_id: project.value.owner_id || null, estimated_hours: null, actual_hours: null, due_date: null, status: 'todo', description: '' }) }
-function resetCaseForm() { Object.assign(caseForm, { project_id: projectId.value, requirement_id: null, title: '', case_type: 'functional', test_scope: 'functional_test', default_tester_id: null, precondition: '', steps_json: [{ step: '', expected: '' }], expected_result: '' }) }
+function resetRequirementForm() { Object.assign(requirementForm, { project_id: projectId.value, iteration_id: null, title: '', requirement_type: '功能', priority: '3', owner_id: defaultProjectMember(['product_owner']), proposer_id: currentUserId(users.value), status: 'draft', review_status: 'not_required', description: '', acceptance_criteria: '', source_reviewed: false }) }
+function resetTaskForm() { Object.assign(taskForm, { project_id: projectId.value, requirement_id: null, title: '', task_type: '', priority: 'medium', owner_id: defaultProjectMember(['developer', 'tech_lead']), estimated_hours: null, actual_hours: null, due_date: null, status: 'todo', description: '' }) }
+function resetCaseForm() { Object.assign(caseForm, { project_id: projectId.value, requirement_id: null, title: '', case_type: 'functional', test_scope: 'functional_test', default_tester_id: defaultProjectMember(['tester', 'test_lead']), precondition: '', steps_json: [{ step: '', expected: '' }], expected_result: '' }) }
 function resetRunForm() { Object.assign(runForm, { project_id: projectId.value, iteration_id: null, name: '', test_owner_id: null, status: 'planning', remark: '' }) }
-function resetBugForm() { Object.assign(bugForm, { project_id: projectId.value, iteration_id: null, requirement_id: null, task_id: null, test_case_id: null, test_run_id: null, title: '', bug_type: '代码错误', severity: '3', priority: '3', owner_id: null, reporter_id: null, reproduce_steps: '', expected_result: '', actual_result: '', status: 'open' }) }
+function resetBugForm() { Object.assign(bugForm, { project_id: projectId.value, iteration_id: null, requirement_id: null, task_id: null, test_case_id: null, test_run_id: null, title: '', bug_type: '代码错误', severity: '3', priority: '3', owner_id: defaultProjectMember(['developer', 'tech_lead']), reporter_id: null, reproduce_steps: '', expected_result: '', actual_result: '', status: 'open' }) }
 
 function openIterationCreate() { editingIterationId.value = null; resetIterationForm(); iterationDialogVisible.value = true }
 function openIterationEdit(row) { editingIterationId.value = row.id; Object.assign(iterationForm, { ...row, project_ids: row.project_ids || [], goal: row.goal || '' }); iterationDialogVisible.value = true }
@@ -901,10 +981,10 @@ function openRequirementClose(row) { closingRequirementId.value = row.id; Object
 function openTaskCreate() { editingTaskId.value = null; resetTaskForm(); taskDialogVisible.value = true }
 function openTaskEdit(row) { editingTaskId.value = row.id; Object.assign(taskForm, { ...row, task_type: row.task_type || '', description: row.description || '' }); taskDialogVisible.value = true }
 function openTaskClose(row) { closingTaskId.value = row.id; Object.assign(closeTaskForm, { reason: '', remark: '' }); closeTaskVisible.value = true }
-function taskOwnerForRequirement(requirement) { return requirement?.owner_id || project.value.owner_id || null }
+function taskOwnerForRequirement(requirement) { return requirement?.owner_id || defaultProjectMember(['developer', 'tech_lead']) || null }
 function onTaskRequirementChange(requirementId) {
   const requirement = projectRequirementOptions.value.find((item) => item.id === requirementId)
-  taskForm.owner_id = requirement?.owner_id || project.value.owner_id || null
+  taskForm.owner_id = requirement?.owner_id || defaultProjectMember(['developer', 'tech_lead']) || null
 }
 function openCaseCreate() { editingCaseId.value = null; resetCaseForm(); caseDialogVisible.value = true }
 function openCaseCreateForRequirement(row) { editingCaseId.value = null; resetCaseForm(); Object.assign(caseForm, { requirement_id: row.id, title: row.title }); caseDialogVisible.value = true }
@@ -965,6 +1045,7 @@ async function loadData() {
       iterationRefRes,
       requirementRefRes,
       taskRefRes,
+      memberRes,
       auditRes,
       statusRes,
       iterationRes,
@@ -981,6 +1062,7 @@ async function loadData() {
       fetchIterations({ project_id: projectId.value }),
       fetchRequirements(),
       fetchTasks(),
+      fetchProjectMembers(projectId.value),
       fetchProjectAuditLogs(projectId.value),
       fetchProjectStatusOperations(projectId.value),
       fetchProjectIterations(projectId.value, projectListParams('iterations')),
@@ -994,6 +1076,7 @@ async function loadData() {
     projects.value = projectsRes.data
     programs.value = programRes.data; users.value = userRes.data
     iterations.value = iterationRefRes.data; requirements.value = requirementRefRes.data; tasks.value = taskRefRes.data
+    projectMembers.value = memberRes.data
     applyProjectPage('iterations', iterationRes, projectIterationRows)
     applyProjectPage('requirements', requirementRes, projectRequirementRows)
     applyProjectPage('tasks', taskRes, projectTaskRows)

@@ -11,12 +11,14 @@ from app.services.project_service import (
     list_project_audit_logs,
     list_project_bugs_page,
     list_project_iterations_page,
+    list_project_members,
     list_project_requirements_page,
     list_project_status_operations,
     list_project_tasks_page,
     list_project_test_cases_page,
     list_project_test_runs_page,
     list_projects,
+    replace_project_members,
     start_project,
     suspend_project,
     update_project,
@@ -25,6 +27,8 @@ from app.views.project_view import (
     ProjectBugPage,
     ProjectCreate,
     ProjectIterationPage,
+    ProjectMemberCreate,
+    ProjectMemberRead,
     ProjectRead,
     ProjectRequirementPage,
     ProjectTaskPage,
@@ -47,6 +51,16 @@ def get_projects(db: Session = Depends(get_db)):
 @router.get("/{project_id}", response_model=ProjectRead)
 def get_project_detail(project_id: int, db: Session = Depends(get_db)):
     return get_project(db, project_id)
+
+
+@router.get("/{project_id}/members", response_model=list[ProjectMemberRead])
+def get_project_members(project_id: int, db: Session = Depends(get_db)):
+    return list_project_members(db, project_id)
+
+
+@router.put("/{project_id}/members", response_model=list[ProjectMemberRead])
+def put_project_members(project_id: int, payload: list[ProjectMemberCreate], db: Session = Depends(get_db)):
+    return replace_project_members(db, project_id, payload)
 
 
 @router.get("/{project_id}/iterations", response_model=ProjectIterationPage)

@@ -55,6 +55,28 @@ class ProjectRead(ProjectBase):
     delete_time: datetime | None = None
 
 
+class ProjectMemberBase(BaseModel):
+    user_id: int
+    project_role: str
+    is_default_assignee: bool = False
+    is_workbench_participant: bool = True
+    sort_order: int = 0
+
+
+class ProjectMemberCreate(ProjectMemberBase):
+    pass
+
+
+class ProjectMemberRead(ProjectMemberBase):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    project_id: int
+    join_time: datetime | None = None
+    create_time: datetime | None = None
+    update_time: datetime | None = None
+
+
 class ProjectIterationPage(BaseModel):
     items: list[IterationRead]
     total: int

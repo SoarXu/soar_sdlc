@@ -18,6 +18,7 @@ from app.models.requirement import Requirement
 from app.models.role import Role, UserRole
 from app.models.task import Task
 from app.models.user import User
+from app.services.project_team_service import default_tech_lead_id
 from app.views.devops_view import (
     DevopsCommitIngest,
     DevopsJenkinsBuildCreate,
@@ -368,7 +369,8 @@ def _ensure_commit_link(db: Session, commit_id: int, object_type: str, object_id
 
 def _ensure_review_task(db: Session, commit: DevopsCommit, links: list[dict[str, Any]]) -> None:
     task = db.query(DevopsCodeReviewTask).filter(DevopsCodeReviewTask.commit_id == commit.id).first()
-    owner_id = _development_lead_user_id(db) or _first_owner_id(db, links)
+    author_id = _commit_author_user_id(db, commit)
+    owner_id = _project_reviewer_user_id(db, links, author_id) or _development_lead_user_id(db, author_id) or _fallback_reviewer_user_id(db, author_id) or _first_owner_id(db, links, author_id)
     if task:
         task.title = f"Code Review: {commit.short_sha or commit.commit_sha[:8]} {commit.title or ''}".strip()
         if not task.owner_id:
@@ -383,7 +385,7 @@ def _ensure_review_task(db: Session, commit: DevopsCommit, links: list[dict[str,
     )
 
 
-def _development_lead_user_id(db: Session) -> int | None:
+def _development_lead_user_id(db: Session, exclude_user_id: int | None = None) -> int | None:
     row = (
         db.query(User.id)
         .join(UserRole, UserRole.user_id == User.id)
@@ -395,21 +397,89 @@ def _development_lead_user_id(db: Session) -> int | None:
             Role.role_key == "development_lead",
         )
         .order_by(User.id.asc())
-        .first()
     )
+    if exclude_user_id:
+        row = row.filter(User.id != exclude_user_id)
+    row = row.first()
     return row.id if row else None
 
 
-def _first_owner_id(db: Session, links: list[dict[str, Any]]) -> int | None:
+def _first_owner_id(db: Session, links: list[dict[str, Any]], exclude_user_id: int | None = None) -> int | None:
     for link in links:
         model = {"requirement": Requirement, "task": Task, "bug": Bug}.get(str(link["object_type"]))
         if not model:
             continue
         item = db.query(model).filter(model.id == link["object_id"]).first()
         owner_id = getattr(item, "owner_id", None) if item else None
+        if owner_id and owner_id != exclude_user_id:
+            return owner_id
+    return None
+
+
+def _project_reviewer_user_id(db: Session, links: list[dict[str, Any]], exclude_user_id: int | None = None) -> int | None:
+    for project_id in _linked_project_ids(db, links):
+        owner_id = default_tech_lead_id(db, project_id, exclude_user_id=exclude_user_id)
         if owner_id:
             return owner_id
     return None
+
+
+def _linked_project_ids(db: Session, links: list[dict[str, Any]]) -> list[int]:
+    result: list[int] = []
+    seen = set()
+    for link in links:
+        model = {"requirement": Requirement, "task": Task, "bug": Bug}.get(str(link["object_type"]))
+        if not model:
+            continue
+        item = db.query(model).filter(model.id == link["object_id"]).first()
+        project_id = getattr(item, "project_id", None) if item else None
+        if project_id and project_id not in seen:
+            result.append(project_id)
+            seen.add(project_id)
+    return result
+
+
+def _commit_author_user_id(db: Session, commit: DevopsCommit) -> int | None:
+    if commit.author_email:
+        user = (
+            db.query(User)
+            .filter(User.deleted == 0, User.is_active.is_(True), User.email == commit.author_email)
+            .first()
+        )
+        if user:
+            return user.id
+    if commit.author_name:
+        user = (
+            db.query(User)
+            .filter(
+                User.deleted == 0,
+                User.is_active.is_(True),
+                (User.full_name == commit.author_name) | (User.username == commit.author_name),
+            )
+            .first()
+        )
+        if user:
+            return user.id
+    return None
+
+
+def _fallback_reviewer_user_id(db: Session, exclude_user_id: int | None = None) -> int | None:
+    row = (
+        db.query(User.id)
+        .join(UserRole, UserRole.user_id == User.id)
+        .join(Role, Role.id == UserRole.role_id)
+        .filter(
+            User.deleted == 0,
+            User.is_active.is_(True),
+            Role.enabled.is_(True),
+            Role.role_key.in_(["system_admin", "program_owner"]),
+        )
+        .order_by(User.id.asc())
+    )
+    if exclude_user_id:
+        row = row.filter(User.id != exclude_user_id)
+    row = row.first()
+    return row.id if row else None
 
 
 def _object_exists(db: Session, object_type: str, object_id: int) -> bool:

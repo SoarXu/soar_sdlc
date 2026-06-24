@@ -6,6 +6,7 @@ from app.db.session import SessionLocal
 from app.core.security import get_password_hash
 from app.models.role import Role, UserRole
 from app.models.user import User
+from app.models.project_member import ProjectMember
 
 
 def _create_user_with_role(username: str, role_key: str) -> int:
@@ -102,6 +103,49 @@ def test_developer_workbench_defaults_to_owned_active_iteration_work(client: Tes
     board = next(item for item in data["iterations"] if item["id"] == iteration_id)
     assert {item["id"] for item in board["tasks"]} == {mine["id"]}
     assert board["test_cases"] == []
+
+
+def test_development_lead_workbench_is_limited_to_project_team_scope(client: TestClient):
+    lead_id = _create_user_with_role(f"lead_user_{uuid4().hex[:6]}", "development_lead")
+    scoped_project_id = _create_project(client, "Lead Scoped Project")
+    outside_project_id = _create_project(client, "Lead Outside Project")
+    scoped_iteration_id = _create_iteration(client, scoped_project_id, "Lead Scoped Iteration")
+    outside_iteration_id = _create_iteration(client, outside_project_id, "Lead Outside Iteration")
+    client.post(f"/api/v1/iterations/{scoped_iteration_id}/start", json={"effective_time": "2026-06-24T10:00:00"})
+    client.post(f"/api/v1/iterations/{outside_iteration_id}/start", json={"effective_time": "2026-06-24T10:00:00"})
+    scoped_requirement = client.post(
+        "/api/v1/requirements",
+        json={"project_id": scoped_project_id, "iteration_id": scoped_iteration_id, "title": "Lead scoped requirement"},
+    ).json()
+    client.post(
+        "/api/v1/requirements",
+        json={"project_id": outside_project_id, "iteration_id": outside_iteration_id, "title": "Lead outside requirement"},
+    )
+
+    db = SessionLocal()
+    try:
+        db.add(
+            ProjectMember(
+                project_id=scoped_project_id,
+                user_id=lead_id,
+                project_role="tech_lead",
+                is_workbench_participant=True,
+            )
+        )
+        db.commit()
+    finally:
+        db.close()
+
+    response = client.get(f"/api/v1/dashboard/workbench?user_id={lead_id}")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["view_mode"] == "lead"
+    board_ids = {item["id"] for item in data["iterations"]}
+    assert scoped_iteration_id in board_ids
+    assert outside_iteration_id not in board_ids
+    board = next(item for item in data["iterations"] if item["id"] == scoped_iteration_id)
+    assert {item["id"] for item in board["requirements"]} == {scoped_requirement["id"]}
 
 
 def test_tester_workbench_includes_linked_cases_with_completion_marker(client: TestClient):

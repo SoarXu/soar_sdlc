@@ -177,12 +177,14 @@ body {
 }
 
 .page-head {
+  position: relative;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 16px;
   flex-wrap: wrap;
   min-height: 42px;
+  padding-right: 160px;
   padding-bottom: 10px;
   margin-bottom: 12px;
   border-bottom: 1px solid #d6dde7;
@@ -202,9 +204,10 @@ body {
 .page-actions {
   display: flex;
   align-items: center;
-  justify-content: flex-end;
+  justify-content: space-between;
   gap: 10px;
-  flex: 0 1 auto;
+  flex: 1 0 100%;
+  width: 100%;
   min-width: 0;
 }
 
@@ -216,8 +219,14 @@ body {
   min-width: 0;
 }
 
+.workbench-action-view {
+  position: absolute;
+  top: 0;
+  right: 0;
+}
+
 .workbench-action-filters {
-  flex: 0 1 auto;
+  flex: 1 1 auto;
   gap: 8px;
   padding: 6px;
   background: #eef3f8;
@@ -865,9 +874,15 @@ body {
 
 .workbench-summary {
   display: grid;
-  grid-template-columns: repeat(5, minmax(120px, 1fr));
+  grid-template-columns: repeat(6, minmax(150px, 1fr));
   gap: 12px;
+  overflow-x: auto;
+  padding-bottom: 2px;
   margin-bottom: 16px;
+}
+
+.workbench-summary .el-card {
+  min-width: 150px;
 }
 
 .workbench-summary .el-card__body {
@@ -1579,6 +1594,11 @@ body {
   .page-head {
     align-items: flex-start;
     gap: 10px;
+    padding-right: 0;
+  }
+
+  .workbench-action-view {
+    position: static;
   }
 
   .project-detail-head {

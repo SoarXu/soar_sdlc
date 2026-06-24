@@ -155,6 +155,40 @@ def test_requirement_activation_updates_linked_tasks_to_doing(client: TestClient
     assert history.json()[-1]["to_status"] == "active"
 
 
+def test_requirement_activation_updates_all_unclosed_linked_tasks_to_doing(client: TestClient):
+    project_id = _create_project(client)
+    requirement = client.post(
+        "/api/v1/requirements",
+        json={"project_id": project_id, "title": f"激活全部关联任务-{uuid4().hex[:8]}"},
+    ).json()
+    todo_task = client.post(
+        "/api/v1/tasks",
+        json={"project_id": project_id, "requirement_id": requirement["id"], "title": f"待办任务-{uuid4().hex[:8]}"},
+    ).json()
+    done_task = client.post(
+        "/api/v1/tasks",
+        json={"project_id": project_id, "requirement_id": requirement["id"], "title": f"已完成任务-{uuid4().hex[:8]}"},
+    ).json()
+    closed_task = client.post(
+        "/api/v1/tasks",
+        json={"project_id": project_id, "requirement_id": requirement["id"], "title": f"已关闭任务-{uuid4().hex[:8]}"},
+    ).json()
+    assert client.post(f"/api/v1/tasks/{done_task['id']}/activate").status_code == 200
+    assert client.post(f"/api/v1/tasks/{done_task['id']}/complete").status_code == 200
+    assert client.post(f"/api/v1/tasks/{closed_task['id']}/activate").status_code == 200
+    assert client.post(
+        f"/api/v1/tasks/{closed_task['id']}/close",
+        json={"reason": "不做", "remark": "保持关闭"},
+    ).status_code == 200
+
+    activated = client.post(f"/api/v1/requirements/{requirement['id']}/activate")
+
+    assert activated.status_code == 200
+    assert client.get(f"/api/v1/tasks/{todo_task['id']}").json()["status"] == "doing"
+    assert client.get(f"/api/v1/tasks/{done_task['id']}").json()["status"] == "doing"
+    assert client.get(f"/api/v1/tasks/{closed_task['id']}").json()["status"] == "closed"
+
+
 def test_requirement_close_requires_reason_and_records_history(client: TestClient):
     project_id = _create_project(client)
     requirement = client.post(

@@ -69,11 +69,26 @@ def activate_requirement(db: Session, requirement_id: int, actor_id: int | None 
     _ensure_project_open_for_requirement(db, requirement)
     from_status = requirement.status
     requirement.status = "active"
-    (
+    linked_tasks = (
         db.query(Task)
-        .filter(Task.requirement_id == requirement.id, Task.deleted == 0, Task.status == "todo")
-        .update({Task.status: "doing"}, synchronize_session=False)
+        .filter(Task.requirement_id == requirement.id, Task.deleted == 0, Task.status != "closed")
+        .all()
     )
+    for task in linked_tasks:
+        if task.status == "doing":
+            continue
+        task_from_status = task.status
+        task.status = "doing"
+        create_status_operation(
+            db,
+            object_type="task",
+            object_id=task.id,
+            action="activate",
+            from_status=task_from_status,
+            to_status=task.status,
+            payload=None,
+            actor_id=actor_id,
+        )
     create_status_operation(
         db,
         object_type="requirement",

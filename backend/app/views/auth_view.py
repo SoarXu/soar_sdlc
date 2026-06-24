@@ -6,6 +6,15 @@ class LoginRequest(BaseModel):
     password: str
 
 
+class RegisterRequest(BaseModel):
+    username: str
+    password: str
+    full_name: str
+    email: str | None = None
+    mobile: str | None = None
+    department: str | None = None
+
+
 class TokenResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"

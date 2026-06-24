@@ -51,6 +51,10 @@
           <el-icon><Connection /></el-icon>
           <span>DevOps</span>
         </el-menu-item>
+        <el-menu-item index="/roles">
+          <el-icon><UserFilled /></el-icon>
+          <span>角色管理</span>
+        </el-menu-item>
         <el-menu-item index="/workflow">
           <el-icon><Setting /></el-icon>
           <span>工作流配置</span>
@@ -76,6 +80,7 @@ import {
   Grid,
   Setting,
   Timer,
+  UserFilled,
   Warning
 } from '@element-plus/icons-vue'
 import { useAuthStore } from '../stores/auth'

@@ -485,6 +485,15 @@ body {
   margin: 12px 0 16px;
 }
 
+.login-switch {
+  margin-top: 14px;
+  text-align: center;
+}
+
+.role-users-card {
+  margin-top: 16px;
+}
+
 .form-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

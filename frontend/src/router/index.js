@@ -13,6 +13,7 @@ import ProjectDetailView from '../views/ProjectDetailView.vue'
 import ProjectsView from '../views/ProjectsView.vue'
 import RequirementDetailView from '../views/RequirementDetailView.vue'
 import RequirementsView from '../views/RequirementsView.vue'
+import RolesView from '../views/RolesView.vue'
 import TaskDetailView from '../views/TaskDetailView.vue'
 import TasksView from '../views/TasksView.vue'
 import TestCaseDetailView from '../views/TestCaseDetailView.vue'
@@ -40,6 +41,7 @@ const routes = [
       { path: 'tests', name: 'tests', component: TestsView },
       { path: 'bugs', name: 'bugs', component: BugsView },
       { path: 'devops', name: 'devops', component: DevopsView },
+      { path: 'roles', name: 'roles', component: RolesView },
       { path: 'workflow', name: 'workflow', component: WorkflowView }
     ]
   }

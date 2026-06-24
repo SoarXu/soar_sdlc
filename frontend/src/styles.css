@@ -380,15 +380,14 @@ body {
 }
 
 .table-link {
-  color: #2f6b3f;
-  font-weight: 600;
+  color: #409eff;
+  font-weight: 400;
   text-decoration: none;
 }
 
 .table-link:hover {
-  color: #1f5f35;
-  text-decoration: underline;
-  text-underline-offset: 3px;
+  color: #337ecc;
+  text-decoration: none;
 }
 
 .priority-badge {
@@ -530,17 +529,17 @@ body {
 }
 
 .project-row-name {
-  color: #2f6b3f;
-  font-weight: 600;
+  color: #409eff;
+  font-weight: 400;
 }
 
-.project-row-link {
-  color: #2f6b3f;
-  font-weight: 600;
+.project-row-link.el-button.is-link {
+  color: #409eff;
+  font-weight: 400;
 }
 
-.project-row-link:hover {
-  color: #1f5f35;
+.project-row-link.el-button.is-link:hover {
+  color: #337ecc;
 }
 
 .muted-action {

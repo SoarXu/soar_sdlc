@@ -6,10 +6,10 @@
         <p>按迭代和负责人聚合当前需要处理的需求、任务、测试用例和 Bug。</p>
       </div>
       <div class="workbench-view-switch">
-        <span>工作范围</span>
+        <span>工作视图</span>
         <el-radio-group v-model="viewMode" size="small">
-          <el-radio-button label="mine">我的工作</el-radio-button>
-          <el-radio-button label="all">全部工作</el-radio-button>
+          <el-radio-button label="mine">我的</el-radio-button>
+          <el-radio-button label="all">全部</el-radio-button>
         </el-radio-group>
       </div>
       <div class="page-actions">

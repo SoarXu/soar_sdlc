@@ -30,10 +30,12 @@ def get_dashboard_summary(db: Session) -> DashboardSummary:
 def get_workbench(db: Session, user_id: int | None = None) -> WorkbenchResponse:
     role_keys = _role_keys_for_user(db, user_id)
     view_mode = _workbench_view_mode(role_keys)
-    scoped_project_ids = workbench_project_ids_for_user(db, user_id) if view_mode in {"lead", "tester"} else set()
+    scoped_project_ids = workbench_project_ids_for_user(db, user_id) if user_id and view_mode != "all" else set()
     iterations = db.query(Iteration).filter(Iteration.deleted == 0).order_by(Iteration.id.desc()).all()
     if view_mode in {"developer", "tester", "lead"}:
         iterations = [iteration for iteration in iterations if iteration.status == "active"]
+    if user_id and view_mode != "all" and not scoped_project_ids:
+        iterations = []
     iteration_ids = [item.id for item in iterations]
     projects = {item.id: item for item in db.query(Project).filter(Project.deleted == 0).all()}
     iteration_projects = _iteration_projects(db, iteration_ids, projects)
@@ -388,13 +390,9 @@ def _filter_items_for_role(
     if view_mode in {"all", "lead"} or not user_id:
         return items
     if view_mode == "tester":
-        if include_test_cases:
-            return [item for item in items if item.owner_id in {None, user_id}]
-        return [item for item in items if item.owner_id in {None, user_id}]
+        return items
     if view_mode == "developer":
-        if include_test_cases:
-            return []
-        return [item for item in items if item.owner_id == user_id]
+        return [] if include_test_cases else items
     return items
 
 

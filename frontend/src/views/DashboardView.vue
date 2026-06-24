@@ -17,7 +17,7 @@
           <el-select v-model="iterationFilter" multiple collapse-tags collapse-tags-tooltip clearable filterable placeholder="迭代" class="workbench-filter wide">
             <el-option v-for="iteration in iterations" :key="iteration.id" :label="iteration.name" :value="iteration.id" />
           </el-select>
-          <el-select v-if="viewMode === 'all'" v-model="ownerFilter" clearable filterable placeholder="负责人" class="workbench-filter">
+          <el-select v-model="ownerFilter" clearable filterable placeholder="负责人" class="workbench-filter">
             <el-option v-for="owner in owners" :key="owner.id" :label="owner.full_name" :value="owner.id" />
           </el-select>
           <el-select v-model="typeFilter" clearable placeholder="类型" class="workbench-filter">
@@ -416,9 +416,8 @@ const summaryCards = computed(() => {
 
 const filteredReviewTasks = computed(() => {
   const keyword = keywordFilter.value.trim().toLowerCase()
-  const effectiveOwnerId = viewMode.value === 'mine' ? currentUserId.value : ownerFilter.value
+  const effectiveOwnerId = ownerFilter.value
   return reviewTasks.value
-    .filter((item) => viewMode.value !== 'mine' || Boolean(effectiveOwnerId))
     .filter((item) => !effectiveOwnerId || item.owner_id === effectiveOwnerId)
     .filter((item) => !keyword || `${item.title || ''} ${item.short_sha || ''} ${item.branch_name || ''}`.toLowerCase().includes(keyword))
 })
@@ -524,9 +523,8 @@ const bugActionTitle = computed(() => ({
 
 function filterItems(items) {
   const keyword = keywordFilter.value.trim().toLowerCase()
-  const effectiveOwnerId = viewMode.value === 'mine' ? currentUserId.value : ownerFilter.value
+  const effectiveOwnerId = ownerFilter.value
   return items
-    .filter((item) => viewMode.value !== 'mine' || Boolean(effectiveOwnerId))
     .filter((item) => !effectiveOwnerId || item.owner_id === effectiveOwnerId)
     .filter((item) => !typeFilter.value || item.object_type === typeFilter.value)
     .filter((item) => !keyword || `${item.title || ''} ${item.project_name || ''}`.toLowerCase().includes(keyword))
@@ -651,9 +649,6 @@ function refreshSelectedWorkItem() {
   else workItemDrawerVisible.value = false
 }
 
-watch(viewMode, (value) => {
-  if (value === 'mine') ownerFilter.value = null
-})
 function onDragStart() {
   dragSnapshot.value = JSON.parse(JSON.stringify(iterations.value))
 }

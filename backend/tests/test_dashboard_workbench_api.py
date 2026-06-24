@@ -80,20 +80,39 @@ def test_workbench_groups_items_by_iteration_and_supports_test_case_iteration(cl
     assert board["counts"] == {"requirements": 1, "tasks": 1, "test_cases": 1, "bugs": 1}
 
 
-def test_developer_workbench_defaults_to_owned_active_iteration_work(client: TestClient):
+def test_developer_workbench_defaults_to_project_member_active_iteration_work(client: TestClient):
     developer_id = _create_user_with_role("developer_user", "developer")
     other_user_id = _create_user_with_role("other_developer", "developer")
+    outsider_id = _create_user_with_role("outside_developer", "developer")
     project_id = _create_project(client, "Developer Workbench Project")
     iteration_id = _create_iteration(client, project_id, "Developer Active Iteration")
     client.post(f"/api/v1/iterations/{iteration_id}/start", json={"effective_time": "2026-06-24T10:00:00"})
-    mine = client.post(
+    requirement = client.post(
+        "/api/v1/requirements",
+        json={"project_id": project_id, "iteration_id": iteration_id, "title": "Team visible requirement"},
+    ).json()
+    owned_task = client.post(
         "/api/v1/tasks",
         json={"project_id": project_id, "iteration_id": iteration_id, "title": "My active task", "owner_id": developer_id},
     ).json()
-    client.post(
+    other_task = client.post(
         "/api/v1/tasks",
         json={"project_id": project_id, "iteration_id": iteration_id, "title": "Other active task", "owner_id": other_user_id},
-    )
+    ).json()
+
+    db = SessionLocal()
+    try:
+        db.add(
+            ProjectMember(
+                project_id=project_id,
+                user_id=developer_id,
+                project_role="developer",
+                is_workbench_participant=True,
+            )
+        )
+        db.commit()
+    finally:
+        db.close()
 
     response = client.get(f"/api/v1/dashboard/workbench?user_id={developer_id}")
 
@@ -101,8 +120,14 @@ def test_developer_workbench_defaults_to_owned_active_iteration_work(client: Tes
     data = response.json()
     assert data["view_mode"] == "developer"
     board = next(item for item in data["iterations"] if item["id"] == iteration_id)
-    assert {item["id"] for item in board["tasks"]} == {mine["id"]}
+    assert {item["id"] for item in board["requirements"]} == {requirement["id"]}
+    assert {item["id"] for item in board["tasks"]} == {owned_task["id"], other_task["id"]}
     assert board["test_cases"] == []
+
+    outsider_response = client.get(f"/api/v1/dashboard/workbench?user_id={outsider_id}")
+    assert outsider_response.status_code == 200
+    outsider_board_ids = {item["id"] for item in outsider_response.json()["iterations"]}
+    assert iteration_id not in outsider_board_ids
 
 
 def test_development_lead_workbench_is_limited_to_project_team_scope(client: TestClient):
@@ -168,6 +193,19 @@ def test_tester_workbench_includes_linked_cases_with_completion_marker(client: T
             "default_tester_id": tester_id,
         },
     ).json()
+    db = SessionLocal()
+    try:
+        db.add(
+            ProjectMember(
+                project_id=project_id,
+                user_id=tester_id,
+                project_role="tester",
+                is_workbench_participant=True,
+            )
+        )
+        db.commit()
+    finally:
+        db.close()
 
     response = client.get(f"/api/v1/dashboard/workbench?user_id={tester_id}")
 

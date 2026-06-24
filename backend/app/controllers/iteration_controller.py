@@ -1,7 +1,9 @@
 from fastapi import APIRouter, Depends, Response, status
 from sqlalchemy.orm import Session
 
+from app.core.auth_dependencies import get_optional_current_user
 from app.db.session import get_db
+from app.models.user import User
 from app.services.iteration_service import (
     available_requirements,
     available_tasks,
@@ -51,13 +53,23 @@ def get_iteration_status_operations(iteration_id: int, db: Session = Depends(get
 
 
 @router.post("/{iteration_id}/start", response_model=IterationRead)
-def start_iteration_status(iteration_id: int, payload: StatusOperationCreate | None = None, db: Session = Depends(get_db)):
-    return start_iteration(db, iteration_id, payload)
+def start_iteration_status(
+    iteration_id: int,
+    payload: StatusOperationCreate | None = None,
+    db: Session = Depends(get_db),
+    current_user: User | None = Depends(get_optional_current_user),
+):
+    return start_iteration(db, iteration_id, payload, actor_id=current_user.id if current_user else None)
 
 
 @router.post("/{iteration_id}/finish", response_model=IterationRead)
-def finish_iteration_status(iteration_id: int, payload: StatusOperationCreate | None = None, db: Session = Depends(get_db)):
-    return finish_iteration(db, iteration_id, payload)
+def finish_iteration_status(
+    iteration_id: int,
+    payload: StatusOperationCreate | None = None,
+    db: Session = Depends(get_db),
+    current_user: User | None = Depends(get_optional_current_user),
+):
+    return finish_iteration(db, iteration_id, payload, actor_id=current_user.id if current_user else None)
 
 
 @router.get("/{iteration_id}/available-requirements")

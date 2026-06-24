@@ -68,7 +68,7 @@ def update_task(db: Session, task_id: int, payload: TaskUpdate) -> Task:
     return task
 
 
-def activate_task(db: Session, task_id: int) -> Task:
+def activate_task(db: Session, task_id: int, actor_id: int | None = None) -> Task:
     task = _get_active_task(db, task_id)
     _ensure_project_open_for_task(db, task)
     from_status = task.status
@@ -81,23 +81,24 @@ def activate_task(db: Session, task_id: int) -> Task:
         from_status=from_status,
         to_status=task.status,
         payload=None,
+        actor_id=actor_id,
     )
     db.commit()
     db.refresh(task)
     return task
 
 
-def close_task(db: Session, task_id: int, payload: StatusOperationCreate) -> Task:
+def close_task(db: Session, task_id: int, payload: StatusOperationCreate, actor_id: int | None = None) -> Task:
     if not payload.reason:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="关闭原因必填")
     task = _get_active_task(db, task_id)
-    close_task_record(db, task, payload)
+    close_task_record(db, task, payload, actor_id=actor_id)
     db.commit()
     db.refresh(task)
     return task
 
 
-def complete_task(db: Session, task_id: int) -> Task:
+def complete_task(db: Session, task_id: int, actor_id: int | None = None) -> Task:
     task = _get_active_task(db, task_id)
     _ensure_project_open_for_task(db, task)
     if task.status == "done":
@@ -112,13 +113,14 @@ def complete_task(db: Session, task_id: int) -> Task:
         from_status=from_status,
         to_status=task.status,
         payload=None,
+        actor_id=actor_id,
     )
     db.commit()
     db.refresh(task)
     return task
 
 
-def close_task_record(db: Session, task: Task, payload: StatusOperationCreate) -> Task:
+def close_task_record(db: Session, task: Task, payload: StatusOperationCreate, actor_id: int | None = None) -> Task:
     if task.status == "closed":
         return task
     from_status = task.status
@@ -131,6 +133,7 @@ def close_task_record(db: Session, task: Task, payload: StatusOperationCreate) -
         from_status=from_status,
         to_status=task.status,
         payload=payload,
+        actor_id=actor_id,
     )
     return task
 

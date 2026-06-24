@@ -5,6 +5,7 @@ from sqlalchemy import text
 
 from app.db.session import SessionLocal
 from app.core.security import get_password_hash
+from app.core.security import create_access_token
 from app.models.user import User
 
 
@@ -513,6 +514,39 @@ def test_project_status_dates_follow_action_rules(client: TestClient):
     )
     assert closed.status_code == 200
     assert closed.json()["actual_end_date"] == "2026-06-08"
+
+
+def test_project_status_history_uses_authenticated_user_name(client: TestClient):
+    db = SessionLocal()
+    try:
+        user = User(
+            username=f"bob.actor.{uuid4().hex[:6]}",
+            full_name="Bob",
+            password_hash=get_password_hash("User123456"),
+            is_active=True,
+        )
+        db.add(user)
+        db.commit()
+        db.refresh(user)
+        token = create_access_token(user.username)
+    finally:
+        db.close()
+
+    project = client.post(
+        "/api/v1/projects",
+        json={"name": f"真实操作人项目-{uuid4().hex[:8]}"},
+    ).json()
+
+    started = client.post(
+        f"/api/v1/projects/{project['id']}/start",
+        json={"effective_time": "2026-06-01T09:00:00"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert started.status_code == 200
+    history = client.get(f"/api/v1/projects/{project['id']}/status-operations").json()
+    assert history[-1]["action"] == "start"
+    assert history[-1]["actor_name"] == "Bob"
 
 
 def test_program_status_dates_follow_action_rules(client: TestClient):

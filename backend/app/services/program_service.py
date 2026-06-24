@@ -136,7 +136,7 @@ def delete_program(db: Session, program_id: int) -> None:
     db.commit()
 
 
-def start_program(db: Session, program_id: int, payload: StatusOperationCreate | None = None) -> Program:
+def start_program(db: Session, program_id: int, payload: StatusOperationCreate | None = None, actor_id: int | None = None) -> Program:
     program = _get_active_program(db, program_id)
     _require_status(program.status, {"planning", "paused"}, "只有规划中或已挂起的项目集可以启动")
     from_status = program.status
@@ -153,13 +153,14 @@ def start_program(db: Session, program_id: int, payload: StatusOperationCreate |
         from_status=from_status,
         to_status=program.status,
         payload=payload,
+        actor_id=actor_id,
     )
     db.commit()
     db.refresh(program)
     return program
 
 
-def suspend_program(db: Session, program_id: int, payload: StatusOperationCreate | None = None) -> Program:
+def suspend_program(db: Session, program_id: int, payload: StatusOperationCreate | None = None, actor_id: int | None = None) -> Program:
     program = _get_active_program(db, program_id)
     _require_status(program.status, {"active"}, "只有进行中的项目集可以挂起")
     from_status = program.status
@@ -172,13 +173,14 @@ def suspend_program(db: Session, program_id: int, payload: StatusOperationCreate
         from_status=from_status,
         to_status=program.status,
         payload=payload,
+        actor_id=actor_id,
     )
     db.commit()
     db.refresh(program)
     return program
 
 
-def close_program(db: Session, program_id: int, payload: StatusOperationCreate | None = None) -> Program:
+def close_program(db: Session, program_id: int, payload: StatusOperationCreate | None = None, actor_id: int | None = None) -> Program:
     program = _get_active_program(db, program_id)
     _require_status(program.status, {"active", "paused"}, "只有进行中或已挂起的项目集可以关闭")
     if _has_unclosed_children(db, program_id):
@@ -195,13 +197,14 @@ def close_program(db: Session, program_id: int, payload: StatusOperationCreate |
         from_status=from_status,
         to_status=program.status,
         payload=payload,
+        actor_id=actor_id,
     )
     db.commit()
     db.refresh(program)
     return program
 
 
-def activate_program(db: Session, program_id: int, payload: StatusOperationCreate | None = None) -> Program:
+def activate_program(db: Session, program_id: int, payload: StatusOperationCreate | None = None, actor_id: int | None = None) -> Program:
     program = _get_active_program(db, program_id)
     _require_status(program.status, {"closed"}, "只有已关闭的项目集可以激活")
     from_status = program.status
@@ -216,6 +219,7 @@ def activate_program(db: Session, program_id: int, payload: StatusOperationCreat
         from_status=from_status,
         to_status=program.status,
         payload=payload,
+        actor_id=actor_id,
     )
     db.commit()
     db.refresh(program)

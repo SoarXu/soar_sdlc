@@ -1,7 +1,9 @@
 from fastapi import APIRouter, Depends, Response, status
 from sqlalchemy.orm import Session
 
+from app.core.auth_dependencies import get_optional_current_user
 from app.db.session import get_db
+from app.models.user import User
 from app.services.requirement_service import (
     activate_requirement,
     close_requirement,
@@ -45,18 +47,31 @@ def patch_requirement(requirement_id: int, payload: RequirementUpdate, db: Sessi
 
 
 @router.post("/{requirement_id}/activate", response_model=RequirementRead)
-def activate_requirement_status(requirement_id: int, db: Session = Depends(get_db)):
-    return activate_requirement(db, requirement_id)
+def activate_requirement_status(
+    requirement_id: int,
+    db: Session = Depends(get_db),
+    current_user: User | None = Depends(get_optional_current_user),
+):
+    return activate_requirement(db, requirement_id, actor_id=current_user.id if current_user else None)
 
 
 @router.post("/{requirement_id}/close", response_model=RequirementRead)
-def close_requirement_status(requirement_id: int, payload: StatusOperationCreate, db: Session = Depends(get_db)):
-    return close_requirement(db, requirement_id, payload)
+def close_requirement_status(
+    requirement_id: int,
+    payload: StatusOperationCreate,
+    db: Session = Depends(get_db),
+    current_user: User | None = Depends(get_optional_current_user),
+):
+    return close_requirement(db, requirement_id, payload, actor_id=current_user.id if current_user else None)
 
 
 @router.post("/{requirement_id}/complete", response_model=RequirementRead)
-def complete_requirement_status(requirement_id: int, db: Session = Depends(get_db)):
-    return complete_requirement(db, requirement_id)
+def complete_requirement_status(
+    requirement_id: int,
+    db: Session = Depends(get_db),
+    current_user: User | None = Depends(get_optional_current_user),
+):
+    return complete_requirement(db, requirement_id, actor_id=current_user.id if current_user else None)
 
 
 @router.get("/{requirement_id}/status-operations", response_model=list[StatusOperationRead])

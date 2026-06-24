@@ -1,7 +1,9 @@
 from fastapi import APIRouter, Depends, Response, status
 from sqlalchemy.orm import Session
 
+from app.core.auth_dependencies import get_optional_current_user
 from app.db.session import get_db
+from app.models.user import User
 from app.services.task_service import (
     activate_task,
     close_task,
@@ -43,18 +45,31 @@ def patch_task(task_id: int, payload: TaskUpdate, db: Session = Depends(get_db))
 
 
 @router.post("/{task_id}/activate", response_model=TaskRead)
-def activate_task_status(task_id: int, db: Session = Depends(get_db)):
-    return activate_task(db, task_id)
+def activate_task_status(
+    task_id: int,
+    db: Session = Depends(get_db),
+    current_user: User | None = Depends(get_optional_current_user),
+):
+    return activate_task(db, task_id, actor_id=current_user.id if current_user else None)
 
 
 @router.post("/{task_id}/close", response_model=TaskRead)
-def close_task_status(task_id: int, payload: StatusOperationCreate, db: Session = Depends(get_db)):
-    return close_task(db, task_id, payload)
+def close_task_status(
+    task_id: int,
+    payload: StatusOperationCreate,
+    db: Session = Depends(get_db),
+    current_user: User | None = Depends(get_optional_current_user),
+):
+    return close_task(db, task_id, payload, actor_id=current_user.id if current_user else None)
 
 
 @router.post("/{task_id}/complete", response_model=TaskRead)
-def complete_task_status(task_id: int, db: Session = Depends(get_db)):
-    return complete_task(db, task_id)
+def complete_task_status(
+    task_id: int,
+    db: Session = Depends(get_db),
+    current_user: User | None = Depends(get_optional_current_user),
+):
+    return complete_task(db, task_id, actor_id=current_user.id if current_user else None)
 
 
 @router.get("/{task_id}/status-operations", response_model=list[StatusOperationRead])

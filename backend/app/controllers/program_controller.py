@@ -1,7 +1,9 @@
 from fastapi import APIRouter, Depends, Response, status
 from sqlalchemy.orm import Session
 
+from app.core.auth_dependencies import get_optional_current_user
 from app.db.session import get_db
+from app.models.user import User
 from app.services.program_service import (
     activate_program,
     close_program,
@@ -53,23 +55,43 @@ def get_program_status_operations(program_id: int, db: Session = Depends(get_db)
 
 
 @router.post("/{program_id}/start", response_model=ProgramRead)
-def start_program_status(program_id: int, payload: StatusOperationCreate | None = None, db: Session = Depends(get_db)):
-    return start_program(db, program_id, payload)
+def start_program_status(
+    program_id: int,
+    payload: StatusOperationCreate | None = None,
+    db: Session = Depends(get_db),
+    current_user: User | None = Depends(get_optional_current_user),
+):
+    return start_program(db, program_id, payload, actor_id=current_user.id if current_user else None)
 
 
 @router.post("/{program_id}/suspend", response_model=ProgramRead)
-def suspend_program_status(program_id: int, payload: StatusOperationCreate | None = None, db: Session = Depends(get_db)):
-    return suspend_program(db, program_id, payload)
+def suspend_program_status(
+    program_id: int,
+    payload: StatusOperationCreate | None = None,
+    db: Session = Depends(get_db),
+    current_user: User | None = Depends(get_optional_current_user),
+):
+    return suspend_program(db, program_id, payload, actor_id=current_user.id if current_user else None)
 
 
 @router.post("/{program_id}/close", response_model=ProgramRead)
-def close_program_status(program_id: int, payload: StatusOperationCreate | None = None, db: Session = Depends(get_db)):
-    return close_program(db, program_id, payload)
+def close_program_status(
+    program_id: int,
+    payload: StatusOperationCreate | None = None,
+    db: Session = Depends(get_db),
+    current_user: User | None = Depends(get_optional_current_user),
+):
+    return close_program(db, program_id, payload, actor_id=current_user.id if current_user else None)
 
 
 @router.post("/{program_id}/activate", response_model=ProgramRead)
-def activate_program_status(program_id: int, payload: StatusOperationCreate | None = None, db: Session = Depends(get_db)):
-    return activate_program(db, program_id, payload)
+def activate_program_status(
+    program_id: int,
+    payload: StatusOperationCreate | None = None,
+    db: Session = Depends(get_db),
+    current_user: User | None = Depends(get_optional_current_user),
+):
+    return activate_program(db, program_id, payload, actor_id=current_user.id if current_user else None)
 
 
 @router.delete("/{program_id}", status_code=status.HTTP_204_NO_CONTENT)

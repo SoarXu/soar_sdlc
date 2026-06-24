@@ -139,7 +139,7 @@ def delete_iteration(db: Session, iteration_id: int) -> None:
     db.commit()
 
 
-def start_iteration(db: Session, iteration_id: int, payload: StatusOperationCreate | None = None) -> dict:
+def start_iteration(db: Session, iteration_id: int, payload: StatusOperationCreate | None = None, actor_id: int | None = None) -> dict:
     iteration = _get_active_iteration(db, iteration_id)
     if iteration.status != "planning":
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="只有规划中的迭代可以开始")
@@ -156,14 +156,15 @@ def start_iteration(db: Session, iteration_id: int, payload: StatusOperationCrea
         from_status=from_status,
         to_status=iteration.status,
         payload=payload,
+        actor_id=actor_id,
     )
-    _activate_iteration_work_items(db, iteration.id)
+    _activate_iteration_work_items(db, iteration.id, actor_id=actor_id)
     db.commit()
     db.refresh(iteration)
     return _iteration_to_dict(iteration, _iteration_project_ids(db, iteration.id))
 
 
-def finish_iteration(db: Session, iteration_id: int, payload: StatusOperationCreate | None = None) -> dict:
+def finish_iteration(db: Session, iteration_id: int, payload: StatusOperationCreate | None = None, actor_id: int | None = None) -> dict:
     iteration = _get_active_iteration(db, iteration_id)
     if iteration.status != "active":
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="只有进行中的迭代可以结束")
@@ -180,6 +181,7 @@ def finish_iteration(db: Session, iteration_id: int, payload: StatusOperationCre
         from_status=from_status,
         to_status=iteration.status,
         payload=payload,
+        actor_id=actor_id,
     )
     db.commit()
     db.refresh(iteration)
@@ -399,7 +401,7 @@ def _linked_tasks(db: Session, iteration_id: int, requirement_ids: list[int]) ->
     return list(tasks_by_id.values())
 
 
-def _activate_iteration_work_items(db: Session, iteration_id: int) -> None:
+def _activate_iteration_work_items(db: Session, iteration_id: int, actor_id: int | None = None) -> None:
     payload = StatusOperationCreate(remark="迭代开始自动激活")
     requirements = _linked_requirements(db, iteration_id)
     requirement_ids = [item.id for item in requirements]
@@ -415,6 +417,7 @@ def _activate_iteration_work_items(db: Session, iteration_id: int) -> None:
                 from_status=from_status,
                 to_status=requirement.status,
                 payload=payload,
+                actor_id=actor_id,
             )
     for task in _linked_tasks(db, iteration_id, requirement_ids):
         if task.status == "todo":
@@ -428,6 +431,7 @@ def _activate_iteration_work_items(db: Session, iteration_id: int) -> None:
                 from_status=from_status,
                 to_status=task.status,
                 payload=payload,
+                actor_id=actor_id,
             )
 
 

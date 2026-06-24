@@ -275,7 +275,7 @@ def replace_project_members(db: Session, project_id: int, payload: list[ProjectM
     return list_project_members(db, project_id)
 
 
-def start_project(db: Session, project_id: int, payload: StatusOperationCreate | None = None) -> Project:
+def start_project(db: Session, project_id: int, payload: StatusOperationCreate | None = None, actor_id: int | None = None) -> Project:
     project = _get_active_project(db, project_id)
     _require_status(project.status, {"planning", "paused"}, "只有规划中或已挂起的项目可以启动")
     from_status = project.status
@@ -292,13 +292,14 @@ def start_project(db: Session, project_id: int, payload: StatusOperationCreate |
         from_status=from_status,
         to_status=project.status,
         payload=payload,
+        actor_id=actor_id,
     )
     db.commit()
     db.refresh(project)
     return project
 
 
-def suspend_project(db: Session, project_id: int, payload: StatusOperationCreate | None = None) -> Project:
+def suspend_project(db: Session, project_id: int, payload: StatusOperationCreate | None = None, actor_id: int | None = None) -> Project:
     project = _get_active_project(db, project_id)
     _require_status(project.status, {"active"}, "只有进行中的项目可以挂起")
     from_status = project.status
@@ -311,13 +312,14 @@ def suspend_project(db: Session, project_id: int, payload: StatusOperationCreate
         from_status=from_status,
         to_status=project.status,
         payload=payload,
+        actor_id=actor_id,
     )
     db.commit()
     db.refresh(project)
     return project
 
 
-def close_project(db: Session, project_id: int, payload: StatusOperationCreate | None = None) -> Project:
+def close_project(db: Session, project_id: int, payload: StatusOperationCreate | None = None, actor_id: int | None = None) -> Project:
     project = _get_active_project(db, project_id)
     _require_status(project.status, {"active", "paused"}, "只有进行中或已挂起的项目可以关闭")
     from_status = project.status
@@ -334,6 +336,7 @@ def close_project(db: Session, project_id: int, payload: StatusOperationCreate |
             "effective_time": payload.effective_time if payload else None,
             "reason": payload.reason if payload else None,
             "remark": payload.remark if payload else None,
+            "operator_id": actor_id,
         },
     )
     project.status = "closed"
@@ -346,7 +349,7 @@ def close_project(db: Session, project_id: int, payload: StatusOperationCreate |
             .all()
         )
         for requirement in requirements:
-            close_requirement_record(db, requirement, cascade_payload)
+            close_requirement_record(db, requirement, cascade_payload, actor_id=actor_id)
         orphan_tasks = (
             db.query(Task)
             .filter(Task.project_id == project.id, Task.deleted == 0, Task.requirement_id.is_(None), Task.status != "closed")
@@ -355,7 +358,7 @@ def close_project(db: Session, project_id: int, payload: StatusOperationCreate |
         for task in orphan_tasks:
             from app.services.task_service import close_task_record
 
-            close_task_record(db, task, cascade_payload)
+            close_task_record(db, task, cascade_payload, actor_id=actor_id)
     create_status_operation(
         db,
         object_type="project",
@@ -364,13 +367,14 @@ def close_project(db: Session, project_id: int, payload: StatusOperationCreate |
         from_status=from_status,
         to_status=project.status,
         payload=payload,
+        actor_id=actor_id,
     )
     db.commit()
     db.refresh(project)
     return project
 
 
-def activate_project(db: Session, project_id: int, payload: StatusOperationCreate | None = None) -> Project:
+def activate_project(db: Session, project_id: int, payload: StatusOperationCreate | None = None, actor_id: int | None = None) -> Project:
     project = _get_active_project(db, project_id)
     _require_status(project.status, {"closed"}, "只有已关闭的项目可以激活")
     from_status = project.status
@@ -385,6 +389,7 @@ def activate_project(db: Session, project_id: int, payload: StatusOperationCreat
         from_status=from_status,
         to_status=project.status,
         payload=payload,
+        actor_id=actor_id,
     )
     db.commit()
     db.refresh(project)

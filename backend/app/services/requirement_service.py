@@ -64,7 +64,7 @@ def update_requirement(db: Session, requirement_id: int, payload: RequirementUpd
     return requirement
 
 
-def activate_requirement(db: Session, requirement_id: int) -> Requirement:
+def activate_requirement(db: Session, requirement_id: int, actor_id: int | None = None) -> Requirement:
     requirement = _get_active_requirement(db, requirement_id)
     _ensure_project_open_for_requirement(db, requirement)
     from_status = requirement.status
@@ -82,6 +82,7 @@ def activate_requirement(db: Session, requirement_id: int) -> Requirement:
         from_status=from_status,
         to_status=requirement.status,
         payload=None,
+        actor_id=actor_id,
     )
     execute_workflows(
         db,
@@ -100,17 +101,17 @@ def activate_requirement(db: Session, requirement_id: int) -> Requirement:
     return requirement
 
 
-def close_requirement(db: Session, requirement_id: int, payload: StatusOperationCreate) -> Requirement:
+def close_requirement(db: Session, requirement_id: int, payload: StatusOperationCreate, actor_id: int | None = None) -> Requirement:
     if not payload.reason:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="关闭原因必填")
     requirement = _get_active_requirement(db, requirement_id)
-    close_requirement_record(db, requirement, payload)
+    close_requirement_record(db, requirement, payload, actor_id=actor_id)
     db.commit()
     db.refresh(requirement)
     return requirement
 
 
-def complete_requirement(db: Session, requirement_id: int) -> Requirement:
+def complete_requirement(db: Session, requirement_id: int, actor_id: int | None = None) -> Requirement:
     requirement = _get_active_requirement(db, requirement_id)
     _ensure_project_open_for_requirement(db, requirement)
     open_tasks = (
@@ -132,20 +133,26 @@ def complete_requirement(db: Session, requirement_id: int) -> Requirement:
         from_status=from_status,
         to_status=requirement.status,
         payload=None,
+        actor_id=actor_id,
     )
     db.commit()
     db.refresh(requirement)
     return requirement
 
 
-def close_requirement_record(db: Session, requirement: Requirement, payload: StatusOperationCreate) -> Requirement:
+def close_requirement_record(
+    db: Session,
+    requirement: Requirement,
+    payload: StatusOperationCreate,
+    actor_id: int | None = None,
+) -> Requirement:
     tasks = (
         db.query(Task)
         .filter(Task.requirement_id == requirement.id, Task.deleted == 0, Task.status != "closed")
         .all()
     )
     for task in tasks:
-        close_task_record(db, task, payload)
+        close_task_record(db, task, payload, actor_id=actor_id)
     if requirement.status == "closed":
         return requirement
     from_status = requirement.status
@@ -158,6 +165,7 @@ def close_requirement_record(db: Session, requirement: Requirement, payload: Sta
         from_status=from_status,
         to_status=requirement.status,
         payload=payload,
+        actor_id=actor_id,
     )
     return requirement
 

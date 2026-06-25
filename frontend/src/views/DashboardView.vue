@@ -17,7 +17,7 @@
           <el-select v-model="iterationFilter" multiple collapse-tags collapse-tags-tooltip clearable filterable placeholder="迭代" class="workbench-filter wide">
             <el-option v-for="iteration in iterations" :key="iteration.id" :label="iteration.name" :value="iteration.id" />
           </el-select>
-          <el-select v-model="typeFilter" clearable placeholder="类型" class="workbench-filter">
+          <el-select v-model="typeFilter" multiple collapse-tags collapse-tags-tooltip clearable placeholder="类型" class="workbench-filter">
             <el-option v-for="type in itemTypes" :key="type.value" :label="type.label" :value="type.value" />
           </el-select>
           <el-input v-model="keywordFilter" clearable placeholder="搜索标题/项目" class="workbench-search" />
@@ -321,7 +321,7 @@ const viewMode = ref('mine')
 const displayMode = ref('list')
 const iterationFilter = ref([])
 const ownerFilter = ref(null)
-const typeFilter = ref('')
+const typeFilter = ref([])
 const keywordFilter = ref('')
 const onlyActiveIterations = ref(true)
 const hideEmptyIterations = ref(false)
@@ -432,7 +432,7 @@ const listSections = computed(() => [
   { key: 'test_case', label: typeLabel('test_case'), description: '按迭代汇总需要执行的测试用例', tagType: 'warning', items: flatWorkbenchItems.value.filter((item) => item.object_type === 'test_case') },
   { key: 'bug', label: typeLabel('bug'), description: '按迭代汇总需要处理的 Bug', tagType: 'danger', items: flatWorkbenchItems.value.filter((item) => item.object_type === 'bug') },
   { key: 'code_review', label: typeLabel('code_review'), description: '需要完成代码评审的提交', tagType: 'info', items: filteredReviewTasks.value }
-].filter((section) => !typeFilter.value || section.key === typeFilter.value))
+].filter((section) => isTypeSelected(section.key)))
 
 const boardColumns = computed(() => {
   const columns = new Map()
@@ -521,9 +521,11 @@ function filterItems(items) {
   const effectiveOwnerId = ownerFilter.value
   return items
     .filter((item) => !effectiveOwnerId || item.owner_id === effectiveOwnerId)
-    .filter((item) => !typeFilter.value || item.object_type === typeFilter.value)
     .filter((item) => !keyword || `${item.title || ''} ${item.project_name || ''}`.toLowerCase().includes(keyword))
     .map((item) => ({ ...item, drag_key: `${item.object_type}-${item.id}` }))
+}
+function isTypeSelected(type) {
+  return !typeFilter.value.length || typeFilter.value.includes(type)
 }
 function iterationForProjectColumn(iteration, project, columnKey) {
   const scopedProjectIds = iteration.scoped_project_ids?.length ? iteration.scoped_project_ids : [project.id]
@@ -566,7 +568,7 @@ function visibleGroups(iteration) {
     { key: 'task', label: '任务', items: iteration.tasks || [] },
     { key: 'test_case', label: '测试用例', items: iteration.test_cases || [] },
     { key: 'bug', label: 'Bug', items: iteration.bugs || [] }
-  ].filter((group) => !typeFilter.value || group.key === typeFilter.value)
+  ].filter((group) => isTypeSelected(group.key))
 }
 function boardTotal(iteration) { return (iteration.requirements?.length || 0) + (iteration.tasks?.length || 0) + (iteration.test_cases?.length || 0) + (iteration.bugs?.length || 0) }
 function laneKey(iterationId, groupKey) { return `${iterationId}-${groupKey}` }

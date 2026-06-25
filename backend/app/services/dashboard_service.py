@@ -43,11 +43,12 @@ def get_workbench(db: Session, user_id: int | None = None) -> WorkbenchResponse:
     iteration_ids = [item.id for item in iterations]
     projects = {item.id: item for item in db.query(Project).filter(Project.deleted == 0).all()}
     iteration_projects = _iteration_projects(db, iteration_ids, projects)
+    iteration_scoped_project_ids = _iteration_scoped_projects(db, iteration_ids)
     if scoped_project_ids:
         iterations = [
             iteration
             for iteration in iterations
-            if any(item["id"] in scoped_project_ids for item in iteration_projects.get(iteration.id, []))
+            if iteration_scoped_project_ids.get(iteration.id, set()) & scoped_project_ids
         ]
         iteration_ids = [item.id for item in iterations]
     requirements = _items_by_iteration(
@@ -119,6 +120,7 @@ def get_workbench(db: Session, user_id: int | None = None) -> WorkbenchResponse:
             "end_date": _date_value(iteration.end_date),
             "create_time": _datetime_value(iteration.create_time),
             "projects": iteration_projects.get(iteration.id, []),
+            "scoped_project_ids": sorted(iteration_scoped_project_ids.get(iteration.id, set())),
             "requirements": reqs,
             "tasks": task_items,
             "test_cases": case_items,
@@ -199,15 +201,24 @@ def _iteration_projects(db: Session, iteration_ids: list[int], projects: dict[in
         return result
     rows = db.query(IterationProject).filter(IterationProject.iteration_id.in_(iteration_ids)).all()
     for row in rows:
-        project_ids = {row.project_id, *_collect_descendant_project_ids(db, row.project_id)}
-        for project_id in project_ids:
-            project = projects.get(project_id)
-            if project:
-                result.setdefault(row.iteration_id, []).append({"id": project.id, "name": project.name})
+        project = projects.get(row.project_id)
+        if project:
+            result.setdefault(row.iteration_id, []).append({"id": project.id, "name": project.name})
     for values in result.values():
         deduped = {item["id"]: item for item in values}
         values[:] = list(deduped.values())
         values.sort(key=lambda item: item["name"])
+    return result
+
+
+def _iteration_scoped_projects(db: Session, iteration_ids: list[int]) -> dict[int, set[int]]:
+    result: dict[int, set[int]] = {iteration_id: set() for iteration_id in iteration_ids}
+    if not iteration_ids:
+        return result
+    rows = db.query(IterationProject).filter(IterationProject.iteration_id.in_(iteration_ids)).all()
+    for row in rows:
+        result.setdefault(row.iteration_id, set()).add(row.project_id)
+        result[row.iteration_id].update(_collect_descendant_project_ids(db, row.project_id))
     return result
 
 

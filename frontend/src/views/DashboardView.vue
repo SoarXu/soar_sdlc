@@ -526,18 +526,19 @@ function filterItems(items) {
     .map((item) => ({ ...item, drag_key: `${item.object_type}-${item.id}` }))
 }
 function iterationForProjectColumn(iteration, project, columnKey) {
+  const scopedProjectIds = iteration.scoped_project_ids?.length ? iteration.scoped_project_ids : [project.id]
   return {
     ...iteration,
     context_key: `${columnKey}-iteration-${iteration.id}`,
-    requirements: filterItemsForProject(iteration.requirements, project.id),
-    tasks: filterItemsForProject(iteration.tasks, project.id),
-    test_cases: filterItemsForProject(iteration.test_cases, project.id),
-    bugs: filterItemsForProject(iteration.bugs, project.id)
+    requirements: filterItemsForProject(iteration.requirements, scopedProjectIds),
+    tasks: filterItemsForProject(iteration.tasks, scopedProjectIds),
+    test_cases: filterItemsForProject(iteration.test_cases, scopedProjectIds),
+    bugs: filterItemsForProject(iteration.bugs, scopedProjectIds)
   }
 }
-function filterItemsForProject(items = [], projectId) {
-  if (projectId === 'unbound') return items.filter((item) => !item.project_id)
-  return items.filter((item) => item.project_id === projectId)
+function filterItemsForProject(items = [], projectIds) {
+  if (projectIds.includes('unbound')) return items.filter((item) => !item.project_id)
+  return items.filter((item) => projectIds.includes(item.project_id))
 }
 function decorateListItem(item, iteration) {
   return {

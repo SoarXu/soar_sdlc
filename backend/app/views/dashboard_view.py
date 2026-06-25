@@ -53,6 +53,7 @@ class WorkbenchIteration(BaseModel):
     end_date: str | None = None
     create_time: str | None = None
     projects: list[WorkbenchProject] = Field(default_factory=list)
+    scoped_project_ids: list[int] = Field(default_factory=list)
     requirements: list[WorkbenchItem]
     tasks: list[WorkbenchItem]
     test_cases: list[WorkbenchItem]

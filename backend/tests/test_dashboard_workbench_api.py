@@ -299,7 +299,7 @@ def test_workbench_iteration_includes_related_projects(client: TestClient):
     assert board["create_time"]
 
 
-def test_workbench_iteration_projects_include_child_projects_with_items(client: TestClient):
+def test_workbench_iteration_project_scope_includes_child_items_without_extra_columns(client: TestClient):
     parent_project_id = _create_project(client, "InnovateX运维")
     child_project_id = _create_child_project(client, parent_project_id, "物料管理")
     iteration_id = _create_iteration(client, parent_project_id, "InnovateX运维-迭代1.4.6")
@@ -313,7 +313,8 @@ def test_workbench_iteration_projects_include_child_projects_with_items(client: 
 
     assert response.status_code == 200
     board = next(item for item in response.json()["iterations"] if item["id"] == iteration_id)
-    assert {project["id"] for project in board["projects"]} == {parent_project_id, child_project_id}
+    assert board["projects"] == [{"id": parent_project_id, "name": "InnovateX运维"}]
+    assert set(board["scoped_project_ids"]) == {parent_project_id, child_project_id}
     assert {item["id"] for item in board["requirements"]} == {requirement["id"]}
 
 
@@ -345,7 +346,8 @@ def test_child_project_member_workbench_includes_parent_iteration_with_child_ite
 
     assert response.status_code == 200
     board = next(item for item in response.json()["iterations"] if item["id"] == iteration_id)
-    assert {project["id"] for project in board["projects"]} == {parent_project_id, child_project_id}
+    assert board["projects"] == [{"id": parent_project_id, "name": "InnovateX运维"}]
+    assert set(board["scoped_project_ids"]) == {parent_project_id, child_project_id}
     assert {item["id"] for item in board["requirements"]} == {requirement["id"]}
 
 

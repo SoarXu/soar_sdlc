@@ -86,8 +86,8 @@ def test_workbench_groups_items_by_iteration_and_supports_test_case_iteration(cl
     assert board["counts"] == {"requirements": 1, "tasks": 1, "test_cases": 1, "bugs": 1}
 
 
-def test_workbench_only_shows_active_iterations_for_all_views(client: TestClient):
-    project_id = _create_project(client, "Active Only Workbench Project")
+def test_workbench_returns_all_iteration_statuses(client: TestClient):
+    project_id = _create_project(client, "All Status Workbench Project")
     active_iteration_id = _create_iteration(client, project_id, "Active Workbench Iteration")
     planning_iteration_id = _create_iteration(client, project_id, "Planning Workbench Iteration")
     client.post(f"/api/v1/iterations/{active_iteration_id}/start", json={"effective_time": "2026-06-24T10:00:00"})
@@ -105,7 +105,39 @@ def test_workbench_only_shows_active_iterations_for_all_views(client: TestClient
     assert response.status_code == 200
     board_ids = {item["id"] for item in response.json()["iterations"]}
     assert active_iteration_id in board_ids
-    assert planning_iteration_id not in board_ids
+    assert planning_iteration_id in board_ids
+
+
+def test_developer_workbench_scope_includes_non_active_project_iterations(client: TestClient):
+    developer_id = _create_user_with_role(f"developer_scope_{uuid4().hex[:6]}", "developer")
+    project_id = _create_project(client, "Developer Planning Scope Project")
+    planning_iteration_id = _create_iteration(client, project_id, "Developer Planning Iteration")
+    requirement = client.post(
+        "/api/v1/requirements",
+        json={"project_id": project_id, "iteration_id": planning_iteration_id, "title": "Planning iteration requirement"},
+    ).json()
+
+    db = SessionLocal()
+    try:
+        db.add(
+            ProjectMember(
+                project_id=project_id,
+                user_id=developer_id,
+                project_role="developer",
+                is_workbench_participant=True,
+            )
+        )
+        db.commit()
+    finally:
+        db.close()
+
+    response = client.get(f"/api/v1/dashboard/workbench?user_id={developer_id}")
+
+    assert response.status_code == 200
+    data = response.json()
+    board = next(item for item in data["iterations"] if item["id"] == planning_iteration_id)
+    assert board["status"] == "planning"
+    assert {item["id"] for item in board["requirements"]} == {requirement["id"]}
 
 
 def test_developer_workbench_defaults_to_project_member_active_iteration_work(client: TestClient):

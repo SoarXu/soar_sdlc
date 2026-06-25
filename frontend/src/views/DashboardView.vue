@@ -3,7 +3,7 @@
     <div class="page-head">
       <div>
         <h1>工作台</h1>
-        <p>仅展示进行中迭代，按项目成员和负责人聚合当前需要处理的需求、任务、测试用例和 Bug。</p>
+        <p>按项目成员范围聚合迭代相关需求、任务、测试用例和 Bug，可通过进行中、有工作项等条件筛选。</p>
       </div>
       <div class="workbench-view-switch">
         <span>工作视图</span>
@@ -21,6 +21,7 @@
             <el-option v-for="type in itemTypes" :key="type.value" :label="type.label" :value="type.value" />
           </el-select>
           <el-input v-model="keywordFilter" clearable placeholder="搜索标题/项目" class="workbench-search" />
+          <el-checkbox v-model="onlyActiveIterations" class="workbench-checkbox">仅显示进行中</el-checkbox>
           <el-checkbox v-model="hideEmptyIterations" class="workbench-checkbox">仅显示有工作项</el-checkbox>
           <el-popover placement="bottom-start" trigger="click" width="280" popper-class="workbench-filter-popover">
             <template #reference>
@@ -322,6 +323,7 @@ const iterationFilter = ref([])
 const ownerFilter = ref(null)
 const typeFilter = ref('')
 const keywordFilter = ref('')
+const onlyActiveIterations = ref(true)
 const hideEmptyIterations = ref(false)
 const expandedIterationIds = ref(new Set())
 const laneLimits = reactive({})
@@ -384,6 +386,7 @@ const currentUserId = computed(() => {
 
 const filteredIterations = computed(() => iterations.value
   .filter((iteration) => !iterationFilter.value.length || iterationFilter.value.includes(iteration.id))
+  .filter((iteration) => !onlyActiveIterations.value || iteration.status === 'active')
   .map((iteration) => ({
     ...iteration,
     requirements: filterItems(iteration.requirements || []),

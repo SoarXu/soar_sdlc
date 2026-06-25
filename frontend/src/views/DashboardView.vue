@@ -676,8 +676,8 @@ function defaultExecutionTime() {
 async function loadWorkbench() {
   loading.value = true
   try {
-    const currentUserId = Number(localStorage.getItem('current_user_id') || 0) || undefined
-    const { data } = await fetchWorkbench(currentUserId ? { user_id: currentUserId } : {})
+    const params = viewMode.value === 'mine' && currentUserId.value ? { user_id: currentUserId.value } : {}
+    const { data } = await fetchWorkbench(params)
     iterations.value = data.iterations || []
     owners.value = data.owners || []
     reviewTasks.value = data.review_tasks || []
@@ -688,6 +688,11 @@ async function loadWorkbench() {
     loading.value = false
   }
 }
+
+watch(viewMode, () => {
+  ownerFilter.value = null
+  loadWorkbench()
+})
 
 function onDragStart() {
   dragSnapshot.value = JSON.parse(JSON.stringify(iterations.value))

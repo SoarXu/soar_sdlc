@@ -221,7 +221,7 @@ def get_iteration_detail(db: Session, iteration_id: int) -> dict:
     detail_project_ids = _merge_detail_project_ids(project_ids, requirements, tasks_by_id.values(), test_cases, bugs)
     return {
         "iteration": _iteration_to_dict(iteration, project_ids),
-        "projects": _projects_to_tree(db, detail_project_ids),
+        "projects": _projects_to_tree(db, _top_level_project_ids(db, detail_project_ids)),
         "requirements": [_model_to_dict(item) for item in requirements],
         "tasks": [_model_to_dict(item) for item in sorted(tasks_by_id.values(), key=lambda item: item.id, reverse=True)],
         "test_cases": [_model_to_dict(item) for item in test_cases],
@@ -447,6 +447,28 @@ def _merge_detail_project_ids(project_ids: list[int], *item_groups) -> list[int]
             if item.project_id:
                 result.add(item.project_id)
     return sorted(result)
+
+
+def _top_level_project_ids(db: Session, project_ids: list[int]) -> list[int]:
+    project_id_set = set(project_ids)
+    result = []
+    for project_id in project_ids:
+        project = db.query(Project).filter(Project.deleted == 0, Project.id == project_id).first()
+        parent_id = project.parent_id if project else None
+        covered_by_ancestor = False
+        visited = set()
+        while parent_id:
+            if parent_id in project_id_set:
+                covered_by_ancestor = True
+                break
+            if parent_id in visited:
+                break
+            visited.add(parent_id)
+            parent = db.query(Project).filter(Project.deleted == 0, Project.id == parent_id).first()
+            parent_id = parent.parent_id if parent else None
+        if not covered_by_ancestor:
+            result.append(project_id)
+    return result
 
 
 def _project_node(db: Session, project: Project) -> dict:

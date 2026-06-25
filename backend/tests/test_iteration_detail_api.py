@@ -91,6 +91,14 @@ def _create_bug(client: TestClient, project_id: int, iteration_id: int, title: s
     return response.json()["id"]
 
 
+def _flatten_project_names(projects: list[dict]) -> list[str]:
+    names = []
+    for project in projects:
+        names.append(project["name"])
+        names.extend(_flatten_project_names(project.get("children") or []))
+    return names
+
+
 def test_iteration_detail_links_requirements_tasks_and_metrics(client: TestClient):
     root_project = _create_project(client, "Root Project")
     child_project = _create_project(client, "Child Project", parent_id=root_project)
@@ -153,6 +161,26 @@ def test_iteration_detail_links_requirements_tasks_and_metrics(client: TestClien
     assert removed_task.status_code == 204
     detail_after_task_remove = client.get(f"/api/v1/iterations/{iteration_id}/detail").json()
     assert child_task not in {item["id"] for item in detail_after_task_remove["tasks"]}
+
+
+def test_iteration_detail_project_tree_does_not_duplicate_child_projects(client: TestClient):
+    root_project = _create_project(client, "InnovateX operations")
+    child_project = _create_project(client, "Material management", parent_id=root_project)
+    iteration_id = _create_iteration(client, [root_project], "Iteration 1.4.6")
+    child_requirement = _create_requirement(client, child_project, "Material approval requirement")
+
+    linked_requirements = client.post(
+        f"/api/v1/iterations/{iteration_id}/requirements",
+        json={"requirement_ids": [child_requirement]},
+    )
+    assert linked_requirements.status_code == 200
+
+    detail = client.get(f"/api/v1/iterations/{iteration_id}/detail")
+
+    assert detail.status_code == 200
+    project_names = _flatten_project_names(detail.json()["projects"])
+    assert project_names.count("InnovateX operations") == 1
+    assert project_names.count("Material management") == 1
 
 
 def test_generated_task_for_linked_requirement_appears_in_iteration_detail(client: TestClient):

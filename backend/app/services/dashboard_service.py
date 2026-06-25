@@ -31,6 +31,7 @@ def get_workbench(db: Session, user_id: int | None = None) -> WorkbenchResponse:
     role_keys = _role_keys_for_user(db, user_id)
     view_mode = _workbench_view_mode(role_keys)
     scoped_project_ids = workbench_project_ids_for_user(db, user_id) if user_id and view_mode != "all" else set()
+    scoped_project_ids = _expand_project_scope_ids(db, scoped_project_ids)
     iterations = (
         db.query(Iteration)
         .filter(Iteration.deleted == 0)
@@ -198,12 +199,24 @@ def _iteration_projects(db: Session, iteration_ids: list[int], projects: dict[in
         return result
     rows = db.query(IterationProject).filter(IterationProject.iteration_id.in_(iteration_ids)).all()
     for row in rows:
-        project = projects.get(row.project_id)
-        if project:
-            result.setdefault(row.iteration_id, []).append({"id": project.id, "name": project.name})
+        project_ids = {row.project_id, *_collect_descendant_project_ids(db, row.project_id)}
+        for project_id in project_ids:
+            project = projects.get(project_id)
+            if project:
+                result.setdefault(row.iteration_id, []).append({"id": project.id, "name": project.name})
     for values in result.values():
+        deduped = {item["id"]: item for item in values}
+        values[:] = list(deduped.values())
         values.sort(key=lambda item: item["name"])
     return result
+
+
+def _expand_project_scope_ids(db: Session, project_ids: set[int]) -> set[int]:
+    expanded = set(project_ids)
+    for project_id in project_ids:
+        expanded.update(_collect_descendant_project_ids(db, project_id))
+        expanded.update(_collect_ancestor_project_ids(db, project_id))
+    return expanded
 
 
 def _iteration_scoped_project_ids(db: Session, iteration_id: int) -> set[int]:
@@ -221,6 +234,21 @@ def _collect_descendant_project_ids(db: Session, project_id: int) -> set[int]:
     result = {child.id for child in children}
     for child in children:
         result.update(_collect_descendant_project_ids(db, child.id))
+    return result
+
+
+def _collect_ancestor_project_ids(db: Session, project_id: int) -> set[int]:
+    result = set()
+    project = db.query(Project).filter(Project.id == project_id, Project.deleted == 0).first()
+    parent_id = project.parent_id if project else None
+    visited = set()
+    while parent_id and parent_id not in visited:
+        visited.add(parent_id)
+        parent = db.query(Project).filter(Project.id == parent_id, Project.deleted == 0).first()
+        if not parent:
+            break
+        result.add(parent.id)
+        parent_id = parent.parent_id
     return result
 
 

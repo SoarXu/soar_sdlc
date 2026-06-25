@@ -38,6 +38,15 @@ def _create_project(client: TestClient, name: str | None = None) -> int:
     return response.json()["id"]
 
 
+def _create_child_project(client: TestClient, parent_id: int, name: str | None = None) -> int:
+    response = client.post(
+        "/api/v1/projects",
+        json={"name": name or f"Project-{uuid4().hex[:8]}", "parent_id": parent_id},
+    )
+    assert response.status_code == 200
+    return response.json()["id"]
+
+
 def _create_iteration(client: TestClient, project_id: int, name: str | None = None) -> int:
     response = client.post(
         "/api/v1/iterations",
@@ -288,6 +297,56 @@ def test_workbench_iteration_includes_related_projects(client: TestClient):
     board = next(item for item in response.json()["iterations"] if item["id"] == iteration_id)
     assert board["projects"] == [{"id": project_id, "name": "Scope Visible Project"}]
     assert board["create_time"]
+
+
+def test_workbench_iteration_projects_include_child_projects_with_items(client: TestClient):
+    parent_project_id = _create_project(client, "InnovateX运维")
+    child_project_id = _create_child_project(client, parent_project_id, "物料管理")
+    iteration_id = _create_iteration(client, parent_project_id, "InnovateX运维-迭代1.4.6")
+    _start_iteration(client, iteration_id)
+    requirement = client.post(
+        "/api/v1/requirements",
+        json={"project_id": child_project_id, "iteration_id": iteration_id, "title": "子项目需求"},
+    ).json()
+
+    response = client.get("/api/v1/dashboard/workbench")
+
+    assert response.status_code == 200
+    board = next(item for item in response.json()["iterations"] if item["id"] == iteration_id)
+    assert {project["id"] for project in board["projects"]} == {parent_project_id, child_project_id}
+    assert {item["id"] for item in board["requirements"]} == {requirement["id"]}
+
+
+def test_child_project_member_workbench_includes_parent_iteration_with_child_items(client: TestClient):
+    user_id = _create_user_with_role(f"child_member_{uuid4().hex[:6]}", "developer")
+    parent_project_id = _create_project(client, "InnovateX运维")
+    child_project_id = _create_child_project(client, parent_project_id, "物料管理")
+    iteration_id = _create_iteration(client, parent_project_id, "InnovateX运维-迭代1.4.6")
+    _start_iteration(client, iteration_id)
+    requirement = client.post(
+        "/api/v1/requirements",
+        json={"project_id": child_project_id, "iteration_id": iteration_id, "title": "子项目成员可见需求"},
+    ).json()
+    db = SessionLocal()
+    try:
+        db.add(
+            ProjectMember(
+                project_id=child_project_id,
+                user_id=user_id,
+                project_role="developer",
+                is_workbench_participant=True,
+            )
+        )
+        db.commit()
+    finally:
+        db.close()
+
+    response = client.get(f"/api/v1/dashboard/workbench?user_id={user_id}")
+
+    assert response.status_code == 200
+    board = next(item for item in response.json()["iterations"] if item["id"] == iteration_id)
+    assert {project["id"] for project in board["projects"]} == {parent_project_id, child_project_id}
+    assert {item["id"] for item in board["requirements"]} == {requirement["id"]}
 
 
 def test_workbench_includes_empty_iterations(client: TestClient):

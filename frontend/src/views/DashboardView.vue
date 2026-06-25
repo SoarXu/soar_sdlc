@@ -17,14 +17,26 @@
           <el-select v-model="iterationFilter" multiple collapse-tags collapse-tags-tooltip clearable filterable placeholder="迭代" class="workbench-filter wide">
             <el-option v-for="iteration in iterations" :key="iteration.id" :label="iteration.name" :value="iteration.id" />
           </el-select>
-          <el-select v-model="ownerFilter" clearable filterable placeholder="负责人" class="workbench-filter">
-            <el-option v-for="owner in owners" :key="owner.id" :label="owner.full_name" :value="owner.id" />
-          </el-select>
           <el-select v-model="typeFilter" clearable placeholder="类型" class="workbench-filter">
             <el-option v-for="type in itemTypes" :key="type.value" :label="type.label" :value="type.value" />
           </el-select>
           <el-input v-model="keywordFilter" clearable placeholder="搜索标题/项目" class="workbench-search" />
           <el-checkbox v-model="hideEmptyIterations" class="workbench-checkbox">仅显示有工作项</el-checkbox>
+          <el-popover placement="bottom-start" trigger="click" width="280" popper-class="workbench-filter-popover">
+            <template #reference>
+              <el-button class="workbench-more-filter" :type="ownerFilter ? 'primary' : 'default'" plain>
+                更多筛选
+                <span v-if="ownerFilter" class="workbench-filter-dot"></span>
+              </el-button>
+            </template>
+            <div class="workbench-extra-filters">
+              <label>负责人</label>
+              <el-select v-model="ownerFilter" clearable filterable placeholder="按工作项负责人筛选">
+                <el-option v-for="owner in owners" :key="owner.id" :label="owner.full_name" :value="owner.id" />
+              </el-select>
+              <p>工作台范围由项目成员决定，负责人只用于进一步定位具体工作项。</p>
+            </div>
+          </el-popover>
         </div>
         <div class="workbench-action-refresh">
           <el-button :loading="loading" @click="loadWorkbench">刷新</el-button>

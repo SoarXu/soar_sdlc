@@ -572,3 +572,89 @@ def test_requirement_complete_requires_linked_tasks_done(client: TestClient):
 
     assert completed.status_code == 400
     assert "关联任务" in completed.json()["detail"]
+def test_workbench_returns_default_queue_sections_for_pending_and_unassigned(client: TestClient):
+    developer_id = _create_user_with_role(f"queue_user_{uuid4().hex[:6]}", "developer")
+    project_id = _create_project(client, "Queue workbench project")
+    iteration_id = _create_iteration(client, project_id, "Queue iteration")
+    _start_iteration(client, iteration_id)
+    owned_task = client.post(
+        "/api/v1/tasks",
+        json={
+            "project_id": project_id,
+            "iteration_id": iteration_id,
+            "title": "Owned queue task",
+            "owner_id": developer_id,
+        },
+    ).json()
+    unassigned_bug = client.post(
+        "/api/v1/bugs",
+        json={
+            "project_id": project_id,
+            "iteration_id": iteration_id,
+            "title": "Unassigned queue bug",
+        },
+    ).json()
+
+    db = SessionLocal()
+    try:
+        db.add(
+            ProjectMember(
+                project_id=project_id,
+                user_id=developer_id,
+                project_role="developer",
+                is_workbench_participant=True,
+            )
+        )
+        db.commit()
+    finally:
+        db.close()
+
+    response = client.get(f"/api/v1/dashboard/workbench?user_id={developer_id}")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["pending_handling"]["label"] == "待处理"
+    assert owned_task["id"] in {item["id"] for item in data["pending_handling"]["items"]}
+    assert data["unassigned"]["label"] == "未分派"
+    assert unassigned_bug["id"] in {item["id"] for item in data["unassigned"]["items"]}
+
+
+def test_workbench_returns_created_watched_mentioned_project_board_and_exception_center(client: TestClient):
+    developer_id = _create_user_with_role(f"follow_user_{uuid4().hex[:6]}", "developer")
+    project_id = _create_project(client, "Follow project")
+    iteration_id = _create_iteration(client, project_id, "Follow iteration")
+    _start_iteration(client, iteration_id)
+    requirement = client.post(
+        "/api/v1/requirements",
+        json={
+            "project_id": project_id,
+            "iteration_id": iteration_id,
+            "title": "Created requirement",
+            "owner_id": developer_id,
+        },
+    ).json()
+
+    db = SessionLocal()
+    try:
+        db.add(
+            ProjectMember(
+                project_id=project_id,
+                user_id=developer_id,
+                project_role="developer",
+                is_workbench_participant=True,
+            )
+        )
+        db.commit()
+    finally:
+        db.close()
+
+    response = client.get(f"/api/v1/dashboard/workbench?user_id={developer_id}")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["created_by_me"]["label"] == "我发起的"
+    assert requirement["id"] in {item["id"] for item in data["created_by_me"]["items"]}
+    assert data["watched_by_me"]["label"] == "我关注的"
+    assert data["mentioned_me"]["label"] == "提到我的"
+    assert data["project_board"]["label"] == "项目看板"
+    assert data["exception_center"]["label"] == "异常中心"

@@ -425,3 +425,72 @@ def test_runtime_requirement_defer_moves_tasks_and_test_cases(client: TestClient
     assert client.get(f"/api/v1/requirements/{requirement['id']}").json()["iteration_id"] == target_iteration["id"]
     assert client.get(f"/api/v1/tasks/{task['id']}").json()["iteration_id"] == target_iteration["id"]
     assert client.get(f"/api/v1/test-cases/{test_case['id']}").json()["iteration_id"] == target_iteration["id"]
+
+
+def test_runtime_routes_bug_type_to_target_status_and_records_resolution(client: TestClient):
+    _, project_id = _create_project_with_bug_workflow(client)
+    developer_id, developer_token = _create_user("Bug Router", "developer")
+    _add_project_member(project_id, developer_id, "developer")
+    bug = client.post(
+        "/api/v1/bugs",
+        json={"project_id": project_id, "title": f"Bug route {uuid4().hex[:8]}", "owner_id": developer_id},
+    ).json()
+
+    executed = client.post(
+        f"/api/v1/workflow-runtime/bug/{bug['id']}/transition",
+        json={
+            "action_key": "confirm_bug_type",
+            "payload": {"selected_values": {"bug_type": "code_issue"}},
+        },
+        headers={"Authorization": f"Bearer {developer_token}"},
+    )
+
+    assert executed.status_code == 200
+    assert executed.json()["status"] == "fixing"
+    assert executed.json()["resolved_target_status"] == "fixing"
+    history = client.get(f"/api/v1/bugs/{bug['id']}/status-operations").json()
+    assert history[-1]["resolved_target_status"] == "fixing"
+    assert history[-1]["selected_values"]["bug_type"] == "code_issue"
+
+
+def test_runtime_submit_confirmation_moves_bug_fix_task_to_confirmation_handler(client: TestClient):
+    config = client.post(
+        "/api/v1/assignee-rule-configs",
+        json={
+            "name": f"Task Runtime Config {uuid4().hex[:8]}",
+            "requirement_owner_roles": "product_owner",
+            "task_owner_roles": "developer",
+            "test_case_tester_roles": "tester",
+            "test_run_owner_roles": "tester",
+            "bug_owner_roles": "developer",
+        },
+    )
+    assert config.status_code == 201
+    project = client.post(
+        "/api/v1/projects",
+        json={"name": f"Task Runtime Project {uuid4().hex[:8]}", "assignee_rule_config_id": config.json()["id"]},
+    )
+    assert project.status_code == 200
+    developer_id, developer_token = _create_user("Task Runtime Developer", "developer")
+    confirmer_id, _ = _create_user("Task Runtime Owner", "project_owner")
+    _add_project_member(project.json()["id"], developer_id, "developer")
+    _add_project_member(project.json()["id"], confirmer_id, "project_owner")
+    task = client.post(
+        "/api/v1/tasks",
+        json={
+            "project_id": project.json()["id"],
+            "title": f"Task runtime {uuid4().hex[:8]}",
+            "task_type": "bug_fix",
+            "owner_id": developer_id,
+        },
+    ).json()
+
+    executed = client.post(
+        f"/api/v1/workflow-runtime/task/{task['id']}/transition",
+        json={"action_key": "submit_confirmation", "payload": {"remark": "ready for review"}},
+        headers={"Authorization": f"Bearer {developer_token}"},
+    )
+
+    assert executed.status_code == 200
+    assert executed.json()["status"] == "pending_confirmation"
+    assert executed.json()["owner_id"] == confirmer_id

@@ -17,10 +17,10 @@ from app.models.test_case_execution import TestCaseExecutionLog
 from app.models.test_run import TestRun, TestRunCase
 from app.models.user import User
 from app.services.status_operation_service import create_status_operation, list_status_operations
-from app.services.requirement_service import close_requirement_record
-from app.services.workflow_engine import execute_workflows
+from app.services.workflow_runtime_service import execute_transition
 from app.views.project_view import ProjectCreate, ProjectMemberCreate, ProjectUpdate
 from app.views.status_operation_view import StatusOperationCreate
+from app.views.workflow_runtime_view import WorkflowTransitionExecuteRequest
 
 
 def list_projects(db: Session) -> list[Project]:
@@ -325,53 +325,18 @@ def suspend_project(db: Session, project_id: int, payload: StatusOperationCreate
 def close_project(db: Session, project_id: int, payload: StatusOperationCreate | None = None, actor_id: int | None = None) -> Project:
     project = _get_active_project(db, project_id)
     _require_status(project.status, {"active", "paused"}, "只有进行中或已挂起的项目可以关闭")
-    from_status = project.status
     _require_effective_time(payload, "请选择实际完成日期")
-    workflow_result = execute_workflows(
+    execute_transition(
         db,
-        target_object="project",
-        trigger_action="status_changed",
-        context={
-            "target_object": "project",
-            "object_id": project.id,
-            "from_status": from_status,
-            "to_status": "closed",
-            "effective_time": payload.effective_time if payload else None,
-            "reason": payload.reason if payload else None,
-            "remark": payload.remark if payload else None,
-            "operator_id": actor_id,
-        },
+        "project",
+        project.id,
+        WorkflowTransitionExecuteRequest(
+            action_key="close",
+            payload=_status_payload_dict(payload),
+        ),
+        _actor_user(db, actor_id),
     )
-    project.status = "closed"
     project.actual_end_date = _effective_date(payload)
-    if not workflow_result.has_action("batch_change_child_status"):
-        cascade_payload = StatusOperationCreate(reason="不做", remark=payload.remark if payload else None)
-        requirements = (
-            db.query(Requirement)
-            .filter(Requirement.project_id == project.id, Requirement.deleted == 0, Requirement.status != "closed")
-            .all()
-        )
-        for requirement in requirements:
-            close_requirement_record(db, requirement, cascade_payload, actor_id=actor_id)
-        orphan_tasks = (
-            db.query(Task)
-            .filter(Task.project_id == project.id, Task.deleted == 0, Task.requirement_id.is_(None), Task.status != "closed")
-            .all()
-        )
-        for task in orphan_tasks:
-            from app.services.task_service import close_task_record
-
-            close_task_record(db, task, cascade_payload, actor_id=actor_id)
-    create_status_operation(
-        db,
-        object_type="project",
-        object_id=project.id,
-        action="close",
-        from_status=from_status,
-        to_status=project.status,
-        payload=payload,
-        actor_id=actor_id,
-    )
     db.commit()
     db.refresh(project)
     return project
@@ -452,6 +417,16 @@ def _effective_date(payload: StatusOperationCreate | None) -> date:
     if payload and payload.effective_time:
         return payload.effective_time.date()
     return date.today()
+
+
+def _actor_user(db: Session, actor_id: int | None) -> User | None:
+    if not actor_id:
+        return None
+    return db.query(User).filter(User.id == actor_id).first()
+
+
+def _status_payload_dict(payload: StatusOperationCreate | None) -> dict:
+    return payload.model_dump(exclude_none=True) if payload else {}
 
 
 def _project_change_data(project: Project, data: dict) -> tuple[dict, dict]:

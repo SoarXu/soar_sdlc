@@ -8,18 +8,19 @@ from app.models.iteration import Iteration, IterationProject
 from app.models.project import Project
 from app.models.requirement import Requirement
 from app.models.test_case import TestCase
-from app.models.test_run import TestRun
-from app.models.test_run import TestRunCase
+from app.models.test_run import TestRun, TestRunCase
+from app.models.user import User
+from app.services.current_handler_service import ensure_work_item_action
 from app.services.lifecycle_service import (
     project_lifecycle_phase,
     requirement_lifecycle_phase,
     test_case_lifecycle_phase,
 )
-from app.services.current_handler_service import ensure_work_item_action
-from app.services.handler_transition_rule_service import apply_handler_transition
-from app.services.requirement_validation_service import evaluate_requirement_validation
-from app.services.status_operation_service import create_status_operation, list_status_operations
+from app.services.status_operation_service import list_status_operations
+from app.services.workflow_runtime_service import execute_transition
 from app.views.bug_view import BugCreate, BugFromTestRunCaseRequest, BugStatusActionRequest, BugUpdate
+from app.views.workflow_runtime_view import WorkflowTransitionExecuteRequest
+
 
 BUG_RESOLUTIONS = {"设计如此", "重复Bug", "外部原因", "已解决", "无法重现", "延期处理", "不予解决"}
 
@@ -41,6 +42,8 @@ def create_bug(db: Session, payload: BugCreate) -> Bug:
         or test_case_lifecycle_phase(db, data.get("test_case_id"))
         or project_lifecycle_phase(db, data.get("project_id"))
     )
+    if data.get("status") not in {"pending_handling", "fixing", "pending_verification", "verified", "closed"}:
+        data["status"] = "pending_handling"
     bug = Bug(**data)
     db.add(bug)
     db.commit()
@@ -78,7 +81,7 @@ def create_bug_from_test_run_case(db: Session, run_case_id: int, payload: BugFro
         reproduce_steps=payload.reproduce_steps,
         expected_result=payload.expected_result or test_case.expected_result,
         actual_result=payload.actual_result,
-        status="open",
+        status="pending_handling",
         lifecycle_phase=test_case.lifecycle_phase,
     )
     db.add(bug)
@@ -103,83 +106,60 @@ def update_bug(db: Session, bug_id: int, payload: BugUpdate, actor_id: int | Non
     db.refresh(bug)
     return bug
 
+
 def start_fixing_bug(db: Session, bug_id: int, payload: BugStatusActionRequest | None = None) -> Bug:
     bug = _get_active_bug(db, bug_id)
     ensure_work_item_action(db, bug, payload.operator_id if payload else None, "Bug")
-    _require_bug_status(bug, {"open", "reopened", "suspended"}, "只有待修复、重新打开或已挂起的 Bug 可以开始修复")
     if payload and payload.iteration_id:
         _ensure_iteration_can_fix_bug(db, payload.iteration_id, bug)
         bug.iteration_id = payload.iteration_id
-    return _transition_bug(db, bug, "fixing", "start_fixing", payload)
+    return _run_bug_transition(
+        db,
+        bug,
+        "confirm_bug_type",
+        payload=payload,
+        actor_id=payload.operator_id if payload else None,
+        selected_values={"bug_type": "code_issue"},
+    )
 
 
 def resolve_bug(db: Session, bug_id: int, payload: BugStatusActionRequest) -> Bug:
     if not payload.resolution:
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="瑙ｅ喅缁撴灉蹇呭～")
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Resolution is required")
     if payload.resolution not in BUG_RESOLUTIONS:
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="未知的解决方案")
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Unknown resolution")
     bug = _get_active_bug(db, bug_id)
     ensure_work_item_action(db, bug, payload.operator_id, "Bug")
-    _require_bug_status(bug, {"fixing"}, "鍙湁淇涓殑 Bug 鍙互鎻愪氦瑙ｅ喅")
     bug.resolution = payload.resolution
-    bug.resolve_time = payload.effective_time or datetime.now()
-    bug.resolved_by = payload.operator_id
-    return _transition_bug(db, bug, "verifying", "resolve", payload)
+    return _run_bug_transition(db, bug, "submit_verification", payload=payload, actor_id=payload.operator_id)
 
 
 def verify_bug_passed(db: Session, bug_id: int, payload: BugStatusActionRequest | None = None) -> Bug:
     bug = _get_active_bug(db, bug_id)
     ensure_work_item_action(db, bug, payload.operator_id if payload else None, "Bug")
-    _require_bug_status(bug, {"verifying"}, "鍙湁寰呴獙璇佺殑 Bug 鍙互楠岃瘉閫氳繃")
-    _require_linked_test_case_passed(db, bug)
-    action_payload = payload or BugStatusActionRequest()
-    bug.verify_result = action_payload.verify_result or "passed"
-    bug.verify_time = action_payload.effective_time or datetime.now()
-    bug.verified_by = action_payload.operator_id
-    bug.close_reason = action_payload.reason or "verified"
-    return _transition_bug(db, bug, "closed", "verify_passed", action_payload)
+    return _run_bug_transition(db, bug, "verification_passed", payload=payload, actor_id=payload.operator_id if payload else None)
 
 
 def verify_bug_failed(db: Session, bug_id: int, payload: BugStatusActionRequest | None = None) -> Bug:
     bug = _get_active_bug(db, bug_id)
     ensure_work_item_action(db, bug, payload.operator_id if payload else None, "Bug")
-    _require_bug_status(bug, {"verifying"}, "鍙湁寰呴獙璇佺殑 Bug 鍙互楠岃瘉澶辫触")
-    action_payload = payload or BugStatusActionRequest()
-    bug.verify_result = action_payload.verify_result or "failed"
-    bug.verify_time = action_payload.effective_time or datetime.now()
-    bug.verified_by = action_payload.operator_id
-    bug.reopen_count = (bug.reopen_count or 0) + 1
-    return _transition_bug(db, bug, "reopened", "verify_failed", action_payload)
+    return _run_bug_transition(db, bug, "verification_failed", payload=payload, actor_id=payload.operator_id if payload else None)
 
 
 def suspend_bug(db: Session, bug_id: int, payload: BugStatusActionRequest | None = None) -> Bug:
-    bug = _get_active_bug(db, bug_id)
-    ensure_work_item_action(db, bug, payload.operator_id if payload else None, "Bug")
-    _require_bug_status(bug, {"open", "fixing", "reopened"}, "只有待修复、修复中或重新打开的 Bug 可以挂起")
-    return _transition_bug(db, bug, "suspended", "suspend", payload)
+    raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Suspend is not supported by the default bug workflow")
 
 
 def close_bug(db: Session, bug_id: int, payload: BugStatusActionRequest | None = None) -> Bug:
     bug = _get_active_bug(db, bug_id)
     ensure_work_item_action(db, bug, payload.operator_id if payload else None, "Bug")
-    _require_bug_status(bug, {"open", "suspended", "verifying"}, "只有待确认、已挂起或待验证的 Bug 可以关闭")
-    action_payload = payload or BugStatusActionRequest()
-    if bug.status == "verifying":
-        _require_linked_test_case_passed(db, bug)
-        bug.verify_result = action_payload.verify_result or "passed"
-        bug.verify_time = action_payload.effective_time or datetime.now()
-        bug.verified_by = action_payload.operator_id
-    bug.close_reason = action_payload.reason
-    return _transition_bug(db, bug, "closed", "close", action_payload)
+    return _run_bug_transition(db, bug, "close", payload=payload, actor_id=payload.operator_id if payload else None)
 
 
 def activate_bug(db: Session, bug_id: int, payload: BugStatusActionRequest | None = None) -> Bug:
     bug = _get_active_bug(db, bug_id)
     ensure_work_item_action(db, bug, payload.operator_id if payload else None, "Bug")
-    _require_bug_status(bug, {"closed"}, "只有已关闭的 Bug 可以激活")
-    action_payload = payload or BugStatusActionRequest()
-    bug.reopen_count = (bug.reopen_count or 0) + 1
-    return _transition_bug(db, bug, "reopened", "activate", action_payload)
+    return _run_bug_transition(db, bug, "activate", payload=payload, actor_id=payload.operator_id if payload else None)
 
 
 def list_bug_status_operations(db: Session, bug_id: int) -> list[dict]:
@@ -201,53 +181,43 @@ def _get_active_bug(db: Session, bug_id: int) -> Bug:
     return bug
 
 
-def _transition_bug(
+def _run_bug_transition(
     db: Session,
     bug: Bug,
-    target_status: str,
-    action: str,
-    payload: BugStatusActionRequest | None,
+    action_key: str,
+    *,
+    payload: BugStatusActionRequest | None = None,
+    actor_id: int | None = None,
+    selected_values: dict | None = None,
 ) -> Bug:
-    from_status = bug.status
-    bug.status = target_status
-    create_status_operation(
-        db,
-        object_type="bug",
-        object_id=bug.id,
-        action=action,
-        from_status=from_status,
-        to_status=target_status,
-        payload=payload,
-        actor_id=payload.operator_id if payload else None,
+    actor = _actor_user(db, actor_id)
+    request = WorkflowTransitionExecuteRequest(
+        action_key=action_key,
+        payload=_payload_dict(payload),
+        selected_values=selected_values or {},
+        delegate_reason=_delegate_reason(bug.owner_id, actor, payload),
     )
-    apply_handler_transition(
-        db,
-        item=bug,
-        object_type="bug",
-        action=action,
-        from_status=from_status,
-        to_status=target_status,
-        actor_id=payload.operator_id if payload else None,
-    )
-    db.flush()
-    if bug.requirement_id:
-        evaluate_requirement_validation(db, bug.requirement_id, actor_id=payload.operator_id if payload else None)
-    db.commit()
+    execute_transition(db, "bug", bug.id, request, actor)
     db.refresh(bug)
     return bug
 
 
-def _require_bug_status(bug: Bug, allowed_statuses: set[str], message: str) -> None:
-    if bug.status not in allowed_statuses:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=message)
+def _payload_dict(payload: BugStatusActionRequest | None) -> dict:
+    return payload.model_dump(exclude_none=True) if payload else {}
 
 
-def _require_linked_test_case_passed(db: Session, bug: Bug) -> None:
-    if not bug.test_case_id:
-        return
-    test_case = db.query(TestCase).filter(TestCase.id == bug.test_case_id, TestCase.deleted == 0).first()
-    if not test_case or test_case.last_execute_result not in {"passed", "ignored"}:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="请先执行关联用例并通过后再验证通过 Bug")
+def _actor_user(db: Session, actor_id: int | None) -> User | None:
+    if not actor_id:
+        return None
+    return db.query(User).filter(User.id == actor_id).first()
+
+
+def _delegate_reason(owner_id: int | None, actor: User | None, payload: BugStatusActionRequest | None) -> str | None:
+    if not actor:
+        return None
+    if owner_id == actor.id:
+        return None
+    return (payload.remark if payload and payload.remark else "legacy bug endpoint proxy")
 
 
 def _ensure_iteration_can_fix_bug(db: Session, iteration_id: int, bug: Bug) -> None:
@@ -257,18 +227,15 @@ def _ensure_iteration_can_fix_bug(db: Session, iteration_id: int, bug: Bug) -> N
 def _ensure_iteration_can_accept_bug(db: Session, iteration_id: int, bug_project_id: int | None) -> None:
     iteration = db.query(Iteration).filter(Iteration.id == iteration_id, Iteration.deleted == 0).first()
     if not iteration:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="迭代不存在")
-    if iteration.status in {"finished", "closed"}:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="已结束的迭代不能选择")
-    project_ids = {
-        item.project_id
-        for item in db.query(IterationProject).filter(IterationProject.iteration_id == iteration_id).all()
-    }
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Iteration not found")
+    if iteration.status in {"finished", "closed", "completed", "canceled"}:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Closed iteration cannot accept bugs")
+    project_ids = {item.project_id for item in db.query(IterationProject).filter(IterationProject.iteration_id == iteration_id).all()}
     scoped_project_ids = set(project_ids)
     for iteration_project_id in project_ids:
         scoped_project_ids.update(_collect_descendant_project_ids(db, iteration_project_id))
     if bug_project_id not in scoped_project_ids:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="迭代不包含该 Bug 所属项目")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Iteration is outside bug project scope")
 
 
 def _collect_descendant_project_ids(db: Session, project_id: int) -> set[int]:

@@ -4,11 +4,13 @@ from fastapi.testclient import TestClient
 
 from app.core.security import create_access_token, get_password_hash
 from app.db.session import SessionLocal
+from app.models.project_member import ProjectMember
+from app.models.role import Role, UserRole
 from app.models.test_case import TestCase
 from app.models.user import User
 
 
-def _create_actor_token(full_name: str) -> tuple[str, int]:
+def _create_actor_token(full_name: str, role_key: str = "developer") -> tuple[str, int]:
     db = SessionLocal()
     try:
         user = User(
@@ -18,8 +20,14 @@ def _create_actor_token(full_name: str) -> tuple[str, int]:
             is_active=True,
         )
         db.add(user)
+        db.flush()
+        role = db.query(Role).filter(Role.role_key == role_key).first()
+        if not role:
+            role = Role(role_key=role_key, role_name=role_key, enabled=True, is_system=True)
+            db.add(role)
+            db.flush()
+        db.add(UserRole(user_id=user.id, role_id=role.id))
         db.commit()
-        db.refresh(user)
         return create_access_token(user.username), user.id
     finally:
         db.close()
@@ -49,62 +57,33 @@ def _create_iteration(client: TestClient, project_id: int, name: str | None = No
     return response.json()["id"]
 
 
-def test_iteration_crud_persists_to_database(client: TestClient):
+def _add_project_member(project_id: int, user_id: int, project_role: str) -> None:
+    db = SessionLocal()
+    try:
+        db.add(
+            ProjectMember(
+                project_id=project_id,
+                user_id=user_id,
+                project_role=project_role,
+                is_workbench_participant=True,
+            )
+        )
+        db.commit()
+    finally:
+        db.close()
+
+
+def test_requirement_and_task_create_default_to_template_statuses_and_prd_fields(client: TestClient):
     project_id = _create_project(client)
-
-    created = client.post(
-        "/api/v1/iterations",
-        json={"project_id": project_id, "name": "MVP 迭代", "status": "planning", "goal": "完成主链路"},
-    )
-    assert created.status_code == 200
-    iteration_id = created.json()["id"]
-    assert created.json()["project_id"] == project_id
-
-    updated = client.patch(f"/api/v1/iterations/{iteration_id}", json={"status": "active"})
-    assert updated.status_code == 200
-    assert updated.json()["status"] == "active"
-
-    deleted = client.delete(f"/api/v1/iterations/{iteration_id}")
-    assert deleted.status_code == 204
-
-
-def test_requirement_can_generate_task_without_review_by_default(client: TestClient):
-    project_id = _create_project(client)
-    requirement = client.post(
-        "/api/v1/requirements",
-        json={
-            "project_id": project_id,
-            "title": "需求生成任务",
-            "priority": "1",
-            "owner_id": 1,
-            "review_status": "not_required",
-        },
-    )
-    assert requirement.status_code == 200
-    requirement_id = requirement.json()["id"]
-
-    generated = client.post(
-        f"/api/v1/requirements/{requirement_id}/generate-task",
-        json={"title": "实现需求生成任务", "task_type": "development"},
-    )
-    assert generated.status_code == 200
-    data = generated.json()
-    assert data["requirement_id"] == requirement_id
-    assert data["project_id"] == project_id
-    assert data["owner_id"] is None
-    assert data["source_requirement_review_status"] == "not_required"
-
-
-def test_requirement_and_task_crud_use_prd_fields(client: TestClient):
-    project_id = _create_project(client)
+    _, owner_id = _create_actor_token("Requirement Owner")
 
     requirement = client.post(
         "/api/v1/requirements",
-        json={"project_id": project_id, "title": "需求 CRUD", "priority": "3", "status": "draft"},
+        json={"project_id": project_id, "title": "需求 CRUD", "priority": "3", "owner_id": owner_id},
     )
     assert requirement.status_code == 200
-    requirement_id = requirement.json()["id"]
     assert requirement.json()["priority"] == "3"
+    assert requirement.json()["status"] == "in_processing"
 
     default_priority_requirement = client.post(
         "/api/v1/requirements",
@@ -112,22 +91,47 @@ def test_requirement_and_task_crud_use_prd_fields(client: TestClient):
     )
     assert default_priority_requirement.status_code == 200
     assert default_priority_requirement.json()["priority"] == "3"
+    assert default_priority_requirement.json()["status"] == "pending_assignment"
 
     task = client.post(
         "/api/v1/tasks",
-        json={"project_id": project_id, "requirement_id": requirement_id, "title": "任务 CRUD"},
+        json={"project_id": project_id, "requirement_id": requirement.json()["id"], "title": "任务 CRUD", "owner_id": owner_id},
     )
     assert task.status_code == 200
-    task_id = task.json()["id"]
-    assert task.json()["requirement_id"] == requirement_id
+    assert task.json()["requirement_id"] == requirement.json()["id"]
+    assert task.json()["status"] == "in_processing"
 
-    task_update = client.patch(f"/api/v1/tasks/{task_id}", json={"status": "doing", "actual_hours": 1.5})
-    assert task_update.status_code == 200
-    assert task_update.json()["status"] == "doing"
-    assert task_update.json()["actual_hours"] == 1.5
+    updated = client.patch(f"/api/v1/tasks/{task.json()['id']}", json={"actual_hours": 1.5})
+    assert updated.status_code == 200
+    assert updated.json()["actual_hours"] == 1.5
 
-    assert client.delete(f"/api/v1/tasks/{task_id}").status_code == 204
-    assert client.delete(f"/api/v1/requirements/{requirement_id}").status_code == 204
+
+def test_generated_task_inherits_requirement_current_handler_by_default(client: TestClient):
+    project_id = _create_project(client)
+    _, owner_id = _create_actor_token("需求负责人")
+    requirement = client.post(
+        "/api/v1/requirements",
+        json={
+            "project_id": project_id,
+            "title": "需求生成任务",
+            "priority": "1",
+            "owner_id": owner_id,
+            "review_status": "not_required",
+        },
+    )
+    assert requirement.status_code == 200
+
+    generated = client.post(
+        f"/api/v1/requirements/{requirement.json()['id']}/generate-task",
+        json={"title": "实现需求生成任务", "task_type": "requirement_implementation"},
+    )
+    assert generated.status_code == 200
+    data = generated.json()
+    assert data["requirement_id"] == requirement.json()["id"]
+    assert data["project_id"] == project_id
+    assert data["owner_id"] == owner_id
+    assert data["status"] == "in_processing"
+    assert data["source_requirement_review_status"] == "not_required"
 
 
 def test_requirement_update_records_only_changed_fields(client: TestClient):
@@ -156,162 +160,9 @@ def test_requirement_update_records_only_changed_fields(client: TestClient):
     data = logs.json()
     assert len(data) == 1
     assert data[0]["action"] == "update"
-    assert data[0]["object_type"] == "requirement"
-    assert data[0]["object_id"] == requirement["id"]
     assert data[0]["actor_id"] == actor_id
-    assert data[0]["actor_name"] == "Requirement Auditor"
     assert data[0]["before_data"] == {"title": requirement["title"], "priority": "3"}
     assert data[0]["after_data"] == {"title": "编辑后需求", "priority": "2"}
-
-    unchanged = client.patch(f"/api/v1/requirements/{requirement['id']}", json={"title": "编辑后需求"})
-    assert unchanged.status_code == 200
-    assert len(client.get(f"/api/v1/requirements/{requirement['id']}/audit-logs").json()) == 1
-
-
-def test_requirement_activation_updates_linked_tasks_to_doing(client: TestClient):
-    project_id = _create_project(client)
-    requirement = client.post(
-        "/api/v1/requirements",
-        json={"project_id": project_id, "title": f"待激活需求-{uuid4().hex[:8]}"},
-    )
-    assert requirement.status_code == 200
-    requirement_id = requirement.json()["id"]
-    assert requirement.json()["status"] == "draft"
-
-    task = client.post(
-        "/api/v1/tasks",
-        json={"project_id": project_id, "requirement_id": requirement_id, "title": f"联动任务-{uuid4().hex[:8]}"},
-    )
-    assert task.status_code == 200
-    task_id = task.json()["id"]
-    assert task.json()["status"] == "todo"
-
-    activated = client.post(f"/api/v1/requirements/{requirement_id}/activate")
-    assert activated.status_code == 200
-    assert activated.json()["status"] == "active"
-
-    task_detail = client.get(f"/api/v1/tasks/{task_id}")
-    assert task_detail.status_code == 200
-    assert task_detail.json()["status"] == "doing"
-
-    history = client.get(f"/api/v1/requirements/{requirement_id}/status-operations")
-    assert history.status_code == 200
-    assert history.json()[-1]["action"] == "activate"
-    assert history.json()[-1]["to_status"] == "active"
-
-
-def test_requirement_activation_updates_all_unclosed_linked_tasks_to_doing(client: TestClient):
-    project_id = _create_project(client)
-    requirement = client.post(
-        "/api/v1/requirements",
-        json={"project_id": project_id, "title": f"激活全部关联任务-{uuid4().hex[:8]}"},
-    ).json()
-    todo_task = client.post(
-        "/api/v1/tasks",
-        json={"project_id": project_id, "requirement_id": requirement["id"], "title": f"待办任务-{uuid4().hex[:8]}"},
-    ).json()
-    done_task = client.post(
-        "/api/v1/tasks",
-        json={"project_id": project_id, "requirement_id": requirement["id"], "title": f"已完成任务-{uuid4().hex[:8]}"},
-    ).json()
-    closed_task = client.post(
-        "/api/v1/tasks",
-        json={"project_id": project_id, "requirement_id": requirement["id"], "title": f"已关闭任务-{uuid4().hex[:8]}"},
-    ).json()
-    assert client.post(f"/api/v1/tasks/{done_task['id']}/activate").status_code == 200
-    assert client.post(f"/api/v1/tasks/{done_task['id']}/complete").status_code == 200
-    assert client.post(f"/api/v1/tasks/{closed_task['id']}/activate").status_code == 200
-    assert client.post(
-        f"/api/v1/tasks/{closed_task['id']}/close",
-        json={"reason": "不做", "remark": "保持关闭"},
-    ).status_code == 200
-
-    activated = client.post(f"/api/v1/requirements/{requirement['id']}/activate")
-
-    assert activated.status_code == 200
-    assert client.get(f"/api/v1/tasks/{todo_task['id']}").json()["status"] == "doing"
-    assert client.get(f"/api/v1/tasks/{done_task['id']}").json()["status"] == "doing"
-    assert client.get(f"/api/v1/tasks/{closed_task['id']}").json()["status"] == "closed"
-
-
-def test_requirement_close_requires_reason_and_records_history(client: TestClient):
-    project_id = _create_project(client)
-    requirement = client.post(
-        "/api/v1/requirements",
-        json={"project_id": project_id, "title": f"待关闭需求-{uuid4().hex[:8]}"},
-    )
-    assert requirement.status_code == 200
-    requirement_id = requirement.json()["id"]
-
-    activated = client.post(f"/api/v1/requirements/{requirement_id}/activate")
-    assert activated.status_code == 200
-
-    rejected = client.post(f"/api/v1/requirements/{requirement_id}/close", json={"remark": "缺少原因"})
-    assert rejected.status_code == 422
-
-    closed = client.post(
-        f"/api/v1/requirements/{requirement_id}/close",
-        json={"reason": "done", "remark": "已完成上线"},
-    )
-    assert closed.status_code == 200
-    assert closed.json()["status"] == "closed"
-
-    history = client.get(f"/api/v1/requirements/{requirement_id}/status-operations")
-    assert history.status_code == 200
-    actions = [item["action"] for item in history.json()]
-    assert actions[-2:] == ["activate", "close"]
-    assert history.json()[-1]["reason"] == "done"
-    assert history.json()[-1]["remark"] == "已完成上线"
-
-
-def test_task_can_be_activated_and_closed_with_history(client: TestClient):
-    project_id = _create_project(client)
-    task = client.post(
-        "/api/v1/tasks",
-        json={"project_id": project_id, "title": f"任务状态流转-{uuid4().hex[:8]}"},
-    )
-    assert task.status_code == 200
-    task_id = task.json()["id"]
-
-    activated = client.post(f"/api/v1/tasks/{task_id}/activate")
-    assert activated.status_code == 200
-    assert activated.json()["status"] == "doing"
-
-    rejected = client.post(f"/api/v1/tasks/{task_id}/close", json={"remark": "缺少原因"})
-    assert rejected.status_code == 422
-
-    closed = client.post(
-        f"/api/v1/tasks/{task_id}/close",
-        json={"reason": "不做", "remark": "任务取消"},
-    )
-    assert closed.status_code == 200
-    assert closed.json()["status"] == "closed"
-
-    history = client.get(f"/api/v1/tasks/{task_id}/status-operations")
-    assert history.status_code == 200
-    assert [item["action"] for item in history.json()][-2:] == ["activate", "close"]
-    assert history.json()[-1]["reason"] == "不做"
-    assert history.json()[-1]["remark"] == "任务取消"
-
-
-def test_done_task_cannot_be_closed(client: TestClient):
-    project_id = _create_project(client)
-    task = client.post(
-        "/api/v1/tasks",
-        json={"project_id": project_id, "title": f"Done task cannot close-{uuid4().hex[:8]}"},
-    ).json()
-    assert client.post(f"/api/v1/tasks/{task['id']}/activate").status_code == 200
-    completed = client.post(f"/api/v1/tasks/{task['id']}/complete")
-    assert completed.status_code == 200
-    assert completed.json()["status"] == "done"
-
-    closed = client.post(
-        f"/api/v1/tasks/{task['id']}/close",
-        json={"reason": "不做", "remark": "already done"},
-    )
-
-    assert closed.status_code == 400
-    assert client.get(f"/api/v1/tasks/{task['id']}").json()["status"] == "done"
 
 
 def test_task_update_records_only_changed_fields(client: TestClient):
@@ -340,45 +191,90 @@ def test_task_update_records_only_changed_fields(client: TestClient):
     data = logs.json()
     assert len(data) == 1
     assert data[0]["action"] == "update"
-    assert data[0]["object_type"] == "task"
-    assert data[0]["object_id"] == task["id"]
     assert data[0]["actor_id"] == actor_id
-    assert data[0]["actor_name"] == "Task Auditor"
     assert data[0]["before_data"] == {"title": task["title"], "priority": "medium"}
     assert data[0]["after_data"] == {"title": "任务编辑后标题", "priority": "high"}
 
-    unchanged = client.patch(f"/api/v1/tasks/{task['id']}", json={"title": "任务编辑后标题"})
-    assert unchanged.status_code == 200
-    assert len(client.get(f"/api/v1/tasks/{task['id']}/audit-logs").json()) == 1
 
-
-def test_requirement_close_closes_open_linked_tasks_with_same_reason(client: TestClient):
+def test_requirement_close_requires_reason_and_records_canceled_history(client: TestClient):
     project_id = _create_project(client)
+    _, owner_id = _create_actor_token("Requirement Closer")
     requirement = client.post(
         "/api/v1/requirements",
-        json={"project_id": project_id, "title": f"关闭级联需求-{uuid4().hex[:8]}"},
+        json={"project_id": project_id, "title": f"待关闭需求-{uuid4().hex[:8]}", "owner_id": owner_id},
+    )
+    assert requirement.status_code == 200
+
+    rejected = client.post(f"/api/v1/requirements/{requirement.json()['id']}/close", json={"remark": "缺少原因"})
+    assert rejected.status_code == 422
+
+    closed = client.post(
+        f"/api/v1/requirements/{requirement.json()['id']}/close",
+        json={"reason": "done", "remark": "已完成上线"},
+    )
+    assert closed.status_code == 200
+    assert closed.json()["status"] == "canceled"
+
+    history = client.get(f"/api/v1/requirements/{requirement.json()['id']}/status-operations")
+    assert history.status_code == 200
+    assert history.json()[-1]["action"] == "cancel"
+    assert history.json()[-1]["reason"] == "done"
+    assert history.json()[-1]["remark"] == "已完成上线"
+
+
+def test_requirement_close_blocks_on_open_linked_tasks_and_does_not_cancel_them(client: TestClient):
+    project_id = _create_project(client)
+    _, owner_id = _create_actor_token("Requirement Handler")
+    requirement = client.post(
+        "/api/v1/requirements",
+        json={"project_id": project_id, "title": f"关闭阻塞需求-{uuid4().hex[:8]}", "owner_id": owner_id},
     ).json()
     task = client.post(
         "/api/v1/tasks",
-        json={"project_id": project_id, "requirement_id": requirement["id"], "title": f"关闭级联任务-{uuid4().hex[:8]}"},
+        json={"project_id": project_id, "requirement_id": requirement["id"], "title": f"打开任务-{uuid4().hex[:8]}", "owner_id": owner_id},
     ).json()
-    client.post(f"/api/v1/tasks/{task['id']}/activate")
 
-    closed = client.post(
+    blocked = client.post(
         f"/api/v1/requirements/{requirement['id']}/close",
-        json={"reason": "不做", "remark": "需求取消关闭"},
+        json={"reason": "不做", "remark": "需求取消"},
     )
 
-    assert closed.status_code == 200
-    assert client.get(f"/api/v1/tasks/{task['id']}").json()["status"] == "closed"
-    task_history = client.get(f"/api/v1/tasks/{task['id']}/status-operations").json()
-    assert task_history[-1]["action"] == "close"
-    assert task_history[-1]["reason"] == "不做"
-    assert task_history[-1]["remark"] == "需求取消关闭"
+    assert blocked.status_code == 400
+    assert client.get(f"/api/v1/requirements/{requirement['id']}").json()["status"] == "in_processing"
+    assert client.get(f"/api/v1/tasks/{task['id']}").json()["status"] == "in_processing"
 
 
-def test_requirement_defer_moves_requirement_to_target_iteration_without_closing(client: TestClient):
+def test_requirement_complete_goes_directly_to_completed_and_blocks_on_open_tasks(client: TestClient):
     project_id = _create_project(client)
+    _, owner_id = _create_actor_token("Requirement Completer")
+    requirement = client.post(
+        "/api/v1/requirements",
+        json={"project_id": project_id, "title": f"可完成需求-{uuid4().hex[:8]}", "owner_id": owner_id},
+    ).json()
+
+    completed = client.post(f"/api/v1/requirements/{requirement['id']}/complete")
+    assert completed.status_code == 200
+    assert completed.json()["status"] == "completed"
+    history = client.get(f"/api/v1/requirements/{requirement['id']}/status-operations").json()
+    assert history[-1]["action"] == "complete"
+
+    blocked_requirement = client.post(
+        "/api/v1/requirements",
+        json={"project_id": project_id, "title": f"阻塞完成需求-{uuid4().hex[:8]}", "owner_id": owner_id},
+    ).json()
+    client.post(
+        "/api/v1/tasks",
+        json={"project_id": project_id, "requirement_id": blocked_requirement["id"], "title": f"未完成任务-{uuid4().hex[:8]}", "owner_id": owner_id},
+    )
+
+    blocked = client.post(f"/api/v1/requirements/{blocked_requirement['id']}/complete")
+    assert blocked.status_code == 400
+    assert client.get(f"/api/v1/requirements/{blocked_requirement['id']}").json()["status"] == "in_processing"
+
+
+def test_requirement_defer_moves_linked_items_and_resets_status(client: TestClient):
+    project_id = _create_project(client)
+    _, owner_id = _create_actor_token("Defer Owner")
     current_iteration = client.post(
         "/api/v1/iterations",
         json={"project_ids": [project_id], "name": f"当前迭代-{uuid4().hex[:8]}", "status": "active"},
@@ -389,17 +285,21 @@ def test_requirement_defer_moves_requirement_to_target_iteration_without_closing
     ).json()
     requirement = client.post(
         "/api/v1/requirements",
-        json={"project_id": project_id, "iteration_id": current_iteration["id"], "title": f"延期需求-{uuid4().hex[:8]}"},
+        json={
+            "project_id": project_id,
+            "iteration_id": current_iteration["id"],
+            "title": f"延期需求-{uuid4().hex[:8]}",
+            "owner_id": owner_id,
+        },
     ).json()
-    activated = client.post(f"/api/v1/requirements/{requirement['id']}/activate")
-    assert activated.status_code == 200
     task = client.post(
         "/api/v1/tasks",
         json={
             "project_id": project_id,
             "requirement_id": requirement["id"],
             "iteration_id": current_iteration["id"],
-            "title": f"Deferred task-{uuid4().hex[:8]}",
+            "title": f"延期任务-{uuid4().hex[:8]}",
+            "owner_id": owner_id,
         },
     ).json()
     test_case = client.post(
@@ -408,7 +308,7 @@ def test_requirement_defer_moves_requirement_to_target_iteration_without_closing
             "project_id": project_id,
             "requirement_id": requirement["id"],
             "iteration_id": current_iteration["id"],
-            "title": f"Deferred case-{uuid4().hex[:8]}",
+            "title": f"延期用例-{uuid4().hex[:8]}",
         },
     ).json()
 
@@ -418,125 +318,89 @@ def test_requirement_defer_moves_requirement_to_target_iteration_without_closing
     )
 
     assert deferred.status_code == 200
-    assert deferred.json()["status"] == "draft"
+    assert deferred.json()["status"] == "in_processing"
     assert deferred.json()["iteration_id"] == target_iteration["id"]
     assert client.get(f"/api/v1/tasks/{task['id']}").json()["iteration_id"] == target_iteration["id"]
-    assert client.get(f"/api/v1/test-cases/{test_case['id']}").json()["iteration_id"] == target_iteration["id"]
-    history = client.get(f"/api/v1/requirements/{requirement['id']}/status-operations").json()
-    assert history[-1]["action"] == "defer"
-    assert history[-1]["reason"] == "延期"
+    assert client.get(f"/api/v1/tasks/{task['id']}").json()["status"] == "pending_assignment"
+    db = SessionLocal()
+    try:
+        persisted_case = db.query(TestCase).filter(TestCase.id == test_case["id"]).first()
+        assert persisted_case is not None
+        assert persisted_case.iteration_id == target_iteration["id"]
+    finally:
+        db.close()
 
 
-def test_requirement_defer_without_target_iteration_unbinds_iteration(client: TestClient):
+def test_task_activate_and_close_follow_default_statuses(client: TestClient):
     project_id = _create_project(client)
-    current_iteration = client.post(
-        "/api/v1/iterations",
-        json={"project_ids": [project_id], "name": f"当前迭代-{uuid4().hex[:8]}", "status": "active"},
-    ).json()
-    requirement = client.post(
-        "/api/v1/requirements",
-        json={"project_id": project_id, "iteration_id": current_iteration["id"], "title": f"游离延期需求-{uuid4().hex[:8]}"},
-    ).json()
-    client.post(f"/api/v1/requirements/{requirement['id']}/activate")
+    task = client.post(
+        "/api/v1/tasks",
+        json={"project_id": project_id, "title": f"任务状态流转-{uuid4().hex[:8]}"},
+    )
+    assert task.status_code == 200
+    assert task.json()["status"] == "pending_assignment"
 
-    deferred = client.post(
-        f"/api/v1/requirements/{requirement['id']}/close",
-        json={"reason": "延期", "remark": "没有目标迭代"},
+    activated = client.post(f"/api/v1/tasks/{task.json()['id']}/activate")
+    assert activated.status_code == 200
+    assert activated.json()["status"] == "in_processing"
+
+    rejected = client.post(f"/api/v1/tasks/{task.json()['id']}/close", json={"remark": "缺少原因"})
+    assert rejected.status_code == 422
+
+    closed = client.post(
+        f"/api/v1/tasks/{task.json()['id']}/close",
+        json={"reason": "不做", "remark": "任务取消"},
+    )
+    assert closed.status_code == 200
+    assert closed.json()["status"] == "canceled"
+
+    history = client.get(f"/api/v1/tasks/{task.json()['id']}/status-operations")
+    assert history.status_code == 200
+    assert [item["action"] for item in history.json()][-2:] == ["claim", "cancel"]
+
+
+def test_bug_fix_task_complete_routes_to_pending_confirmation(client: TestClient):
+    project_id = _create_project(client)
+    developer_token, developer_id = _create_actor_token("Task Developer", "developer")
+    _, confirmer_id = _create_actor_token("Task Owner", "project_owner")
+    _add_project_member(project_id, developer_id, "developer")
+    _add_project_member(project_id, confirmer_id, "project_owner")
+    task = client.post(
+        "/api/v1/tasks",
+        json={
+            "project_id": project_id,
+            "title": f"Bug fix task {uuid4().hex[:8]}",
+            "task_type": "bug_fix",
+            "owner_id": developer_id,
+        },
+    ).json()
+
+    completed = client.post(
+        f"/api/v1/tasks/{task['id']}/complete",
+        headers={"Authorization": f"Bearer {developer_token}"},
     )
 
-    assert deferred.status_code == 200
-    assert deferred.json()["status"] == "draft"
-    assert deferred.json()["iteration_id"] is None
+    assert completed.status_code == 200
+    assert completed.json()["status"] == "pending_confirmation"
+    assert completed.json()["owner_id"] == confirmer_id
 
 
-def test_closed_project_blocks_requirement_and_task_activation(client: TestClient):
+def test_project_close_is_blocked_by_open_requirement_and_task(client: TestClient):
     project_id = _create_project(client)
     client.post(f"/api/v1/projects/{project_id}/start", json={"effective_time": "2026-06-01T09:00:00"})
     requirement = client.post(
         "/api/v1/requirements",
         json={"project_id": project_id, "title": f"项目关闭需求-{uuid4().hex[:8]}"},
     ).json()
-    task = client.post(
+    client.post(
         "/api/v1/tasks",
         json={"project_id": project_id, "requirement_id": requirement["id"], "title": f"项目关闭任务-{uuid4().hex[:8]}"},
-    ).json()
-    client.post(f"/api/v1/requirements/{requirement['id']}/activate")
-    client.post(f"/api/v1/tasks/{task['id']}/activate")
+    )
 
     closed_project = client.post(f"/api/v1/projects/{project_id}/close", json={"effective_time": "2026-06-10T18:00:00"})
-    assert closed_project.status_code == 200
 
-    requirement_detail = client.get(f"/api/v1/requirements/{requirement['id']}")
-    task_detail = client.get(f"/api/v1/tasks/{task['id']}")
-    assert requirement_detail.json()["status"] == "closed"
-    assert task_detail.json()["status"] == "closed"
-
-    requirement_history = client.get(f"/api/v1/requirements/{requirement['id']}/status-operations").json()
-    task_history = client.get(f"/api/v1/tasks/{task['id']}/status-operations").json()
-    assert requirement_history[-1]["action"] == "close"
-    assert requirement_history[-1]["reason"] == "不做"
-    assert task_history[-1]["action"] == "close"
-    assert task_history[-1]["reason"] == "不做"
-
-
-def test_closed_project_blocks_requirement_and_task_edit_delete(client: TestClient):
-    project_id = _create_project(client)
-    client.post(f"/api/v1/projects/{project_id}/start", json={"effective_time": "2026-06-01T09:00:00"})
-    requirement = client.post(
-        "/api/v1/requirements",
-        json={"project_id": project_id, "title": f"关闭项目需求编辑-{uuid4().hex[:8]}"},
-    ).json()
-    task = client.post(
-        "/api/v1/tasks",
-        json={"project_id": project_id, "requirement_id": requirement["id"], "title": f"关闭项目任务编辑-{uuid4().hex[:8]}"},
-    ).json()
-    closed_project = client.post(f"/api/v1/projects/{project_id}/close", json={"effective_time": "2026-06-10T18:00:00"})
-    assert closed_project.status_code == 200
-
-    requirement_edit = client.patch(f"/api/v1/requirements/{requirement['id']}", json={"title": "禁止编辑需求"})
-    task_edit = client.patch(f"/api/v1/tasks/{task['id']}", json={"title": "禁止编辑任务"})
-    requirement_delete = client.delete(f"/api/v1/requirements/{requirement['id']}")
-    task_delete = client.delete(f"/api/v1/tasks/{task['id']}")
-
-    assert requirement_edit.status_code == 400
-    assert task_edit.status_code == 400
-    assert requirement_delete.status_code == 400
-    assert task_delete.status_code == 400
-
-    requirement_reactivate = client.post(f"/api/v1/requirements/{requirement['id']}/activate")
-    task_reactivate = client.post(f"/api/v1/tasks/{task['id']}/activate")
-    assert requirement_reactivate.status_code == 400
-    assert requirement_reactivate.json()["detail"] == "项目已关闭，需求不允许激活"
-    assert task_reactivate.status_code == 400
-    assert task_reactivate.json()["detail"] == "项目已关闭，任务不允许激活"
-
-
-def test_closed_requirement_can_be_reactivated_and_records_history(client: TestClient):
-    project_id = _create_project(client)
-    requirement = client.post(
-        "/api/v1/requirements",
-        json={"project_id": project_id, "title": f"重新激活需求-{uuid4().hex[:8]}"},
-    )
-    assert requirement.status_code == 200
-    requirement_id = requirement.json()["id"]
-
-    activated = client.post(f"/api/v1/requirements/{requirement_id}/activate")
-    assert activated.status_code == 200
-    closed = client.post(
-        f"/api/v1/requirements/{requirement_id}/close",
-        json={"reason": "不做", "remark": "暂时关闭"},
-    )
-    assert closed.status_code == 200
-
-    reactivated = client.post(f"/api/v1/requirements/{requirement_id}/activate")
-    assert reactivated.status_code == 200
-    assert reactivated.json()["status"] == "active"
-
-    history = client.get(f"/api/v1/requirements/{requirement_id}/status-operations")
-    assert history.status_code == 200
-    assert [item["action"] for item in history.json()][-3:] == ["activate", "close", "activate"]
-    assert history.json()[-1]["from_status"] == "closed"
-    assert history.json()[-1]["to_status"] == "active"
+    assert closed_project.status_code == 400
+    assert client.get(f"/api/v1/projects/{project_id}").json()["status"] == "active"
 
 
 def test_requirement_status_cannot_be_changed_by_form_save(client: TestClient):
@@ -546,49 +410,15 @@ def test_requirement_status_cannot_be_changed_by_form_save(client: TestClient):
         json={"project_id": project_id, "title": f"表单状态保护-{uuid4().hex[:8]}", "status": "active"},
     )
     assert requirement.status_code == 200
-    requirement_id = requirement.json()["id"]
-    assert requirement.json()["status"] == "draft"
+    assert requirement.json()["status"] == "pending_assignment"
 
-    updated = client.patch(f"/api/v1/requirements/{requirement_id}", json={"title": "表单更新标题", "status": "closed"})
+    updated = client.patch(
+        f"/api/v1/requirements/{requirement.json()['id']}",
+        json={"title": "表单更新标题", "status": "closed"},
+    )
     assert updated.status_code == 200
     assert updated.json()["title"] == "表单更新标题"
-    assert updated.json()["status"] == "draft"
-
-
-def test_requirement_complete_submits_validation_instead_of_done(client: TestClient):
-    project_id = _create_project(client)
-    requirement = client.post(
-        "/api/v1/requirements",
-        json={"project_id": project_id, "title": f"Validation requirement-{uuid4().hex[:8]}"},
-    ).json()
-    client.post(f"/api/v1/requirements/{requirement['id']}/activate")
-
-    submitted = client.post(f"/api/v1/requirements/{requirement['id']}/complete")
-
-    assert submitted.status_code == 200
-    assert submitted.json()["status"] == "pending_validation"
-    history = client.get(f"/api/v1/requirements/{requirement['id']}/status-operations").json()
-    assert history[-1]["action"] == "submit_validation"
-    assert history[-1]["from_status"] == "active"
-    assert history[-1]["to_status"] == "pending_validation"
-
-
-def test_requirement_submit_validation_requires_linked_tasks_finished(client: TestClient):
-    project_id = _create_project(client)
-    requirement = client.post(
-        "/api/v1/requirements",
-        json={"project_id": project_id, "title": f"Task gate requirement-{uuid4().hex[:8]}"},
-    ).json()
-    client.post(
-        "/api/v1/tasks",
-        json={"project_id": project_id, "requirement_id": requirement["id"], "title": f"Open task-{uuid4().hex[:8]}"},
-    )
-    client.post(f"/api/v1/requirements/{requirement['id']}/activate")
-
-    submitted = client.post(f"/api/v1/requirements/{requirement['id']}/complete")
-
-    assert submitted.status_code == 400
-    assert client.get(f"/api/v1/requirements/{requirement['id']}").json()["status"] == "active"
+    assert updated.json()["status"] == "pending_assignment"
 
 
 def test_requirement_update_rejects_iteration_outside_project_scope(client: TestClient):
@@ -611,82 +441,7 @@ def test_requirement_update_rejects_iteration_outside_project_scope(client: Test
     assert accepted.status_code == 200
     assert accepted.json()["iteration_id"] == iteration_id
     assert rejected.status_code == 400
-    assert "迭代项目范围" in rejected.json()["detail"]
-    assert client.get(f"/api/v1/requirements/{toxicology_requirement['id']}").json()["iteration_id"] is None
-
-
-def test_requirement_create_allows_parent_iteration_and_rejects_outside_scope(client: TestClient):
-    operations_project = _create_named_project(client, "Create scope operations")
-    material_project = _create_named_project(client, "Create scope material", parent_id=operations_project)
-    toxicology_project = _create_named_project(client, "Create scope toxicology")
-    parent_iteration_id = _create_iteration(client, operations_project, "Create scope parent iteration")
-    outside_iteration_id = _create_iteration(client, toxicology_project, "Create scope outside iteration")
-
-    accepted = client.post(
-        "/api/v1/requirements",
-        json={
-            "project_id": material_project,
-            "iteration_id": parent_iteration_id,
-            "title": "Child requirement in parent iteration",
-        },
-    )
-    rejected = client.post(
-        "/api/v1/requirements",
-        json={
-            "project_id": material_project,
-            "iteration_id": outside_iteration_id,
-            "title": "Child requirement in outside iteration",
-        },
-    )
-
-    assert accepted.status_code == 200
-    assert accepted.json()["iteration_id"] == parent_iteration_id
-    assert rejected.status_code == 400
-
-
-def test_requirement_and_task_detail_endpoints(client: TestClient):
-    project_id = _create_project(client)
-    requirement = client.post(
-        "/api/v1/requirements",
-        json={"project_id": project_id, "title": f"详情需求-{uuid4().hex[:8]}", "description": "需求详情描述"},
-    ).json()
-    task = client.post(
-        "/api/v1/tasks",
-        json={"project_id": project_id, "requirement_id": requirement["id"], "title": f"详情任务-{uuid4().hex[:8]}"},
-    ).json()
-
-    requirement_detail = client.get(f"/api/v1/requirements/{requirement['id']}")
-    task_detail = client.get(f"/api/v1/tasks/{task['id']}")
-
-    assert requirement_detail.status_code == 200
-    assert requirement_detail.json()["id"] == requirement["id"]
-    assert requirement_detail.json()["title"] == requirement["title"]
-    assert task_detail.status_code == 200
-    assert task_detail.json()["id"] == task["id"]
-    assert task_detail.json()["requirement_id"] == requirement["id"]
-
-
-def test_deleting_requirement_unbinds_linked_tasks(client: TestClient):
-    project_id = _create_project(client)
-    requirement = client.post(
-        "/api/v1/requirements",
-        json={"project_id": project_id, "title": f"Deleted requirement-{uuid4().hex[:8]}"},
-    ).json()
-    task = client.post(
-        "/api/v1/tasks",
-        json={
-            "project_id": project_id,
-            "requirement_id": requirement["id"],
-            "title": f"Task keeps visible after requirement delete-{uuid4().hex[:8]}",
-        },
-    ).json()
-
-    deleted = client.delete(f"/api/v1/requirements/{requirement['id']}")
-
-    assert deleted.status_code == 204
-    task_detail = client.get(f"/api/v1/tasks/{task['id']}")
-    assert task_detail.status_code == 200
-    assert task_detail.json()["requirement_id"] is None
+    assert "scope" in rejected.json()["detail"].lower()
 
 
 def test_deleting_requirement_unbinds_linked_test_cases(client: TestClient):

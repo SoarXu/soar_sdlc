@@ -10,15 +10,13 @@ from app.models.requirement import Requirement
 from app.models.task import Task
 from app.models.test_case import TestCase
 from app.models.user import User
-from app.services.lifecycle_service import project_lifecycle_phase
 from app.services.current_handler_service import ensure_work_item_action
-from app.services.handler_transition_rule_service import apply_handler_transition
-from app.services.requirement_validation_service import submit_requirement_validation
-from app.services.status_operation_service import create_status_operation, list_status_operations
-from app.services.task_service import close_task_record
-from app.services.workflow_engine import execute_workflows
+from app.services.lifecycle_service import project_lifecycle_phase
+from app.services.status_operation_service import list_status_operations
+from app.services.workflow_runtime_service import execute_transition
 from app.views.requirement_view import GenerateTaskRequest, RequirementCreate, RequirementUpdate
 from app.views.status_operation_view import StatusOperationCreate
+from app.views.workflow_runtime_view import WorkflowTransitionExecuteRequest
 
 
 def list_requirements(db: Session) -> list[Requirement]:
@@ -32,7 +30,8 @@ def get_requirement(db: Session, requirement_id: int) -> Requirement:
 def create_requirement(db: Session, payload: RequirementCreate) -> Requirement:
     data = payload.model_dump()
     _ensure_requirement_iteration_scope(db, data.get("project_id"), data.get("iteration_id"))
-    data["status"] = "draft"
+    if data.get("status") not in {"pending_assignment", "in_processing", "pending_confirmation", "completed", "canceled"}:
+        data["status"] = _initial_requirement_status(data.get("owner_id"))
     data["lifecycle_phase"] = project_lifecycle_phase(db, data.get("project_id"))
     requirement = Requirement(**data)
     db.add(requirement)
@@ -73,88 +72,43 @@ def activate_requirement(db: Session, requirement_id: int, actor_id: int | None 
     requirement = _get_active_requirement(db, requirement_id)
     ensure_work_item_action(db, requirement, actor_id, "需求")
     _ensure_project_open_for_requirement(db, requirement)
-    from_status = requirement.status
-    requirement.status = "active"
-    linked_tasks = (
-        db.query(Task)
-        .filter(Task.requirement_id == requirement.id, Task.deleted == 0, Task.status != "closed")
-        .all()
-    )
-    for task in linked_tasks:
-        if task.status == "doing":
-            continue
-        task_from_status = task.status
-        task.status = "doing"
-        create_status_operation(
-            db,
-            object_type="task",
-            object_id=task.id,
-            action="activate",
-            from_status=task_from_status,
-            to_status=task.status,
-            payload=None,
-            actor_id=actor_id,
-        )
-    create_status_operation(
-        db,
-        object_type="requirement",
-        object_id=requirement.id,
-        action="activate",
-        from_status=from_status,
-        to_status=requirement.status,
-        payload=None,
-        actor_id=actor_id,
-    )
-    apply_handler_transition(
-        db,
-        item=requirement,
-        object_type="requirement",
-        action="activate",
-        from_status=from_status,
-        to_status=requirement.status,
-        actor_id=actor_id,
-    )
-    execute_workflows(
-        db,
-        target_object="requirement",
-        trigger_action="status_changed",
-        context={
-            "target_object": "requirement",
-            "object_id": requirement.id,
-            "from_status": from_status,
-            "to_status": requirement.status,
-            "current_status": requirement.status,
-        },
-    )
-    db.commit()
-    db.refresh(requirement)
+    if requirement.status in {"completed", "done"}:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Completed requirement cannot be activated")
+    if requirement.status in {"canceled", "closed"}:
+        return _run_requirement_transition(db, requirement, "reactivate", actor_id=actor_id)
+    if requirement.status in {"pending_assignment", "draft"}:
+        if requirement.owner_id:
+            return _run_requirement_transition(
+                db,
+                requirement,
+                "assign",
+                actor_id=actor_id,
+                next_owner_id=requirement.owner_id,
+            )
+        return _run_requirement_transition(db, requirement, "claim", actor_id=actor_id)
     return requirement
 
 
 def close_requirement(db: Session, requirement_id: int, payload: StatusOperationCreate, actor_id: int | None = None) -> Requirement:
     if not payload.reason:
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="关闭原因必填")
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Close reason is required")
     requirement = _get_active_requirement(db, requirement_id)
     ensure_work_item_action(db, requirement, actor_id, "需求")
     if payload.reason == "延期":
-        defer_requirement_record(db, requirement, payload, actor_id=actor_id)
+        result = defer_requirement_record(db, requirement, payload, actor_id=actor_id)
         db.commit()
-        db.refresh(requirement)
-        return requirement
-    close_requirement_record(db, requirement, payload, actor_id=actor_id)
-    db.commit()
-    db.refresh(requirement)
-    return requirement
+        db.refresh(result)
+        return result
+    return close_requirement_record(db, requirement, payload, actor_id=actor_id)
 
 
 def complete_requirement(db: Session, requirement_id: int, actor_id: int | None = None) -> Requirement:
     requirement = _get_active_requirement(db, requirement_id)
     ensure_work_item_action(db, requirement, actor_id, "需求")
     _ensure_project_open_for_requirement(db, requirement)
-    submit_requirement_validation(db, requirement, actor_id=actor_id)
-    db.commit()
-    db.refresh(requirement)
-    return requirement
+    if requirement.status in {"completed", "done"}:
+        return requirement
+    return _run_requirement_transition(db, requirement, "complete", actor_id=actor_id)
 
 
 def close_requirement_record(
@@ -163,28 +117,9 @@ def close_requirement_record(
     payload: StatusOperationCreate,
     actor_id: int | None = None,
 ) -> Requirement:
-    tasks = (
-        db.query(Task)
-        .filter(Task.requirement_id == requirement.id, Task.deleted == 0, Task.status != "closed")
-        .all()
-    )
-    for task in tasks:
-        close_task_record(db, task, payload, actor_id=actor_id)
-    if requirement.status == "closed":
+    if requirement.status in {"completed", "done", "canceled", "closed"}:
         return requirement
-    from_status = requirement.status
-    requirement.status = "closed"
-    create_status_operation(
-        db,
-        object_type="requirement",
-        object_id=requirement.id,
-        action="close",
-        from_status=from_status,
-        to_status=requirement.status,
-        payload=payload,
-        actor_id=actor_id,
-    )
-    return requirement
+    return _run_requirement_transition(db, requirement, "cancel", payload=payload, actor_id=actor_id)
 
 
 def defer_requirement_record(
@@ -194,33 +129,23 @@ def defer_requirement_record(
     actor_id: int | None = None,
 ) -> Requirement:
     if payload.target_iteration_id and requirement.iteration_id == payload.target_iteration_id:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="目标迭代不能和当前迭代相同")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Target iteration cannot be current iteration")
     if payload.target_iteration_id:
         _ensure_requirement_iteration_scope(db, requirement.project_id, payload.target_iteration_id)
 
     from_iteration_id = requirement.iteration_id
     from_status = requirement.status
     requirement.iteration_id = payload.target_iteration_id
-    requirement.status = "draft"
+    requirement.status = _initial_requirement_status(requirement.owner_id)
     linked_tasks = db.query(Task).filter(Task.requirement_id == requirement.id, Task.deleted == 0).all()
     for task in linked_tasks:
         task.iteration_id = payload.target_iteration_id
-        if task.status != "closed":
-            task.status = "todo"
+        if task.status not in {"completed", "canceled", "done", "closed"}:
+            task.status = "pending_assignment"
     linked_test_cases = db.query(TestCase).filter(TestCase.requirement_id == requirement.id, TestCase.deleted == 0).all()
     for test_case in linked_test_cases:
         test_case.iteration_id = payload.target_iteration_id
 
-    create_status_operation(
-        db,
-        object_type="requirement",
-        object_id=requirement.id,
-        action="defer",
-        from_status=from_status,
-        to_status=requirement.status,
-        payload=payload,
-        actor_id=actor_id,
-    )
     db.add(
         AuditLog(
             actor_id=actor_id,
@@ -231,6 +156,8 @@ def defer_requirement_record(
             after_data={"iteration_id": payload.target_iteration_id, "status": requirement.status},
         )
     )
+    db.commit()
+    db.refresh(requirement)
     return requirement
 
 
@@ -286,6 +213,7 @@ def delete_requirement(db: Session, requirement_id: int, actor_id: int | None = 
 
 def generate_task_from_requirement(db: Session, requirement_id: int, payload: GenerateTaskRequest) -> Task:
     requirement = _get_active_requirement(db, requirement_id)
+    owner_id = payload.owner_id if payload.owner_id is not None else requirement.owner_id
     task = Task(
         project_id=requirement.project_id,
         source_project_id=requirement.source_project_id,
@@ -293,9 +221,9 @@ def generate_task_from_requirement(db: Session, requirement_id: int, payload: Ge
         title=payload.title or requirement.title,
         task_type=payload.task_type,
         priority=payload.priority or requirement.priority,
-        owner_id=payload.owner_id,
+        owner_id=owner_id,
         due_date=payload.due_date,
-        status="todo",
+        status="in_processing" if owner_id else "pending_assignment",
         lifecycle_phase=requirement.lifecycle_phase,
         description=payload.description,
         source_requirement_review_status=requirement.review_status,
@@ -307,26 +235,67 @@ def generate_task_from_requirement(db: Session, requirement_id: int, payload: Ge
 
 
 def _get_active_requirement(db: Session, requirement_id: int) -> Requirement:
-    requirement = (
-        db.query(Requirement)
-        .filter(Requirement.id == requirement_id, Requirement.deleted == 0)
-        .first()
-    )
+    requirement = db.query(Requirement).filter(Requirement.id == requirement_id, Requirement.deleted == 0).first()
     if not requirement:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Requirement not found")
     return requirement
 
 
+def _initial_requirement_status(owner_id: int | None) -> str:
+    return "in_processing" if owner_id else "pending_assignment"
+
+
+def _run_requirement_transition(
+    db: Session,
+    requirement: Requirement,
+    action_key: str,
+    *,
+    payload: StatusOperationCreate | None = None,
+    actor_id: int | None = None,
+    next_owner_id: int | None = None,
+) -> Requirement:
+    actor = _actor_user(db, actor_id)
+    request = WorkflowTransitionExecuteRequest(
+        action_key=action_key,
+        payload=_status_payload_dict(payload),
+        next_owner_id=next_owner_id,
+        delegate_reason=_delegate_reason(requirement.owner_id, actor, payload),
+    )
+    execute_transition(db, "requirement", requirement.id, request, actor)
+    db.refresh(requirement)
+    return requirement
+
+
+def _actor_user(db: Session, actor_id: int | None) -> User | None:
+    if not actor_id:
+        return None
+    return db.query(User).filter(User.id == actor_id).first()
+
+
+def _status_payload_dict(payload: StatusOperationCreate | None) -> dict:
+    return payload.model_dump(exclude_none=True) if payload else {}
+
+
+def _delegate_reason(owner_id: int | None, actor: User | None, payload: StatusOperationCreate | None) -> str | None:
+    if not actor:
+        return None
+    if owner_id == actor.id:
+        return payload.delegate_reason if payload else None
+    if payload and payload.delegate_reason:
+        return payload.delegate_reason
+    return "legacy requirement endpoint proxy"
+
+
 def _ensure_project_open_for_requirement(db: Session, requirement: Requirement) -> None:
     project = db.query(Project).filter(Project.id == requirement.project_id, Project.deleted == 0).first()
     if project and project.status == "closed":
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="项目已关闭，需求不允许激活")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Project is closed")
 
 
 def _ensure_project_editable_for_requirement(db: Session, requirement: Requirement) -> None:
     project = db.query(Project).filter(Project.id == requirement.project_id, Project.deleted == 0).first()
     if project and project.status == "closed":
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="项目已关闭，需求不允许编辑或删除")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Project is closed")
 
 
 def _ensure_requirement_iteration_scope(db: Session, project_id: int | None, iteration_id: int | None) -> None:
@@ -334,15 +303,13 @@ def _ensure_requirement_iteration_scope(db: Session, project_id: int | None, ite
         return
     iteration = db.query(Iteration).filter(Iteration.id == iteration_id, Iteration.deleted == 0).first()
     if not iteration:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="迭代不存在")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Iteration not found")
     if project_id not in _iteration_scoped_project_ids(db, iteration_id):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="需求不在迭代项目范围内")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Requirement is outside iteration scope")
 
 
 def _iteration_scoped_project_ids(db: Session, iteration_id: int) -> set[int]:
-    root_ids = [
-        row.project_id for row in db.query(IterationProject).filter(IterationProject.iteration_id == iteration_id).all()
-    ]
+    root_ids = [row.project_id for row in db.query(IterationProject).filter(IterationProject.iteration_id == iteration_id).all()]
     result = set(root_ids)
     for project_id in root_ids:
         result.update(_collect_descendant_project_ids(db, project_id))

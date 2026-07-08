@@ -37,6 +37,14 @@ MODEL_BY_TYPE = {
     "project": Project,
 }
 
+NORMALIZED_STATUS_SETS = {
+    "requirement": {"pending_assignment", "in_processing", "pending_confirmation", "completed", "canceled"},
+    "task": {"pending_assignment", "in_processing", "pending_confirmation", "completed", "canceled"},
+    "bug": {"pending_handling", "fixing", "pending_verification", "verified", "closed"},
+    "iteration": {"planning", "active", "completed", "canceled"},
+    "project": {"planning", "active", "paused", "closed"},
+}
+
 
 def list_available_transitions(
     db: Session,
@@ -308,7 +316,7 @@ def _handler_allowed(db: Session, object_type: str, item, actor: User | None) ->
         return owner_id == actor.id or _is_delegated(db, item, actor)
     if object_type in {"iteration", "project"}:
         return True
-    return _is_delegated(db, item, actor)
+    return True
 
 
 def _role_allowed(db: Session, object_type: str, item, transition: WorkflowTransition, actor: User | None) -> bool:
@@ -329,6 +337,8 @@ def _is_delegated(db: Session, item, actor: User | None) -> bool:
     if not actor:
         return False
     owner_id = getattr(item, "owner_id", None)
+    if owner_id is None:
+        return False
     if owner_id == actor.id:
         return False
     project_id = _project_id_for_item(db, _object_type_for_item(item), item)
@@ -355,16 +365,28 @@ def _status_candidates(object_type: str, item) -> list[str]:
     if object_type == "bug":
         if status_key in {"open", "reopened", "suspended"}:
             _add("pending_handling")
+        elif status_key == "pending_handling":
+            _add("open")
         elif status_key == "verifying":
             _add("pending_verification")
+        elif status_key == "pending_verification":
+            _add("verifying")
     elif object_type == "task":
         if status_key == "todo":
             _add("in_processing" if owner_id else "pending_assignment")
             _add("pending_assignment" if owner_id else "in_processing")
+        elif status_key == "pending_assignment":
+            _add("todo")
+        elif status_key == "in_processing":
+            _add("doing")
         elif status_key == "doing":
             _add("in_processing")
+        elif status_key == "completed":
+            _add("done")
         elif status_key == "done":
             _add("completed")
+        elif status_key == "canceled":
+            _add("closed")
         elif status_key == "closed":
             _add("canceled")
             _add("completed")
@@ -372,18 +394,32 @@ def _status_candidates(object_type: str, item) -> list[str]:
         if status_key == "draft":
             _add("in_processing" if owner_id else "pending_assignment")
             _add("pending_assignment" if owner_id else "in_processing")
+        elif status_key == "pending_assignment":
+            _add("draft")
+        elif status_key == "in_processing":
+            _add("active")
         elif status_key == "active":
             _add("in_processing")
+        elif status_key == "completed":
+            _add("done")
         elif status_key == "done":
             _add("completed")
+        elif status_key == "canceled":
+            _add("closed")
         elif status_key == "closed":
             _add("canceled")
             _add("completed")
     elif object_type == "iteration":
         if status_key in {"draft", "open"}:
             _add("planning")
+        elif status_key == "planning":
+            _add("open")
         elif status_key in {"started", "doing"}:
             _add("active")
+        elif status_key == "completed":
+            _add("finished")
+        elif status_key == "canceled":
+            _add("closed")
         elif status_key in {"finished", "closed"}:
             _add("completed")
     elif object_type == "project":
@@ -393,6 +429,17 @@ def _status_candidates(object_type: str, item) -> list[str]:
             _add("paused")
 
     return candidates
+
+
+def _normalized_status(object_type: str, item) -> str | None:
+    candidates = _status_candidates(object_type, item)
+    if not candidates:
+        return getattr(item, "status", None)
+    normalized_statuses = NORMALIZED_STATUS_SETS.get(object_type, set())
+    for candidate in candidates:
+        if candidate in normalized_statuses:
+            return candidate
+    return candidates[0]
 
 
 def _resolve_target_status(item, transition: WorkflowTransition, request: WorkflowTransitionExecuteRequest, selected_values: dict[str, Any]) -> tuple[str, str]:
@@ -453,6 +500,8 @@ def _apply_domain_payload(
         item.verify_time = _parse_effective_time(payload) or datetime.now()
         item.verified_by = actor.id if actor else None
         item.reopen_count = (item.reopen_count or 0) + 1
+    if object_type == "bug" and transition.action_key == "activate":
+        item.reopen_count = (item.reopen_count or 0) + 1
 
 
 def _run_transition_validator(db: Session, object_type: str, item, transition: WorkflowTransition, resolved_target_status: str) -> None:
@@ -475,39 +524,45 @@ def _require_bug_close_tasks_complete(db: Session, bug: Bug, validator: dict[str
     if not bug.task_id:
         return
     task = db.query(Task).filter(Task.id == bug.task_id, Task.deleted == 0).first()
-    if task and task.status not in statuses:
+    if task and _normalized_status("task", task) not in statuses:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Bug cannot close while direct task is unfinished")
 
 
 def _require_requirement_relations_complete(db: Session, requirement: Requirement, resolved_target_status: str) -> None:
     if resolved_target_status not in {"completed", "canceled"}:
         return
-    blocking_tasks = (
-        db.query(Task)
-        .filter(Task.requirement_id == requirement.id, Task.deleted == 0, Task.status.notin_(["completed", "canceled"]))
-        .all()
-    )
+    blocking_tasks = [
+        task
+        for task in db.query(Task).filter(Task.requirement_id == requirement.id, Task.deleted == 0).all()
+        if _normalized_status("task", task) not in {"completed", "canceled"}
+    ]
     if blocking_tasks:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Requirement has unfinished task blockers")
-    blocking_bugs = (
-        db.query(Bug)
-        .filter(Bug.requirement_id == requirement.id, Bug.deleted == 0, Bug.status != "closed")
-        .all()
-    )
+    blocking_bugs = [
+        bug
+        for bug in db.query(Bug).filter(Bug.requirement_id == requirement.id, Bug.deleted == 0).all()
+        if _normalized_status("bug", bug) != "closed"
+    ]
     if blocking_bugs:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Requirement has unclosed bug blockers")
 
 
 def _require_iteration_items_complete(db: Session, iteration_id: int) -> None:
     requirements = db.query(Requirement).filter(Requirement.iteration_id == iteration_id, Requirement.deleted == 0).all()
-    if any(item.status not in {"completed", "canceled"} for item in requirements):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Iteration has unfinished requirement blockers")
+    blocking_messages: list[str] = []
+    if any(_normalized_status("requirement", item) not in {"completed", "canceled"} for item in requirements):
+        blocking_messages.append("requirement")
     tasks = db.query(Task).filter(Task.iteration_id == iteration_id, Task.deleted == 0).all()
-    if any(item.status not in {"completed", "canceled"} for item in tasks):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Iteration has unfinished task blockers")
+    if any(_normalized_status("task", item) not in {"completed", "canceled"} for item in tasks):
+        blocking_messages.append("task")
     bugs = db.query(Bug).filter(Bug.iteration_id == iteration_id, Bug.deleted == 0).all()
-    if any(item.status != "closed" for item in bugs):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Iteration has unclosed bug blockers")
+    if any(_normalized_status("bug", item) != "closed" for item in bugs):
+        blocking_messages.append("bug")
+    if blocking_messages:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Iteration has unfinished {', '.join(blocking_messages)} blockers",
+        )
 
 
 def _require_project_items_complete(db: Session, project_id: int) -> None:
@@ -517,17 +572,23 @@ def _require_project_items_complete(db: Session, project_id: int) -> None:
         .filter(IterationProject.project_id == project_id, Iteration.deleted == 0)
         .all()
     )
-    if any(item.status not in {"completed", "canceled"} for item in iterations):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Project has unfinished iteration blockers")
+    blocking_messages: list[str] = []
+    if any(_normalized_status("iteration", item) not in {"completed", "canceled"} for item in iterations):
+        blocking_messages.append("iteration")
     requirements = db.query(Requirement).filter(Requirement.project_id == project_id, Requirement.deleted == 0).all()
-    if any(item.status not in {"completed", "canceled"} for item in requirements):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Project has unfinished requirement blockers")
+    if any(_normalized_status("requirement", item) not in {"completed", "canceled"} for item in requirements):
+        blocking_messages.append("requirement")
     tasks = db.query(Task).filter(Task.project_id == project_id, Task.deleted == 0).all()
-    if any(item.status not in {"completed", "canceled"} for item in tasks):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Project has unfinished task blockers")
+    if any(_normalized_status("task", item) not in {"completed", "canceled"} for item in tasks):
+        blocking_messages.append("task")
     bugs = db.query(Bug).filter(Bug.project_id == project_id, Bug.deleted == 0).all()
-    if any(item.status != "closed" for item in bugs):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Project has unclosed bug blockers")
+    if any(_normalized_status("bug", item) != "closed" for item in bugs):
+        blocking_messages.append("bug")
+    if blocking_messages:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Project has unfinished {', '.join(blocking_messages)} blockers",
+        )
 
 
 def _next_owner_id(

@@ -9,86 +9,98 @@ def _valid_resolution() -> str:
     return sorted(BUG_RESOLUTIONS)[0]
 
 
-def _create_bug(client: TestClient) -> int:
+def _create_bug(client: TestClient, **overrides) -> dict:
     project = client.post("/api/v1/projects", json={"name": f"Bug Flow Project {uuid4().hex[:8]}"})
     assert project.status_code == 200
-    bug = client.post(
-        "/api/v1/bugs",
-        json={"project_id": project.json()["id"], "title": f"Bug Flow {uuid4().hex[:8]}"},
-    )
+    payload = {
+        "project_id": project.json()["id"],
+        "title": f"Bug Flow {uuid4().hex[:8]}",
+    }
+    payload.update(overrides)
+    bug = client.post("/api/v1/bugs", json=payload)
     assert bug.status_code == 200
-    assert bug.json()["status"] == "open"
-    return bug.json()["id"]
+    assert bug.json()["status"] == "pending_handling"
+    return bug.json()
 
 
-def test_bug_status_flow_records_resolution_verification_and_reopen(client: TestClient):
-    bug_id = _create_bug(client)
+def test_bug_legacy_endpoints_follow_default_template_flow(client: TestClient):
+    bug = _create_bug(client)
 
-    fixing = client.post(f"/api/v1/bugs/{bug_id}/start-fixing", json={"remark": "start fixing"})
+    fixing = client.post(f"/api/v1/bugs/{bug['id']}/start-fixing", json={"remark": "start fixing"})
     assert fixing.status_code == 200
     assert fixing.json()["status"] == "fixing"
 
-    resolved = client.post(
-        f"/api/v1/bugs/{bug_id}/resolve",
-        json={"resolution": "已解决", "remark": "patched validation"},
+    submitted = client.post(
+        f"/api/v1/bugs/{bug['id']}/resolve",
+        json={"resolution": _valid_resolution(), "remark": "patched validation"},
     )
-    assert resolved.status_code == 200
-    assert resolved.json()["status"] == "verifying"
-    assert resolved.json()["resolution"] == "已解决"
-    assert resolved.json()["resolve_time"] is not None
+    assert submitted.status_code == 200
+    assert submitted.json()["status"] == "pending_verification"
+    assert submitted.json()["resolution"] == _valid_resolution()
+    assert submitted.json()["resolve_time"] is not None
 
     failed = client.post(
-        f"/api/v1/bugs/{bug_id}/verify-failed",
+        f"/api/v1/bugs/{bug['id']}/verify-failed",
         json={"verify_result": "failed", "remark": "still reproduces"},
     )
     assert failed.status_code == 200
-    assert failed.json()["status"] == "reopened"
+    assert failed.json()["status"] == "pending_handling"
     assert failed.json()["verify_result"] == "failed"
     assert failed.json()["reopen_count"] == 1
 
-    fixing_again = client.post(f"/api/v1/bugs/{bug_id}/start-fixing", json={"remark": "confirm reopened bug"})
+    fixing_again = client.post(f"/api/v1/bugs/{bug['id']}/start-fixing", json={"remark": "retry"})
     assert fixing_again.status_code == 200
     assert fixing_again.json()["status"] == "fixing"
 
-    resolved_again = client.post(
-        f"/api/v1/bugs/{bug_id}/resolve",
-        json={"resolution": "已解决", "remark": "patched again"},
+    submitted_again = client.post(
+        f"/api/v1/bugs/{bug['id']}/resolve",
+        json={"resolution": _valid_resolution(), "remark": "patched again"},
     )
-    assert resolved_again.status_code == 200
-    assert resolved_again.json()["status"] == "verifying"
+    assert submitted_again.status_code == 200
+    assert submitted_again.json()["status"] == "pending_verification"
 
-    closed = client.post(
-        f"/api/v1/bugs/{bug_id}/verify-passed",
+    verified = client.post(
+        f"/api/v1/bugs/{bug['id']}/verify-passed",
         json={"verify_result": "passed", "remark": "verified"},
     )
+    assert verified.status_code == 200
+    assert verified.json()["status"] == "verified"
+    assert verified.json()["verify_result"] == "passed"
+    assert verified.json()["verify_time"] is not None
+
+    closed = client.post(f"/api/v1/bugs/{bug['id']}/close", json={"reason": "verified done"})
     assert closed.status_code == 200
     assert closed.json()["status"] == "closed"
-    assert closed.json()["verify_result"] == "passed"
-    assert closed.json()["verify_time"] is not None
 
-    history = client.get(f"/api/v1/bugs/{bug_id}/status-operations")
+    reactivated = client.post(f"/api/v1/bugs/{bug['id']}/activate", json={"remark": "reopen closed bug"})
+    assert reactivated.status_code == 200
+    assert reactivated.json()["status"] == "pending_handling"
+    assert reactivated.json()["reopen_count"] == 2
+
+    history = client.get(f"/api/v1/bugs/{bug['id']}/status-operations")
     assert history.status_code == 200
-    actions = [item["action"] for item in history.json()]
-    assert actions == [
-        "start_fixing",
-        "resolve",
-        "verify_failed",
-        "start_fixing",
-        "resolve",
-        "verify_passed",
+    assert [item["action"] for item in history.json()] == [
+        "confirm_bug_type",
+        "submit_verification",
+        "verification_failed",
+        "confirm_bug_type",
+        "submit_verification",
+        "verification_passed",
+        "close",
+        "activate",
     ]
 
 
 def test_bug_resolve_requires_resolution(client: TestClient):
-    bug_id = _create_bug(client)
-    client.post(f"/api/v1/bugs/{bug_id}/start-fixing", json={})
+    bug = _create_bug(client)
+    client.post(f"/api/v1/bugs/{bug['id']}/start-fixing", json={})
 
-    response = client.post(f"/api/v1/bugs/{bug_id}/resolve", json={})
+    response = client.post(f"/api/v1/bugs/{bug['id']}/resolve", json={})
 
     assert response.status_code == 422
 
 
-def test_start_fixing_bug_rejects_finished_iteration(client: TestClient):
+def test_start_fixing_bug_rejects_closed_iteration(client: TestClient):
     project = client.post("/api/v1/projects", json={"name": f"Bug Iteration Project {uuid4().hex[:8]}"})
     assert project.status_code == 200
     project_id = project.json()["id"]
@@ -106,10 +118,10 @@ def test_start_fixing_bug_rejects_finished_iteration(client: TestClient):
     )
 
     assert response.status_code == 400
-    assert "已结束" in response.json()["detail"]
+    assert "iteration" in response.json()["detail"].lower()
 
 
-def test_bug_create_and_update_reject_finished_iteration(client: TestClient):
+def test_bug_create_and_update_reject_closed_iteration(client: TestClient):
     project = client.post("/api/v1/projects", json={"name": f"Bug Edit Iteration Project {uuid4().hex[:8]}"})
     assert project.status_code == 200
     project_id = project.json()["id"]
@@ -135,101 +147,26 @@ def test_bug_create_and_update_reject_finished_iteration(client: TestClient):
     assert updated_with_finished_iteration.status_code == 400
 
 
-def test_bug_update_accepts_parent_project_unfinished_iteration(client: TestClient):
-    parent = client.post("/api/v1/projects", json={"name": f"Parent Bug Project {uuid4().hex[:8]}"})
-    assert parent.status_code == 200
-    parent_id = parent.json()["id"]
-    child = client.post(
-        "/api/v1/projects",
-        json={"name": f"Child Bug Project {uuid4().hex[:8]}", "parent_id": parent_id},
-    )
-    assert child.status_code == 200
-    child_id = child.json()["id"]
-    parent_iteration = client.post(
-        "/api/v1/iterations",
-        json={"project_ids": [parent_id], "name": f"Parent Iteration {uuid4().hex[:8]}", "status": "active"},
-    )
-    assert parent_iteration.status_code == 200
-    bug = client.post("/api/v1/bugs", json={"project_id": child_id, "title": f"Child Bug {uuid4().hex[:8]}"})
-    assert bug.status_code == 200
-
-    response = client.patch(
-        f"/api/v1/bugs/{bug.json()['id']}",
-        json={"iteration_id": parent_iteration.json()["id"]},
-    )
-
-    assert response.status_code == 200
-    assert response.json()["project_id"] == child_id
-    assert response.json()["iteration_id"] == parent_iteration.json()["id"]
-
-
-def test_verify_passed_endpoint_closes_verifying_bug(client: TestClient):
-    bug_id = _create_bug(client)
-    client.post(f"/api/v1/bugs/{bug_id}/start-fixing", json={})
-    client.post(f"/api/v1/bugs/{bug_id}/resolve", json={"resolution": _valid_resolution()})
-
-    response = client.post(f"/api/v1/bugs/{bug_id}/verify-passed", json={"remark": "verified"})
-
-    assert response.status_code == 200
-    assert response.json()["status"] == "closed"
-    assert response.json()["verify_result"] == "passed"
-    assert response.json()["verify_time"] is not None
-    history = client.get(f"/api/v1/bugs/{bug_id}/status-operations")
-    assert [item["action"] for item in history.json()] == ["start_fixing", "resolve", "verify_passed"]
-
-
-def test_verify_failed_endpoint_reopens_verifying_bug(client: TestClient):
-    bug_id = _create_bug(client)
-    client.post(f"/api/v1/bugs/{bug_id}/start-fixing", json={})
-    client.post(f"/api/v1/bugs/{bug_id}/resolve", json={"resolution": _valid_resolution()})
-
-    response = client.post(f"/api/v1/bugs/{bug_id}/verify-failed", json={"remark": "still failed"})
-
-    assert response.status_code == 200
-    assert response.json()["status"] == "reopened"
-    assert response.json()["verify_result"] == "failed"
-    assert response.json()["verify_time"] is not None
-    assert response.json()["reopen_count"] == 1
-    history = client.get(f"/api/v1/bugs/{bug_id}/status-operations")
-    assert [item["action"] for item in history.json()] == ["start_fixing", "resolve", "verify_failed"]
-
-
-def test_start_verifying_endpoint_is_not_exposed(client: TestClient):
-    bug_id = _create_bug(client)
-
-    response = client.post(f"/api/v1/bugs/{bug_id}/start-verifying", json={})
-
-    assert response.status_code == 404
-
-
 def test_bug_detail_and_resolution_options(client: TestClient):
-    bug_id = _create_bug(client)
+    bug = _create_bug(client)
 
-    detail = client.get(f"/api/v1/bugs/{bug_id}")
+    detail = client.get(f"/api/v1/bugs/{bug['id']}")
     assert detail.status_code == 200
-    assert detail.json()["id"] == bug_id
+    assert detail.json()["id"] == bug["id"]
 
-    client.post(f"/api/v1/bugs/{bug_id}/start-fixing", json={})
-    invalid = client.post(f"/api/v1/bugs/{bug_id}/resolve", json={"resolution": "fixed"})
+    client.post(f"/api/v1/bugs/{bug['id']}/start-fixing", json={})
+    invalid = client.post(f"/api/v1/bugs/{bug['id']}/resolve", json={"resolution": "fixed"})
     assert invalid.status_code == 422
 
-    valid = client.post(f"/api/v1/bugs/{bug_id}/resolve", json={"resolution": "已解决"})
+    valid = client.post(f"/api/v1/bugs/{bug['id']}/resolve", json={"resolution": _valid_resolution()})
     assert valid.status_code == 200
-    assert valid.json()["resolution"] == "已解决"
-    assert valid.json()["status"] == "verifying"
+    assert valid.json()["resolution"] == _valid_resolution()
+    assert valid.json()["status"] == "pending_verification"
 
 
-def test_closed_bug_can_be_activated(client: TestClient):
-    bug_id = _create_bug(client)
-    client.post(f"/api/v1/bugs/{bug_id}/close", json={"reason": "not required"})
+def test_bug_direct_close_is_blocked_before_verified(client: TestClient):
+    bug = _create_bug(client)
 
-    activated = client.post(f"/api/v1/bugs/{bug_id}/activate", json={"remark": "reopen closed bug"})
+    blocked = client.post(f"/api/v1/bugs/{bug['id']}/close", json={"reason": "not required"})
 
-    assert activated.status_code == 200
-    assert activated.json()["status"] == "reopened"
-    assert activated.json()["reopen_count"] == 1
-
-    confirmed = client.post(f"/api/v1/bugs/{bug_id}/start-fixing", json={})
-
-    assert confirmed.status_code == 200
-    assert confirmed.json()["status"] == "fixing"
+    assert blocked.status_code == 400

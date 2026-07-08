@@ -60,9 +60,16 @@ def test_apply_template_creates_graph_nodes_and_transitions(client: TestClient):
 
     assert applied.status_code == 200
     graph = applied.json()
-    assert {node["status_key"] for node in graph["states"]} >= {"open", "fixing", "verifying", "reopened", "closed"}
-    assert any(edge["action_key"] == "resolve" and edge["to_status"] == "verifying" for edge in graph["transitions"])
-    assert any(edge["handler_rule"]["target_type"] == "last_resolver" for edge in graph["transitions"])
+    assert {node["status_key"] for node in graph["states"]} == {
+        "pending_handling",
+        "fixing",
+        "pending_verification",
+        "verified",
+        "closed",
+    }
+    assert any(edge["action_key"] == "submit_verification" and edge["to_status"] == "pending_verification" for edge in graph["transitions"])
+    assert any(edge["action_key"] == "verification_passed" and edge["to_status"] == "verified" for edge in graph["transitions"])
+    assert any(edge["action_key"] == "close" and edge["to_status"] == "closed" for edge in graph["transitions"])
 
 
 def test_save_graph_preserves_layout_and_validates_duplicates(client: TestClient):
@@ -219,3 +226,46 @@ def test_save_graph_preserves_transition_ui_and_form_config(client: TestClient):
     assert transition["form_config"]["title"] == "解决 Bug"
     loaded = client.get(f"/api/v1/workflow-definitions/{definition['id']}")
     assert loaded.json()["transitions"][0]["form_config"]["fields"][0]["field"] == "resolution"
+def test_default_template_definitions_exist_for_core_objects(client: TestClient):
+    listed = client.get("/api/v1/workflow-definitions?scope_type=system")
+
+    assert listed.status_code == 200
+    by_object_type = {item["object_type"]: item for item in listed.json()}
+    assert {"requirement", "task", "bug", "iteration", "project"} <= set(by_object_type)
+    assert by_object_type["bug"]["is_default_template"] is True
+    assert by_object_type["task"]["is_default_template"] is True
+
+
+def test_bug_default_template_matches_prd_baseline(client: TestClient):
+    listed = client.get("/api/v1/workflow-definitions?object_type=bug&scope_type=system")
+    assert listed.status_code == 200
+    definition = next(item for item in listed.json() if item["is_default_template"] is True)
+
+    graph = client.get(f"/api/v1/workflow-definitions/{definition['id']}")
+
+    assert graph.status_code == 200
+    states = {node["status_key"] for node in graph.json()["states"]}
+    assert states == {"pending_handling", "fixing", "pending_verification", "verified", "closed"}
+    transitions = {item["action_key"] for item in graph.json()["transitions"]}
+    assert {
+        "confirm_bug_type",
+        "submit_verification",
+        "verification_passed",
+        "verification_failed",
+        "close",
+        "activate",
+        "reclassify_bug_type",
+    } <= transitions
+    assert graph.json()["definition"]["template_key"] == "bug.default"
+
+
+def test_requirement_and_project_default_templates_expose_default_metadata(client: TestClient):
+    requirement_list = client.get("/api/v1/workflow-definitions?object_type=requirement&scope_type=system")
+    project_list = client.get("/api/v1/workflow-definitions?object_type=project&scope_type=system")
+
+    assert requirement_list.status_code == 200
+    assert project_list.status_code == 200
+    requirement_definition = next(item for item in requirement_list.json() if item["is_default_template"] is True)
+    project_definition = next(item for item in project_list.json() if item["is_default_template"] is True)
+    assert requirement_definition["template_key"] == "requirement.default"
+    assert project_definition["template_key"] == "project.default"

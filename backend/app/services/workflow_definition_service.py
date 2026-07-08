@@ -6,16 +6,16 @@ from sqlalchemy.orm import Session
 from app.models.assignee_rule_config import AssigneeRuleConfig
 from app.models.handler_transition_rule import HandlerTransitionRule
 from app.models.workflow_definition import WorkflowDefinition, WorkflowState, WorkflowTransition
+from app.services.default_workflow_template_service import ensure_default_workflow_templates, graph_for_object_type
 from app.views.workflow_definition_view import (
     WorkflowDefinitionCreate,
     WorkflowDefinitionUpdate,
     WorkflowGraphSave,
-    WorkflowStateBase,
     WorkflowTransitionBase,
 )
 
 
-OBJECT_TYPES = {"requirement", "task", "bug"}
+OBJECT_TYPES = {"requirement", "task", "bug", "iteration", "project"}
 SCOPE_TYPES = {"system", "project", "assignee_rule_config"}
 STATE_CATEGORIES = {"start", "normal", "terminal"}
 
@@ -26,6 +26,7 @@ def list_definitions(
     scope_type: str | None = None,
     scope_id: int | None = None,
 ) -> list[WorkflowDefinition]:
+    ensure_default_workflow_templates(db)
     query = db.query(WorkflowDefinition)
     if object_type:
         query = query.filter(WorkflowDefinition.object_type == object_type)
@@ -33,7 +34,11 @@ def list_definitions(
         query = query.filter(WorkflowDefinition.scope_type == scope_type)
     if scope_id is not None:
         query = query.filter(WorkflowDefinition.scope_id == scope_id)
-    return query.order_by(WorkflowDefinition.id.desc()).all()
+    return query.order_by(
+        WorkflowDefinition.is_default_template.desc(),
+        WorkflowDefinition.object_type.asc(),
+        WorkflowDefinition.id.desc(),
+    ).all()
 
 
 def create_definition(db: Session, payload: WorkflowDefinitionCreate) -> WorkflowDefinition:
@@ -53,6 +58,9 @@ def update_definition(db: Session, definition_id: int, payload: WorkflowDefiniti
         "object_type": definition.object_type,
         "scope_type": definition.scope_type,
         "scope_id": definition.scope_id,
+        "template_key": definition.template_key,
+        "parent_definition_id": definition.parent_definition_id,
+        "is_default_template": definition.is_default_template,
         "enabled": definition.enabled,
         **data,
     }
@@ -73,6 +81,7 @@ def disable_definition(db: Session, definition_id: int) -> None:
 
 
 def get_graph(db: Session, definition_id: int) -> dict:
+    ensure_default_workflow_templates(db)
     definition = _get_definition(db, definition_id)
     return _graph_response(db, definition)
 
@@ -91,8 +100,7 @@ def save_graph(db: Session, definition_id: int, payload: WorkflowGraphSave) -> d
 
 def apply_template(db: Session, definition_id: int) -> dict:
     definition = _get_definition(db, definition_id)
-    template = _template_for(definition.object_type)
-    return save_graph(db, definition_id, template)
+    return save_graph(db, definition_id, graph_for_object_type(definition.object_type))
 
 
 def _get_definition(db: Session, definition_id: int) -> WorkflowDefinition:
@@ -116,6 +124,8 @@ def _validate_definition_payload(db: Session, data: dict) -> None:
 
 
 def _validate_graph(object_type: str, payload: WorkflowGraphSave) -> None:
+    if object_type not in OBJECT_TYPES:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Unknown workflow object type")
     status_keys: set[str] = set()
     for state in payload.states:
         if state.category not in STATE_CATEGORIES:
@@ -208,99 +218,6 @@ def _graph_response(db: Session, definition: WorkflowDefinition) -> dict:
         .all()
     )
     return {"definition": definition, "states": states, "transitions": transitions}
-
-
-def _template_for(object_type: str) -> WorkflowGraphSave:
-    if object_type == "requirement":
-        return WorkflowGraphSave(
-            states=[
-                _state("draft", "草稿", "start", "#475569", 120, 80),
-                _state("active", "激活", "normal", "#2563eb", 320, 80),
-                _state("pending_validation", "待验证", "normal", "#0f766e", 520, 80),
-                _state("validation_failed", "验证未通过", "normal", "#d97706", 520, 230),
-                _state("done", "完成", "terminal", "#059669", 720, 80),
-                _state("closed", "关闭", "terminal", "#64748b", 320, 230),
-            ],
-            transitions=[
-                _transition("activate", "激活", "draft", "active", target_roles="development_lead,developer"),
-                _transition("submit_validation", "提交验证", "active", "pending_validation", target_roles="test_lead,tester"),
-                _transition("validation_failed", "验证失败", "pending_validation", "validation_failed", target_roles="development_lead,developer"),
-                _transition("activate", "重新激活", "validation_failed", "active", target_roles="development_lead,developer"),
-                _transition("complete", "验证通过", "pending_validation", "done", target_type="keep_current"),
-                _transition("close", "关闭", "active", "closed", target_type="keep_current"),
-            ],
-        )
-    if object_type == "task":
-        return WorkflowGraphSave(
-            states=[
-                _state("todo", "待办", "start", "#475569", 120, 120),
-                _state("doing", "进行中", "normal", "#2563eb", 340, 120),
-                _state("done", "完成", "terminal", "#059669", 560, 120),
-                _state("closed", "关闭", "terminal", "#64748b", 340, 260),
-            ],
-            transitions=[
-                _transition("activate", "激活", "todo", "doing", target_roles="development_lead,developer"),
-                _transition("complete", "完成", "doing", "done", target_type="keep_current"),
-                _transition("close", "关闭", "todo", "closed", target_type="keep_current"),
-                _transition("close", "关闭", "doing", "closed", target_type="keep_current"),
-            ],
-        )
-    return WorkflowGraphSave(
-        states=[
-            _state("open", "待确认", "start", "#475569", 120, 80),
-            _state("fixing", "修复中", "normal", "#2563eb", 320, 80),
-            _state("verifying", "待验证", "normal", "#0f766e", 520, 80),
-            _state("reopened", "重新打开", "normal", "#d97706", 520, 240),
-            _state("suspended", "已挂起", "normal", "#7c3aed", 320, 240),
-            _state("closed", "已关闭", "terminal", "#059669", 720, 80),
-        ],
-        transitions=[
-            _transition("start_fixing", "开始修复", "open", "fixing", target_roles="development_lead,developer"),
-            _transition("resolve", "解决", "fixing", "verifying", target_roles="test_lead,tester"),
-            _transition("verify_passed", "验证通过", "verifying", "closed", target_type="keep_current"),
-            _transition(
-                "verify_failed",
-                "验证失败",
-                "verifying",
-                "reopened",
-                target_type="last_resolver",
-                fallback_type="project_role",
-                fallback_roles="development_lead,developer",
-            ),
-            _transition("start_fixing", "重新修复", "reopened", "fixing", target_roles="development_lead,developer"),
-            _transition("suspend", "挂起", "fixing", "suspended", target_type="keep_current"),
-            _transition("activate", "激活", "suspended", "open", target_roles="development_lead,developer"),
-        ],
-    )
-
-
-def _state(status_key: str, status_name: str, category: str, color: str, x: int, y: int) -> WorkflowStateBase:
-    return WorkflowStateBase(status_key=status_key, status_name=status_name, category=category, color=color, x=x, y=y)
-
-
-def _transition(
-    action_key: str,
-    action_name: str,
-    from_status: str,
-    to_status: str,
-    *,
-    target_type: str = "project_role",
-    target_roles: str = "",
-    fallback_type: str = "keep_current",
-    fallback_roles: str = "",
-) -> WorkflowTransitionBase:
-    return WorkflowTransitionBase(
-        action_key=action_key,
-        action_name=action_name,
-        from_status=from_status,
-        to_status=to_status,
-        handler_rule={
-            "target_type": target_type,
-            "target_roles": target_roles,
-            "fallback_type": fallback_type,
-            "fallback_roles": fallback_roles,
-        },
-    )
 
 
 def _csv(value) -> str:

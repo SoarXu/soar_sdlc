@@ -9,6 +9,9 @@ class WorkflowDefinitionBase(BaseModel):
     object_type: str
     scope_type: str = "system"
     scope_id: int | None = None
+    template_key: str | None = None
+    parent_definition_id: int | None = None
+    is_default_template: bool = False
     enabled: bool = True
 
 
@@ -21,6 +24,9 @@ class WorkflowDefinitionUpdate(BaseModel):
     object_type: str | None = None
     scope_type: str | None = None
     scope_id: int | None = None
+    template_key: str | None = None
+    parent_definition_id: int | None = None
+    is_default_template: bool | None = None
     enabled: bool | None = None
 
 

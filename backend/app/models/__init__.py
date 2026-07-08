@@ -6,6 +6,7 @@ from app.models.handler_transition_rule import HandlerTransitionRule
 from app.models.integration_mapping import ExternalIntegrationMapping
 from app.models.iteration import Iteration, IterationProject
 from app.models.notification import Notification, NotificationChannelConfig, NotificationDeliveryLog
+from app.models.object_watch import ObjectWatch
 from app.models.project import Project
 from app.models.project_member import ProjectMember
 from app.models.program import Program
@@ -18,6 +19,7 @@ from app.models.test_case import TestCase
 from app.models.test_case_execution import TestCaseExecutionLog
 from app.models.test_run import TestRun, TestRunCase
 from app.models.user import User
+from app.models.work_item_comment import WorkItemComment
 from app.models.workflow_component import WorkflowComponent
 from app.models.workflow_definition import WorkflowDefinition, WorkflowState, WorkflowTransition
 from app.models.workflow_rule import WorkflowRule
@@ -37,6 +39,7 @@ __all__ = [
     "Notification",
     "NotificationChannelConfig",
     "NotificationDeliveryLog",
+    "ObjectWatch",
     "ObjectRelation",
     "ObjectTag",
     "Program",
@@ -53,6 +56,7 @@ __all__ = [
     "TestRunCase",
     "User",
     "UserRole",
+    "WorkItemComment",
     "WorkflowComponent",
     "WorkflowDefinition",
     "WorkflowRule",

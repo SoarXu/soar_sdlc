@@ -85,13 +85,26 @@ def ensure_runtime_schema(engine: Engine) -> None:
                 "object_type VARCHAR(32) NOT NULL COMMENT 'requirement/task/bug',"
                 "scope_type VARCHAR(32) NOT NULL DEFAULT 'system' COMMENT 'scope type',"
                 "scope_id BIGINT UNSIGNED NULL COMMENT 'scope id',"
+                "template_key VARCHAR(64) NULL COMMENT 'template key',"
+                "parent_definition_id BIGINT UNSIGNED NULL COMMENT 'parent definition id',"
+                "is_default_template TINYINT(1) NOT NULL DEFAULT 0 COMMENT 'is default template',"
                 "enabled TINYINT(1) NOT NULL DEFAULT 1 COMMENT 'enabled',"
                 "version INT NOT NULL DEFAULT 1 COMMENT 'version',"
                 "create_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT 'create time',"
                 "update_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT 'update time',"
-                "KEY idx_wfd_object_scope (object_type, scope_type, scope_id, enabled)"
+                "KEY idx_wfd_object_scope (object_type, scope_type, scope_id, enabled),"
+                "KEY idx_wfd_template_key (template_key),"
+                "KEY idx_wfd_parent_definition_id (parent_definition_id)"
                 ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='visual workflow definitions'"
             ))
+    _ensure_column(engine, "workflow_definitions", "template_key",
+                   "ALTER TABLE workflow_definitions ADD COLUMN template_key VARCHAR(64) NULL COMMENT 'template key' AFTER scope_id",
+                   "CREATE INDEX idx_wfd_template_key ON workflow_definitions (template_key)")
+    _ensure_column(engine, "workflow_definitions", "parent_definition_id",
+                   "ALTER TABLE workflow_definitions ADD COLUMN parent_definition_id BIGINT UNSIGNED NULL COMMENT 'parent definition id' AFTER template_key",
+                   "CREATE INDEX idx_wfd_parent_definition_id ON workflow_definitions (parent_definition_id)")
+    _ensure_column(engine, "workflow_definitions", "is_default_template",
+                   "ALTER TABLE workflow_definitions ADD COLUMN is_default_template TINYINT(1) NOT NULL DEFAULT 0 COMMENT 'is default template' AFTER parent_definition_id")
 
     if "workflow_states" not in inspector0.get_table_names():
         with engine.begin() as conn:
@@ -222,6 +235,50 @@ def ensure_runtime_schema(engine: Engine) -> None:
                    "ALTER TABLE bugs ADD COLUMN close_reason VARCHAR(64) NULL COMMENT '关闭原因' AFTER reopen_count")
     _ensure_column(engine, "bugs", "deleted",
                    "ALTER TABLE bugs ADD COLUMN deleted TINYINT(1) NOT NULL DEFAULT 0 COMMENT '是否删除 0否1是' AFTER delete_time")
+
+    if "object_watch" not in inspector0.get_table_names():
+        with engine.begin() as conn:
+            conn.execute(text(
+                "CREATE TABLE object_watch ("
+                "id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,"
+                "object_type VARCHAR(64) NOT NULL COMMENT 'object type',"
+                "object_id BIGINT UNSIGNED NOT NULL COMMENT 'object id',"
+                "user_id BIGINT UNSIGNED NOT NULL COMMENT 'watch user id',"
+                "source VARCHAR(32) NOT NULL DEFAULT 'manual' COMMENT 'watch source',"
+                "enabled TINYINT(1) NOT NULL DEFAULT 1 COMMENT 'enabled',"
+                "create_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT 'create time',"
+                "update_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT 'update time',"
+                "KEY idx_object_watch_object (object_type, object_id),"
+                "KEY idx_object_watch_user (user_id, enabled)"
+                ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='object watch relations'"
+            ))
+
+    if "work_item_comments" not in inspector0.get_table_names():
+        with engine.begin() as conn:
+            conn.execute(text(
+                "CREATE TABLE work_item_comments ("
+                "id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,"
+                "object_type VARCHAR(64) NOT NULL COMMENT 'object type',"
+                "object_id BIGINT UNSIGNED NOT NULL COMMENT 'object id',"
+                "author_id BIGINT UNSIGNED NOT NULL COMMENT 'author id',"
+                "body TEXT NOT NULL COMMENT 'comment body',"
+                "mentioned_user_ids JSON NULL COMMENT 'mentioned user ids',"
+                "mentions_metadata JSON NULL COMMENT 'mention metadata',"
+                "create_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT 'create time',"
+                "update_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT 'update time',"
+                "KEY idx_work_item_comments_object (object_type, object_id),"
+                "KEY idx_work_item_comments_author (author_id)"
+                ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='work item comments'"
+            ))
+
+    _ensure_column(engine, "notifications", "category",
+                   "ALTER TABLE notifications ADD COLUMN category VARCHAR(32) NOT NULL DEFAULT 'system' COMMENT 'notification category' AFTER object_id")
+    _ensure_column(engine, "notifications", "source_type",
+                   "ALTER TABLE notifications ADD COLUMN source_type VARCHAR(64) NULL COMMENT 'source object type' AFTER category")
+    _ensure_column(engine, "notifications", "source_id",
+                   "ALTER TABLE notifications ADD COLUMN source_id BIGINT UNSIGNED NULL COMMENT 'source object id' AFTER source_type")
+    _ensure_column(engine, "notifications", "metadata_json",
+                   "ALTER TABLE notifications ADD COLUMN metadata_json JSON NULL COMMENT 'notification metadata' AFTER source_id")
 
     _ensure_column(engine, "test_cases", "source_project_id",
                    "ALTER TABLE test_cases ADD COLUMN source_project_id BIGINT UNSIGNED NULL COMMENT '来源项目 ID' AFTER project_id",

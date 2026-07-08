@@ -94,6 +94,22 @@ def upgrade() -> None:
     if "metadata_json" not in notification_columns:
         op.add_column("notifications", sa.Column("metadata_json", sa.JSON(), nullable=True))
 
+    status_operation_columns = _column_names("status_operation_log")
+    if "selected_values" not in status_operation_columns:
+        op.add_column("status_operation_log", sa.Column("selected_values", sa.JSON(), nullable=True))
+    if "default_target_status" not in status_operation_columns:
+        op.add_column("status_operation_log", sa.Column("default_target_status", sa.String(length=64), nullable=True))
+    if "resolved_target_status" not in status_operation_columns:
+        op.add_column("status_operation_log", sa.Column("resolved_target_status", sa.String(length=64), nullable=True))
+    if "override_reason" not in status_operation_columns:
+        op.add_column("status_operation_log", sa.Column("override_reason", sa.String(length=255), nullable=True))
+    if "next_owner_id" not in status_operation_columns:
+        op.add_column("status_operation_log", sa.Column("next_owner_id", sa.BigInteger(), nullable=True))
+    if "next_owner_name" not in status_operation_columns:
+        op.add_column("status_operation_log", sa.Column("next_owner_name", sa.String(length=100), nullable=True))
+    if "blocker_messages" not in status_operation_columns:
+        op.add_column("status_operation_log", sa.Column("blocker_messages", sa.JSON(), nullable=True))
+
 
 def downgrade() -> None:
     pass

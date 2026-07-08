@@ -30,6 +30,13 @@ def create_status_operation(
     delegated_owner_id: int | None = None,
     delegated_owner_name: str | None = None,
     delegate_reason: str | None = None,
+    selected_values: dict | None = None,
+    default_target_status: str | None = None,
+    resolved_target_status: str | None = None,
+    override_reason: str | None = None,
+    next_owner_id: int | None = None,
+    next_owner_name: str | None = None,
+    blocker_messages: list[str] | None = None,
 ) -> StatusOperationLog:
     effective_time = payload.effective_time if payload and payload.effective_time else datetime.now()
     reason = payload.reason if payload else None
@@ -49,6 +56,13 @@ def create_status_operation(
         delegated_owner_id=delegated_owner_id,
         delegated_owner_name=delegated_owner_name,
         delegate_reason=delegate_reason or (getattr(payload, "delegate_reason", None) if payload else None),
+        selected_values=selected_values or (getattr(payload, "selected_values", None) if payload else None),
+        default_target_status=default_target_status or (getattr(payload, "default_target_status", None) if payload else None),
+        resolved_target_status=resolved_target_status or (getattr(payload, "resolved_target_status", None) if payload else None),
+        override_reason=override_reason or (getattr(payload, "override_reason", None) if payload else None),
+        next_owner_id=next_owner_id or (getattr(payload, "next_owner_id", None) if payload else None),
+        next_owner_name=next_owner_name or (getattr(payload, "next_owner_name", None) if payload else None),
+        blocker_messages=blocker_messages or (getattr(payload, "blocker_messages", None) if payload else None),
     )
     db.add(operation)
     return operation
@@ -82,6 +96,13 @@ def list_status_operations(db: Session, object_type: str, object_id: int) -> lis
             "delegated_owner_id": operation.delegated_owner_id,
             "delegated_owner_name": operation.delegated_owner_name,
             "delegate_reason": operation.delegate_reason,
+            "selected_values": operation.selected_values,
+            "default_target_status": operation.default_target_status,
+            "resolved_target_status": operation.resolved_target_status,
+            "override_reason": operation.override_reason,
+            "next_owner_id": operation.next_owner_id,
+            "next_owner_name": operation.next_owner_name,
+            "blocker_messages": operation.blocker_messages,
             "create_time": operation.create_time,
         }
         for operation in operations

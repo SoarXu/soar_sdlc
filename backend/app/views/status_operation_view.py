@@ -9,6 +9,13 @@ class StatusOperationCreate(BaseModel):
     remark: str | None = None
     target_iteration_id: int | None = None
     delegate_reason: str | None = None
+    selected_values: dict | None = None
+    default_target_status: str | None = None
+    resolved_target_status: str | None = None
+    override_reason: str | None = None
+    next_owner_id: int | None = None
+    next_owner_name: str | None = None
+    blocker_messages: list[str] | None = None
 
 
 class AssignOwnerRequest(BaseModel):
@@ -50,4 +57,11 @@ class StatusOperationRead(BaseModel):
     delegated_owner_id: int | None = None
     delegated_owner_name: str | None = None
     delegate_reason: str | None = None
+    selected_values: dict | list | None = None
+    default_target_status: str | None = None
+    resolved_target_status: str | None = None
+    override_reason: str | None = None
+    next_owner_id: int | None = None
+    next_owner_name: str | None = None
+    blocker_messages: dict | list | None = None
     create_time: datetime | None = None

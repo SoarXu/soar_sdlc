@@ -13,6 +13,8 @@ class WorkflowTransitionActionRead(BaseModel):
     list_priority: int = 100
     requires_form: bool = False
     confirm_required: bool = False
+    routing_mode: str | None = None
+    allowed_target_statuses: list[str] = Field(default_factory=list)
     ui_config: dict[str, Any] = Field(default_factory=dict)
     form_config: dict[str, Any] = Field(default_factory=dict)
 
@@ -22,6 +24,9 @@ class WorkflowTransitionExecuteRequest(BaseModel):
     payload: dict[str, Any] = Field(default_factory=dict)
     next_owner_id: int | None = None
     delegate_reason: str | None = None
+    selected_values: dict[str, Any] = Field(default_factory=dict)
+    selected_target_status: str | None = None
+    override_reason: str | None = None
 
 
 class WorkflowTransitionBatchItem(BaseModel):
@@ -48,3 +53,7 @@ class WorkflowTransitionExecuteRead(BaseModel):
     id: int
     status: str
     owner_id: int | None = None
+    default_target_status: str | None = None
+    resolved_target_status: str | None = None
+    selected_values: dict[str, Any] = Field(default_factory=dict)
+    override_reason: str | None = None

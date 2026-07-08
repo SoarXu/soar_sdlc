@@ -75,6 +75,20 @@ def ensure_runtime_schema(engine: Engine) -> None:
                    "ALTER TABLE status_operation_log ADD COLUMN delegated_owner_name VARCHAR(100) NULL COMMENT 'delegated owner name snapshot' AFTER delegated_owner_id")
     _ensure_column(engine, "status_operation_log", "delegate_reason",
                    "ALTER TABLE status_operation_log ADD COLUMN delegate_reason VARCHAR(255) NULL COMMENT 'delegate reason' AFTER delegated_owner_name")
+    _ensure_column(engine, "status_operation_log", "selected_values",
+                   "ALTER TABLE status_operation_log ADD COLUMN selected_values JSON NULL COMMENT 'selected form values' AFTER delegate_reason")
+    _ensure_column(engine, "status_operation_log", "default_target_status",
+                   "ALTER TABLE status_operation_log ADD COLUMN default_target_status VARCHAR(64) NULL COMMENT 'default target status' AFTER selected_values")
+    _ensure_column(engine, "status_operation_log", "resolved_target_status",
+                   "ALTER TABLE status_operation_log ADD COLUMN resolved_target_status VARCHAR(64) NULL COMMENT 'resolved target status' AFTER default_target_status")
+    _ensure_column(engine, "status_operation_log", "override_reason",
+                   "ALTER TABLE status_operation_log ADD COLUMN override_reason VARCHAR(255) NULL COMMENT 'override reason' AFTER resolved_target_status")
+    _ensure_column(engine, "status_operation_log", "next_owner_id",
+                   "ALTER TABLE status_operation_log ADD COLUMN next_owner_id BIGINT UNSIGNED NULL COMMENT 'next owner id' AFTER override_reason")
+    _ensure_column(engine, "status_operation_log", "next_owner_name",
+                   "ALTER TABLE status_operation_log ADD COLUMN next_owner_name VARCHAR(100) NULL COMMENT 'next owner name snapshot' AFTER next_owner_id")
+    _ensure_column(engine, "status_operation_log", "blocker_messages",
+                   "ALTER TABLE status_operation_log ADD COLUMN blocker_messages JSON NULL COMMENT 'blocker messages' AFTER next_owner_name")
 
     if "workflow_definitions" not in inspector0.get_table_names():
         with engine.begin() as conn:

@@ -9,6 +9,8 @@ from app.controllers import (
     handler_transition_rule_controller,
     health_controller,
     iteration_controller,
+    notification_controller,
+    object_watch_controller,
     program_controller,
     project_controller,
     requirement_controller,
@@ -18,6 +20,7 @@ from app.controllers import (
     test_run_controller,
     user_controller,
     work_item_controller,
+    work_item_comment_controller,
     workflow_component_controller,
     workflow_controller,
     workflow_definition_controller,
@@ -36,7 +39,10 @@ api_router.include_router(
     tags=["assignee-rule-configs"],
 )
 api_router.include_router(dashboard_controller.router, prefix="/dashboard", tags=["dashboard"])
+api_router.include_router(notification_controller.router, prefix="/notifications", tags=["notifications"])
+api_router.include_router(object_watch_controller.router, prefix="/object-watches", tags=["object-watches"])
 api_router.include_router(work_item_controller.router, prefix="/work-items", tags=["work-items"])
+api_router.include_router(work_item_comment_controller.router, prefix="/work-item-comments", tags=["work-item-comments"])
 api_router.include_router(program_controller.router, prefix="/programs", tags=["programs"])
 api_router.include_router(project_controller.router, prefix="/projects", tags=["projects"])
 api_router.include_router(iteration_controller.router, prefix="/iterations", tags=["iterations"])

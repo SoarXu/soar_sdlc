@@ -167,45 +167,25 @@ def test_manager_can_assign_and_batch_assign_work_items(client: TestClient):
     assert batch.json()["failures"] == []
 
 
-def test_auto_assign_unassigned_items_uses_visual_workflow_transition_rule(client: TestClient):
+def test_auto_assign_unassigned_items_uses_handler_transition_rule(client: TestClient):
     config_id, project_id = _create_project(client)
     manager_id, manager_token = _create_user("Auto Assign Manager", "project_owner")
     developer_id, _ = _create_user("Auto Developer", "developer")
     _add_project_member(project_id, manager_id, "project_owner")
     _add_project_member(project_id, developer_id, "developer")
-    definition = client.post(
-        "/api/v1/workflow-definitions",
+    rule = client.post(
+        "/api/v1/handler-transition-rules",
         json={
-            "name": f"Auto Assign Workflow {uuid4().hex[:8]}",
+            "config_id": config_id,
             "object_type": "bug",
-            "scope_type": "assignee_rule_config",
-            "scope_id": config_id,
+            "action": "auto_assign",
+            "from_status": "pending_handling",
+            "target_type": "project_role",
+            "target_roles": "developer",
+            "fallback_type": "none",
         },
     )
-    assert definition.status_code == 201
-    graph = client.put(
-        f"/api/v1/workflow-definitions/{definition.json()['id']}/graph",
-        json={
-            "states": [
-                {"status_key": "open", "status_name": "Open", "category": "start", "x": 100, "y": 100},
-                {"status_key": "fixing", "status_name": "Fixing", "category": "normal", "x": 280, "y": 100},
-            ],
-            "transitions": [
-                {
-                    "action_key": "start_fixing",
-                    "action_name": "Start fixing",
-                    "from_status": "open",
-                    "to_status": "fixing",
-                    "handler_rule": {
-                        "target_type": "project_role",
-                        "target_roles": "developer",
-                        "fallback_type": "none",
-                    },
-                }
-            ],
-        },
-    )
-    assert graph.status_code == 200
+    assert rule.status_code == 201
     bug = client.post(
         "/api/v1/bugs",
         json={"project_id": project_id, "title": f"Auto Assign Bug {uuid4().hex[:8]}", "owner_id": None},

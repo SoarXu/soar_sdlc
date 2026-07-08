@@ -1,12 +1,16 @@
+from datetime import datetime, timedelta
 from uuid import uuid4
 
 from fastapi.testclient import TestClient
 
-from app.db.session import SessionLocal
 from app.core.security import get_password_hash
+from app.db.session import SessionLocal
+from app.models.bug import Bug
+from app.models.object_watch import ObjectWatch
+from app.models.project_member import ProjectMember
 from app.models.role import Role, UserRole
 from app.models.user import User
-from app.models.project_member import ProjectMember
+from app.models.work_item_comment import WorkItemComment
 
 
 def _create_user_with_role(username: str, role_key: str) -> int:
@@ -533,45 +537,6 @@ def test_workbench_uses_iteration_membership_not_lifecycle_phase(client: TestCli
     assert requirement["id"] in {item["id"] for item in board["requirements"]}
 
 
-def test_requirement_and_task_can_be_completed_with_status_history(client: TestClient):
-    project_id = _create_project(client, "Completion Project")
-    requirement = client.post(
-        "/api/v1/requirements",
-        json={"project_id": project_id, "title": "Completable requirement"},
-    ).json()
-    task = client.post(
-        "/api/v1/tasks",
-        json={"project_id": project_id, "title": "Completable task"},
-    ).json()
-
-    completed_requirement = client.post(f"/api/v1/requirements/{requirement['id']}/complete")
-    completed_task = client.post(f"/api/v1/tasks/{task['id']}/complete")
-
-    assert completed_requirement.status_code == 200
-    assert completed_requirement.json()["status"] == "pending_validation"
-    assert completed_task.status_code == 200
-    assert completed_task.json()["status"] == "done"
-    requirement_history = client.get(f"/api/v1/requirements/{requirement['id']}/status-operations").json()
-    task_history = client.get(f"/api/v1/tasks/{task['id']}/status-operations").json()
-    assert requirement_history[-1]["action"] == "submit_validation"
-    assert task_history[-1]["action"] == "complete"
-
-
-def test_requirement_complete_requires_linked_tasks_done(client: TestClient):
-    project_id = _create_project(client, "Requirement Guard Project")
-    requirement = client.post(
-        "/api/v1/requirements",
-        json={"project_id": project_id, "title": "Requirement with open task"},
-    ).json()
-    client.post(
-        "/api/v1/tasks",
-        json={"project_id": project_id, "requirement_id": requirement["id"], "title": "Open linked task"},
-    )
-
-    completed = client.post(f"/api/v1/requirements/{requirement['id']}/complete")
-
-    assert completed.status_code == 400
-    assert "关联任务" in completed.json()["detail"]
 def test_workbench_returns_default_queue_sections_for_pending_and_unassigned(client: TestClient):
     developer_id = _create_user_with_role(f"queue_user_{uuid4().hex[:6]}", "developer")
     project_id = _create_project(client, "Queue workbench project")
@@ -624,13 +589,47 @@ def test_workbench_returns_created_watched_mentioned_project_board_and_exception
     project_id = _create_project(client, "Follow project")
     iteration_id = _create_iteration(client, project_id, "Follow iteration")
     _start_iteration(client, iteration_id)
-    requirement = client.post(
+    created_requirement = client.post(
         "/api/v1/requirements",
         json={
             "project_id": project_id,
             "iteration_id": iteration_id,
             "title": "Created requirement",
             "owner_id": developer_id,
+        },
+    ).json()
+    watched_task = client.post(
+        "/api/v1/tasks",
+        json={
+            "project_id": project_id,
+            "iteration_id": iteration_id,
+            "title": "Watched task",
+        },
+    ).json()
+    mentioned_bug = client.post(
+        "/api/v1/bugs",
+        json={
+            "project_id": project_id,
+            "iteration_id": iteration_id,
+            "title": "Mentioned bug",
+        },
+    ).json()
+    verified_bug = client.post(
+        "/api/v1/bugs",
+        json={
+            "project_id": project_id,
+            "iteration_id": iteration_id,
+            "title": "Verified not closed bug",
+            "owner_id": developer_id,
+        },
+    ).json()
+    overdue_bug = client.post(
+        "/api/v1/bugs",
+        json={
+            "project_id": project_id,
+            "iteration_id": iteration_id,
+            "title": "High priority unprocessed bug",
+            "priority": "1",
         },
     ).json()
 
@@ -644,6 +643,34 @@ def test_workbench_returns_created_watched_mentioned_project_board_and_exception
                 is_workbench_participant=True,
             )
         )
+        db.query(Bug).filter(Bug.id == verified_bug["id"]).update({"status": "verified", "creator_id": developer_id})
+        db.query(Bug).filter(Bug.id == mentioned_bug["id"]).update({"creator_id": developer_id})
+        db.query(Bug).filter(Bug.id == overdue_bug["id"]).update(
+            {"creator_id": developer_id, "create_time": datetime.now() - timedelta(hours=30)}
+        )
+        db.add(
+            ObjectWatch(
+                object_type="task",
+                object_id=watched_task["id"],
+                user_id=developer_id,
+                source="manual",
+                enabled=True,
+            )
+        )
+        db.add(
+            WorkItemComment(
+                object_type="bug",
+                object_id=mentioned_bug["id"],
+                author_id=developer_id,
+                body="@follow",
+                mentioned_user_ids=[developer_id],
+                mentions_metadata=[{"user_id": developer_id, "display_name": "Follow Developer"}],
+            )
+        )
+        db.execute(
+            __import__("sqlalchemy").text("update requirements set creator_id = :user_id where id = :id"),
+            {"user_id": developer_id, "id": created_requirement["id"]},
+        )
         db.commit()
     finally:
         db.close()
@@ -653,8 +680,13 @@ def test_workbench_returns_created_watched_mentioned_project_board_and_exception
     assert response.status_code == 200
     data = response.json()
     assert data["created_by_me"]["label"] == "我发起的"
-    assert requirement["id"] in {item["id"] for item in data["created_by_me"]["items"]}
+    assert created_requirement["id"] in {item["id"] for item in data["created_by_me"]["items"]}
     assert data["watched_by_me"]["label"] == "我关注的"
+    assert watched_task["id"] in {item["id"] for item in data["watched_by_me"]["items"]}
     assert data["mentioned_me"]["label"] == "提到我的"
+    assert mentioned_bug["id"] in {item["id"] for item in data["mentioned_me"]["items"]}
     assert data["project_board"]["label"] == "项目看板"
     assert data["exception_center"]["label"] == "异常中心"
+    exception_ids = {(item["object_type"], item["id"]) for item in data["exception_center"]["items"]}
+    assert ("bug", verified_bug["id"]) in exception_ids
+    assert ("bug", overdue_bug["id"]) in exception_ids

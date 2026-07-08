@@ -3,8 +3,11 @@ from datetime import datetime
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 
+from app.models.test_case import TestCase
 from app.models.test_run import TestRun, TestRunCase
 from app.services.lifecycle_service import iteration_lifecycle_phase, project_lifecycle_phase
+from app.services.project_team_service import default_test_run_owner_id
+from app.services.requirement_validation_service import apply_test_execution_result
 from app.views.test_run_view import SelectTestCasesRequest, TestRunCaseUpdate, TestRunCreate, TestRunUpdate
 
 
@@ -18,6 +21,8 @@ def create_test_run(db: Session, payload: TestRunCreate) -> TestRun:
         iteration_lifecycle_phase(db, data.get("iteration_id"))
         or project_lifecycle_phase(db, data.get("project_id"))
     )
+    if not data.get("test_owner_id"):
+        data["test_owner_id"] = default_test_run_owner_id(db, data.get("project_id"))
     test_run = TestRun(**data)
     db.add(test_run)
     db.commit()
@@ -69,6 +74,12 @@ def update_test_run_case(db: Session, run_case_id: int, payload: TestRunCaseUpda
         run_case.execute_time = datetime.now()
     for field, value in data.items():
         setattr(run_case, field, value)
+    if data.get("result"):
+        test_case = db.query(TestCase).filter(TestCase.id == run_case.test_case_id, TestCase.deleted == 0).first()
+        if test_case:
+            test_case.last_execute_time = run_case.execute_time
+            test_case.last_execute_result = run_case.result
+            apply_test_execution_result(db, test_case, run_case.result, actor_id=run_case.tester_id)
     db.commit()
     db.refresh(run_case)
     return run_case

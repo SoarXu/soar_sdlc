@@ -16,6 +16,14 @@ export function updateTask(id, payload) {
   return http.patch(`/tasks/${id}`, payload)
 }
 
+export function assignTask(id, payload) {
+  return http.post(`/tasks/${id}/assign`, payload)
+}
+
+export function batchAssignTasks(payload) {
+  return http.post('/tasks/batch-assign', payload)
+}
+
 export function activateTask(id) {
   return http.post(`/tasks/${id}/activate`)
 }

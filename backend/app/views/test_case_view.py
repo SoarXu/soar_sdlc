@@ -76,3 +76,39 @@ class TestCaseExecutionRead(BaseModel):
     result: str
     steps_result_json: dict | list | None = None
     create_time: datetime | None = None
+
+
+class ValidationCaseRead(BaseModel):
+    id: int
+    project_id: int | None = None
+    requirement_id: int | None = None
+    iteration_id: int | None = None
+    title: str
+    case_type: str | None = None
+    test_scope: str | None = None
+    default_tester_id: int | None = None
+    latest_execute_time: datetime | None = None
+    latest_result: str | None = None
+    open_bug_count: int = 0
+
+
+class ValidationCaseSummary(BaseModel):
+    total: int = 0
+    passed: int = 0
+    failed: int = 0
+    blocked: int = 0
+    ignored: int = 0
+    pending: int = 0
+
+
+class RequirementValidationCasesRead(BaseModel):
+    summary: ValidationCaseSummary
+    items: list[ValidationCaseRead]
+
+
+class BugValidationContextRead(BaseModel):
+    source: str
+    requirement_id: int | None = None
+    test_case_id: int | None = None
+    summary: ValidationCaseSummary
+    items: list[ValidationCaseRead]

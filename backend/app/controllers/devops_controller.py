@@ -3,6 +3,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, Response, status
 from sqlalchemy.orm import Session
 
+from app.core.auth_dependencies import require_system_admin
 from app.db.session import get_db
 from app.services import devops_service
 from app.views.devops_view import (
@@ -29,17 +30,30 @@ def list_repositories(db: Session = Depends(get_db)):
 
 
 @router.post("/repositories", response_model=DevopsRepositoryRead, status_code=status.HTTP_201_CREATED)
-def create_repository(payload: DevopsRepositoryCreate, db: Session = Depends(get_db)):
+def create_repository(
+    payload: DevopsRepositoryCreate,
+    db: Session = Depends(get_db),
+    _admin=Depends(require_system_admin),
+):
     return devops_service.create_repository(db, payload)
 
 
 @router.put("/repositories/{repository_id}", response_model=DevopsRepositoryRead)
-def update_repository(repository_id: int, payload: DevopsRepositoryUpdate, db: Session = Depends(get_db)):
+def update_repository(
+    repository_id: int,
+    payload: DevopsRepositoryUpdate,
+    db: Session = Depends(get_db),
+    _admin=Depends(require_system_admin),
+):
     return devops_service.update_repository(db, repository_id, payload)
 
 
 @router.delete("/repositories/{repository_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_repository(repository_id: int, db: Session = Depends(get_db)):
+def delete_repository(
+    repository_id: int,
+    db: Session = Depends(get_db),
+    _admin=Depends(require_system_admin),
+):
     devops_service.delete_repository(db, repository_id)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
@@ -55,7 +69,11 @@ def list_jenkins_builds(job_id: int | None = None, commit_sha: str | None = None
 
 
 @router.post("/jenkins-builds", response_model=DevopsJenkinsBuildRead, status_code=status.HTTP_201_CREATED)
-def create_jenkins_build(payload: DevopsJenkinsBuildCreate, db: Session = Depends(get_db)):
+def create_jenkins_build(
+    payload: DevopsJenkinsBuildCreate,
+    db: Session = Depends(get_db),
+    _admin=Depends(require_system_admin),
+):
     return devops_service.create_jenkins_build(db, payload)
 
 
@@ -65,17 +83,30 @@ def jenkins_webhook(payload: dict[str, Any], db: Session = Depends(get_db)):
 
 
 @router.post("/jenkins-jobs", response_model=DevopsJenkinsJobRead, status_code=status.HTTP_201_CREATED)
-def create_jenkins_job(payload: DevopsJenkinsJobCreate, db: Session = Depends(get_db)):
+def create_jenkins_job(
+    payload: DevopsJenkinsJobCreate,
+    db: Session = Depends(get_db),
+    _admin=Depends(require_system_admin),
+):
     return devops_service.create_jenkins_job(db, payload)
 
 
 @router.put("/jenkins-jobs/{job_id}", response_model=DevopsJenkinsJobRead)
-def update_jenkins_job(job_id: int, payload: DevopsJenkinsJobUpdate, db: Session = Depends(get_db)):
+def update_jenkins_job(
+    job_id: int,
+    payload: DevopsJenkinsJobUpdate,
+    db: Session = Depends(get_db),
+    _admin=Depends(require_system_admin),
+):
     return devops_service.update_jenkins_job(db, job_id, payload)
 
 
 @router.delete("/jenkins-jobs/{job_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_jenkins_job(job_id: int, db: Session = Depends(get_db)):
+def delete_jenkins_job(
+    job_id: int,
+    db: Session = Depends(get_db),
+    _admin=Depends(require_system_admin),
+):
     devops_service.delete_jenkins_job(db, job_id)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
@@ -91,7 +122,11 @@ def get_commit_detail(commit_id: int, db: Session = Depends(get_db)):
 
 
 @router.post("/commits", response_model=DevopsCommitRead, status_code=status.HTTP_201_CREATED)
-def ingest_commit(payload: DevopsCommitIngest, db: Session = Depends(get_db)):
+def ingest_commit(
+    payload: DevopsCommitIngest,
+    db: Session = Depends(get_db),
+    _admin=Depends(require_system_admin),
+):
     return devops_service.ingest_commit(db, payload)
 
 
@@ -106,5 +141,10 @@ def list_review_tasks(status_value: str | None = None, db: Session = Depends(get
 
 
 @router.post("/commits/{commit_id}/reviewed", response_model=DevopsCommitRead)
-def mark_commit_reviewed(commit_id: int, payload: DevopsReviewRequest, db: Session = Depends(get_db)):
+def mark_commit_reviewed(
+    commit_id: int,
+    payload: DevopsReviewRequest,
+    db: Session = Depends(get_db),
+    _admin=Depends(require_system_admin),
+):
     return devops_service.mark_commit_reviewed(db, commit_id, payload)

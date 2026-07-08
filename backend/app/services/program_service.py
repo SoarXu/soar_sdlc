@@ -60,6 +60,7 @@ def list_program_tree(db: Session) -> list[dict]:
                 {
                     "id": project.id,
                     "parent_id": project.parent_id,
+                    "program_id": project.program_id,
                     "name": project.name,
                     "owner_id": project.owner_id,
                     "status": project.status,
@@ -76,6 +77,37 @@ def list_program_tree(db: Session) -> list[dict]:
         node = nodes[program.id]
         if program.parent_id and program.parent_id in nodes:
             nodes[program.parent_id]["children"].append(node)
+        else:
+            roots.append(node)
+    roots.extend(_build_unbound_project_tree(projects))
+    return roots
+
+
+def _project_tree_node(project: Project) -> dict:
+    return {
+        "id": project.id,
+        "parent_id": project.parent_id,
+        "program_id": project.program_id,
+        "node_type": "project",
+        "name": project.name,
+        "owner_id": project.owner_id,
+        "status": project.status,
+        "start_date": project.start_date,
+        "end_date": project.end_date,
+        "actual_start_date": project.actual_start_date,
+        "actual_end_date": project.actual_end_date,
+        "is_long_term": project.is_long_term,
+        "children": [],
+    }
+
+
+def _build_unbound_project_tree(projects: list[Project]) -> list[dict]:
+    nodes = {project.id: _project_tree_node(project) for project in projects if project.program_id is None}
+    roots = []
+    for project_id, node in nodes.items():
+        parent_id = node["parent_id"]
+        if parent_id and parent_id in nodes:
+            nodes[parent_id]["children"].append(node)
         else:
             roots.append(node)
     return roots

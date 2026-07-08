@@ -3,6 +3,8 @@ from uuid import uuid4
 from fastapi.testclient import TestClient
 
 from app.db.session import SessionLocal
+from app.jobs.iteration_jobs import run_auto_start_due_iterations
+from app.models.requirement import Requirement
 from app.models.user import User
 
 
@@ -56,6 +58,14 @@ def _create_requirement(client: TestClient, project_id: int, title: str | None =
             json={"reason": "done", "remark": "closed for iteration metric"},
         )
         assert close_response.status_code == 200
+    elif status == "done":
+        db = SessionLocal()
+        try:
+            requirement = db.query(Requirement).filter(Requirement.id == requirement_id).first()
+            requirement.status = "done"
+            db.commit()
+        finally:
+            db.close()
     return requirement_id
 
 
@@ -324,6 +334,64 @@ def test_iteration_can_start_with_actual_start_date(client: TestClient):
     assert operations.json()[0]["remark"] == "iteration kickoff"
 
 
+def test_iteration_job_auto_starts_when_start_date_is_reached(client: TestClient):
+    project_id = _create_project(client)
+    created = client.post(
+        "/api/v1/iterations",
+        json={
+            "project_ids": [project_id],
+            "name": f"Auto start iteration-{uuid4().hex[:8]}",
+            "status": "planning",
+            "start_date": "2026-06-01",
+        },
+    )
+    assert created.status_code == 200
+    iteration_id = created.json()["id"]
+    requirement_id = _create_requirement(client, project_id, "Auto start requirement")
+    task_id = _create_task(client, project_id, "Auto start task")
+    linked_requirement = client.post(
+        f"/api/v1/iterations/{iteration_id}/requirements",
+        json={"requirement_ids": [requirement_id]},
+    )
+    assert linked_requirement.status_code == 200
+    linked_task = client.post(f"/api/v1/iterations/{iteration_id}/tasks", json={"task_ids": [task_id]})
+    assert linked_task.status_code == 200
+
+    started_count = run_auto_start_due_iterations()
+    detail = client.get(f"/api/v1/iterations/{iteration_id}/detail")
+
+    assert started_count == 1
+    assert detail.status_code == 200
+    assert detail.json()["iteration"]["status"] == "active"
+    assert detail.json()["iteration"]["actual_start_date"] == "2026-06-01"
+    assert client.get(f"/api/v1/requirements/{requirement_id}").json()["status"] == "active"
+    assert client.get(f"/api/v1/tasks/{task_id}").json()["status"] == "doing"
+    operations = client.get(f"/api/v1/iterations/{iteration_id}/status-operations").json()
+    assert operations[0]["action"] == "start"
+    assert operations[0]["remark"] == "到达计划开始日期自动开始"
+
+
+def test_iteration_list_does_not_auto_start_before_start_date(client: TestClient):
+    project_id = _create_project(client)
+    created = client.post(
+        "/api/v1/iterations",
+        json={
+            "project_ids": [project_id],
+            "name": f"Future iteration-{uuid4().hex[:8]}",
+            "status": "planning",
+            "start_date": "2099-06-01",
+        },
+    )
+    assert created.status_code == 200
+
+    listed = client.get("/api/v1/iterations")
+
+    assert listed.status_code == 200
+    iteration = next(item for item in listed.json() if item["id"] == created.json()["id"])
+    assert iteration["status"] == "planning"
+    assert iteration["actual_start_date"] is None
+
+
 def test_iteration_start_activates_open_requirements_and_tasks(client: TestClient):
     project_id = _create_project(client)
     iteration_id = _create_iteration(client, [project_id])
@@ -394,3 +462,92 @@ def test_iteration_can_finish_with_actual_end_date(client: TestClient):
     assert operations.json()[-1]["from_status"] == "active"
     assert operations.json()[-1]["to_status"] == "finished"
     assert operations.json()[-1]["remark"] == "iteration finish"
+
+
+def test_iteration_finish_rejects_unfinished_requirements_and_tasks(client: TestClient):
+    project_id = _create_project(client)
+    iteration_id = _create_iteration(client, [project_id])
+    requirement_id = _create_requirement(client, project_id, "Unfinished requirement")
+    task_id = _create_task(client, project_id, "Unfinished task")
+    linked_requirements = client.post(
+        f"/api/v1/iterations/{iteration_id}/requirements",
+        json={"requirement_ids": [requirement_id]},
+    )
+    assert linked_requirements.status_code == 200
+    linked_tasks = client.post(f"/api/v1/iterations/{iteration_id}/tasks", json={"task_ids": [task_id]})
+    assert linked_tasks.status_code == 200
+    started = client.post(
+        f"/api/v1/iterations/{iteration_id}/start",
+        json={"effective_time": "2026-06-12T09:30:00"},
+    )
+    assert started.status_code == 200
+
+    finished = client.post(
+        f"/api/v1/iterations/{iteration_id}/finish",
+        json={"effective_time": "2026-06-20T18:00:00", "remark": "iteration finish"},
+    )
+
+    assert finished.status_code == 400
+    assert "存在未完成需求 1 个" in finished.json()["detail"]
+    assert "存在未完成任务 1 个" in finished.json()["detail"]
+    assert "Unfinished requirement" in finished.json()["detail"]
+    assert "Unfinished task" in finished.json()["detail"]
+
+
+def test_iteration_finish_allows_done_requirements(client: TestClient):
+    project_id = _create_project(client, "Finish done requirements project")
+    requirement_id = _create_requirement(client, project_id, "Finished requirement", status="done")
+    iteration_id = _create_iteration(client, [project_id], "Finish done requirements iteration")
+    linked = client.post(
+        f"/api/v1/iterations/{iteration_id}/requirements",
+        json={"requirement_ids": [requirement_id]},
+    )
+    assert linked.status_code == 200
+    started = client.post(f"/api/v1/iterations/{iteration_id}/start", json={"effective_time": "2026-06-01T09:00:00"})
+    assert started.status_code == 200
+
+    finished = client.post(f"/api/v1/iterations/{iteration_id}/finish", json={"effective_time": "2026-06-10T18:00:00"})
+
+    assert finished.status_code == 200
+    assert finished.json()["status"] == "finished"
+
+
+def test_defer_unfinished_iteration_work_items_to_target_iteration(client: TestClient):
+    project_id = _create_project(client)
+    iteration_id = _create_iteration(client, [project_id], "Current iteration")
+    target_iteration_id = _create_iteration(client, [project_id], "Next iteration")
+    requirement_id = _create_requirement(client, project_id, "Deferred requirement")
+    task_id = _create_task(client, project_id, "Deferred task")
+    linked_requirements = client.post(
+        f"/api/v1/iterations/{iteration_id}/requirements",
+        json={"requirement_ids": [requirement_id]},
+    )
+    assert linked_requirements.status_code == 200
+    linked_tasks = client.post(f"/api/v1/iterations/{iteration_id}/tasks", json={"task_ids": [task_id]})
+    assert linked_tasks.status_code == 200
+    started = client.post(
+        f"/api/v1/iterations/{iteration_id}/start",
+        json={"effective_time": "2026-06-12T09:30:00"},
+    )
+    assert started.status_code == 200
+
+    deferred = client.post(
+        f"/api/v1/iterations/{iteration_id}/defer-work-items",
+        json={"target_iteration_id": target_iteration_id, "remark": "move to next iteration"},
+    )
+
+    assert deferred.status_code == 200
+    assert deferred.json()["moved_requirement_ids"] == [requirement_id]
+    assert deferred.json()["moved_task_ids"] == [task_id]
+    current_detail = client.get(f"/api/v1/iterations/{iteration_id}/detail").json()
+    target_detail = client.get(f"/api/v1/iterations/{target_iteration_id}/detail").json()
+    assert requirement_id not in {item["id"] for item in current_detail["requirements"]}
+    assert task_id not in {item["id"] for item in current_detail["tasks"]}
+    assert requirement_id in {item["id"] for item in target_detail["requirements"]}
+    assert task_id in {item["id"] for item in target_detail["tasks"]}
+
+    finished = client.post(
+        f"/api/v1/iterations/{iteration_id}/finish",
+        json={"effective_time": "2026-06-20T18:00:00", "remark": "iteration finish"},
+    )
+    assert finished.status_code == 200

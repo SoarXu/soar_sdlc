@@ -123,7 +123,12 @@ def test_developer_workbench_scope_includes_non_active_project_iterations(client
     planning_iteration_id = _create_iteration(client, project_id, "Developer Planning Iteration")
     requirement = client.post(
         "/api/v1/requirements",
-        json={"project_id": project_id, "iteration_id": planning_iteration_id, "title": "Planning iteration requirement"},
+        json={
+            "project_id": project_id,
+            "iteration_id": planning_iteration_id,
+            "title": "Planning iteration requirement",
+            "owner_id": developer_id,
+        },
     ).json()
 
     db = SessionLocal()
@@ -158,7 +163,12 @@ def test_developer_workbench_defaults_to_project_member_active_iteration_work(cl
     _start_iteration(client, iteration_id)
     requirement = client.post(
         "/api/v1/requirements",
-        json={"project_id": project_id, "iteration_id": iteration_id, "title": "Team visible requirement"},
+        json={
+            "project_id": project_id,
+            "iteration_id": iteration_id,
+            "title": "Team visible requirement",
+            "owner_id": developer_id,
+        },
     ).json()
     owned_task = client.post(
         "/api/v1/tasks",
@@ -187,10 +197,11 @@ def test_developer_workbench_defaults_to_project_member_active_iteration_work(cl
 
     assert response.status_code == 200
     data = response.json()
-    assert data["view_mode"] == "developer"
+    assert data["view_mode"] == "mine"
     board = next(item for item in data["iterations"] if item["id"] == iteration_id)
     assert {item["id"] for item in board["requirements"]} == {requirement["id"]}
-    assert {item["id"] for item in board["tasks"]} == {owned_task["id"], other_task["id"]}
+    assert {item["id"] for item in board["tasks"]} == {owned_task["id"]}
+    assert other_task["id"] not in {item["id"] for item in board["tasks"]}
     assert board["test_cases"] == []
 
     outsider_response = client.get(f"/api/v1/dashboard/workbench?user_id={outsider_id}")
@@ -242,7 +253,7 @@ def test_development_lead_workbench_is_limited_to_project_team_scope(client: Tes
     assert {item["id"] for item in board["requirements"]} == {scoped_requirement["id"]}
 
 
-def test_tester_workbench_includes_linked_cases_with_completion_marker(client: TestClient):
+def test_tester_workbench_includes_linked_cases_without_completion_marker(client: TestClient):
     tester_id = _create_user_with_role("tester_user", "tester")
     project_id = _create_project(client, "Tester Workbench Project")
     iteration_id = _create_iteration(client, project_id, "Tester Active Iteration")
@@ -262,6 +273,10 @@ def test_tester_workbench_includes_linked_cases_with_completion_marker(client: T
             "default_tester_id": tester_id,
         },
     ).json()
+    client.post(
+        f"/api/v1/test-cases/{test_case['id']}/executions",
+        json={"steps_result_json": [{"step": "open", "expected": "ok", "result": "failed"}]},
+    )
     db = SessionLocal()
     try:
         db.add(
@@ -280,10 +295,12 @@ def test_tester_workbench_includes_linked_cases_with_completion_marker(client: T
 
     assert response.status_code == 200
     data = response.json()
-    assert data["view_mode"] == "tester"
+    assert data["view_mode"] == "mine"
     board = next(item for item in data["iterations"] if item["id"] == iteration_id)
     case = next(item for item in board["test_cases"] if item["id"] == test_case["id"])
-    assert case["marker"] == "待回归"
+    assert "marker" not in case
+    assert case["last_execute_result"] == "failed"
+    assert case["last_execute_time"]
 
 
 def test_workbench_iteration_includes_related_projects(client: TestClient):
@@ -326,7 +343,12 @@ def test_child_project_member_workbench_includes_parent_iteration_with_child_ite
     _start_iteration(client, iteration_id)
     requirement = client.post(
         "/api/v1/requirements",
-        json={"project_id": child_project_id, "iteration_id": iteration_id, "title": "子项目成员可见需求"},
+        json={
+            "project_id": child_project_id,
+            "iteration_id": iteration_id,
+            "title": "子项目成员可见需求",
+            "owner_id": user_id,
+        },
     ).json()
     db = SessionLocal()
     try:
@@ -526,12 +548,12 @@ def test_requirement_and_task_can_be_completed_with_status_history(client: TestC
     completed_task = client.post(f"/api/v1/tasks/{task['id']}/complete")
 
     assert completed_requirement.status_code == 200
-    assert completed_requirement.json()["status"] == "done"
+    assert completed_requirement.json()["status"] == "pending_validation"
     assert completed_task.status_code == 200
     assert completed_task.json()["status"] == "done"
     requirement_history = client.get(f"/api/v1/requirements/{requirement['id']}/status-operations").json()
     task_history = client.get(f"/api/v1/tasks/{task['id']}/status-operations").json()
-    assert requirement_history[-1]["action"] == "complete"
+    assert requirement_history[-1]["action"] == "submit_validation"
     assert task_history[-1]["action"] == "complete"
 
 

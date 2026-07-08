@@ -35,7 +35,6 @@ class WorkbenchItem(BaseModel):
     test_case_id: int | None = None
     bug_type: str | None = None
     severity: str | None = None
-    marker: str | None = None
 
 
 class WorkbenchProject(BaseModel):

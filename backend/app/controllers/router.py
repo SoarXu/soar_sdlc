@@ -1,10 +1,12 @@
 from fastapi import APIRouter
 
 from app.controllers import (
+    assignee_rule_config_controller,
     auth_controller,
     bug_controller,
     dashboard_controller,
     devops_controller,
+    handler_transition_rule_controller,
     health_controller,
     iteration_controller,
     program_controller,
@@ -15,8 +17,11 @@ from app.controllers import (
     test_case_controller,
     test_run_controller,
     user_controller,
+    work_item_controller,
     workflow_component_controller,
     workflow_controller,
+    workflow_definition_controller,
+    workflow_runtime_controller,
 )
 
 
@@ -25,7 +30,13 @@ api_router.include_router(health_controller.router, tags=["health"])
 api_router.include_router(auth_controller.router, prefix="/auth", tags=["auth"])
 api_router.include_router(user_controller.router, prefix="/users", tags=["users"])
 api_router.include_router(role_controller.router, prefix="/roles", tags=["roles"])
+api_router.include_router(
+    assignee_rule_config_controller.router,
+    prefix="/assignee-rule-configs",
+    tags=["assignee-rule-configs"],
+)
 api_router.include_router(dashboard_controller.router, prefix="/dashboard", tags=["dashboard"])
+api_router.include_router(work_item_controller.router, prefix="/work-items", tags=["work-items"])
 api_router.include_router(program_controller.router, prefix="/programs", tags=["programs"])
 api_router.include_router(project_controller.router, prefix="/projects", tags=["projects"])
 api_router.include_router(iteration_controller.router, prefix="/iterations", tags=["iterations"])
@@ -36,5 +47,12 @@ api_router.include_router(test_run_controller.router, tags=["test-runs"])
 api_router.include_router(bug_controller.router, prefix="/bugs", tags=["bugs"])
 api_router.include_router(devops_controller.router, prefix="/devops", tags=["devops"])
 api_router.include_router(workflow_controller.router, prefix="/workflow-rules", tags=["workflow-rules"])
+api_router.include_router(workflow_definition_controller.router, prefix="/workflow-definitions", tags=["workflow-definitions"])
+api_router.include_router(workflow_runtime_controller.router, prefix="/workflow-runtime", tags=["workflow-runtime"])
 api_router.include_router(workflow_component_controller.component_router, prefix="/workflow-components", tags=["workflow-components"])
 api_router.include_router(workflow_component_controller.handler_router, prefix="/workflow-handlers", tags=["workflow-handlers"])
+api_router.include_router(
+    handler_transition_rule_controller.router,
+    prefix="/handler-transition-rules",
+    tags=["handler-transition-rules"],
+)

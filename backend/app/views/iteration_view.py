@@ -64,3 +64,15 @@ class LinkRequirementsRequest(BaseModel):
 
 class LinkTasksRequest(BaseModel):
     task_ids: list[int]
+
+
+class DeferIterationWorkItemsRequest(BaseModel):
+    target_iteration_id: int
+    requirement_ids: list[int] | None = None
+    task_ids: list[int] | None = None
+    remark: str | None = None
+
+
+class DeferIterationWorkItemsResult(BaseModel):
+    moved_requirement_ids: list[int]
+    moved_task_ids: list[int]

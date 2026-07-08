@@ -22,6 +22,7 @@ class Project(Base):
     status: Mapped[str] = mapped_column(String(32), default="planning")
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     workflow_config_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    assignee_rule_config_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     creator_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     updater_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     create_time: Mapped[datetime] = mapped_column(DateTime, server_default=text("CURRENT_TIMESTAMP"))

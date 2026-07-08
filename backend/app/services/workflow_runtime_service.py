@@ -1,0 +1,461 @@
+from datetime import datetime
+from typing import Any
+
+from fastapi import HTTPException, status
+from sqlalchemy.orm import Session
+
+from app.models.audit_log import AuditLog
+from app.models.bug import Bug
+from app.models.iteration import Iteration, IterationProject
+from app.models.project import Project
+from app.models.project_member import ProjectMember
+from app.models.requirement import Requirement
+from app.models.task import Task
+from app.models.test_case import TestCase
+from app.models.user import User
+from app.models.workflow_definition import WorkflowDefinition, WorkflowTransition
+from app.services.handler_transition_rule_service import _last_bug_resolver_id, _split_csv
+from app.services.project_permission_service import can_admin_action, ensure_authenticated
+from app.services.status_operation_service import create_status_operation
+from app.views.status_operation_view import StatusOperationCreate
+from app.views.workflow_runtime_view import (
+    WorkflowTransitionActionRead,
+    WorkflowTransitionBatchRead,
+    WorkflowTransitionBatchRequest,
+    WorkflowTransitionBatchResultItem,
+    WorkflowTransitionExecuteRequest,
+    WorkflowTransitionExecuteRead,
+)
+
+
+MODEL_BY_TYPE = {
+    "requirement": Requirement,
+    "task": Task,
+    "bug": Bug,
+}
+READ_ONLY_TERMINAL_STATUSES = {
+    "requirement": {"done", "closed"},
+    "task": {"done", "closed"},
+    "bug": set(),
+}
+BUG_RESOLUTIONS = {"已解决", "无法重现", "不予解决", "延期处理", "重复Bug", "设计如此", "外部原因"}
+
+
+def list_available_transitions(
+    db: Session,
+    object_type: str,
+    object_id: int,
+    actor: User | None,
+) -> list[WorkflowTransitionActionRead]:
+    item = _get_item(db, object_type, object_id)
+    definition = _workflow_definition_for_item(db, object_type, item)
+    if not definition:
+        return []
+    transitions = (
+        db.query(WorkflowTransition)
+        .filter(
+            WorkflowTransition.definition_id == definition.id,
+            WorkflowTransition.from_status == item.status,
+            WorkflowTransition.enabled == True,  # noqa: E712
+        )
+        .order_by(WorkflowTransition.sort_order.asc(), WorkflowTransition.id.asc())
+        .all()
+    )
+    return [_transition_read(transition) for transition in transitions if _can_see_transition(db, item, transition, actor)]
+
+
+def batch_available_transitions(
+    db: Session,
+    payload: WorkflowTransitionBatchRequest,
+    actor: User | None,
+) -> WorkflowTransitionBatchRead:
+    return WorkflowTransitionBatchRead(
+        items=[
+            WorkflowTransitionBatchResultItem(
+                object_type=item.object_type,
+                id=item.id,
+                transitions=list_available_transitions(db, item.object_type, item.id, actor),
+            )
+            for item in payload.items
+        ]
+    )
+
+
+def execute_transition(
+    db: Session,
+    object_type: str,
+    object_id: int,
+    request: WorkflowTransitionExecuteRequest,
+    actor: User | None,
+):
+    ensure_authenticated(actor)
+    item = _get_item(db, object_type, object_id)
+    transition = _get_executable_transition(db, object_type, item, request.action_key)
+    _ensure_can_execute(db, item, transition, actor, request)
+    from_status = item.status
+    delegated = _is_delegated(db, item, actor)
+    delegated_owner = _owner_user(db, getattr(item, "owner_id", None)) if delegated else None
+    original_owner_id = getattr(item, "owner_id", None)
+    _apply_domain_payload(db, object_type, item, transition, request, actor)
+    item.status = transition.to_status
+    next_owner_id = _next_owner_id(db, item, object_type, transition, request)
+    if next_owner_id != original_owner_id:
+        item.owner_id = next_owner_id
+    operation = create_status_operation(
+        db,
+        object_type=object_type,
+        object_id=item.id,
+        action=transition.action_key,
+        from_status=from_status,
+        to_status=transition.to_status,
+        payload=_status_payload(request),
+        actor_id=actor.id if actor else None,
+        actor_name=actor.full_name if actor else None,
+        is_delegated=delegated,
+        delegated_owner_id=delegated_owner.id if delegated_owner else getattr(item, "owner_id", None) if delegated else None,
+        delegated_owner_name=delegated_owner.full_name if delegated_owner else None,
+        delegate_reason=request.delegate_reason,
+    )
+    if next_owner_id != original_owner_id:
+        operation.remark = _append_remark(operation.remark, f"handler transition to {next_owner_id}")
+    db.commit()
+    db.refresh(item)
+    return WorkflowTransitionExecuteRead(
+        object_type=object_type,
+        id=item.id,
+        status=item.status,
+        owner_id=getattr(item, "owner_id", None),
+    )
+
+
+def _get_item(db: Session, object_type: str, object_id: int):
+    model = MODEL_BY_TYPE.get(object_type)
+    if not model:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unsupported workflow object type")
+    item = db.query(model).filter(model.id == object_id, model.deleted == 0).first()
+    if not item:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Workflow object not found")
+    return item
+
+
+def _workflow_definition_for_item(db: Session, object_type: str, item):
+    project_id = getattr(item, "source_project_id", None) or getattr(item, "project_id", None)
+    project = db.query(Project).filter(Project.id == project_id, Project.deleted == 0).first()
+    if not project or not project.assignee_rule_config_id:
+        return None
+    return (
+        db.query(WorkflowDefinition)
+        .filter(
+            WorkflowDefinition.object_type == object_type,
+            WorkflowDefinition.scope_type == "assignee_rule_config",
+            WorkflowDefinition.scope_id == project.assignee_rule_config_id,
+            WorkflowDefinition.enabled == True,  # noqa: E712
+        )
+        .order_by(WorkflowDefinition.id.desc())
+        .first()
+    )
+
+
+def _get_executable_transition(db: Session, object_type: str, item, action_key: str) -> WorkflowTransition:
+    definition = _workflow_definition_for_item(db, object_type, item)
+    if not definition:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Workflow definition not found")
+    transition = (
+        db.query(WorkflowTransition)
+        .filter(
+            WorkflowTransition.definition_id == definition.id,
+            WorkflowTransition.from_status == item.status,
+            WorkflowTransition.action_key == action_key,
+            WorkflowTransition.enabled == True,  # noqa: E712
+        )
+        .first()
+    )
+    if not transition:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Workflow transition not available")
+    return transition
+
+
+def _transition_read(transition: WorkflowTransition) -> WorkflowTransitionActionRead:
+    ui_config = transition.ui_config or {}
+    form_config = dict(transition.form_config or {})
+    handler_rule = transition.handler_rule or {}
+    if handler_rule.get("allow_manual_owner") and "allow_manual_owner" not in form_config:
+        form_config["allow_manual_owner"] = True
+    return WorkflowTransitionActionRead(
+        action_key=transition.action_key,
+        action_name=transition.action_name,
+        from_status=transition.from_status,
+        to_status=transition.to_status,
+        button_type=ui_config.get("button_type", "primary"),
+        list_display=ui_config.get("list_display", "more"),
+        list_priority=int(ui_config.get("list_priority", transition.sort_order or 100)),
+        requires_form=bool((form_config.get("fields") or [])),
+        confirm_required=bool(ui_config.get("confirm_required", False)),
+        ui_config=ui_config,
+        form_config=form_config,
+    )
+
+
+def _can_see_transition(db: Session, item, transition: WorkflowTransition, actor: User | None) -> bool:
+    if transition.ui_config and transition.ui_config.get("hidden") is True:
+        return False
+    if not _handler_allowed(db, item, actor):
+        return False
+    return _role_allowed(db, item, transition, actor)
+
+
+def _ensure_can_execute(
+    db: Session,
+    item,
+    transition: WorkflowTransition,
+    actor: User | None,
+    request: WorkflowTransitionExecuteRequest,
+) -> None:
+    delegated = _is_delegated(db, item, actor)
+    if not _handler_allowed(db, item, actor):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only current handler can execute transition")
+    if delegated and not request.delegate_reason:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="请填写代处理原因")
+    if not _role_allowed(db, item, transition, actor):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Transition role not allowed")
+
+
+def _handler_allowed(db: Session, item, actor: User | None) -> bool:
+    if not actor:
+        return True
+    owner_id = getattr(item, "owner_id", None)
+    if owner_id:
+        return owner_id == actor.id or _is_delegated(db, item, actor)
+    return _is_delegated(db, item, actor)
+
+
+def _role_allowed(db: Session, item, transition: WorkflowTransition, actor: User | None) -> bool:
+    roles = _split_csv(transition.allowed_roles)
+    if not roles or not actor:
+        return True
+    project_id = getattr(item, "source_project_id", None) or getattr(item, "project_id", None)
+    return bool(
+        db.query(ProjectMember)
+        .filter(ProjectMember.project_id == project_id, ProjectMember.user_id == actor.id, ProjectMember.project_role.in_(roles))
+        .first()
+    )
+
+
+def _is_delegated(db: Session, item, actor: User | None) -> bool:
+    if not actor:
+        return False
+    owner_id = getattr(item, "owner_id", None)
+    if owner_id == actor.id:
+        return False
+    project_id = getattr(item, "source_project_id", None) or getattr(item, "project_id", None)
+    return can_admin_action(db, project_id, actor.id)
+
+
+def _apply_domain_payload(
+    db: Session,
+    object_type: str,
+    item,
+    transition: WorkflowTransition,
+    request: WorkflowTransitionExecuteRequest,
+    actor: User | None,
+) -> None:
+    payload = request.payload or {}
+    if object_type == "requirement" and transition.action_key == "submit_validation":
+        _require_finished_tasks(db, item.id)
+    if object_type == "requirement" and transition.action_key in {"validation_passed", "complete"}:
+        _require_related_test_cases_passed(db, item.id)
+    if object_type == "requirement" and transition.action_key == "defer":
+        _defer_requirement_links(db, item, payload, actor)
+    if object_type == "bug" and transition.action_key == "resolve":
+        resolution = payload.get("resolution")
+        if not resolution:
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Resolution is required")
+        item.resolution = resolution
+        item.resolve_time = _parse_effective_time(payload) or datetime.now()
+        item.resolved_by = actor.id if actor else None
+    if object_type == "bug" and transition.action_key == "verify_passed":
+        _require_linked_test_case_passed(db, item)
+        item.verify_result = payload.get("verify_result") or "passed"
+        item.verify_time = _parse_effective_time(payload) or datetime.now()
+        item.verified_by = actor.id if actor else None
+        item.close_reason = payload.get("reason") or "verified"
+    if object_type == "bug" and transition.action_key in {"verify_failed", "activate"}:
+        item.verify_result = payload.get("verify_result") or ("failed" if transition.action_key == "verify_failed" else item.verify_result)
+        item.reopen_count = (item.reopen_count or 0) + 1
+    if object_type == "bug" and payload.get("iteration_id") is not None:
+        item.iteration_id = payload.get("iteration_id")
+
+
+def _require_finished_tasks(db: Session, requirement_id: int) -> None:
+    open_tasks = (
+        db.query(Task)
+        .filter(Task.requirement_id == requirement_id, Task.deleted == 0, Task.status.notin_(["done", "closed"]))
+        .count()
+    )
+    if open_tasks:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Requirement has unfinished tasks")
+
+
+def _require_related_test_cases_passed(db: Session, requirement_id: int) -> None:
+    test_cases = db.query(TestCase).filter(TestCase.requirement_id == requirement_id, TestCase.deleted == 0).all()
+    if not test_cases or any(test_case.last_execute_result not in {"passed", "ignored"} for test_case in test_cases):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Requirement test cases are not passed")
+
+
+def _require_linked_test_case_passed(db: Session, bug: Bug) -> None:
+    if not bug.test_case_id:
+        return
+    test_case = db.query(TestCase).filter(TestCase.id == bug.test_case_id, TestCase.deleted == 0).first()
+    if not test_case or test_case.last_execute_result not in {"passed", "ignored"}:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Linked test case must pass before bug verification")
+
+
+def _next_owner_id(
+    db: Session,
+    item,
+    object_type: str,
+    transition: WorkflowTransition,
+    request: WorkflowTransitionExecuteRequest,
+) -> int | None:
+    handler_rule = transition.handler_rule or {}
+    if request.next_owner_id and handler_rule.get("allow_manual_owner"):
+        _ensure_manual_owner_allowed(db, getattr(item, "project_id", None), request.next_owner_id, handler_rule)
+        return request.next_owner_id
+    original_owner_id = getattr(item, "owner_id", None)
+    target = _resolve_owner(db, item, object_type, handler_rule, original_owner_id)
+    if target is None:
+        target = _resolve_fallback_owner(db, item, handler_rule, original_owner_id)
+    return target
+
+
+def _resolve_owner(db: Session, item, object_type: str, rule: dict[str, Any], original_owner_id: int | None) -> int | None:
+    target_type = rule.get("target_type", "keep_current")
+    if target_type == "keep_current":
+        return original_owner_id
+    if target_type == "none":
+        return None
+    if target_type == "proposer":
+        return getattr(item, "proposer_id", None)
+    if target_type == "reporter":
+        return getattr(item, "reporter_id", None)
+    if target_type == "last_resolver" and object_type == "bug":
+        return _last_bug_resolver_id(db, item)
+    if target_type == "project_role":
+        return _first_project_member_id(db, getattr(item, "project_id", None), _split_csv(rule.get("target_roles")))
+    return None
+
+
+def _resolve_fallback_owner(db: Session, item, rule: dict[str, Any], original_owner_id: int | None) -> int | None:
+    fallback_type = rule.get("fallback_type", "keep_current")
+    if fallback_type == "keep_current":
+        return original_owner_id
+    if fallback_type == "project_role":
+        return _first_project_member_id(db, getattr(item, "project_id", None), _split_csv(rule.get("fallback_roles")))
+    return None
+
+
+def _first_project_member_id(db: Session, project_id: int | None, roles: list[str]) -> int | None:
+    if not project_id or not roles:
+        return None
+    for role in roles:
+        member = (
+            db.query(ProjectMember)
+            .filter(ProjectMember.project_id == project_id, ProjectMember.project_role == role)
+            .order_by(ProjectMember.sort_order.asc(), ProjectMember.id.asc())
+            .first()
+        )
+        if member:
+            return member.user_id
+    return None
+
+
+def _ensure_project_member(db: Session, project_id: int | None, user_id: int) -> None:
+    if not project_id:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Project is required")
+    if not db.query(ProjectMember).filter(ProjectMember.project_id == project_id, ProjectMember.user_id == user_id).first():
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Next handler is not a project member")
+
+
+def _ensure_manual_owner_allowed(db: Session, project_id: int | None, user_id: int, rule: dict[str, Any]) -> None:
+    _ensure_project_member(db, project_id, user_id)
+    roles = _split_csv(rule.get("manual_owner_roles"))
+    if not roles:
+        return
+    if not (
+        db.query(ProjectMember)
+        .filter(ProjectMember.project_id == project_id, ProjectMember.user_id == user_id, ProjectMember.project_role.in_(roles))
+        .first()
+    ):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Next handler role is not allowed")
+
+
+def _defer_requirement_links(db: Session, requirement: Requirement, payload: dict[str, Any], actor: User | None) -> None:
+    target_iteration_id = payload.get("target_iteration_id") or payload.get("iteration_id")
+    if target_iteration_id and requirement.iteration_id == target_iteration_id:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Target iteration cannot be current iteration")
+    if target_iteration_id:
+        _ensure_iteration_scope(db, requirement.project_id, target_iteration_id)
+
+    from_iteration_id = requirement.iteration_id
+    requirement.iteration_id = target_iteration_id
+    for task in db.query(Task).filter(Task.requirement_id == requirement.id, Task.deleted == 0).all():
+        task.iteration_id = target_iteration_id
+        if task.status != "closed":
+            task.status = "todo"
+    for test_case in db.query(TestCase).filter(TestCase.requirement_id == requirement.id, TestCase.deleted == 0).all():
+        test_case.iteration_id = target_iteration_id
+
+    db.add(
+        AuditLog(
+            actor_id=actor.id if actor else None,
+            action="defer",
+            object_type="requirement",
+            object_id=requirement.id,
+            before_data={"iteration_id": from_iteration_id, "status": requirement.status},
+            after_data={"iteration_id": target_iteration_id},
+        )
+    )
+
+
+def _ensure_iteration_scope(db: Session, project_id: int | None, iteration_id: int) -> None:
+    if not project_id:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Project is required")
+    iteration = db.query(Iteration).filter(Iteration.id == iteration_id, Iteration.deleted == 0).first()
+    if not iteration:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Iteration not found")
+    if iteration.status in {"finished", "closed"}:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Iteration is finished or closed")
+    scoped_project_ids = {row.project_id for row in db.query(IterationProject).filter(IterationProject.iteration_id == iteration_id).all()}
+    if project_id not in scoped_project_ids:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Iteration is not in project scope")
+
+
+def _owner_user(db: Session, owner_id: int | None) -> User | None:
+    if not owner_id:
+        return None
+    return db.query(User).filter(User.id == owner_id).first()
+
+
+def _status_payload(request: WorkflowTransitionExecuteRequest) -> StatusOperationCreate:
+    payload = request.payload or {}
+    return StatusOperationCreate(
+        effective_time=_parse_effective_time(payload),
+        reason=payload.get("reason"),
+        remark=payload.get("remark"),
+        target_iteration_id=payload.get("target_iteration_id") or payload.get("iteration_id"),
+        delegate_reason=request.delegate_reason,
+    )
+
+
+def _parse_effective_time(payload: dict[str, Any]):
+    value = payload.get("effective_time")
+    if not value or isinstance(value, datetime):
+        return value
+    try:
+        return datetime.fromisoformat(value)
+    except ValueError:
+        return None
+
+
+def _append_remark(remark: str | None, addition: str) -> str:
+    return f"{remark}; {addition}" if remark else addition

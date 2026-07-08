@@ -15,7 +15,9 @@ from app.services.lifecycle_service import (
     requirement_lifecycle_phase,
     test_case_lifecycle_phase,
 )
-from app.services.project_team_service import default_developer_id
+from app.services.current_handler_service import ensure_work_item_action
+from app.services.handler_transition_rule_service import apply_handler_transition
+from app.services.requirement_validation_service import evaluate_requirement_validation
 from app.services.status_operation_service import create_status_operation, list_status_operations
 from app.views.bug_view import BugCreate, BugFromTestRunCaseRequest, BugStatusActionRequest, BugUpdate
 
@@ -32,13 +34,13 @@ def get_bug(db: Session, bug_id: int) -> Bug:
 
 def create_bug(db: Session, payload: BugCreate) -> Bug:
     data = payload.model_dump()
+    if data.get("iteration_id"):
+        _ensure_iteration_can_accept_bug(db, data["iteration_id"], data.get("project_id"))
     data["lifecycle_phase"] = (
         requirement_lifecycle_phase(db, data.get("requirement_id"))
         or test_case_lifecycle_phase(db, data.get("test_case_id"))
         or project_lifecycle_phase(db, data.get("project_id"))
     )
-    if not data.get("owner_id"):
-        data["owner_id"] = _default_bug_owner_id(db, data)
     bug = Bug(**data)
     db.add(bug)
     db.commit()
@@ -63,11 +65,6 @@ def create_bug_from_test_run_case(db: Session, run_case_id: int, payload: BugFro
         if test_case.requirement_id
         else None
     )
-    project = db.query(Project).filter(Project.id == test_run.project_id, Project.deleted == 0).first()
-    owner_id = default_developer_id(db, test_run.project_id) or (requirement.owner_id if requirement else None)
-    if not owner_id and project:
-        owner_id = project.owner_id
-
     bug = Bug(
         project_id=test_run.project_id,
         requirement_id=test_case.requirement_id,
@@ -76,7 +73,7 @@ def create_bug_from_test_run_case(db: Session, run_case_id: int, payload: BugFro
         title=payload.title,
         severity=payload.severity,
         priority=payload.priority,
-        owner_id=owner_id,
+        owner_id=requirement.owner_id if requirement else None,
         reporter_id=payload.reporter_id or run_case.tester_id,
         reproduce_steps=payload.reproduce_steps,
         expected_result=payload.expected_result or test_case.expected_result,
@@ -90,41 +87,25 @@ def create_bug_from_test_run_case(db: Session, run_case_id: int, payload: BugFro
     return bug
 
 
-def update_bug(db: Session, bug_id: int, payload: BugUpdate) -> Bug:
+def update_bug(db: Session, bug_id: int, payload: BugUpdate, actor_id: int | None = None) -> Bug:
     bug = _get_active_bug(db, bug_id)
+    ensure_work_item_action(db, bug, actor_id, "Bug")
     data = payload.model_dump(exclude_unset=True)
     data.pop("status", None)
     data.pop("resolution", None)
     data.pop("verify_result", None)
     data.pop("close_reason", None)
+    if data.get("iteration_id"):
+        _ensure_iteration_can_accept_bug(db, data["iteration_id"], data.get("project_id", bug.project_id))
     for field, value in data.items():
         setattr(bug, field, value)
     db.commit()
     db.refresh(bug)
     return bug
 
-
-def _default_bug_owner_id(db: Session, data: dict) -> int | None:
-    if data.get("task_id"):
-        from app.models.task import Task
-
-        task = db.query(Task).filter(Task.id == data["task_id"], Task.deleted == 0).first()
-        if task and task.owner_id:
-            return task.owner_id
-    project_id = data.get("project_id")
-    owner_id = default_developer_id(db, project_id)
-    if owner_id:
-        return owner_id
-    if data.get("requirement_id"):
-        requirement = db.query(Requirement).filter(Requirement.id == data["requirement_id"], Requirement.deleted == 0).first()
-        if requirement and requirement.owner_id:
-            return requirement.owner_id
-    project = db.query(Project).filter(Project.id == project_id, Project.deleted == 0).first() if project_id else None
-    return project.owner_id if project else None
-
-
 def start_fixing_bug(db: Session, bug_id: int, payload: BugStatusActionRequest | None = None) -> Bug:
     bug = _get_active_bug(db, bug_id)
+    ensure_work_item_action(db, bug, payload.operator_id if payload else None, "Bug")
     _require_bug_status(bug, {"open", "reopened", "suspended"}, "只有待修复、重新打开或已挂起的 Bug 可以开始修复")
     if payload and payload.iteration_id:
         _ensure_iteration_can_fix_bug(db, payload.iteration_id, bug)
@@ -134,26 +115,23 @@ def start_fixing_bug(db: Session, bug_id: int, payload: BugStatusActionRequest |
 
 def resolve_bug(db: Session, bug_id: int, payload: BugStatusActionRequest) -> Bug:
     if not payload.resolution:
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="解决结果必填")
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="瑙ｅ喅缁撴灉蹇呭～")
     if payload.resolution not in BUG_RESOLUTIONS:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="未知的解决方案")
     bug = _get_active_bug(db, bug_id)
-    _require_bug_status(bug, {"fixing"}, "只有修复中的 Bug 可以提交解决")
+    ensure_work_item_action(db, bug, payload.operator_id, "Bug")
+    _require_bug_status(bug, {"fixing"}, "鍙湁淇涓殑 Bug 鍙互鎻愪氦瑙ｅ喅")
     bug.resolution = payload.resolution
     bug.resolve_time = payload.effective_time or datetime.now()
     bug.resolved_by = payload.operator_id
     return _transition_bug(db, bug, "verifying", "resolve", payload)
 
 
-def start_verifying_bug(db: Session, bug_id: int, payload: BugStatusActionRequest | None = None) -> Bug:
-    bug = _get_active_bug(db, bug_id)
-    _require_bug_status(bug, {"resolved"}, "只有已解决的 Bug 可以开始验证")
-    return _transition_bug(db, bug, "verifying", "start_verifying", payload)
-
-
 def verify_bug_passed(db: Session, bug_id: int, payload: BugStatusActionRequest | None = None) -> Bug:
     bug = _get_active_bug(db, bug_id)
-    _require_bug_status(bug, {"verifying"}, "只有待验证的 Bug 可以验证通过")
+    ensure_work_item_action(db, bug, payload.operator_id if payload else None, "Bug")
+    _require_bug_status(bug, {"verifying"}, "鍙湁寰呴獙璇佺殑 Bug 鍙互楠岃瘉閫氳繃")
+    _require_linked_test_case_passed(db, bug)
     action_payload = payload or BugStatusActionRequest()
     bug.verify_result = action_payload.verify_result or "passed"
     bug.verify_time = action_payload.effective_time or datetime.now()
@@ -164,7 +142,8 @@ def verify_bug_passed(db: Session, bug_id: int, payload: BugStatusActionRequest 
 
 def verify_bug_failed(db: Session, bug_id: int, payload: BugStatusActionRequest | None = None) -> Bug:
     bug = _get_active_bug(db, bug_id)
-    _require_bug_status(bug, {"verifying", "resolved"}, "只有已解决或待验证的 Bug 可以验证失败")
+    ensure_work_item_action(db, bug, payload.operator_id if payload else None, "Bug")
+    _require_bug_status(bug, {"verifying"}, "鍙湁寰呴獙璇佺殑 Bug 鍙互楠岃瘉澶辫触")
     action_payload = payload or BugStatusActionRequest()
     bug.verify_result = action_payload.verify_result or "failed"
     bug.verify_time = action_payload.effective_time or datetime.now()
@@ -175,15 +154,18 @@ def verify_bug_failed(db: Session, bug_id: int, payload: BugStatusActionRequest 
 
 def suspend_bug(db: Session, bug_id: int, payload: BugStatusActionRequest | None = None) -> Bug:
     bug = _get_active_bug(db, bug_id)
+    ensure_work_item_action(db, bug, payload.operator_id if payload else None, "Bug")
     _require_bug_status(bug, {"open", "fixing", "reopened"}, "只有待修复、修复中或重新打开的 Bug 可以挂起")
     return _transition_bug(db, bug, "suspended", "suspend", payload)
 
 
 def close_bug(db: Session, bug_id: int, payload: BugStatusActionRequest | None = None) -> Bug:
     bug = _get_active_bug(db, bug_id)
+    ensure_work_item_action(db, bug, payload.operator_id if payload else None, "Bug")
     _require_bug_status(bug, {"open", "suspended", "verifying"}, "只有待确认、已挂起或待验证的 Bug 可以关闭")
     action_payload = payload or BugStatusActionRequest()
     if bug.status == "verifying":
+        _require_linked_test_case_passed(db, bug)
         bug.verify_result = action_payload.verify_result or "passed"
         bug.verify_time = action_payload.effective_time or datetime.now()
         bug.verified_by = action_payload.operator_id
@@ -193,14 +175,11 @@ def close_bug(db: Session, bug_id: int, payload: BugStatusActionRequest | None =
 
 def activate_bug(db: Session, bug_id: int, payload: BugStatusActionRequest | None = None) -> Bug:
     bug = _get_active_bug(db, bug_id)
-    _require_bug_status(bug, {"verifying", "closed"}, "只有待验证或已关闭的 Bug 可以激活")
+    ensure_work_item_action(db, bug, payload.operator_id if payload else None, "Bug")
+    _require_bug_status(bug, {"closed"}, "只有已关闭的 Bug 可以激活")
     action_payload = payload or BugStatusActionRequest()
-    if bug.status == "verifying":
-        bug.verify_result = action_payload.verify_result or "failed"
-        bug.verify_time = action_payload.effective_time or datetime.now()
-        bug.verified_by = action_payload.operator_id
     bug.reopen_count = (bug.reopen_count or 0) + 1
-    return _transition_bug(db, bug, "fixing", "activate", action_payload)
+    return _transition_bug(db, bug, "reopened", "activate", action_payload)
 
 
 def list_bug_status_operations(db: Session, bug_id: int) -> list[dict]:
@@ -241,6 +220,18 @@ def _transition_bug(
         payload=payload,
         actor_id=payload.operator_id if payload else None,
     )
+    apply_handler_transition(
+        db,
+        item=bug,
+        object_type="bug",
+        action=action,
+        from_status=from_status,
+        to_status=target_status,
+        actor_id=payload.operator_id if payload else None,
+    )
+    db.flush()
+    if bug.requirement_id:
+        evaluate_requirement_validation(db, bug.requirement_id, actor_id=payload.operator_id if payload else None)
     db.commit()
     db.refresh(bug)
     return bug
@@ -251,19 +242,33 @@ def _require_bug_status(bug: Bug, allowed_statuses: set[str], message: str) -> N
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=message)
 
 
+def _require_linked_test_case_passed(db: Session, bug: Bug) -> None:
+    if not bug.test_case_id:
+        return
+    test_case = db.query(TestCase).filter(TestCase.id == bug.test_case_id, TestCase.deleted == 0).first()
+    if not test_case or test_case.last_execute_result not in {"passed", "ignored"}:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="请先执行关联用例并通过后再验证通过 Bug")
+
+
 def _ensure_iteration_can_fix_bug(db: Session, iteration_id: int, bug: Bug) -> None:
+    _ensure_iteration_can_accept_bug(db, iteration_id, bug.project_id)
+
+
+def _ensure_iteration_can_accept_bug(db: Session, iteration_id: int, bug_project_id: int | None) -> None:
     iteration = db.query(Iteration).filter(Iteration.id == iteration_id, Iteration.deleted == 0).first()
     if not iteration:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="解决迭代不存在")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="迭代不存在")
+    if iteration.status in {"finished", "closed"}:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="已结束的迭代不能选择")
     project_ids = {
         item.project_id
         for item in db.query(IterationProject).filter(IterationProject.iteration_id == iteration_id).all()
     }
     scoped_project_ids = set(project_ids)
-    for project_id in project_ids:
-        scoped_project_ids.update(_collect_descendant_project_ids(db, project_id))
-    if bug.project_id not in scoped_project_ids:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="解决迭代不包含该 Bug 所属项目")
+    for iteration_project_id in project_ids:
+        scoped_project_ids.update(_collect_descendant_project_ids(db, iteration_project_id))
+    if bug_project_id not in scoped_project_ids:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="迭代不包含该 Bug 所属项目")
 
 
 def _collect_descendant_project_ids(db: Session, project_id: int) -> set[int]:

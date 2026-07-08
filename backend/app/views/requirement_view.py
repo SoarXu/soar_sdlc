@@ -60,3 +60,32 @@ class RequirementRead(RequirementBase):
     create_time: datetime | None = None
     update_time: datetime | None = None
     delete_time: datetime | None = None
+
+
+class RequirementImportError(BaseModel):
+    row_number: int
+    messages: list[str]
+
+
+class RequirementImportDuplicate(BaseModel):
+    row_number: int
+    project_id: int
+    project_name: str
+    title: str
+    existing_requirement_id: int
+    existing_requirement_title: str
+
+
+class RequirementImportPreviewRead(BaseModel):
+    valid_count: int
+    error_count: int
+    duplicate_count: int
+    errors: list[RequirementImportError] = []
+    duplicates: list[RequirementImportDuplicate] = []
+
+
+class RequirementImportCommitRead(BaseModel):
+    created_count: int
+    updated_count: int
+    error_count: int
+    errors: list[RequirementImportError] = []

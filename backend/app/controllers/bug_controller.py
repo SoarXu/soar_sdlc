@@ -4,6 +4,11 @@ from sqlalchemy.orm import Session
 from app.core.auth_dependencies import get_optional_current_user
 from app.db.session import get_db
 from app.models.user import User
+from app.services.project_permission_service import (
+    ensure_audit_view_permission,
+    ensure_work_item_create_permission,
+    ensure_work_item_delete_permission,
+)
 from app.services.bug_service import (
     activate_bug,
     close_bug,
@@ -14,14 +19,16 @@ from app.services.bug_service import (
     list_bugs,
     resolve_bug,
     start_fixing_bug,
-    start_verifying_bug,
     suspend_bug,
     update_bug,
     verify_bug_failed,
     verify_bug_passed,
 )
+from app.services.assignment_service import assign_bug_owner, batch_assign_bug_owner
+from app.services.validation_case_service import bug_validation_context
 from app.views.bug_view import BugCreate, BugRead, BugStatusActionRequest, BugUpdate
-from app.views.status_operation_view import StatusOperationRead
+from app.views.status_operation_view import AssignOwnerRequest, BatchAssignOwnerRead, BatchAssignOwnerRequest, StatusOperationRead
+from app.views.test_case_view import BugValidationContextRead
 
 
 router = APIRouter()
@@ -33,8 +40,22 @@ def get_bugs(db: Session = Depends(get_db)):
 
 
 @router.post("", response_model=BugRead)
-def post_bug(payload: BugCreate, db: Session = Depends(get_db)):
+def post_bug(
+    payload: BugCreate,
+    db: Session = Depends(get_db),
+    current_user: User | None = Depends(get_optional_current_user),
+):
+    ensure_work_item_create_permission(db, payload.project_id, current_user)
     return create_bug(db, payload)
+
+
+@router.post("/batch-assign", response_model=BatchAssignOwnerRead)
+def batch_assign_bugs(
+    payload: BatchAssignOwnerRequest,
+    db: Session = Depends(get_db),
+    current_user: User | None = Depends(get_optional_current_user),
+):
+    return batch_assign_bug_owner(db, payload, actor=current_user)
 
 
 @router.get("/{bug_id}", response_model=BugRead)
@@ -42,9 +63,29 @@ def get_bug_detail(bug_id: int, db: Session = Depends(get_db)):
     return get_bug(db, bug_id)
 
 
+@router.get("/{bug_id}/validation-context", response_model=BugValidationContextRead)
+def get_bug_validation_context(bug_id: int, db: Session = Depends(get_db)):
+    return bug_validation_context(db, bug_id)
+
+
 @router.patch("/{bug_id}", response_model=BugRead)
-def patch_bug(bug_id: int, payload: BugUpdate, db: Session = Depends(get_db)):
-    return update_bug(db, bug_id, payload)
+def patch_bug(
+    bug_id: int,
+    payload: BugUpdate,
+    db: Session = Depends(get_db),
+    current_user: User | None = Depends(get_optional_current_user),
+):
+    return update_bug(db, bug_id, payload, actor_id=current_user.id if current_user else None)
+
+
+@router.post("/{bug_id}/assign", response_model=BugRead)
+def assign_bug(
+    bug_id: int,
+    payload: AssignOwnerRequest,
+    db: Session = Depends(get_db),
+    current_user: User | None = Depends(get_optional_current_user),
+):
+    return assign_bug_owner(db, bug_id, payload, actor=current_user)
 
 
 @router.post("/{bug_id}/start-fixing", response_model=BugRead)
@@ -65,16 +106,6 @@ def post_bug_resolve(
     current_user: User | None = Depends(get_optional_current_user),
 ):
     return resolve_bug(db, bug_id, _with_operator(payload, current_user))
-
-
-@router.post("/{bug_id}/start-verifying", response_model=BugRead)
-def start_bug_verifying(
-    bug_id: int,
-    payload: BugStatusActionRequest | None = None,
-    db: Session = Depends(get_db),
-    current_user: User | None = Depends(get_optional_current_user),
-):
-    return start_verifying_bug(db, bug_id, _with_operator(payload, current_user))
 
 
 @router.post("/{bug_id}/verify-passed", response_model=BugRead)
@@ -136,11 +167,23 @@ def _with_operator(payload: BugStatusActionRequest | None, current_user: User | 
 
 
 @router.get("/{bug_id}/status-operations", response_model=list[StatusOperationRead])
-def get_bug_status_operations(bug_id: int, db: Session = Depends(get_db)):
+def get_bug_status_operations(
+    bug_id: int,
+    db: Session = Depends(get_db),
+    current_user: User | None = Depends(get_optional_current_user),
+):
+    bug = get_bug(db, bug_id)
+    ensure_audit_view_permission(db, bug.project_id, current_user)
     return list_bug_status_operations(db, bug_id)
 
 
 @router.delete("/{bug_id}", status_code=status.HTTP_204_NO_CONTENT)
-def remove_bug(bug_id: int, db: Session = Depends(get_db)):
+def remove_bug(
+    bug_id: int,
+    db: Session = Depends(get_db),
+    current_user: User | None = Depends(get_optional_current_user),
+):
+    bug = get_bug(db, bug_id)
+    ensure_work_item_delete_permission(db, bug.project_id, current_user)
     delete_bug(db, bug_id)
     return Response(status_code=status.HTTP_204_NO_CONTENT)

@@ -79,7 +79,7 @@
       <template v-else-if="activeTab === 'iterations'">
         <div class="project-tab-toolbar">
           <el-input v-model="projectListFilters.iterations.keyword" clearable placeholder="搜索迭代名称" class="project-tab-search" @keyup.enter="resetProjectListSearch('iterations')" @clear="resetProjectListSearch('iterations')" />
-          <el-button type="primary" @click="openIterationCreate">新增迭代</el-button>
+          <el-button v-if="canManageCurrentProject" type="primary" @click="openIterationCreate">新增迭代</el-button>
         </div>
         <el-table :data="pagedProjectIterations" stripe width="100%">
           <el-table-column prop="id" label="ID" width="80" />
@@ -95,7 +95,7 @@
           <el-table-column prop="actual_end_date" label="实际结束" width="130" />
           <el-table-column label="状态" width="120"><template #default="{ row }">{{ iterationStatusLabel(row.status) }}</template></el-table-column>
           <el-table-column label="操作" width="250" fixed="right">
-            <template #default="{ row }"><el-button v-if="row.status === 'planning'" link type="success" @click="openIterationStart(row)">开始</el-button><el-button v-if="row.status === 'active'" link type="warning" @click="openIterationFinish(row)">结束</el-button><el-button link type="primary" @click="openIterationEdit(row)">编辑</el-button><el-popconfirm title="确认删除该迭代？" @confirm="removeIteration(row.id)"><template #reference><el-button link type="danger">删除</el-button></template></el-popconfirm></template>
+            <template #default="{ row }"><el-button v-if="canManageCurrentProject && row.status === 'planning'" link type="success" @click="openIterationStart(row)">开始</el-button><el-button v-if="canManageCurrentProject && row.status === 'active'" link type="warning" @click="openIterationFinish(row)">结束</el-button><el-button v-if="canManageCurrentProject" link type="primary" @click="openIterationEdit(row)">编辑</el-button><el-popconfirm v-if="canManageCurrentProject" title="确认删除该迭代？" @confirm="removeIteration(row.id)"><template #reference><el-button link type="danger">删除</el-button></template></el-popconfirm></template>
           </el-table-column>
         </el-table>
         <div class="table-pagination">
@@ -114,17 +114,17 @@
       <template v-else-if="activeTab === 'requirements'">
         <div class="project-tab-toolbar">
           <el-input v-model="projectListFilters.requirements.keyword" clearable placeholder="搜索需求标题" class="project-tab-search" @keyup.enter="resetProjectListSearch('requirements')" @clear="resetProjectListSearch('requirements')" />
-          <el-button type="primary" :disabled="projectClosed" @click="openRequirementCreate">新增需求</el-button>
+          <el-button v-if="canCreateCurrentWorkItem && !projectClosed" @click="openImportDialog">导入需求</el-button>
+          <el-button v-if="canCreateCurrentWorkItem && !projectClosed" type="primary" @click="openRequirementCreate">新增需求</el-button>
         </div>
         <el-table :data="pagedProjectRequirements" stripe width="100%">
           <el-table-column prop="id" label="ID" width="80" />
           <el-table-column label="需求标题" min-width="180" show-overflow-tooltip>
             <template #default="{ row }"><router-link class="table-link" :to="`/requirements/${row.id}`">{{ row.title }}</router-link></template>
           </el-table-column>
-          <el-table-column label="迭代" width="140"><template #default="{ row }">{{ labelById(projectIterationOptions, row.iteration_id) }}</template></el-table-column>
-          <el-table-column label="负责人" width="130"><template #default="{ row }">{{ userLabel(users, row.owner_id) }}</template></el-table-column>
+          <el-table-column label="迭代" width="140"><template #default="{ row }">{{ labelById(requirementIterationDisplayOptions, row.iteration_id) }}</template></el-table-column>
+          <el-table-column label="当前处理人" width="130"><template #default="{ row }">{{ userLabel(users, row.owner_id) }}</template></el-table-column>
           <el-table-column label="优先级" width="100"><template #default="{ row }"><RequirementPriorityBadge :value="row.priority" /></template></el-table-column>
-          <el-table-column label="评审状态" width="110"><template #default="{ row }">{{ reviewStatusLabel(row.review_status) }}</template></el-table-column>
           <el-table-column label="状态" width="90">
             <template #default="{ row }">
               <el-tooltip v-if="closeReasonByRequirement[row.id]" :content="closeReasonByRequirement[row.id]" placement="top" raw-content>
@@ -136,12 +136,19 @@
           <el-table-column label="操作" width="360" fixed="right">
             <template #default="{ row }">
               <div class="table-actions">
-              <el-button link type="primary" :disabled="projectClosed" @click="openRequirementEdit(row)">编辑</el-button>
-              <el-button v-if="canActivateRequirement(row)" link type="warning" @click="activateRequirementRow(row.id)">激活</el-button>
-              <el-button v-if="row.status === 'active'" link type="danger" @click="openRequirementClose(row)">关闭</el-button>
-              <el-button link type="success" :disabled="projectClosed" @click="openGenerate(row)">生成任务</el-button>
-              <el-button link type="success" :disabled="projectClosed" @click="openCaseCreateForRequirement(row)">建用例</el-button>
-              <el-popconfirm title="确认删除该需求？" :disabled="projectClosed" @confirm="removeRequirement(row.id)"><template #reference><el-button link type="danger" :disabled="projectClosed">删除</el-button></template></el-popconfirm>
+              <el-button v-if="canEditWorkItem(row)" link type="primary" @click="openRequirementEdit(row)">编辑</el-button>
+              <WorkflowActionButtons
+                object-type="requirement"
+                :object-id="row.id"
+                mode="list"
+                :transitions="projectWorkflowTransitionsFor('requirement', row.id)"
+                :auto-load="false"
+                :users="users"
+                @executed="refreshAfterMutation"
+              />
+              <el-button v-if="canCreateCurrentWorkItem && !projectClosed" link type="success" @click="openGenerate(row)">生成任务</el-button>
+              <el-button v-if="canManageCurrentTestCase && !projectClosed" link type="success" @click="openCaseCreateForRequirement(row)">建用例</el-button>
+              <el-popconfirm v-if="canDeleteCurrentWorkItem && !projectClosed" title="确认删除该需求？" @confirm="removeRequirement(row.id)"><template #reference><el-button link type="danger">删除</el-button></template></el-popconfirm>
               </div>
             </template>
           </el-table-column>
@@ -162,7 +169,7 @@
       <template v-else-if="activeTab === 'tasks'">
         <div class="project-tab-toolbar">
           <el-input v-model="projectListFilters.tasks.keyword" clearable placeholder="搜索任务标题" class="project-tab-search" @keyup.enter="resetProjectListSearch('tasks')" @clear="resetProjectListSearch('tasks')" />
-          <el-button type="primary" :disabled="projectClosed" @click="openTaskCreate">新增任务</el-button>
+          <el-button v-if="canCreateCurrentWorkItem && !projectClosed" type="primary" @click="openTaskCreate">新增任务</el-button>
         </div>
         <el-table :data="pagedProjectTasks" stripe width="100%">
           <el-table-column prop="id" label="ID" width="80" />
@@ -170,8 +177,7 @@
             <template #default="{ row }"><router-link class="table-link" :to="`/tasks/${row.id}`">{{ row.title }}</router-link></template>
           </el-table-column>
           <el-table-column label="需求" width="180"><template #default="{ row }">{{ labelById(projectRequirementOptions, row.requirement_id, 'title') }}</template></el-table-column>
-          <el-table-column label="负责人" width="150"><template #default="{ row }">{{ userLabel(users, row.owner_id) }}</template></el-table-column>
-          <el-table-column prop="actual_hours" label="实际工时" width="110" />
+          <el-table-column label="当前处理人" width="150"><template #default="{ row }">{{ userLabel(users, row.owner_id) }}</template></el-table-column>
           <el-table-column prop="due_date" label="截止日期" width="130" />
           <el-table-column label="状态" width="110">
             <template #default="{ row }">
@@ -182,7 +188,7 @@
             </template>
           </el-table-column>
           <el-table-column label="操作" width="240" fixed="right">
-            <template #default="{ row }"><el-button link type="primary" :disabled="projectClosed" @click="openTaskEdit(row)">编辑</el-button><el-button v-if="canActivateTask(row)" link type="warning" @click="activateTaskRow(row.id)">激活</el-button><el-button v-if="row.status !== 'closed'" link type="danger" @click="openTaskClose(row)">关闭</el-button><el-popconfirm title="确认删除该任务？" :disabled="projectClosed" @confirm="removeTask(row.id)"><template #reference><el-button link type="danger" :disabled="projectClosed">删除</el-button></template></el-popconfirm></template>
+            <template #default="{ row }"><el-button v-if="canEditWorkItem(row)" link type="primary" @click="openTaskEdit(row)">编辑</el-button><WorkflowActionButtons object-type="task" :object-id="row.id" mode="list" :transitions="projectWorkflowTransitionsFor('task', row.id)" :auto-load="false" :users="users" @executed="refreshAfterMutation" /><el-popconfirm v-if="canDeleteCurrentWorkItem && !projectClosed" title="确认删除该任务？" @confirm="removeTask(row.id)"><template #reference><el-button link type="danger">删除</el-button></template></el-popconfirm></template>
           </el-table-column>
         </el-table>
         <div class="table-pagination">
@@ -203,15 +209,16 @@
           <el-tab-pane label="测试用例" name="cases">
             <div class="project-tab-toolbar">
               <el-input v-model="projectListFilters.testCases.keyword" clearable placeholder="搜索用例标题" class="project-tab-search" @keyup.enter="resetProjectListSearch('testCases')" @clear="resetProjectListSearch('testCases')" />
-              <el-button type="primary" @click="openCaseCreate">新增用例</el-button>
+              <el-button v-if="canManageCurrentTestCase" type="primary" @click="openCaseCreate">新增用例</el-button>
             </div>
             <el-table :data="pagedProjectTestCases" stripe width="100%">
               <el-table-column prop="id" label="ID" width="80" />
               <el-table-column label="用例标题" min-width="180" show-overflow-tooltip><template #default="{ row }"><router-link class="table-link" :to="{ name: 'test-case-detail', params: { id: row.id }, query: { from: 'project' } }">{{ row.title }}</router-link></template></el-table-column>
-              <el-table-column label="需求" width="180"><template #default="{ row }">{{ labelById(projectRequirementOptions, row.requirement_id, 'title') }}</template></el-table-column>
+              <el-table-column label="需求" width="180"><template #default="{ row }">{{ testCaseRequirementLabel(row.requirement_id) }}</template></el-table-column>
+              <el-table-column label="测试人" width="140"><template #default="{ row }">{{ userLabel(users, row.default_tester_id) }}</template></el-table-column>
               <el-table-column label="最近执行时间" width="170"><template #default="{ row }">{{ formatDateTime(row.last_execute_time) }}</template></el-table-column>
               <el-table-column label="最近结果" width="110"><template #default="{ row }">{{ executionResultLabel(row.last_execute_result) }}</template></el-table-column>
-              <el-table-column label="操作" width="280" fixed="right"><template #default="{ row }"><el-button link type="success" @click="openCaseExecution(row)">执行</el-button><el-button link type="warning" :disabled="!canCreateBugFromCase(row)" @click="openCaseBug(row)">提 Bug</el-button><el-button link type="primary" @click="openCaseEdit(row)">编辑</el-button><el-popconfirm title="确认删除该用例？" @confirm="removeCase(row.id)"><template #reference><el-button link type="danger">删除</el-button></template></el-popconfirm></template></el-table-column>
+              <el-table-column label="操作" width="280" fixed="right"><template #default="{ row }"><el-button v-if="canManageCurrentTestCase" link type="success" @click="openCaseExecution(row)">执行</el-button><el-button v-if="canManageCurrentTestCase" link type="warning" :disabled="!canCreateBugFromCase(row)" @click="openCaseBug(row)">提 Bug</el-button><el-button v-if="canManageCurrentTestCase" link type="primary" @click="openCaseEdit(row)">编辑</el-button><el-popconfirm v-if="canManageCurrentTestCase" title="确认删除该用例？" @confirm="removeCase(row.id)"><template #reference><el-button link type="danger">删除</el-button></template></el-popconfirm></template></el-table-column>
             </el-table>
             <div class="table-pagination">
               <el-pagination
@@ -228,15 +235,15 @@
           <el-tab-pane label="测试单" name="runs">
             <div class="project-tab-toolbar">
               <el-input v-model="projectListFilters.testRuns.keyword" clearable placeholder="搜索测试单名称" class="project-tab-search" @keyup.enter="resetProjectListSearch('testRuns')" @clear="resetProjectListSearch('testRuns')" />
-              <el-button type="primary" @click="openRunCreate">新增测试单</el-button>
+              <el-button v-if="canManageCurrentTestCase" type="primary" @click="openRunCreate">新增测试单</el-button>
             </div>
             <el-table :data="pagedProjectTestRuns" stripe width="100%">
               <el-table-column prop="id" label="ID" width="80" />
               <el-table-column prop="name" label="测试单名称" min-width="180" show-overflow-tooltip />
               <el-table-column label="迭代" width="160"><template #default="{ row }">{{ labelById(projectIterationOptions, row.iteration_id) }}</template></el-table-column>
-              <el-table-column label="负责人" width="140"><template #default="{ row }">{{ userLabel(users, row.test_owner_id) }}</template></el-table-column>
+              <el-table-column label="测试人" width="140"><template #default="{ row }">{{ userLabel(users, row.test_owner_id) }}</template></el-table-column>
               <el-table-column label="状态" width="110"><template #default="{ row }">{{ testRunStatusLabel(row.status) }}</template></el-table-column>
-              <el-table-column label="操作" width="150" fixed="right"><template #default="{ row }"><el-button link type="primary" @click="openRunEdit(row)">编辑</el-button><el-popconfirm title="确认删除该测试单？" @confirm="removeRun(row.id)"><template #reference><el-button link type="danger">删除</el-button></template></el-popconfirm></template></el-table-column>
+              <el-table-column label="操作" width="150" fixed="right"><template #default="{ row }"><el-button v-if="canManageCurrentTestCase" link type="primary" @click="openRunEdit(row)">编辑</el-button><el-popconfirm v-if="canManageCurrentTestCase" title="确认删除该测试单？" @confirm="removeRun(row.id)"><template #reference><el-button link type="danger">删除</el-button></template></el-popconfirm></template></el-table-column>
             </el-table>
             <div class="table-pagination">
               <el-pagination
@@ -256,14 +263,14 @@
       <template v-else-if="activeTab === 'bugs'">
         <div class="project-tab-toolbar">
           <el-input v-model="projectListFilters.bugs.keyword" clearable placeholder="搜索 Bug 标题/类型" class="project-tab-search" @keyup.enter="resetProjectListSearch('bugs')" @clear="resetProjectListSearch('bugs')" />
-          <el-button type="primary" @click="openBugCreate">新增 Bug</el-button>
+          <el-button v-if="canCreateCurrentWorkItem" type="primary" @click="openBugCreate">新增 Bug</el-button>
         </div>
         <el-table :data="pagedProjectBugs" stripe width="100%">
           <el-table-column prop="id" label="ID" width="80" />
           <el-table-column label="Bug 标题" min-width="180" show-overflow-tooltip><template #default="{ row }"><router-link class="table-link" :to="{ name: 'bug-detail', params: { id: row.id }, query: { from: 'project' } }">{{ row.title }}</router-link></template></el-table-column>
           <el-table-column label="需求" width="180"><template #default="{ row }">{{ labelById(projectRequirementOptions, row.requirement_id, 'title') }}</template></el-table-column>
           <el-table-column label="任务" width="180"><template #default="{ row }">{{ labelById(projectTaskOptions, row.task_id, 'title') }}</template></el-table-column>
-          <el-table-column label="负责人" width="140"><template #default="{ row }">{{ userLabel(users, row.owner_id) }}</template></el-table-column>
+              <el-table-column label="当前处理人" width="140"><template #default="{ row }">{{ userLabel(users, row.owner_id) }}</template></el-table-column>
           <el-table-column label="Bug 类型" width="120"><template #default="{ row }">{{ row.bug_type || '-' }}</template></el-table-column>
           <el-table-column label="严重程度" width="110"><template #default="{ row }"><RequirementPriorityBadge :value="row.severity" /></template></el-table-column>
           <el-table-column label="优先级" width="110"><template #default="{ row }"><RequirementPriorityBadge :value="row.priority" /></template></el-table-column>
@@ -271,13 +278,17 @@
           <el-table-column label="操作" width="380" fixed="right">
             <template #default="{ row }">
               <div class="table-actions">
-                <el-button link type="primary" @click="openBugEdit(row)">编辑</el-button>
-                <el-button v-if="['open', 'reopened', 'suspended'].includes(row.status)" link type="success" @click="openBugAction(row, 'start_fixing')">确认</el-button>
-                <el-button v-if="row.status === 'fixing'" link type="success" @click="openBugAction(row, 'resolve')">解决</el-button>
-                <el-button v-if="['verifying', 'closed'].includes(row.status)" link type="warning" @click="openBugAction(row, 'activate')">激活</el-button>
-                <el-button v-if="['open', 'fixing', 'reopened'].includes(row.status)" link type="warning" @click="openBugAction(row, 'suspend')">挂起</el-button>
-                <el-button v-if="['open', 'suspended', 'verifying'].includes(row.status)" link type="danger" @click="openBugAction(row, 'close')">关闭</el-button>
-                <el-popconfirm title="确认删除该 Bug？" @confirm="removeBug(row.id)"><template #reference><el-button link type="danger">删除</el-button></template></el-popconfirm>
+                <el-button v-if="canEditWorkItem(row)" link type="primary" @click="openBugEdit(row)">编辑</el-button>
+                <WorkflowActionButtons
+                  object-type="bug"
+                  :object-id="row.id"
+                  mode="list"
+                  :transitions="projectWorkflowTransitionsFor('bug', row.id)"
+                  :auto-load="false"
+                  :users="users"
+                  @executed="refreshAfterMutation"
+                />
+                <el-popconfirm v-if="canDeleteCurrentWorkItem" title="确认删除该 Bug？" @confirm="removeBug(row.id)"><template #reference><el-button link type="danger">删除</el-button></template></el-popconfirm>
               </div>
             </template>
           </el-table-column>
@@ -297,45 +308,89 @@
 
       <template v-else-if="activeTab === 'members'">
         <div class="project-tab-toolbar">
-          <el-button type="primary" @click="addProjectMember">添加成员</el-button>
-          <el-button type="success" :loading="saving" @click="submitProjectMembers">保存成员</el-button>
+          <el-button v-if="canManageCurrentProject" type="primary" @click="addProjectMember">添加成员</el-button>
+          <el-button v-if="canManageCurrentProject" type="success" :loading="saving" @click="submitProjectMembers">保存成员</el-button>
         </div>
         <el-table :data="projectMembers" stripe width="100%">
           <el-table-column label="成员" min-width="180">
             <template #default="{ row }">
-              <el-select v-model="row.user_id" clearable filterable>
+              <el-select v-model="row.user_id" clearable filterable :disabled="!canManageCurrentProject">
                 <el-option v-for="user in users" :key="user.id" :label="user.full_name" :value="user.id" />
               </el-select>
             </template>
           </el-table-column>
           <el-table-column label="项目角色" min-width="180">
             <template #default="{ row }">
-              <el-select v-model="row.project_role">
+              <el-select v-model="row.project_role" :disabled="!canManageCurrentProject">
                 <el-option v-for="option in projectMemberRoleOptions" :key="option.value" :label="option.label" :value="option.value" />
               </el-select>
-            </template>
-          </el-table-column>
-          <el-table-column label="默认负责人" width="130" align="center">
-            <template #default="{ row }">
-              <el-tooltip content="新增需求、任务、Bug、用例时优先作为该角色的默认负责人" placement="top">
-                <el-checkbox v-model="row.is_default_assignee" />
-              </el-tooltip>
             </template>
           </el-table-column>
           <el-table-column label="纳入工作台" width="130" align="center">
             <template #default="{ row }">
               <el-tooltip content="该成员可在工作台按项目团队范围看到相关进行中工作项" placement="top">
-                <el-checkbox v-model="row.is_workbench_participant" />
+                <el-checkbox v-model="row.is_workbench_participant" :disabled="!canManageCurrentProject" />
               </el-tooltip>
             </template>
           </el-table-column>
           <el-table-column label="显示顺序" width="130">
-            <template #default="{ row }"><el-input-number v-model="row.sort_order" :min="0" controls-position="right" /></template>
+            <template #default="{ row }"><el-input-number v-model="row.sort_order" :min="0" controls-position="right" :disabled="!canManageCurrentProject" /></template>
           </el-table-column>
           <el-table-column label="操作" width="100" fixed="right">
-            <template #default="{ $index }"><el-button link type="danger" @click="removeProjectMember($index)">删除</el-button></template>
+            <template #default="{ $index }"><el-button v-if="canManageCurrentProject" link type="danger" @click="removeProjectMember($index)">删除</el-button></template>
           </el-table-column>
         </el-table>
+      </template>
+
+      <template v-else-if="activeTab === 'settings'">
+        <div class="project-settings">
+          <section class="project-settings-section">
+            <div class="project-settings-head">
+              <div>
+                <h2>工作流方案</h2>
+                <p>项目绑定一套工作流方案，需求、任务、Bug 会按方案内对应对象类型的流程执行。</p>
+              </div>
+              <el-tag type="info" effect="plain">{{ activeWorkflowSchemeLabel }}</el-tag>
+            </div>
+            <el-form label-position="top" class="project-settings-form">
+              <el-form-item label="工作流方案">
+                <el-select
+                  v-model="settingsForm.assignee_rule_config_id"
+                  clearable
+                  filterable
+                  :disabled="!canManageCurrentProject"
+                  placeholder="请选择工作流方案"
+                >
+                  <el-option
+                    v-for="scheme in enabledWorkflowSchemes"
+                    :key="scheme.id"
+                    :label="scheme.name"
+                    :value="scheme.id"
+                  />
+                </el-select>
+              </el-form-item>
+              <el-form-item label="方案说明">
+                <el-input
+                  :model-value="selectedWorkflowSchemeDescription"
+                  type="textarea"
+                  :rows="3"
+                  readonly
+                  placeholder="选择工作流方案后显示说明"
+                />
+              </el-form-item>
+              <el-alert
+                title="切换方案不会批量修改已有工作项状态；后续新的状态流转和处理人流转按新方案执行。"
+                type="info"
+                :closable="false"
+                show-icon
+              />
+            </el-form>
+            <div v-if="canManageCurrentProject" class="project-settings-actions">
+              <el-button @click="resetProjectSettings">重置</el-button>
+              <el-button type="primary" :loading="saving" @click="submitProjectSettings">保存配置</el-button>
+            </div>
+          </section>
+        </div>
       </template>
 
       <template v-else>
@@ -370,55 +425,74 @@
       <template #footer><el-button @click="iterationFinishVisible = false">取消</el-button><el-button type="primary" :loading="saving" @click="submitIterationFinish">确认结束</el-button></template>
     </el-dialog>
 
+    <el-dialog v-model="deferWorkItemsVisible" title="处理未完成项" width="720px">
+      <el-alert
+        title="当前迭代存在未完成需求或任务，请先延期到其他迭代后再结束当前迭代。"
+        type="warning"
+        :closable="false"
+        show-icon
+      />
+      <el-form label-position="top" class="defer-work-form">
+        <el-form-item label="目标迭代" required>
+          <el-select v-model="deferWorkItemsForm.target_iteration_id" filterable placeholder="请选择目标迭代">
+            <el-option
+              v-for="iteration in deferTargetIterations"
+              :key="iteration.id"
+              :label="iteration.name"
+              :value="iteration.id"
+            />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="备注">
+          <el-input v-model="deferWorkItemsForm.remark" type="textarea" :rows="2" placeholder="例如：延期到下一迭代继续处理" />
+        </el-form-item>
+      </el-form>
+      <div class="defer-work-lists">
+        <div>
+          <h3>未完成需求 {{ unfinishedIterationRequirements.length }}</h3>
+          <el-table :data="unfinishedIterationRequirements" max-height="220" border>
+            <el-table-column prop="title" label="标题" min-width="220" />
+            <el-table-column label="状态" width="100"><template #default="{ row }">{{ requirementStatusLabel(row.status) }}</template></el-table-column>
+            <el-table-column label="当前处理人" width="120"><template #default="{ row }">{{ userLabel(users, row.owner_id) }}</template></el-table-column>
+          </el-table>
+        </div>
+        <div>
+          <h3>未完成任务 {{ unfinishedIterationTasks.length }}</h3>
+          <el-table :data="unfinishedIterationTasks" max-height="220" border>
+            <el-table-column prop="title" label="标题" min-width="220" />
+            <el-table-column label="状态" width="100"><template #default="{ row }">{{ taskStatusLabel(row.status) }}</template></el-table-column>
+            <el-table-column label="当前处理人" width="120"><template #default="{ row }">{{ userLabel(users, row.owner_id) }}</template></el-table-column>
+          </el-table>
+        </div>
+      </div>
+      <template #footer>
+        <el-button @click="deferWorkItemsVisible = false">取消</el-button>
+        <el-button type="primary" :loading="saving" @click="submitDeferWorkItems">延期到目标迭代</el-button>
+      </template>
+    </el-dialog>
+
     <el-dialog v-model="requirementDialogVisible" :title="editingRequirementId ? '编辑需求' : '新增需求'" width="640px">
       <el-form label-position="top">
         <el-form-item label="需求标题" required><el-input v-model="requirementForm.title" /></el-form-item>
-        <div class="form-grid"><el-form-item label="迭代"><el-select v-model="requirementForm.iteration_id" clearable filterable><el-option v-for="iteration in projectIterationOptions" :key="iteration.id" :label="iteration.name" :value="iteration.id" /></el-select></el-form-item><el-form-item label="负责人"><el-select v-model="requirementForm.owner_id" clearable filterable><el-option v-for="user in users" :key="user.id" :label="user.full_name" :value="user.id" /></el-select></el-form-item><el-form-item label="提出人"><el-select v-model="requirementForm.proposer_id" clearable filterable><el-option v-for="user in users" :key="user.id" :label="user.full_name" :value="user.id" /></el-select></el-form-item><el-form-item label="类型"><el-select v-model="requirementForm.requirement_type"><el-option v-for="option in requirementTypeOptions" :key="option" :label="option" :value="option" /></el-select></el-form-item><el-form-item label="优先级"><el-select v-model="requirementForm.priority" class="priority-select"><template #prefix><RequirementPriorityBadge :value="requirementForm.priority" /></template><el-option v-for="option in requirementPriorityOptions" :key="option.value" :label="option.label" :value="option.value"><RequirementPriorityBadge :value="option.value" /></el-option></el-select></el-form-item><el-form-item label="评审状态"><el-select v-model="requirementForm.review_status"><el-option label="无需评审" value="not_required" /><el-option label="待评审" value="pending" /><el-option label="已通过" value="approved" /></el-select></el-form-item></div>
+        <div class="form-grid"><el-form-item label="迭代"><el-select v-model="requirementForm.iteration_id" clearable filterable><el-option v-for="iteration in requirementIterationOptions" :key="iteration.id" :label="iteration.name" :value="iteration.id" /></el-select></el-form-item><el-form-item label="当前处理人"><el-select v-model="requirementForm.owner_id" clearable filterable><el-option v-for="user in users" :key="user.id" :label="user.full_name" :value="user.id" /></el-select></el-form-item><el-form-item label="提出人"><el-select v-model="requirementForm.proposer_id" clearable filterable><el-option v-for="user in users" :key="user.id" :label="user.full_name" :value="user.id" /></el-select></el-form-item><el-form-item label="类型"><el-select v-model="requirementForm.requirement_type"><el-option v-for="option in requirementTypeOptions" :key="option" :label="option" :value="option" /></el-select></el-form-item><el-form-item label="优先级"><el-select v-model="requirementForm.priority" class="priority-select"><template #prefix><RequirementPriorityBadge :value="requirementForm.priority" /></template><el-option v-for="option in requirementPriorityOptions" :key="option.value" :label="option.label" :value="option.value"><RequirementPriorityBadge :value="option.value" /></el-option></el-select></el-form-item></div>
         <el-form-item label="需求描述"><el-input v-model="requirementForm.description" type="textarea" :rows="3" /></el-form-item>
         <el-form-item label="验收标准"><el-input v-model="requirementForm.acceptance_criteria" type="textarea" :rows="3" /></el-form-item>
       </el-form>
       <template #footer><el-button @click="requirementDialogVisible = false">取消</el-button><el-button type="primary" :loading="saving" @click="submitRequirement">保存</el-button></template>
     </el-dialog>
 
-    <el-dialog v-model="closeRequirementVisible" title="关闭需求" width="480px">
-      <el-form label-position="top">
-        <el-form-item label="关闭原因" required>
-          <el-select v-model="closeRequirementForm.reason" placeholder="请选择关闭原因">
-            <el-option v-for="option in requirementCloseReasons" :key="option" :label="option" :value="option" />
-          </el-select>
-        </el-form-item>
-        <el-form-item label="备注">
-          <el-input v-model="closeRequirementForm.remark" type="textarea" :rows="3" placeholder="补充说明本次关闭原因" />
-        </el-form-item>
-      </el-form>
-      <template #footer>
-        <el-button @click="closeRequirementVisible = false">取消</el-button>
-        <el-button type="primary" :loading="saving" @click="submitRequirementClose">确认关闭</el-button>
-      </template>
-    </el-dialog>
+    
 
     <el-dialog v-model="taskDialogVisible" :title="editingTaskId ? '编辑任务' : '新增任务'" width="620px">
       <el-form label-position="top">
         <el-form-item label="任务标题" required><el-input v-model="taskForm.title" /></el-form-item>
-        <div class="form-grid"><el-form-item label="需求"><el-select v-model="taskForm.requirement_id" clearable filterable @change="onTaskRequirementChange"><el-option v-for="requirement in projectRequirementOptions" :key="requirement.id" :label="requirement.title" :value="requirement.id" /></el-select></el-form-item><el-form-item label="负责人"><el-select v-model="taskForm.owner_id" clearable filterable><el-option v-for="user in users" :key="user.id" :label="user.full_name" :value="user.id" /></el-select></el-form-item><el-form-item label="类型"><el-input v-model="taskForm.task_type" /></el-form-item><el-form-item label="优先级"><el-select v-model="taskForm.priority"><el-option label="高" value="high" /><el-option label="中" value="medium" /><el-option label="低" value="low" /></el-select></el-form-item><el-form-item label="预计工时"><el-input-number v-model="taskForm.estimated_hours" :min="0" /></el-form-item><el-form-item label="实际工时"><el-input-number v-model="taskForm.actual_hours" :min="0" /></el-form-item><el-form-item label="截止日期"><el-date-picker v-model="taskForm.due_date" value-format="YYYY-MM-DD" type="date" /></el-form-item><el-form-item label="状态"><el-select v-model="taskForm.status"><el-option label="待办" value="todo" /><el-option label="进行中" value="doing" /><el-option label="完成" value="done" /><el-option label="关闭" value="closed" /></el-select></el-form-item></div>
+        <div class="form-grid"><el-form-item label="需求"><el-select v-model="taskForm.requirement_id" clearable filterable @change="onTaskRequirementChange"><el-option v-for="requirement in projectRequirementOptions" :key="requirement.id" :label="requirement.title" :value="requirement.id" /></el-select></el-form-item><el-form-item label="当前处理人"><el-select v-model="taskForm.owner_id" clearable filterable><el-option v-for="user in users" :key="user.id" :label="user.full_name" :value="user.id" /></el-select></el-form-item><el-form-item label="优先级"><el-select v-model="taskForm.priority"><el-option label="高" value="high" /><el-option label="中" value="medium" /><el-option label="低" value="low" /></el-select></el-form-item><el-form-item label="截止日期"><el-date-picker v-model="taskForm.due_date" value-format="YYYY-MM-DD" type="date" /></el-form-item><el-form-item label="状态"><el-select v-model="taskForm.status"><el-option label="待办" value="todo" /><el-option label="进行中" value="doing" /><el-option label="完成" value="done" /><el-option label="关闭" value="closed" /></el-select></el-form-item></div>
         <el-form-item label="描述"><el-input v-model="taskForm.description" type="textarea" :rows="3" /></el-form-item>
       </el-form>
       <template #footer><el-button @click="taskDialogVisible = false">取消</el-button><el-button type="primary" :loading="saving" @click="submitTask">保存</el-button></template>
     </el-dialog>
 
-    <el-dialog v-model="closeTaskVisible" title="关闭任务" width="480px">
-      <el-form label-position="top">
-        <el-form-item label="关闭原因" required>
-          <el-select v-model="closeTaskForm.reason" placeholder="请选择关闭原因">
-            <el-option v-for="option in closeReasons" :key="option" :label="option" :value="option" />
-          </el-select>
-        </el-form-item>
-        <el-form-item label="备注">
-          <el-input v-model="closeTaskForm.remark" type="textarea" :rows="3" placeholder="补充说明本次关闭原因" />
-        </el-form-item>
-      </el-form>
-      <template #footer><el-button @click="closeTaskVisible = false">取消</el-button><el-button type="primary" :loading="saving" @click="submitTaskClose">确认关闭</el-button></template>
-    </el-dialog>
+    
 
     <el-dialog v-model="caseDialogVisible" :title="editingCaseId ? '编辑用例' : '新增用例'" width="760px">
       <el-form label-position="top">
@@ -492,30 +566,66 @@
     </el-dialog>
 
     <el-dialog v-model="bugDialogVisible" :title="editingBugId ? '编辑 Bug' : '新增 Bug'" width="700px">
-      <el-form label-position="top"><el-form-item label="Bug 标题" required><el-input v-model="bugForm.title" /></el-form-item><div class="form-grid"><el-form-item label="需求"><el-select v-model="bugForm.requirement_id" clearable filterable><el-option v-for="requirement in projectRequirementOptions" :key="requirement.id" :label="requirement.title" :value="requirement.id" /></el-select></el-form-item><el-form-item label="任务"><el-select v-model="bugForm.task_id" clearable filterable><el-option v-for="task in projectTaskOptions" :key="task.id" :label="task.title" :value="task.id" /></el-select></el-form-item><el-form-item label="来源用例"><el-select v-model="bugForm.test_case_id" clearable filterable><el-option v-for="item in projectTestCaseOptions" :key="item.id" :label="item.title" :value="item.id" /></el-select></el-form-item><el-form-item label="来源测试单"><el-select v-model="bugForm.test_run_id" clearable filterable><el-option v-for="run in projectTestRunOptions" :key="run.id" :label="run.name" :value="run.id" /></el-select></el-form-item><el-form-item label="所属迭代"><el-select v-model="bugForm.iteration_id" clearable filterable><el-option v-for="iteration in projectIterationOptions" :key="iteration.id" :label="iteration.name" :value="iteration.id" /></el-select></el-form-item><el-form-item label="Bug 类型"><el-select v-model="bugForm.bug_type"><el-option v-for="option in bugTypeOptions" :key="option" :label="option" :value="option" /></el-select></el-form-item><el-form-item label="负责人"><el-select v-model="bugForm.owner_id" clearable filterable><el-option v-for="user in users" :key="user.id" :label="user.full_name" :value="user.id" /></el-select></el-form-item><el-form-item label="提出人"><el-select v-model="bugForm.reporter_id" clearable filterable><el-option v-for="user in users" :key="user.id" :label="user.full_name" :value="user.id" /></el-select></el-form-item><el-form-item label="严重程度"><el-select v-model="bugForm.severity"><el-option v-for="option in priorityLevelOptions" :key="option.value" :label="option.label" :value="option.value"><RequirementPriorityBadge :value="option.value" /></el-option></el-select></el-form-item><el-form-item label="优先级"><el-select v-model="bugForm.priority"><el-option v-for="option in priorityLevelOptions" :key="option.value" :label="option.label" :value="option.value"><RequirementPriorityBadge :value="option.value" /></el-option></el-select></el-form-item></div><el-form-item label="复现步骤"><RichTextPasteEditor v-model="bugForm.reproduce_steps" /></el-form-item><el-form-item label="期望结果"><el-input v-model="bugForm.expected_result" type="textarea" :rows="2" /></el-form-item><el-form-item label="实际结果"><el-input v-model="bugForm.actual_result" type="textarea" :rows="2" /></el-form-item></el-form>
+      <el-form label-position="top"><el-form-item label="Bug 标题" required><el-input v-model="bugForm.title" /></el-form-item><div class="form-grid"><el-form-item label="需求"><el-select v-model="bugForm.requirement_id" clearable filterable><el-option v-for="requirement in projectRequirementOptions" :key="requirement.id" :label="requirement.title" :value="requirement.id" /></el-select></el-form-item><el-form-item label="任务"><el-select v-model="bugForm.task_id" clearable filterable><el-option v-for="task in projectTaskOptions" :key="task.id" :label="task.title" :value="task.id" /></el-select></el-form-item><el-form-item label="来源用例"><el-select v-model="bugForm.test_case_id" clearable filterable><el-option v-for="item in projectTestCaseOptions" :key="item.id" :label="item.title" :value="item.id" /></el-select></el-form-item><el-form-item label="来源测试单"><el-select v-model="bugForm.test_run_id" clearable filterable><el-option v-for="run in projectTestRunOptions" :key="run.id" :label="run.name" :value="run.id" /></el-select></el-form-item><el-form-item label="所属迭代"><el-select v-model="bugForm.iteration_id" clearable filterable><el-option v-for="iteration in bugEditableIterationDisplayOptions" :key="iteration.id" :label="iteration.name" :value="iteration.id" :disabled="iteration.disabled" /></el-select></el-form-item><el-form-item label="Bug 类型"><el-select v-model="bugForm.bug_type"><el-option v-for="option in bugTypeOptions" :key="option" :label="option" :value="option" /></el-select></el-form-item><el-form-item label="当前处理人"><el-select v-model="bugForm.owner_id" clearable filterable><el-option v-for="user in users" :key="user.id" :label="user.full_name" :value="user.id" /></el-select></el-form-item><el-form-item label="提出人"><el-select v-model="bugForm.reporter_id" clearable filterable><el-option v-for="user in users" :key="user.id" :label="user.full_name" :value="user.id" /></el-select></el-form-item><el-form-item label="严重程度"><el-select v-model="bugForm.severity"><el-option v-for="option in priorityLevelOptions" :key="option.value" :label="option.label" :value="option.value"><RequirementPriorityBadge :value="option.value" /></el-option></el-select></el-form-item><el-form-item label="优先级"><el-select v-model="bugForm.priority"><el-option v-for="option in priorityLevelOptions" :key="option.value" :label="option.label" :value="option.value"><RequirementPriorityBadge :value="option.value" /></el-option></el-select></el-form-item></div><el-form-item label="复现步骤"><RichTextPasteEditor v-model="bugForm.reproduce_steps" /></el-form-item><el-form-item label="期望结果"><el-input v-model="bugForm.expected_result" type="textarea" :rows="2" /></el-form-item><el-form-item label="实际结果"><el-input v-model="bugForm.actual_result" type="textarea" :rows="2" /></el-form-item></el-form>
       <template #footer><el-button @click="bugDialogVisible = false">取消</el-button><el-button type="primary" :loading="saving" @click="submitBug">保存</el-button></template>
     </el-dialog>
 
-    <el-dialog v-model="bugActionVisible" :title="bugActionTitle" width="480px">
-      <el-form label-position="top">
-        <el-form-item v-if="bugActionType === 'resolve'" label="解决结果" required>
-          <el-select v-model="bugActionForm.resolution">
-            <el-option v-for="option in bugResolutionOptions" :key="option.value" :label="option.label" :value="option.value" />
-          </el-select>
-        </el-form-item>
-        <el-form-item v-if="bugActionType === 'start_fixing'" label="解决迭代">
-          <el-select v-model="bugActionForm.iteration_id" clearable filterable placeholder="请选择解决迭代">
-            <el-option v-for="iteration in projectIterationOptions" :key="iteration.id" :label="iteration.name" :value="iteration.id" />
-          </el-select>
-        </el-form-item>
-        <el-form-item v-if="bugActionType === 'suspend'" label="原因">
-          <el-input v-model="bugActionForm.reason" />
-        </el-form-item>
-        <el-form-item label="备注">
-          <el-input v-model="bugActionForm.remark" type="textarea" :rows="3" />
-        </el-form-item>
-      </el-form>
-      <template #footer><el-button @click="bugActionVisible = false">取消</el-button><el-button type="primary" :loading="saving" @click="submitBugAction">确认</el-button></template>
+    
+
+    <el-dialog v-model="importVisible" title="导入需求" width="720px">
+      <div class="import-template-action">
+        <span>请先下载固定模板，填写后上传 Excel 文件。</span>
+        <el-button link type="primary" @click="downloadImportTemplate">下载模板</el-button>
+      </div>
+      <el-upload
+        :auto-upload="false"
+        :limit="1"
+        accept=".xlsx"
+        :on-change="onImportFileChange"
+        :on-remove="clearImportFile"
+      >
+        <el-button>选择 Excel 文件</el-button>
+      </el-upload>
+
+      <div v-if="importPreview" class="import-preview">
+        <p class="import-preview-summary">
+          有效 {{ importPreview.valid_count }} 行，失败 {{ importPreview.error_count }} 行，重复 {{ importPreview.duplicate_count }} 行
+        </p>
+        <el-table v-if="importPreview.errors.length" :data="importPreview.errors" size="small" border>
+          <el-table-column prop="row_number" label="行号" width="80" />
+          <el-table-column label="错误">
+            <template #default="{ row }">{{ row.messages.join('；') }}</template>
+          </el-table-column>
+        </el-table>
+        <template v-if="importPreview.duplicates.length">
+          <div class="import-strategy">
+            <el-radio-group v-model="duplicateStrategy">
+              <el-radio label="update_existing">更新已有需求</el-radio>
+              <el-radio label="create_duplicate">重复创建</el-radio>
+            </el-radio-group>
+          </div>
+          <el-table :data="importPreview.duplicates" size="small" border>
+            <el-table-column prop="row_number" label="行号" width="80" />
+            <el-table-column prop="project_name" label="项目" min-width="140" />
+            <el-table-column prop="title" label="需求标题" min-width="160" />
+            <el-table-column prop="existing_requirement_id" label="已有ID" width="90" />
+            <el-table-column prop="existing_requirement_title" label="已有需求" min-width="160" />
+          </el-table>
+        </template>
+      </div>
+
+      <template #footer>
+        <el-button @click="importVisible = false">取消</el-button>
+        <el-button type="primary" :loading="saving" @click="submitImportPreview">预检</el-button>
+        <el-button
+          v-if="importPreview && !importPreview.error_count && importPreview.duplicate_count"
+          type="success"
+          :loading="saving"
+          @click="submitImportCommit()"
+        >
+          确认导入
+        </el-button>
+      </template>
     </el-dialog>
   </section>
 </template>
@@ -525,8 +635,8 @@ import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 
-import { activateBug, closeBug, createBug, deleteBug, resolveBug, startFixingBug, suspendBug, updateBug } from '../api/bugs'
-import { createIteration, deleteIteration, fetchIterations, finishIteration, startIteration, updateIteration } from '../api/iterations'
+import { createBug, deleteBug, updateBug } from '../api/bugs'
+import { createIteration, deferIterationWorkItems, deleteIteration, fetchIterations, finishIteration, startIteration, updateIteration } from '../api/iterations'
 import { fetchPrograms } from '../api/programs'
 import {
   fetchProject,
@@ -540,19 +650,34 @@ import {
   fetchProjectTestCases,
   fetchProjectTestRuns,
   fetchProjects,
-  saveProjectMembers
+  saveProjectMembers,
+  updateProject
 } from '../api/projects'
-import { activateRequirement, closeRequirement, createRequirement, deleteRequirement, fetchRequirementStatusOperations, fetchRequirements, updateRequirement } from '../api/requirements'
-import { activateTask, closeTask, createTask, deleteTask, fetchTaskStatusOperations, fetchTasks, updateTask } from '../api/tasks'
+import {
+  commitRequirementImport,
+  createRequirement,
+  deleteRequirement,
+  downloadRequirementImportTemplate,
+  fetchRequirementStatusOperations,
+  fetchRequirements,
+  previewRequirementImport,
+  updateRequirement
+} from '../api/requirements'
+import { createTask, deleteTask, fetchTaskStatusOperations, fetchTasks, updateTask } from '../api/tasks'
 import { createBugFromTestCase, createTestCase, deleteTestCase, executeTestCase, fetchTestCaseExecutions, updateTestCase } from '../api/testCases'
 import { createTestRun, deleteTestRun, updateTestRun } from '../api/testRuns'
 import { fetchUsers } from '../api/users'
+import { fetchAssigneeRuleConfigs } from '../api/assigneeRuleConfigs'
+import { fetchWorkflowTransitionsBatch } from '../api/workflowRuntime'
 import RequirementPriorityBadge from '../components/RequirementPriorityBadge.vue'
 import RichTextPasteEditor from '../components/RichTextPasteEditor.vue'
+import WorkflowActionButtons from '../components/WorkflowActionButtons.vue'
 import { currentUserId } from '../utils/currentUser'
 import { loadCloseReasonMap } from '../utils/closeReasonTooltip'
 import { labelById, userLabel } from '../utils/referenceLabels'
 import { formatAuditValue } from '../utils/auditHistoryLabels'
+import { bugIterationOptions, includeSelectedIterationOption } from '../utils/bugIterations'
+import { canCreateWorkItem, canDeleteWorkItem, canExecuteWorkItem, canManageProject, canManageTestCase, currentUserFromStorage } from '../utils/permissions'
 
 const route = useRoute()
 const router = useRouter()
@@ -565,6 +690,7 @@ const project = ref({})
 const projects = ref([])
 const programs = ref([])
 const users = ref([])
+const assigneeRuleConfigs = ref([])
 const iterations = ref([])
 const requirements = ref([])
 const tasks = ref([])
@@ -582,6 +708,7 @@ const projectAuditLogs = ref([])
 const projectStatusOperations = ref([])
 const closeReasonByRequirement = ref({})
 const closeReasonByTask = ref({})
+const projectWorkflowTransitions = ref({})
 const expandedHistoryKeys = ref(new Set())
 const projectPageSizes = [10, 20, 50, 100]
 const projectListTotals = reactive({
@@ -609,16 +736,25 @@ const projectListPagination = reactive({
   bugs: { currentPage: 1, pageSize: 10 }
 })
 
-const iterationDialogVisible = ref(false), iterationStartVisible = ref(false), iterationFinishVisible = ref(false), requirementDialogVisible = ref(false), closeRequirementVisible = ref(false), taskDialogVisible = ref(false), closeTaskVisible = ref(false)
-const caseDialogVisible = ref(false), runDialogVisible = ref(false), bugDialogVisible = ref(false), bugActionVisible = ref(false), caseExecutionVisible = ref(false), caseBugVisible = ref(false)
-const editingIterationId = ref(null), startingIterationId = ref(null), editingRequirementId = ref(null), closingRequirementId = ref(null), editingTaskId = ref(null)
-const closingTaskId = ref(null)
+const iterationDialogVisible = ref(false)
+const iterationStartVisible = ref(false)
+const iterationFinishVisible = ref(false)
+const deferWorkItemsVisible = ref(false)
+const requirementDialogVisible = ref(false)
+const taskDialogVisible = ref(false)
+const caseDialogVisible = ref(false)
+const caseExecutionVisible = ref(false)
+const caseBugVisible = ref(false)
+const runDialogVisible = ref(false)
+const bugDialogVisible = ref(false)
+const importVisible = ref(false)
+const editingIterationId = ref(null), startingIterationId = ref(null), editingRequirementId = ref(null), editingTaskId = ref(null)
 const editingCaseId = ref(null), editingRunId = ref(null), editingBugId = ref(null)
-const actingBug = ref(null)
-const bugActionType = ref('')
 const selectedCase = ref(null)
 const bugSourceCase = ref(null)
 const caseExecutionHistory = ref([])
+const deferWorkItemsForm = reactive({ target_iteration_id: null, remark: '' })
+const settingsForm = reactive({ assignee_rule_config_id: null })
 
 const tabs = [
   { key: 'overview', label: '概览' },
@@ -645,6 +781,8 @@ const iterationStatusOptions = [
 const requirementStatusOptions = [
   { label: '草稿', value: 'draft' },
   { label: '激活', value: 'active' },
+  { label: '待验证', value: 'pending_validation' },
+  { label: '验证未通过', value: 'validation_failed' },
   { label: '完成', value: 'done' },
   { label: '关闭', value: 'closed' }
 ]
@@ -655,15 +793,8 @@ const requirementPriorityOptions = [
   { label: '4', value: '4' },
   { label: '5', value: '5' }
 ]
-const requirementCloseReasons = ['已完成', '重复', '延期', '不做', '设计如此']
-const closeReasons = requirementCloseReasons
 const requirementTypeOptions = ['功能', '接口', '性能', '安全', '体验', '改进', '其他']
 const legacyRequirementPriorityValues = { high: '1', medium: '3', low: '5' }
-const reviewStatusOptions = [
-  { label: '无需评审', value: 'not_required' },
-  { label: '待评审', value: 'pending' },
-  { label: '已通过', value: 'approved' }
-]
 const taskStatusOptions = [
   { label: '待办', value: 'todo' },
   { label: '进行中', value: 'doing' },
@@ -708,6 +839,7 @@ const testRunStatusOptions = [
 ]
 const projectMemberRoleOptions = [
   { label: '产品经理', value: 'product_owner' },
+  { label: '部门负责人', value: 'department_head' },
   { label: '开发主管', value: 'tech_lead' },
   { label: '开发', value: 'developer' },
   { label: '测试主管', value: 'test_lead' },
@@ -717,26 +849,30 @@ const projectMemberRoleOptions = [
 const bugStatusOptions = [
   { label: '待确认', value: 'open' },
   { label: '修复中', value: 'fixing' },
-  { label: '已解决', value: 'resolved' },
   { label: '待验证', value: 'verifying' },
   { label: '已关闭', value: 'closed' },
   { label: '重新打开', value: 'reopened' },
   { label: '已挂起', value: 'suspended' }
-]
-const bugResolutionOptions = [
-  { label: '设计如此', value: '设计如此' },
-  { label: '重复Bug', value: '重复Bug' },
-  { label: '外部原因', value: '外部原因' },
-  { label: '已解决', value: '已解决' },
-  { label: '无法重现', value: '无法重现' },
-  { label: '延期处理', value: '延期处理' },
-  { label: '不予解决', value: '不予解决' }
 ]
 
 const projectIterations = computed(() => projectIterationRows.value)
 const projectRequirements = computed(() => projectRequirementRows.value)
 const projectTasks = computed(() => projectTaskRows.value)
 const projectClosed = computed(() => project.value.status === 'closed')
+const currentUser = computed(() => currentUserFromStorage(users.value))
+const canManageCurrentProject = computed(() => canManageProject(project.value, currentUser.value, projectMembers.value))
+const canCreateCurrentWorkItem = computed(() => !projectClosed.value && canCreateWorkItem(project.value, currentUser.value, projectMembers.value))
+const canDeleteCurrentWorkItem = computed(() => !projectClosed.value && canDeleteWorkItem(project.value, currentUser.value, projectMembers.value))
+const canManageCurrentTestCase = computed(() => canManageTestCase(project.value, currentUser.value, projectMembers.value))
+const enabledWorkflowSchemes = computed(() => assigneeRuleConfigs.value.filter((item) => item.enabled))
+const selectedWorkflowScheme = computed(() => enabledWorkflowSchemes.value.find((item) => item.id === settingsForm.assignee_rule_config_id) || null)
+const activeWorkflowScheme = computed(() => {
+  const configId = project.value.assignee_rule_config_id
+  if (!configId) return null
+  return assigneeRuleConfigs.value.find((item) => item.id === configId) || null
+})
+const activeWorkflowSchemeLabel = computed(() => activeWorkflowScheme.value?.name || '未配置工作流方案')
+const selectedWorkflowSchemeDescription = computed(() => selectedWorkflowScheme.value?.description || '')
 const projectTestCases = computed(() => projectTestCaseRows.value)
 const projectTestRuns = computed(() => projectTestRunRows.value)
 const projectBugs = computed(() => projectBugRows.value)
@@ -747,10 +883,29 @@ const pagedProjectTestCases = computed(() => projectTestCases.value)
 const pagedProjectTestRuns = computed(() => projectTestRuns.value)
 const pagedProjectBugs = computed(() => projectBugs.value)
 const projectIterationOptions = computed(() => iterations.value.filter((item) => (item.project_ids || []).includes(projectId.value)))
+const requirementProjectScopeIds = computed(() => collectProjectAndAncestorIds(projectId.value))
+const requirementIterationDisplayOptions = computed(() => iterations.value.filter((item) => {
+  const optionProjectIds = item.project_ids || []
+  return optionProjectIds.some((id) => requirementProjectScopeIds.value.includes(id))
+}))
+const requirementIterationOptions = computed(() => requirementIterationDisplayOptions.value.filter((item) => !['finished', 'closed'].includes(item.status)))
 const projectRequirementOptions = computed(() => requirements.value.filter((item) => item.project_id === projectId.value))
 const projectTaskOptions = computed(() => tasks.value.filter((item) => item.project_id === projectId.value))
-const projectTestCaseOptions = computed(() => testCases.value.filter((item) => item.project_id === projectId.value))
-const projectTestRunOptions = computed(() => testRuns.value.filter((item) => item.project_id === projectId.value))
+const projectTestCaseOptions = computed(() => projectTestCaseRows.value)
+const projectTestRunOptions = computed(() => projectTestRunRows.value)
+const bugEditableIterationOptions = computed(() => bugIterationOptions(iterations.value, projects.value, bugForm.project_id || projectId.value))
+const bugEditableIterationDisplayOptions = computed(() => includeSelectedIterationOption(bugEditableIterationOptions.value, iterations.value, bugForm.iteration_id))
+const deferTargetIterations = computed(() => projectIterationOptions.value.filter((item) => item.id !== startingIterationId.value && !['finished', 'closed'].includes(item.status)))
+const unfinishedIterationRequirements = computed(() => requirements.value.filter((item) => item.iteration_id === startingIterationId.value && !['done', 'closed'].includes(item.status)))
+const directUnfinishedIterationTasks = computed(() => tasks.value.filter((item) => item.iteration_id === startingIterationId.value && !['done', 'closed'].includes(item.status)))
+const unfinishedIterationTasks = computed(() => {
+  const requirementIds = new Set(unfinishedIterationRequirements.value.map((item) => item.id))
+  const taskById = new Map()
+  tasks.value
+    .filter((item) => !['done', 'closed'].includes(item.status) && (item.iteration_id === startingIterationId.value || requirementIds.has(item.requirement_id)))
+    .forEach((item) => taskById.set(item.id, item))
+  return Array.from(taskById.values())
+})
 const activeTabLabel = computed(() => tabs.find((tab) => tab.key === activeTab.value)?.label || '')
 const projectEndDateLabel = computed(() => project.value.is_long_term ? '长期' : project.value.end_date || '未设置结束')
 const metrics = computed(() => [
@@ -773,7 +928,7 @@ const projectHistory = computed(() => {
     key: `audit-${item.id}`,
     type: 'audit',
     time: item.create_time,
-    actor: '系统',
+    actor: item.actor_name || '系统',
     actionLabel: '编辑',
     changes: Object.keys(item.after_data || {}).map((field) => ({
       field,
@@ -785,31 +940,35 @@ const projectHistory = computed(() => {
 })
 
 const failedExecutionCount = computed(() => caseExecutionHistory.value.filter((item) => item.result === 'failed').length)
-const bugActionTitle = computed(() => ({
-  start_fixing: '确认 Bug',
-  resolve: '解决 Bug',
-  activate: '激活 Bug',
-  suspend: '挂起 Bug',
-  close: '关闭 Bug'
-}[bugActionType.value] || 'Bug 操作'))
-
 const iterationForm = reactive({ project_ids: [], name: '', owner_id: null, start_date: null, end_date: null, status: 'planning', goal: '' })
 const iterationStartForm = reactive({ effective_time: '', remark: '' })
 const iterationFinishForm = reactive({ effective_time: '', remark: '' })
-const requirementForm = reactive({ project_id: null, iteration_id: null, title: '', requirement_type: '功能', priority: '3', owner_id: null, proposer_id: null, status: 'draft', review_status: 'not_required', description: '', acceptance_criteria: '', source_reviewed: false })
-const closeRequirementForm = reactive({ reason: '', remark: '' })
-const taskForm = reactive({ project_id: null, requirement_id: null, title: '', task_type: '', priority: 'medium', owner_id: null, estimated_hours: null, actual_hours: null, due_date: null, status: 'todo', description: '' })
-const closeTaskForm = reactive({ reason: '', remark: '' })
-const caseForm = reactive({ project_id: null, requirement_id: null, title: '', case_type: 'functional', test_scope: 'functional_test', default_tester_id: defaultProjectMember(['tester', 'test_lead']), precondition: '', steps_json: [{ step: '', expected: '' }], expected_result: '' })
+const requirementForm = reactive({ project_id: null, iteration_id: null, title: '', requirement_type: '功能', priority: '3', owner_id: null, proposer_id: null, status: 'draft', description: '', acceptance_criteria: '' })
+const importFile = ref(null)
+const importPreview = ref(null)
+const duplicateStrategy = ref('')
+const taskForm = reactive({ project_id: null, requirement_id: null, title: '', priority: 'medium', owner_id: null, due_date: null, status: 'todo', description: '' })
+const caseForm = reactive({ project_id: null, requirement_id: null, title: '', case_type: 'functional', test_scope: 'functional_test', default_tester_id: null, precondition: '', steps_json: [{ step: '', expected: '' }], expected_result: '' })
 const caseExecutionForm = reactive({ execute_time: '', steps_result_json: [] })
 const runForm = reactive({ project_id: null, iteration_id: null, name: '', test_owner_id: null, status: 'planning', remark: '' })
-const bugForm = reactive({ project_id: null, iteration_id: null, requirement_id: null, task_id: null, test_case_id: null, test_run_id: null, title: '', bug_type: '代码错误', severity: '3', priority: '3', owner_id: defaultProjectMember(['developer', 'tech_lead']), reporter_id: null, reproduce_steps: '', expected_result: '', actual_result: '', status: 'open' })
-const bugActionForm = reactive({ resolution: '', verify_result: '', iteration_id: null, reason: '', remark: '' })
+const bugForm = reactive({ project_id: null, iteration_id: null, requirement_id: null, task_id: null, test_case_id: null, test_run_id: null, title: '', bug_type: '代码错误', severity: '3', priority: '3', owner_id: null, reporter_id: null, reproduce_steps: '', expected_result: '', actual_result: '', status: 'open' })
 const caseBugForm = reactive({ title: '', bug_type: '代码错误', severity: '3', priority: '3', reproduce_steps: '', actual_result: '' })
 
 function optionLabel(options, value) { return options.find((option) => option.value === value)?.label || value || '-' }
 function normalizeProjectTab(value) {
   return ['overview', 'iterations', 'requirements', 'tasks', 'tests', 'bugs', 'members', 'settings'].includes(value) ? value : 'overview'
+}
+function collectProjectAndAncestorIds(id) {
+  const result = []
+  const seen = new Set()
+  let currentId = Number(id)
+  while (currentId && !seen.has(currentId)) {
+    seen.add(currentId)
+    result.push(currentId)
+    const currentProject = projects.value.find((item) => item.id === currentId)
+    currentId = Number(currentProject?.parent_id || 0)
+  }
+  return result
 }
 function setActiveTab(key) {
   activeTab.value = key
@@ -842,10 +1001,12 @@ async function loadProjectIterationsPage() {
 async function loadProjectRequirementsPage() {
   if (applyProjectPage('requirements', await fetchProjectRequirements(projectId.value, projectListParams('requirements')), projectRequirementRows)) return loadProjectRequirementsPage()
   closeReasonByRequirement.value = await loadCloseReasonMap(projectRequirements.value, fetchRequirementStatusOperations)
+  await loadProjectWorkflowTransitions('requirement', projectRequirements.value)
 }
 async function loadProjectTasksPage() {
   if (applyProjectPage('tasks', await fetchProjectTasks(projectId.value, projectListParams('tasks')), projectTaskRows)) return loadProjectTasksPage()
   closeReasonByTask.value = await loadCloseReasonMap(projectTasks.value, fetchTaskStatusOperations)
+  await loadProjectWorkflowTransitions('task', projectTasks.value)
 }
 async function loadProjectTestCasesPage() {
   if (applyProjectPage('testCases', await fetchProjectTestCases(projectId.value, projectListParams('testCases')), projectTestCaseRows)) await loadProjectTestCasesPage()
@@ -855,6 +1016,7 @@ async function loadProjectTestRunsPage() {
 }
 async function loadProjectBugsPage() {
   if (applyProjectPage('bugs', await fetchProjectBugs(projectId.value, projectListParams('bugs')), projectBugRows)) await loadProjectBugsPage()
+  await loadProjectWorkflowTransitions('bug', projectBugs.value)
 }
 async function loadProjectListPage(key) {
   const loaders = {
@@ -886,13 +1048,32 @@ function projectStatusLabel(value) { return optionLabel(projectStatusOptions, va
 function iterationStatusLabel(value) { return optionLabel(iterationStatusOptions, value) }
 function normalizeRequirementPriority(value) { return legacyRequirementPriorityValues[value] || value || '3' }
 function requirementStatusLabel(value) { return optionLabel(requirementStatusOptions, value) }
-function reviewStatusLabel(value) { return optionLabel(reviewStatusOptions, value) }
 function taskStatusLabel(value) { return optionLabel(taskStatusOptions, value) }
 function testRunStatusLabel(value) { return optionLabel(testRunStatusOptions, value) }
 function bugStatusLabel(value) { return optionLabel(bugStatusOptions, value) }
 function operationActionLabel(value) { return optionLabel([{ label: '启动', value: 'start' }, { label: '挂起', value: 'suspend' }, { label: '关闭', value: 'close' }, { label: '激活', value: 'activate' }], value) }
 function canActivateRequirement(row) { return ['draft', 'closed'].includes(row.status) }
 function canActivateTask(row) { return ['todo', 'closed'].includes(row.status) }
+function canCompleteTask(row) { return row.status === 'doing' }
+function canCloseTask(row) { return !['done', 'closed'].includes(row.status) }
+function projectWorkflowTransitionKey(objectType, id) { return `${objectType}:${id}` }
+function projectWorkflowTransitionsFor(objectType, id) { return projectWorkflowTransitions.value[projectWorkflowTransitionKey(objectType, id)] || [] }
+async function loadProjectWorkflowTransitions(objectType, rows) {
+  const items = (rows || []).map((row) => ({ object_type: objectType, id: row.id }))
+  if (!items.length) return
+  try {
+    const { data } = await fetchWorkflowTransitionsBatch(items)
+    projectWorkflowTransitions.value = {
+      ...projectWorkflowTransitions.value,
+      ...Object.fromEntries((data.items || []).map((item) => [projectWorkflowTransitionKey(item.object_type, item.id), item.transitions || []]))
+    }
+  } catch {
+    projectWorkflowTransitions.value = {
+      ...projectWorkflowTransitions.value,
+      ...Object.fromEntries(items.map((item) => [projectWorkflowTransitionKey(item.object_type, item.id), []]))
+    }
+  }
+}
 function apiErrorMessage(error, fallback) { return error?.response?.data?.detail || fallback }
 function showActionError(error, fallback) { ElMessageBox.alert(apiErrorMessage(error, fallback), '提示', { type: 'warning' }) }
 function isHistoryExpanded(key) {
@@ -907,6 +1088,11 @@ function toggleHistory(key) {
 function formatDateTime(value) { return value ? new Date(value).toLocaleString('zh-CN', { hour12: false }) : '-' }
 function executionResultLabel(value) { return executionResultOptions.find((option) => option.value === value)?.label || '-' }
 function canCreateBugFromCase(row) { return ['failed', 'blocked'].includes(row.last_execute_result) }
+function canEditWorkItem(row) { return !projectClosed.value && canExecuteWorkItem(row, currentUser.value, project.value, projectMembers.value) }
+function testCaseRequirementLabel(requirementId) {
+  if (!requirementId) return '-'
+  return projectRequirementOptions.value.find((item) => item.id === requirementId)?.title || '-'
+}
 function executionHistoryTitle(item) { return `#${item.id} ${formatDateTime(item.execute_time)}，结果为 ${executionResultLabel(item.result)}` }
 function defaultExecutionTime() {
   const date = new Date()
@@ -919,11 +1105,19 @@ function displayHistoryValue(field, value) {
     users: users.value,
     projects: projects.value,
     programs: programs.value,
+    assigneeRuleConfigs: assigneeRuleConfigs.value,
     iterations: projectIterationOptions.value,
     requirements: projectRequirementOptions.value,
     tasks: projectTaskOptions.value,
     testCases: projectTestCaseOptions.value,
-    testRuns: projectTestRunOptions.value
+    testRuns: projectTestRunOptions.value,
+    statusOptions: projectStatusOptions,
+    priorityOptions: priorityLevelOptions,
+    requirementTypeOptions,
+    caseTypeOptions,
+    testScopeOptions,
+    executionResultOptions,
+    projectMemberRoleOptions
   })
 }
 function projectFieldLabel(field) {
@@ -938,18 +1132,52 @@ function projectFieldLabel(field) {
     { label: '实际结束', value: 'actual_end_date' },
     { label: '长期', value: 'is_long_term' },
     { label: '描述', value: 'description' },
-    { label: '工作流配置', value: 'workflow_config_id' }
+    { label: '工作流配置', value: 'workflow_config_id' },
+    { label: '工作流方案', value: 'assignee_rule_config_id' }
   ], field)
 }
 function defaultProjectMember(roles) {
   const candidates = projectMembers.value.filter((item) => roles.includes(item.project_role) && item.user_id)
-  return (candidates.find((item) => item.is_default_assignee) || candidates[0])?.user_id || null
+  candidates.sort((left, right) => (left.sort_order ?? 0) - (right.sort_order ?? 0))
+  return candidates[0]?.user_id || null
+}
+function activeAssigneeRuleConfig() {
+  const configId = project.value.assignee_rule_config_id
+  if (!configId) return null
+  return assigneeRuleConfigs.value.find((item) => item.id === configId && item.enabled) || null
+}
+function resetProjectSettings() {
+  settingsForm.assignee_rule_config_id = project.value.assignee_rule_config_id || null
+}
+async function submitProjectSettings() {
+  saving.value = true
+  try {
+    const { data } = await updateProject(projectId.value, {
+      assignee_rule_config_id: settingsForm.assignee_rule_config_id || null
+    })
+    project.value = data
+    resetProjectSettings()
+    projectAuditLogs.value = (await fetchProjectAuditLogs(projectId.value)).data
+    ElMessage.success('项目配置已保存')
+  } finally {
+    saving.value = false
+  }
+}
+function splitAssigneeRoles(value) {
+  return (value || '').split(',').map((item) => item.trim()).filter(Boolean)
+}
+function configuredAssigneeRoles(field, fallbackRoles) {
+  const config = activeAssigneeRuleConfig()
+  const roles = config ? splitAssigneeRoles(config[field]) : []
+  return roles.length ? roles : []
+}
+function defaultTesterByRule(field, fallbackRoles) {
+  return defaultProjectMember(configuredAssigneeRoles(field, fallbackRoles))
 }
 function addProjectMember() {
   projectMembers.value.push({
     user_id: null,
     project_role: 'developer',
-    is_default_assignee: false,
     is_workbench_participant: true,
     sort_order: projectMembers.value.length
   })
@@ -963,7 +1191,6 @@ async function submitProjectMembers() {
     .map((item, index) => ({
       user_id: item.user_id,
       project_role: item.project_role,
-      is_default_assignee: Boolean(item.is_default_assignee),
       is_workbench_participant: item.is_workbench_participant !== false,
       sort_order: item.sort_order ?? index
     }))
@@ -976,27 +1203,69 @@ async function submitProjectMembers() {
   }
 }
 function resetIterationForm() { Object.assign(iterationForm, { project_ids: [projectId.value], name: '', owner_id: null, start_date: null, end_date: null, status: 'planning', goal: '' }) }
-function resetRequirementForm() { Object.assign(requirementForm, { project_id: projectId.value, iteration_id: null, title: '', requirement_type: '功能', priority: '3', owner_id: defaultProjectMember(['product_owner']), proposer_id: currentUserId(users.value), status: 'draft', review_status: 'not_required', description: '', acceptance_criteria: '', source_reviewed: false }) }
-function resetTaskForm() { Object.assign(taskForm, { project_id: projectId.value, requirement_id: null, title: '', task_type: '', priority: 'medium', owner_id: defaultProjectMember(['developer', 'tech_lead']), estimated_hours: null, actual_hours: null, due_date: null, status: 'todo', description: '' }) }
-function resetCaseForm() { Object.assign(caseForm, { project_id: projectId.value, requirement_id: null, title: '', case_type: 'functional', test_scope: 'functional_test', default_tester_id: defaultProjectMember(['tester', 'test_lead']), precondition: '', steps_json: [{ step: '', expected: '' }], expected_result: '' }) }
-function resetRunForm() { Object.assign(runForm, { project_id: projectId.value, iteration_id: null, name: '', test_owner_id: null, status: 'planning', remark: '' }) }
-function resetBugForm() { Object.assign(bugForm, { project_id: projectId.value, iteration_id: null, requirement_id: null, task_id: null, test_case_id: null, test_run_id: null, title: '', bug_type: '代码错误', severity: '3', priority: '3', owner_id: defaultProjectMember(['developer', 'tech_lead']), reporter_id: null, reproduce_steps: '', expected_result: '', actual_result: '', status: 'open' }) }
+function resetRequirementForm() { Object.assign(requirementForm, { project_id: projectId.value, iteration_id: null, title: '', requirement_type: '功能', priority: '3', owner_id: null, proposer_id: currentUserId(users.value), status: 'draft', description: '', acceptance_criteria: '' }) }
+function resetTaskForm() { Object.assign(taskForm, { project_id: projectId.value, requirement_id: null, title: '', priority: 'medium', owner_id: null, due_date: null, status: 'todo', description: '' }) }
+function resetCaseForm() { Object.assign(caseForm, { project_id: projectId.value, requirement_id: null, title: '', case_type: 'functional', test_scope: 'functional_test', default_tester_id: defaultTesterByRule('test_case_tester_roles', ['tester', 'test_lead']), precondition: '', steps_json: [{ step: '', expected: '' }], expected_result: '' }) }
+function resetRunForm() { Object.assign(runForm, { project_id: projectId.value, iteration_id: null, name: '', test_owner_id: defaultTesterByRule('test_run_owner_roles', ['tester', 'test_lead']), status: 'planning', remark: '' }) }
+function resetBugForm() { Object.assign(bugForm, { project_id: projectId.value, iteration_id: null, requirement_id: null, task_id: null, test_case_id: null, test_run_id: null, title: '', bug_type: '代码错误', severity: '3', priority: '3', owner_id: null, reporter_id: null, reproduce_steps: '', expected_result: '', actual_result: '', status: 'open' }) }
 
 function openIterationCreate() { editingIterationId.value = null; resetIterationForm(); iterationDialogVisible.value = true }
 function openIterationEdit(row) { editingIterationId.value = row.id; Object.assign(iterationForm, { ...row, project_ids: row.project_ids || [], goal: row.goal || '' }); iterationDialogVisible.value = true }
 function openIterationStart(row) { startingIterationId.value = row.id; Object.assign(iterationStartForm, { effective_time: currentDateTimeValue(), remark: '' }); iterationStartVisible.value = true }
-function openIterationFinish(row) { startingIterationId.value = row.id; Object.assign(iterationFinishForm, { effective_time: currentDateTimeValue(), remark: '' }); iterationFinishVisible.value = true }
+function openIterationFinish(row) {
+  startingIterationId.value = row.id
+  Object.assign(iterationFinishForm, { effective_time: currentDateTimeValue(), remark: '' })
+  Object.assign(deferWorkItemsForm, { target_iteration_id: null, remark: '' })
+  iterationFinishVisible.value = true
+}
 function openRequirementCreate() { editingRequirementId.value = null; resetRequirementForm(); requirementDialogVisible.value = true }
 function openRequirementEdit(row) { editingRequirementId.value = row.id; Object.assign(requirementForm, { ...row, priority: normalizeRequirementPriority(row.priority), requirement_type: row.requirement_type || '', description: row.description || '', acceptance_criteria: row.acceptance_criteria || '' }); requirementDialogVisible.value = true }
-function openGenerate(row) { editingTaskId.value = null; resetTaskForm(); Object.assign(taskForm, { requirement_id: row.id, title: row.title, owner_id: taskOwnerForRequirement(row) }); taskDialogVisible.value = true }
-function openRequirementClose(row) { closingRequirementId.value = row.id; Object.assign(closeRequirementForm, { reason: '', remark: '' }); closeRequirementVisible.value = true }
+function openGenerate(row) { editingTaskId.value = null; resetTaskForm(); Object.assign(taskForm, { requirement_id: row.id, title: row.title, owner_id: null }); taskDialogVisible.value = true }
+
+async function downloadImportTemplate() {
+  const response = await downloadRequirementImportTemplate(projectId.value)
+  const url = URL.createObjectURL(response.data)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = '需求导入模板.xlsx'
+  link.click()
+  URL.revokeObjectURL(url)
+}
+function openImportDialog() {
+  importFile.value = null
+  importPreview.value = null
+  duplicateStrategy.value = ''
+  importVisible.value = true
+}
+function onImportFileChange(file) {
+  importFile.value = file.raw
+  importPreview.value = null
+  duplicateStrategy.value = ''
+}
+function clearImportFile() {
+  importFile.value = null
+  importPreview.value = null
+  duplicateStrategy.value = ''
+}
 function openTaskCreate() { editingTaskId.value = null; resetTaskForm(); taskDialogVisible.value = true }
-function openTaskEdit(row) { editingTaskId.value = row.id; Object.assign(taskForm, { ...row, task_type: row.task_type || '', description: row.description || '' }); taskDialogVisible.value = true }
-function openTaskClose(row) { closingTaskId.value = row.id; Object.assign(closeTaskForm, { reason: '', remark: '' }); closeTaskVisible.value = true }
-function taskOwnerForRequirement(requirement) { return requirement?.owner_id || defaultProjectMember(['developer', 'tech_lead']) || null }
+function openTaskEdit(row) {
+  editingTaskId.value = row.id
+  Object.assign(taskForm, {
+    project_id: row.project_id || projectId.value,
+    requirement_id: row.requirement_id || null,
+    title: row.title || '',
+    priority: row.priority || 'medium',
+    owner_id: row.owner_id || null,
+    due_date: row.due_date || null,
+    status: row.status || 'todo',
+    description: row.description || ''
+  })
+  taskDialogVisible.value = true
+}
+
+function taskOwnerForRequirement() { return null }
 function onTaskRequirementChange(requirementId) {
-  const requirement = projectRequirementOptions.value.find((item) => item.id === requirementId)
-  taskForm.owner_id = requirement?.owner_id || defaultProjectMember(['developer', 'tech_lead']) || null
+  taskForm.owner_id = taskOwnerForRequirement()
 }
 function openCaseCreate() { editingCaseId.value = null; resetCaseForm(); caseDialogVisible.value = true }
 function openCaseCreateForRequirement(row) { editingCaseId.value = null; resetCaseForm(); Object.assign(caseForm, { requirement_id: row.id, title: row.title }); caseDialogVisible.value = true }
@@ -1033,18 +1302,7 @@ function openRunCreate() { editingRunId.value = null; resetRunForm(); runDialogV
 function openRunEdit(row) { editingRunId.value = row.id; Object.assign(runForm, { ...row, remark: row.remark || '' }); runDialogVisible.value = true }
 function openBugCreate() { editingBugId.value = null; resetBugForm(); bugDialogVisible.value = true }
 function openBugEdit(row) { editingBugId.value = row.id; Object.assign(bugForm, { ...row, reproduce_steps: row.reproduce_steps || '', expected_result: row.expected_result || '', actual_result: row.actual_result || '' }); bugDialogVisible.value = true }
-function openBugAction(row, actionType) {
-  actingBug.value = row
-  bugActionType.value = actionType
-  Object.assign(bugActionForm, {
-    resolution: actionType === 'resolve' ? '已解决' : '',
-    verify_result: actionType === 'close' ? 'passed' : actionType === 'activate' ? 'failed' : '',
-    iteration_id: actionType === 'start_fixing' ? row.iteration_id || null : null,
-    reason: '',
-    remark: ''
-  })
-  bugActionVisible.value = true
-}
+
 
 async function safeFetchProjectMembers(id) {
   try {
@@ -1063,6 +1321,7 @@ async function loadData() {
       projectsRes,
       programRes,
       userRes,
+      assigneeRuleRes,
       iterationRefRes,
       requirementRefRes,
       taskRefRes,
@@ -1080,7 +1339,8 @@ async function loadData() {
       fetchProjects(),
       fetchPrograms(),
       fetchUsers(),
-      fetchIterations({ project_id: projectId.value }),
+      fetchAssigneeRuleConfigs(),
+      fetchIterations(),
       fetchRequirements(),
       fetchTasks(),
       safeFetchProjectMembers(projectId.value),
@@ -1094,8 +1354,9 @@ async function loadData() {
       fetchProjectBugs(projectId.value, projectListParams('bugs'))
     ])
     project.value = projectRes.data
+    resetProjectSettings()
     projects.value = projectsRes.data
-    programs.value = programRes.data; users.value = userRes.data
+    programs.value = programRes.data; users.value = userRes.data; assigneeRuleConfigs.value = assigneeRuleRes.data
     iterations.value = iterationRefRes.data; requirements.value = requirementRefRes.data; tasks.value = taskRefRes.data
     projectMembers.value = memberRes.data
     applyProjectPage('iterations', iterationRes, projectIterationRows)
@@ -1107,6 +1368,11 @@ async function loadData() {
     projectAuditLogs.value = auditRes.data; projectStatusOperations.value = statusRes.data
     closeReasonByRequirement.value = await loadCloseReasonMap(projectRequirements.value, fetchRequirementStatusOperations)
     closeReasonByTask.value = await loadCloseReasonMap(projectTasks.value, fetchTaskStatusOperations)
+    await Promise.all([
+      loadProjectWorkflowTransitions('requirement', projectRequirements.value),
+      loadProjectWorkflowTransitions('task', projectTasks.value),
+      loadProjectWorkflowTransitions('bug', projectBugs.value)
+    ])
   } catch {
     ElMessage.error('项目详情加载失败')
   } finally {
@@ -1116,7 +1382,7 @@ async function loadData() {
 
 async function refreshProjectReferences() {
   const [iterationRefRes, requirementRefRes, taskRefRes] = await Promise.all([
-    fetchIterations({ project_id: projectId.value }),
+    fetchIterations(),
     fetchRequirements(),
     fetchTasks()
   ])
@@ -1130,58 +1396,197 @@ async function refreshAfterMutation() {
   await refreshActiveProjectList()
 }
 
-async function submitIteration() { if (!iterationForm.name.trim()) return ElMessage.warning('请填写迭代名称'); saving.value = true; try { const payload = { ...iterationForm, project_ids: iterationForm.project_ids.length ? iterationForm.project_ids : [projectId.value], owner_id: iterationForm.owner_id || null }; if (editingIterationId.value) await updateIteration(editingIterationId.value, payload); else await createIteration(payload); iterationDialogVisible.value = false; await refreshAfterMutation() } finally { saving.value = false } }
-async function submitIterationStart() { if (!iterationStartForm.effective_time) return ElMessage.warning('请选择实际开始日期'); saving.value = true; try { await startIteration(startingIterationId.value, { ...iterationStartForm }); iterationStartVisible.value = false; await refreshAfterMutation(); ElMessage.success('迭代已开始') } finally { saving.value = false } }
-async function submitIterationFinish() { if (!iterationFinishForm.effective_time) return ElMessage.warning('请选择实际结束日期'); saving.value = true; try { await finishIteration(startingIterationId.value, { ...iterationFinishForm }); iterationFinishVisible.value = false; await refreshAfterMutation(); ElMessage.success('迭代已结束') } finally { saving.value = false } }
-async function submitRequirement() { if (!requirementForm.title.trim()) return ElMessage.warning('请填写需求标题'); saving.value = true; try { const { status: _status, ...formData } = requirementForm; const payload = { ...formData, project_id: projectId.value, iteration_id: requirementForm.iteration_id || null, owner_id: requirementForm.owner_id || null, proposer_id: requirementForm.proposer_id || null }; if (editingRequirementId.value) await updateRequirement(editingRequirementId.value, payload); else await createRequirement(payload); requirementDialogVisible.value = false; await refreshAfterMutation() } finally { saving.value = false } }
-async function activateRequirementRow(id) { try { await activateRequirement(id); await refreshAfterMutation(); ElMessage.success('需求已激活，关联任务已进入进行中') } catch (error) { showActionError(error, '需求激活失败') } }
-async function submitRequirementClose() {
-  if (!closeRequirementForm.reason) return ElMessage.warning('请选择关闭原因')
+async function submitIteration() {
+  if (!iterationForm.name.trim()) return ElMessage.warning('请填写迭代名称')
   saving.value = true
   try {
-    await closeRequirement(closingRequirementId.value, { ...closeRequirementForm })
-    closeRequirementVisible.value = false
+    const payload = { ...iterationForm, project_ids: iterationForm.project_ids.length ? iterationForm.project_ids : [projectId.value], owner_id: iterationForm.owner_id || null }
+    if (editingIterationId.value) await updateIteration(editingIterationId.value, payload)
+    else await createIteration(payload)
+    iterationDialogVisible.value = false
     await refreshAfterMutation()
-    ElMessage.success('需求已关闭')
+  } catch (error) {
+    showActionError(error, editingIterationId.value ? '迭代保存失败' : '迭代创建失败')
   } finally {
     saving.value = false
   }
 }
-async function submitTask() { if (!taskForm.title.trim()) return ElMessage.warning('请填写任务标题'); saving.value = true; try { const payload = { ...taskForm, project_id: projectId.value, requirement_id: taskForm.requirement_id || null, owner_id: taskForm.owner_id || null }; if (editingTaskId.value) await updateTask(editingTaskId.value, payload); else await createTask(payload); taskDialogVisible.value = false; await refreshAfterMutation() } finally { saving.value = false } }
-async function activateTaskRow(id) { try { await activateTask(id); await refreshAfterMutation(); ElMessage.success('任务已激活') } catch (error) { showActionError(error, '任务激活失败') } }
-async function submitTaskClose() { if (!closeTaskForm.reason) return ElMessage.warning('请选择关闭原因'); saving.value = true; try { await closeTask(closingTaskId.value, { ...closeTaskForm }); closeTaskVisible.value = false; await refreshAfterMutation(); ElMessage.success('任务已关闭') } catch (error) { showActionError(error, '任务关闭失败') } finally { saving.value = false } }
-async function submitCase() { if (!caseForm.title.trim()) return ElMessage.warning('请填写用例标题'); saving.value = true; try { const payload = { ...caseForm, project_id: projectId.value, requirement_id: caseForm.requirement_id || null, default_tester_id: caseForm.default_tester_id || null, steps_json: cleanCaseSteps() }; if (editingCaseId.value) await updateTestCase(editingCaseId.value, payload); else await createTestCase(payload); caseDialogVisible.value = false; await refreshAfterMutation() } finally { saving.value = false } }
-async function submitCaseExecution() { saving.value = true; try { const currentId = selectedCase.value.id; await executeTestCase(currentId, { execute_time: caseExecutionForm.execute_time, steps_result_json: caseExecutionForm.steps_result_json }); await refreshAfterMutation(); ElMessage.success('用例执行结果已保存'); await openNextCaseAfterExecution(currentId, projectTestCases.value) } finally { saving.value = false } }
-async function submitRun() { if (!runForm.name.trim()) return ElMessage.warning('请填写测试单名称'); saving.value = true; try { const payload = { ...runForm, project_id: projectId.value, iteration_id: runForm.iteration_id || null, test_owner_id: runForm.test_owner_id || null }; if (editingRunId.value) await updateTestRun(editingRunId.value, payload); else await createTestRun(payload); runDialogVisible.value = false; await refreshAfterMutation() } finally { saving.value = false } }
-async function submitBug() { if (!bugForm.title.trim()) return ElMessage.warning('请填写 Bug 标题'); saving.value = true; try { const payload = { ...bugForm, project_id: projectId.value, iteration_id: bugForm.iteration_id || null, requirement_id: bugForm.requirement_id || null, task_id: bugForm.task_id || null, test_case_id: bugForm.test_case_id || null, test_run_id: bugForm.test_run_id || null, owner_id: bugForm.owner_id || null, reporter_id: bugForm.reporter_id || null }; if (editingBugId.value) await updateBug(editingBugId.value, payload); else await createBug(payload); bugDialogVisible.value = false; await refreshAfterMutation() } finally { saving.value = false } }
-async function submitBugAction() {
-  if (bugActionType.value === 'resolve' && !bugActionForm.resolution) return ElMessage.warning('请选择解决结果')
+async function submitIterationStart() { if (!iterationStartForm.effective_time) return ElMessage.warning('请选择实际开始日期'); saving.value = true; try { await startIteration(startingIterationId.value, { ...iterationStartForm }); iterationStartVisible.value = false; await refreshAfterMutation(); ElMessage.success('迭代已开始') } catch (error) { showActionError(error, '迭代开始失败') } finally { saving.value = false } }
+async function submitIterationFinish() {
+  if (!iterationFinishForm.effective_time) return ElMessage.warning('请选择实际结束日期')
   saving.value = true
   try {
-    const id = actingBug.value.id
-    const payload = ['activate', 'close'].includes(bugActionType.value) ? { remark: bugActionForm.remark } : { ...bugActionForm }
-    const actions = {
-      start_fixing: startFixingBug,
-      resolve: resolveBug,
-      activate: activateBug,
-      suspend: suspendBug,
-      close: closeBug
+    await finishIteration(startingIterationId.value, { ...iterationFinishForm })
+    iterationFinishVisible.value = false
+    await refreshAfterMutation()
+    ElMessage.success('迭代已结束')
+  } catch (error) {
+    showActionError(error, '迭代结束失败')
+    if (unfinishedIterationRequirements.value.length || unfinishedIterationTasks.value.length) {
+      deferWorkItemsVisible.value = true
     }
-    await actions[bugActionType.value](id, payload)
-    bugActionVisible.value = false
-    await refreshAfterMutation()
-    ElMessage.success('Bug 状态已更新')
   } finally {
     saving.value = false
   }
 }
-async function submitCaseBug() { if (!caseBugForm.title.trim()) return ElMessage.warning('请填写 Bug 标题'); saving.value = true; try { await createBugFromTestCase(bugSourceCase.value.id, { ...caseBugForm }); caseBugVisible.value = false; await refreshAfterMutation(); ElMessage.success('Bug 已提交') } finally { saving.value = false } }
-async function removeIteration(id) { await deleteIteration(id); await refreshAfterMutation() }
-async function removeRequirement(id) { await deleteRequirement(id); await refreshAfterMutation() }
-async function removeTask(id) { await deleteTask(id); await refreshAfterMutation() }
-async function removeCase(id) { await deleteTestCase(id); await refreshAfterMutation() }
-async function removeRun(id) { await deleteTestRun(id); await refreshAfterMutation() }
-async function removeBug(id) { await deleteBug(id); await refreshAfterMutation() }
+async function submitDeferWorkItems() {
+  if (!deferWorkItemsForm.target_iteration_id) return ElMessage.warning('请选择目标迭代')
+  saving.value = true
+  try {
+    const { data } = await deferIterationWorkItems(startingIterationId.value, {
+      target_iteration_id: deferWorkItemsForm.target_iteration_id,
+      requirement_ids: unfinishedIterationRequirements.value.map((item) => item.id),
+      task_ids: directUnfinishedIterationTasks.value.map((item) => item.id),
+      remark: deferWorkItemsForm.remark
+    })
+    deferWorkItemsVisible.value = false
+    await refreshAfterMutation()
+    ElMessage.success(`已延期 ${data.moved_requirement_ids.length} 个需求、${data.moved_task_ids.length} 个任务`)
+  } catch (error) {
+    showActionError(error, '延期未完成项失败')
+  } finally {
+    saving.value = false
+  }
+}
+async function submitRequirement() {
+  if (!requirementForm.title.trim()) return ElMessage.warning('请填写需求标题')
+  saving.value = true
+  try {
+    const { status: _status, ...formData } = requirementForm
+    const payload = { ...formData, project_id: projectId.value, iteration_id: requirementForm.iteration_id || null, owner_id: requirementForm.owner_id || null, proposer_id: requirementForm.proposer_id || null }
+    if (editingRequirementId.value) await updateRequirement(editingRequirementId.value, payload)
+    else await createRequirement(payload)
+    requirementDialogVisible.value = false
+    await refreshAfterMutation()
+  } catch (error) {
+    showActionError(error, editingRequirementId.value ? '需求保存失败' : '需求创建失败')
+  } finally {
+    saving.value = false
+  }
+}
+async function submitImportPreview() {
+  if (!importFile.value) return ElMessage.warning('请选择 Excel 文件')
+  saving.value = true
+  try {
+    const { data } = await previewRequirementImport(importFile.value, projectId.value)
+    importPreview.value = data
+    if (data.error_count) return
+    if (!data.duplicate_count) await submitImportCommit('create_duplicate')
+  } catch (error) {
+    showActionError(error, '导入预检失败')
+  } finally {
+    saving.value = false
+  }
+}
+async function submitImportCommit(strategy = duplicateStrategy.value) {
+  if (!importFile.value) return ElMessage.warning('请选择 Excel 文件')
+  if (importPreview.value?.duplicate_count && !strategy) return ElMessage.warning('请选择重复处理方式')
+  saving.value = true
+  try {
+    const { data } = await commitRequirementImport(importFile.value, strategy || 'create_duplicate', projectId.value)
+    importVisible.value = false
+    await refreshAfterMutation()
+    ElMessage.success(`导入完成，新增 ${data.created_count} 条，更新 ${data.updated_count} 条`)
+  } catch (error) {
+    showActionError(error, '导入需求失败')
+  } finally {
+    saving.value = false
+  }
+}
+async function submitTask() {
+  if (!taskForm.title.trim()) return ElMessage.warning('请填写任务标题')
+  saving.value = true
+  try {
+    const payload = { ...taskForm, project_id: projectId.value, requirement_id: taskForm.requirement_id || null, owner_id: taskForm.owner_id || null }
+    if (editingTaskId.value) await updateTask(editingTaskId.value, payload)
+    else await createTask(payload)
+    taskDialogVisible.value = false
+    await refreshAfterMutation()
+  } catch (error) {
+    showActionError(error, editingTaskId.value ? '任务保存失败' : '任务创建失败')
+  } finally {
+    saving.value = false
+  }
+}
+async function submitCase() {
+  if (!caseForm.title.trim()) return ElMessage.warning('请填写用例标题')
+  saving.value = true
+  try {
+    const payload = { ...caseForm, project_id: projectId.value, requirement_id: caseForm.requirement_id || null, default_tester_id: caseForm.default_tester_id || null, steps_json: cleanCaseSteps() }
+    if (editingCaseId.value) await updateTestCase(editingCaseId.value, payload)
+    else await createTestCase(payload)
+    caseDialogVisible.value = false
+    await refreshAfterMutation()
+  } catch (error) {
+    showActionError(error, editingCaseId.value ? '用例保存失败' : '用例创建失败')
+  } finally {
+    saving.value = false
+  }
+}
+async function submitCaseExecution() {
+  saving.value = true
+  try {
+    const currentId = selectedCase.value.id
+    await executeTestCase(currentId, { execute_time: caseExecutionForm.execute_time, steps_result_json: caseExecutionForm.steps_result_json })
+    await refreshAfterMutation()
+    ElMessage.success('用例执行结果已保存')
+    await openNextCaseAfterExecution(currentId, projectTestCases.value)
+  } catch (error) {
+    showActionError(error, '用例执行结果保存失败')
+  } finally {
+    saving.value = false
+  }
+}
+async function submitRun() {
+  if (!runForm.name.trim()) return ElMessage.warning('请填写测试单名称')
+  saving.value = true
+  try {
+    const payload = { ...runForm, project_id: projectId.value, iteration_id: runForm.iteration_id || null, test_owner_id: runForm.test_owner_id || null }
+    if (editingRunId.value) await updateTestRun(editingRunId.value, payload)
+    else await createTestRun(payload)
+    runDialogVisible.value = false
+    await refreshAfterMutation()
+  } catch (error) {
+    showActionError(error, editingRunId.value ? '测试单保存失败' : '测试单创建失败')
+  } finally {
+    saving.value = false
+  }
+}
+async function submitBug() {
+  if (!bugForm.title.trim()) return ElMessage.warning('请填写 Bug 标题')
+  saving.value = true
+  try {
+    const payload = { ...bugForm, project_id: projectId.value, iteration_id: bugForm.iteration_id || null, requirement_id: bugForm.requirement_id || null, task_id: bugForm.task_id || null, test_case_id: bugForm.test_case_id || null, test_run_id: bugForm.test_run_id || null, owner_id: bugForm.owner_id || null, reporter_id: bugForm.reporter_id || null }
+    if (editingBugId.value) await updateBug(editingBugId.value, payload)
+    else await createBug(payload)
+    bugDialogVisible.value = false
+    await refreshAfterMutation()
+  } catch (error) {
+    showActionError(error, editingBugId.value ? 'Bug 保存失败' : 'Bug 创建失败')
+  } finally {
+    saving.value = false
+  }
+}
+async function submitCaseBug() {
+  if (!caseBugForm.title.trim()) return ElMessage.warning('请填写 Bug 标题')
+  saving.value = true
+  try {
+    await createBugFromTestCase(bugSourceCase.value.id, { ...caseBugForm })
+    caseBugVisible.value = false
+    await refreshAfterMutation()
+    ElMessage.success('Bug 已提交')
+  } catch (error) {
+    showActionError(error, 'Bug 提交失败')
+  } finally {
+    saving.value = false
+  }
+}
+async function removeIteration(id) { try { await deleteIteration(id); await refreshAfterMutation() } catch (error) { showActionError(error, '迭代删除失败') } }
+async function removeRequirement(id) { try { await deleteRequirement(id); await refreshAfterMutation() } catch (error) { showActionError(error, '需求删除失败') } }
+async function removeTask(id) { try { await deleteTask(id); await refreshAfterMutation() } catch (error) { showActionError(error, '任务删除失败') } }
+async function removeCase(id) { try { await deleteTestCase(id); await refreshAfterMutation() } catch (error) { showActionError(error, '用例删除失败') } }
+async function removeRun(id) { try { await deleteTestRun(id); await refreshAfterMutation() } catch (error) { showActionError(error, '测试单删除失败') } }
+async function removeBug(id) { try { await deleteBug(id); await refreshAfterMutation() } catch (error) { showActionError(error, 'Bug 删除失败') } }
 
 onMounted(loadData)
 watch(() => route.query.tab, async (value) => {
@@ -1217,3 +1622,21 @@ function buildActualText(execution) {
   return rows.map((row) => row.actual).filter(Boolean).join('\n')
 }
 </script>
+
+<style scoped>
+.defer-work-form {
+  margin-top: 16px;
+}
+
+.defer-work-lists {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 16px;
+}
+
+.defer-work-lists h3 {
+  margin: 0 0 8px;
+  font-size: 14px;
+  font-weight: 600;
+}
+</style>

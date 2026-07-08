@@ -12,6 +12,7 @@ from app.models.role import Role, UserRole
 from app.models.task import Task
 from app.models.test_case import TestCase
 from app.models.user import User
+from app.services.project_permission_service import ensure_project_manage_permission
 from app.services.project_team_service import workbench_project_ids_for_user
 from app.views.dashboard_view import DashboardSummary, WorkbenchItem, WorkbenchResponse
 
@@ -30,16 +31,19 @@ def get_dashboard_summary(db: Session) -> DashboardSummary:
 def get_workbench(db: Session, user_id: int | None = None) -> WorkbenchResponse:
     role_keys = _role_keys_for_user(db, user_id)
     view_mode = _workbench_view_mode(role_keys)
-    scoped_project_ids = workbench_project_ids_for_user(db, user_id) if user_id and view_mode != "all" else set()
+    scoped_project_ids = workbench_project_ids_for_user(db, user_id) if user_id and view_mode == "lead" else set()
     scoped_project_ids = _expand_project_scope_ids(db, scoped_project_ids)
+    owner_iteration_ids = _owner_work_item_iteration_ids(db, user_id) if user_id and view_mode == "mine" else set()
     iterations = (
         db.query(Iteration)
         .filter(Iteration.deleted == 0)
         .order_by(Iteration.id.desc())
         .all()
     )
-    if user_id and view_mode != "all" and not scoped_project_ids:
+    if user_id and view_mode == "lead" and not scoped_project_ids:
         iterations = []
+    if user_id and view_mode == "mine":
+        iterations = [iteration for iteration in iterations if iteration.id in owner_iteration_ids]
     iteration_ids = [item.id for item in iterations]
     projects = {item.id: item for item in db.query(Project).filter(Project.deleted == 0).all()}
     iteration_projects = _iteration_projects(db, iteration_ids, projects)
@@ -73,13 +77,13 @@ def get_workbench(db: Session, user_id: int | None = None) -> WorkbenchResponse:
     )
     test_cases = _items_by_iteration(
         db.query(TestCase).filter(TestCase.deleted == 0, TestCase.iteration_id.in_(iteration_ids)).all(),
-        lambda item: _test_case_item(item, projects, marker=_test_case_marker(item, requirements)),
+        lambda item: _test_case_item(item, projects),
     )
     _merge_requirement_linked_items(
         test_cases,
         db.query(TestCase).filter(TestCase.deleted == 0, TestCase.requirement_id.in_(requirement_iteration_ids)).all(),
         requirement_iteration_ids,
-        lambda item, iteration_id: _test_case_item(item, projects, iteration_id, _test_case_marker(item, requirements)),
+        lambda item, iteration_id: _test_case_item(item, projects, iteration_id),
     )
     bugs = _items_by_iteration(
         db.query(Bug).filter(Bug.deleted == 0, Bug.iteration_id.in_(iteration_ids)).all(),
@@ -136,7 +140,13 @@ def get_workbench(db: Session, user_id: int | None = None) -> WorkbenchResponse:
     return WorkbenchResponse(iterations=boards, owners=owners, review_tasks=review_tasks, role_keys=role_keys, view_mode=view_mode)
 
 
-def move_workbench_item(db: Session, object_type: str, object_id: int, target_iteration_id: int) -> WorkbenchItem:
+def move_workbench_item(
+    db: Session,
+    object_type: str,
+    object_id: int,
+    target_iteration_id: int,
+    actor: User | None = None,
+) -> WorkbenchItem:
     iteration = db.query(Iteration).filter(Iteration.id == target_iteration_id, Iteration.deleted == 0).first()
     if not iteration:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="目标迭代不存在")
@@ -154,6 +164,7 @@ def move_workbench_item(db: Session, object_type: str, object_id: int, target_it
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="工作项不存在")
     if item.project_id not in _iteration_scoped_project_ids(db, target_iteration_id):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="工作项不在目标迭代的项目范围内")
+    ensure_project_manage_permission(db, item.project_id, actor)
     item.iteration_id = target_iteration_id
     db.commit()
     db.refresh(item)
@@ -341,7 +352,6 @@ def _test_case_item(
     item: TestCase,
     projects: dict[int, Project],
     iteration_id: int | None = None,
-    marker: str | None = None,
 ) -> WorkbenchItem:
     return WorkbenchItem(
         id=item.id,
@@ -358,7 +368,6 @@ def _test_case_item(
         steps_json=item.steps_json,
         requirement_id=item.requirement_id,
         test_case_id=item.id,
-        marker=marker,
     )
 
 
@@ -413,11 +422,46 @@ def _workbench_view_mode(role_keys: list[str]) -> str:
         return "all"
     if role_set & {"project_owner", "product_manager", "development_lead"}:
         return "lead"
-    if "tester" in role_set:
-        return "tester"
-    if "developer" in role_set:
-        return "developer"
-    return "all"
+    return "mine"
+
+
+def _owner_work_item_iteration_ids(db: Session, user_id: int | None) -> set[int]:
+    if not user_id:
+        return set()
+    requirement_ids = {
+        row.iteration_id
+        for row in db.query(Requirement.iteration_id)
+        .filter(
+            Requirement.deleted == 0,
+            Requirement.owner_id == user_id,
+            Requirement.iteration_id.isnot(None),
+            Requirement.status.notin_(("done", "closed")),
+        )
+        .all()
+    }
+    task_ids = {
+        row.iteration_id
+        for row in db.query(Task.iteration_id)
+        .filter(
+            Task.deleted == 0,
+            Task.owner_id == user_id,
+            Task.iteration_id.isnot(None),
+            Task.status.notin_(("done", "closed")),
+        )
+        .all()
+    }
+    bug_ids = {
+        row.iteration_id
+        for row in db.query(Bug.iteration_id)
+        .filter(
+            Bug.deleted == 0,
+            Bug.owner_id == user_id,
+            Bug.iteration_id.isnot(None),
+            Bug.status != "closed",
+        )
+        .all()
+    }
+    return {item for item in requirement_ids | task_ids | bug_ids if item}
 
 
 def _filter_items_for_role(
@@ -427,15 +471,25 @@ def _filter_items_for_role(
     include_test_cases: bool,
     scoped_project_ids: set[int] | None = None,
 ) -> list[WorkbenchItem]:
-    if scoped_project_ids:
-        return [item for item in items if item.project_id in scoped_project_ids]
     if view_mode in {"all", "lead"} or not user_id:
+        if scoped_project_ids:
+            return [item for item in items if item.project_id in scoped_project_ids]
         return items
-    if view_mode == "tester":
-        return items
-    if view_mode == "developer":
-        return [] if include_test_cases else items
-    return items
+    if scoped_project_ids:
+        items = [item for item in items if item.project_id in scoped_project_ids]
+    if include_test_cases:
+        return [item for item in items if item.owner_id == user_id]
+    return [item for item in items if item.owner_id == user_id and not _is_terminal_workbench_item(item)]
+
+
+def _is_terminal_workbench_item(item: WorkbenchItem) -> bool:
+    if item.object_type == "requirement":
+        return item.status in {"done", "closed"}
+    if item.object_type == "task":
+        return item.status in {"done", "closed"}
+    if item.object_type == "bug":
+        return item.status == "closed"
+    return False
 
 
 def _filter_review_tasks_for_role(review_tasks: list[dict], user_id: int | None, view_mode: str) -> list[dict]:
@@ -444,19 +498,3 @@ def _filter_review_tasks_for_role(review_tasks: list[dict], user_id: int | None,
     if view_mode == "developer":
         return [item for item in review_tasks if item.get("owner_id") == user_id]
     return []
-
-
-def _test_case_marker(item: TestCase, requirements: dict[int, list[WorkbenchItem]]) -> str | None:
-    requirement_items = {
-        requirement.id: requirement
-        for values in requirements.values()
-        for requirement in values
-    }
-    requirement = requirement_items.get(item.requirement_id)
-    if not requirement or requirement.status not in {"done", "closed"}:
-        return None
-    if item.last_execute_result == "passed":
-        return "最近通过"
-    if item.last_execute_result in {"failed", "blocked"}:
-        return "最近失败"
-    return "待回归"

@@ -2,15 +2,33 @@ from fastapi.testclient import TestClient
 import pytest
 from sqlalchemy import text
 
+from app.core.security import create_access_token, get_password_hash
 from app.db.session import SessionLocal
 from app.main import app
+from app.models.role import Role, UserRole
+from app.models.user import User
+
+
+class AuthenticatedTestClient(TestClient):
+    def __init__(self, *args, default_token: str, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.default_token = default_token
+
+    def request(self, method: str, url, **kwargs):
+        headers = dict(kwargs.pop("headers", {}) or {})
+        skip_default_auth = headers.pop("X-Test-No-Auth", None)
+        if not skip_default_auth and "Authorization" not in headers:
+            headers["Authorization"] = f"Bearer {self.default_token}"
+        kwargs["headers"] = headers
+        return super().request(method, url, **kwargs)
 
 
 @pytest.fixture()
 def client() -> TestClient:
     before = _snapshot_table_ids()
+    default_token = _create_default_admin_token()
     try:
-        yield TestClient(app)
+        yield AuthenticatedTestClient(app, default_token=default_token)
     finally:
         _cleanup_created_rows(before)
 
@@ -35,6 +53,9 @@ TRACKED_TABLES = [
     "custom_field_value",
     "form_layout_config",
     "workflow_component_registry",
+    "workflow_transitions",
+    "workflow_states",
+    "workflow_definitions",
     "workflow_rules",
     "notifications",
     "bugs",
@@ -45,9 +66,12 @@ TRACKED_TABLES = [
     "iterations",
     "project_members",
     "projects",
+    "handler_transition_rules",
+    "assignee_rule_configs",
     "programs",
     "user_roles",
     "users",
+    "roles",
 ]
 
 
@@ -80,3 +104,31 @@ def _cleanup_created_rows(before: dict[str, set[int]]) -> None:
 
 def _table_exists(db, table: str) -> bool:
     return bool(db.execute(text("show tables like :table"), {"table": table}).first())
+
+
+def _create_default_admin_token() -> str:
+    db = SessionLocal()
+    try:
+        username = "pytest_default_admin"
+        user = db.query(User).filter(User.username == username).first()
+        if not user:
+            user = User(
+                username=username,
+                full_name="Pytest Default Admin",
+                password_hash=get_password_hash("User123456"),
+                is_active=True,
+            )
+            db.add(user)
+            db.flush()
+        role = db.query(Role).filter(Role.role_key == "system_admin").first()
+        if not role:
+            role = Role(role_key="system_admin", role_name="system_admin", enabled=True, is_system=True)
+            db.add(role)
+            db.flush()
+        exists = db.query(UserRole).filter(UserRole.user_id == user.id, UserRole.role_id == role.id).first()
+        if not exists:
+            db.add(UserRole(user_id=user.id, role_id=role.id))
+        db.commit()
+        return create_access_token(user.username)
+    finally:
+        db.close()

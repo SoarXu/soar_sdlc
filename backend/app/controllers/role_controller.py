@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, Response, status
 from sqlalchemy.orm import Session
 
+from app.core.auth_dependencies import require_system_admin
 from app.db.session import get_db
 from app.services import role_service
 from app.views.role_view import RoleCreate, RoleRead, RoleUpdate
@@ -15,16 +16,16 @@ def get_roles(db: Session = Depends(get_db)):
 
 
 @router.post("", response_model=RoleRead, status_code=status.HTTP_201_CREATED)
-def create_role(payload: RoleCreate, db: Session = Depends(get_db)):
+def create_role(payload: RoleCreate, db: Session = Depends(get_db), _admin=Depends(require_system_admin)):
     return role_service.create_role(db, payload)
 
 
 @router.put("/{role_id}", response_model=RoleRead)
-def update_role(role_id: int, payload: RoleUpdate, db: Session = Depends(get_db)):
+def update_role(role_id: int, payload: RoleUpdate, db: Session = Depends(get_db), _admin=Depends(require_system_admin)):
     return role_service.update_role(db, role_id, payload)
 
 
 @router.delete("/{role_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_role(role_id: int, db: Session = Depends(get_db)):
+def delete_role(role_id: int, db: Session = Depends(get_db), _admin=Depends(require_system_admin)):
     role_service.delete_role(db, role_id)
     return Response(status_code=status.HTTP_204_NO_CONTENT)

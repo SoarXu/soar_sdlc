@@ -345,6 +345,14 @@ function buildProjectTree(projects, programId) {
 }
 
 function toTreeRow(node) {
+  if (node.node_type === 'project') {
+    return {
+      ...node,
+      treeKey: `project-${node.id}`,
+      nodeType: 'project',
+      children: (node.children || []).map(toTreeRow)
+    }
+  }
   return {
     ...node,
     treeKey: `program-${node.id}`,
@@ -365,6 +373,7 @@ function flattenPrograms(nodes) {
 
 function flattenProjects(nodes) {
   return nodes.flatMap((node) => [
+    ...(node.node_type === 'project' ? [{ id: node.id, name: node.name, parent_id: node.parent_id }] : []),
     ...(node.projects || []).map((project) => ({ id: project.id, name: project.name, parent_id: project.parent_id })),
     ...flattenProjects(node.children || [])
   ])

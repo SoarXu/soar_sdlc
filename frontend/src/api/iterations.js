@@ -48,6 +48,10 @@ export function finishIteration(id, payload = {}) {
   return http.post(`/iterations/${id}/finish`, payload)
 }
 
+export function deferIterationWorkItems(id, payload) {
+  return http.post(`/iterations/${id}/defer-work-items`, payload)
+}
+
 export function fetchIterationStatusOperations(id) {
   return http.get(`/iterations/${id}/status-operations`)
 }

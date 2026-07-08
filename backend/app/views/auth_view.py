@@ -21,3 +21,9 @@ class TokenResponse(BaseModel):
     user_id: int
     username: str
     full_name: str
+    must_change_password: bool = False
+
+
+class ChangePasswordRequest(BaseModel):
+    current_password: str
+    new_password: str

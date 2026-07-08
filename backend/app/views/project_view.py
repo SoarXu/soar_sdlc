@@ -22,6 +22,7 @@ class ProjectBase(BaseModel):
     is_long_term: bool = False
     status: str = "planning"
     description: str | None = None
+    assignee_rule_config_id: int | None = None
 
 
 class ProjectCreate(ProjectBase):
@@ -40,6 +41,7 @@ class ProjectUpdate(BaseModel):
     is_long_term: bool | None = None
     description: str | None = None
     workflow_config_id: int | None = None
+    assignee_rule_config_id: int | None = None
     updater_id: int | None = None
 
 
@@ -48,6 +50,7 @@ class ProjectRead(ProjectBase):
 
     id: int
     workflow_config_id: int | None = None
+    assignee_rule_config_id: int | None = None
     creator_id: int | None = None
     updater_id: int | None = None
     create_time: datetime | None = None

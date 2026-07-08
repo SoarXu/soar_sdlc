@@ -8,8 +8,10 @@ from app.models.audit_log import AuditLog
 from app.models.project import Project
 from app.models.requirement import Requirement
 from app.models.task import Task
+from app.models.user import User
 from app.services.lifecycle_service import project_lifecycle_phase, requirement_lifecycle_phase
-from app.services.project_team_service import default_developer_id
+from app.services.current_handler_service import ensure_work_item_action
+from app.services.handler_transition_rule_service import apply_handler_transition
 from app.services.status_operation_service import create_status_operation, list_status_operations
 from app.views.status_operation_view import StatusOperationCreate
 from app.views.task_view import TaskCreate, TaskUpdate
@@ -29,16 +31,6 @@ def create_task(db: Session, payload: TaskCreate) -> Task:
         requirement_lifecycle_phase(db, data.get("requirement_id"))
         or project_lifecycle_phase(db, data.get("project_id"))
     )
-    if data.get("requirement_id") and not data.get("owner_id"):
-        requirement = db.query(Requirement).filter(Requirement.id == data["requirement_id"], Requirement.deleted == 0).first()
-        if requirement and requirement.owner_id:
-            data["owner_id"] = requirement.owner_id
-    if not data.get("owner_id"):
-        data["owner_id"] = default_developer_id(db, data.get("source_project_id") or data.get("project_id"))
-    if data.get("source_project_id") and not data.get("owner_id"):
-        source_project = db.query(Project).filter(Project.id == data["source_project_id"], Project.deleted == 0).first()
-        if source_project and source_project.owner_id:
-            data["owner_id"] = source_project.owner_id
     task = Task(**data)
     db.add(task)
     db.commit()
@@ -46,8 +38,9 @@ def create_task(db: Session, payload: TaskCreate) -> Task:
     return task
 
 
-def update_task(db: Session, task_id: int, payload: TaskUpdate) -> Task:
+def update_task(db: Session, task_id: int, payload: TaskUpdate, actor_id: int | None = None) -> Task:
     task = _get_active_task(db, task_id)
+    ensure_work_item_action(db, task, actor_id, "任务")
     _ensure_project_editable_for_task(db, task)
     data = payload.model_dump(exclude_unset=True)
     before_data, after_data = _task_change_data(task, data)
@@ -56,6 +49,7 @@ def update_task(db: Session, task_id: int, payload: TaskUpdate) -> Task:
     if before_data:
         db.add(
             AuditLog(
+                actor_id=actor_id,
                 action="update",
                 object_type="task",
                 object_id=task.id,
@@ -70,6 +64,7 @@ def update_task(db: Session, task_id: int, payload: TaskUpdate) -> Task:
 
 def activate_task(db: Session, task_id: int, actor_id: int | None = None) -> Task:
     task = _get_active_task(db, task_id)
+    ensure_work_item_action(db, task, actor_id, "任务")
     _ensure_project_open_for_task(db, task)
     from_status = task.status
     task.status = "doing"
@@ -83,6 +78,15 @@ def activate_task(db: Session, task_id: int, actor_id: int | None = None) -> Tas
         payload=None,
         actor_id=actor_id,
     )
+    apply_handler_transition(
+        db,
+        item=task,
+        object_type="task",
+        action="activate",
+        from_status=from_status,
+        to_status=task.status,
+        actor_id=actor_id,
+    )
     db.commit()
     db.refresh(task)
     return task
@@ -92,6 +96,9 @@ def close_task(db: Session, task_id: int, payload: StatusOperationCreate, actor_
     if not payload.reason:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="关闭原因必填")
     task = _get_active_task(db, task_id)
+    ensure_work_item_action(db, task, actor_id, "任务")
+    if task.status == "done":
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="已完成任务不允许关闭")
     close_task_record(db, task, payload, actor_id=actor_id)
     db.commit()
     db.refresh(task)
@@ -100,6 +107,7 @@ def close_task(db: Session, task_id: int, payload: StatusOperationCreate, actor_
 
 def complete_task(db: Session, task_id: int, actor_id: int | None = None) -> Task:
     task = _get_active_task(db, task_id)
+    ensure_work_item_action(db, task, actor_id, "任务")
     _ensure_project_open_for_task(db, task)
     if task.status == "done":
         return task
@@ -115,13 +123,22 @@ def complete_task(db: Session, task_id: int, actor_id: int | None = None) -> Tas
         payload=None,
         actor_id=actor_id,
     )
+    apply_handler_transition(
+        db,
+        item=task,
+        object_type="task",
+        action="complete",
+        from_status=from_status,
+        to_status=task.status,
+        actor_id=actor_id,
+    )
     db.commit()
     db.refresh(task)
     return task
 
 
 def close_task_record(db: Session, task: Task, payload: StatusOperationCreate, actor_id: int | None = None) -> Task:
-    if task.status == "closed":
+    if task.status in {"done", "closed"}:
         return task
     from_status = task.status
     task.status = "closed"
@@ -135,6 +152,15 @@ def close_task_record(db: Session, task: Task, payload: StatusOperationCreate, a
         payload=payload,
         actor_id=actor_id,
     )
+    apply_handler_transition(
+        db,
+        item=task,
+        object_type="task",
+        action="close",
+        from_status=from_status,
+        to_status=task.status,
+        actor_id=actor_id,
+    )
     return task
 
 
@@ -143,14 +169,15 @@ def list_task_status_operations(db: Session, task_id: int) -> list[dict]:
     return list_status_operations(db, "task", task_id)
 
 
-def list_task_audit_logs(db: Session, task_id: int) -> list[AuditLog]:
+def list_task_audit_logs(db: Session, task_id: int) -> list[dict]:
     _get_active_task(db, task_id)
-    return (
+    logs = (
         db.query(AuditLog)
         .filter(AuditLog.object_type == "task", AuditLog.object_id == task_id)
         .order_by(AuditLog.create_time.desc(), AuditLog.id.desc())
         .all()
     )
+    return _audit_logs_with_actor_names(db, logs)
 
 
 def delete_task(db: Session, task_id: int) -> None:
@@ -187,6 +214,29 @@ def _audit_value(value):
     if isinstance(value, Decimal):
         return float(value)
     return value
+
+
+def _audit_logs_with_actor_names(db: Session, logs: list[AuditLog]) -> list[dict]:
+    actor_ids = {log.actor_id for log in logs if log.actor_id}
+    users = {}
+    if actor_ids:
+        users = {user.id: user.full_name for user in db.query(User).filter(User.id.in_(actor_ids)).all()}
+    return [
+        {
+            "id": log.id,
+            "actor_id": log.actor_id,
+            "actor_name": users.get(log.actor_id) if log.actor_id else None,
+            "action": log.action,
+            "object_type": log.object_type,
+            "object_id": log.object_id,
+            "before_data": log.before_data,
+            "after_data": log.after_data,
+            "ip_address": log.ip_address,
+            "user_agent": log.user_agent,
+            "create_time": log.create_time,
+        }
+        for log in logs
+    ]
 
 
 def _ensure_project_editable_for_task(db: Session, task: Task) -> None:

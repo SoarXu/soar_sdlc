@@ -15,6 +15,7 @@ from app.models.task import Task
 from app.models.test_case import TestCase
 from app.models.test_case_execution import TestCaseExecutionLog
 from app.models.test_run import TestRun, TestRunCase
+from app.models.user import User
 from app.services.status_operation_service import create_status_operation, list_status_operations
 from app.services.requirement_service import close_requirement_record
 from app.services.workflow_engine import execute_workflows
@@ -186,7 +187,7 @@ def create_project(db: Session, payload: ProjectCreate) -> Project:
     return project
 
 
-def update_project(db: Session, project_id: int, payload: ProjectUpdate) -> Project:
+def update_project(db: Session, project_id: int, payload: ProjectUpdate, actor_id: int | None = None) -> Project:
     project = _get_active_project(db, project_id)
     data = payload.model_dump(exclude_unset=True)
     data.pop("lifecycle_phase", None)
@@ -207,6 +208,7 @@ def update_project(db: Session, project_id: int, payload: ProjectUpdate) -> Proj
     if before_data:
         db.add(
             AuditLog(
+                actor_id=actor_id,
                 action="update",
                 object_type="project",
                 object_id=project.id,
@@ -219,14 +221,15 @@ def update_project(db: Session, project_id: int, payload: ProjectUpdate) -> Proj
     return project
 
 
-def list_project_audit_logs(db: Session, project_id: int) -> list[AuditLog]:
+def list_project_audit_logs(db: Session, project_id: int) -> list[dict]:
     _get_active_project(db, project_id)
-    return (
+    logs = (
         db.query(AuditLog)
         .filter(AuditLog.object_type == "project", AuditLog.object_id == project_id)
         .order_by(AuditLog.create_time.desc(), AuditLog.id.desc())
         .all()
     )
+    return _audit_logs_with_actor_names(db, logs)
 
 
 def delete_project(db: Session, project_id: int) -> None:
@@ -283,7 +286,7 @@ def start_project(db: Session, project_id: int, payload: StatusOperationCreate |
     if from_status == "planning":
         _require_effective_time(payload, "请选择实际开始日期")
         project.actual_start_date = _effective_date(payload)
-    _activate_program_tree(db, project.program_id)
+    _activate_program_tree(db, project.program_id, actual_start_date=project.actual_start_date)
     create_status_operation(
         db,
         object_type="project",
@@ -433,11 +436,13 @@ def _require_effective_time(payload: StatusOperationCreate | None, message: str)
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=message)
 
 
-def _activate_program_tree(db: Session, program_id: int | None) -> None:
+def _activate_program_tree(db: Session, program_id: int | None, actual_start_date: date | None = None) -> None:
     while program_id:
         program = db.query(Program).filter(Program.id == program_id, Program.deleted == 0).first()
         if not program:
             return
+        if program.status == "planning" and actual_start_date and not program.actual_start_date:
+            program.actual_start_date = actual_start_date
         if program.status != "active":
             program.status = "active"
         program_id = program.parent_id
@@ -466,6 +471,29 @@ def _audit_value(value):
     if isinstance(value, (date, datetime)):
         return value.isoformat()
     return value
+
+
+def _audit_logs_with_actor_names(db: Session, logs: list[AuditLog]) -> list[dict]:
+    actor_ids = {log.actor_id for log in logs if log.actor_id}
+    users = {}
+    if actor_ids:
+        users = {user.id: user.full_name for user in db.query(User).filter(User.id.in_(actor_ids)).all()}
+    return [
+        {
+            "id": log.id,
+            "actor_id": log.actor_id,
+            "actor_name": users.get(log.actor_id) if log.actor_id else None,
+            "action": log.action,
+            "object_type": log.object_type,
+            "object_id": log.object_id,
+            "before_data": log.before_data,
+            "after_data": log.after_data,
+            "ip_address": log.ip_address,
+            "user_agent": log.user_agent,
+            "create_time": log.create_time,
+        }
+        for log in logs
+    ]
 
 
 def _paginate(query, page: int, page_size: int) -> dict:

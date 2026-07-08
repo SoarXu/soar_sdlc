@@ -108,6 +108,8 @@ def test_failed_test_result_can_create_bug_with_requirement_owner(client: TestCl
     resolved = client.post(f"/api/v1/bugs/{data['id']}/resolve", json={"resolution": "已解决"})
     assert resolved.status_code == 200
     assert resolved.json()["status"] == "verifying"
+    passed = client.patch(f"/api/v1/test-run-cases/{selected['id']}", json={"result": "passed"})
+    assert passed.status_code == 200
     closed = client.post(f"/api/v1/bugs/{data['id']}/close", json={"verify_result": "passed"})
     assert closed.status_code == 200
     assert closed.json()["status"] == "closed"

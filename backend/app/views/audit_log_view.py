@@ -8,6 +8,7 @@ class AuditLogRead(BaseModel):
 
     id: int
     actor_id: int | None = None
+    actor_name: str | None = None
     action: str
     object_type: str
     object_id: int | None = None

@@ -40,7 +40,7 @@
       <el-descriptions :column="3" border>
         <el-descriptions-item label="所属项目">{{ labelById(projects, testCase.project_id) }}</el-descriptions-item>
         <el-descriptions-item label="关联需求">
-          <router-link v-if="testCase.requirement_id" class="table-link" :to="`/requirements/${testCase.requirement_id}`">{{ labelById(requirements, testCase.requirement_id, 'title') }}</router-link>
+          <router-link v-if="linkedRequirement" class="table-link" :to="`/requirements/${linkedRequirement.id}`">{{ linkedRequirement.title }}</router-link>
           <span v-else>-</span>
         </el-descriptions-item>
         <el-descriptions-item label="测试人">{{ userLabel(users, testCase.default_tester_id) }}</el-descriptions-item>
@@ -116,6 +116,7 @@ const projects = ref([])
 const requirements = ref([])
 const users = ref([])
 const caseSteps = computed(() => (Array.isArray(testCase.value.steps_json) && testCase.value.steps_json.length ? testCase.value.steps_json : []))
+const linkedRequirement = computed(() => requirements.value.find((item) => item.id === testCase.value.requirement_id))
 const caseForm = reactive({ project_id: null, requirement_id: null, title: '', case_type: 'functional', test_scope: 'functional_test', default_tester_id: null, precondition: '', steps_json: [{ step: '', expected: '' }], expected_result: '' })
 
 const caseTypeOptions = [

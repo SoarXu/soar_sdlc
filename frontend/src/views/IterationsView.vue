@@ -108,7 +108,7 @@
 
 <script setup>
 import { computed, onMounted, reactive, ref } from 'vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { createIteration, deleteIteration, fetchIterations, finishIteration, startIteration, updateIteration } from '../api/iterations'
 import { fetchProjects } from '../api/projects'
 import { fetchUsers } from '../api/users'
@@ -164,6 +164,15 @@ const iterationStatusOptions = [
 function iterationStatusLabel(value) {
   return iterationStatusOptions.find((option) => option.value === value)?.label || value || '-'
 }
+function apiErrorMessage(error, fallback) {
+  const detail = error?.response?.data?.detail
+  if (typeof detail === 'string') return detail
+  if (Array.isArray(detail)) return detail.map((item) => item.msg || item.message).filter(Boolean).join('；') || fallback
+  return fallback
+}
+function showActionError(error, fallback) {
+  ElMessageBox.alert(apiErrorMessage(error, fallback), '提示', { type: 'warning' })
+}
 function resetForm() { Object.assign(form, { project_ids: [], name: '', owner_id: null, start_date: null, end_date: null, status: 'planning', goal: '' }) }
 function currentDateTimeValue() {
   const date = new Date()
@@ -212,6 +221,8 @@ async function submitStart() {
     startDialogVisible.value = false
     await loadData()
     ElMessage.success('迭代已开始')
+  } catch (error) {
+    showActionError(error, '迭代开始失败')
   } finally {
     saving.value = false
   }
@@ -224,6 +235,8 @@ async function submitFinish() {
     finishDialogVisible.value = false
     await loadData()
     ElMessage.success('迭代已结束')
+  } catch (error) {
+    showActionError(error, '迭代结束失败')
   } finally {
     saving.value = false
   }

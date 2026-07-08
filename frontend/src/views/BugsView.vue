@@ -5,7 +5,7 @@
         <h1>Bug</h1>
         <p>维护缺陷和关联上下文，项目、需求、任务、用例、测试单和人员均以名称选择。</p>
       </div>
-      <el-button type="primary" @click="openCreate">新增 Bug</el-button>
+      <el-button v-if="canCreateAnyBug" type="primary" @click="openCreate">新增 Bug</el-button>
     </div>
 
     <el-card shadow="never">
@@ -15,19 +15,14 @@
         <el-table-column label="项目" width="170"><template #default="{ row }">{{ labelById(projects, row.project_id) }}</template></el-table-column>
         <el-table-column label="需求" width="180"><template #default="{ row }">{{ labelById(requirements, row.requirement_id, 'title') }}</template></el-table-column>
         <el-table-column label="任务" width="180"><template #default="{ row }">{{ labelById(tasks, row.task_id, 'title') }}</template></el-table-column>
-        <el-table-column label="负责人" width="140"><template #default="{ row }">{{ userLabel(users, row.owner_id) }}</template></el-table-column>
+        <el-table-column label="当前处理人" width="140"><template #default="{ row }">{{ userLabel(users, row.owner_id) }}</template></el-table-column>
         <el-table-column label="严重程度" width="110"><template #default="{ row }"><RequirementPriorityBadge :value="row.severity" /></template></el-table-column>
         <el-table-column label="状态" width="120"><template #default="{ row }">{{ bugStatusLabel(row.status) }}</template></el-table-column>
         <el-table-column label="操作" width="380" fixed="right">
           <template #default="{ row }">
             <div class="table-actions">
-              <el-button link type="primary" @click="openEdit(row)">编辑</el-button>
-              <el-button v-if="['open', 'reopened', 'suspended'].includes(row.status)" link type="success" @click="openBugAction(row, 'start_fixing')">确认</el-button>
-              <el-button v-if="row.status === 'fixing'" link type="success" @click="openBugAction(row, 'resolve')">解决</el-button>
-              <el-button v-if="['verifying', 'closed'].includes(row.status)" link type="warning" @click="openBugAction(row, 'activate')">激活</el-button>
-              <el-button v-if="['open', 'fixing', 'reopened'].includes(row.status)" link type="warning" @click="openBugAction(row, 'suspend')">挂起</el-button>
-              <el-button v-if="['open', 'suspended', 'verifying'].includes(row.status)" link type="danger" @click="openBugAction(row, 'close')">关闭</el-button>
-              <el-popconfirm title="确认删除该 Bug？" @confirm="removeBug(row.id)"><template #reference><el-button link type="danger">删除</el-button></template></el-popconfirm>
+              <el-button v-if="canEditBug(row)" link type="primary" @click="openEdit(row)">编辑</el-button>
+              <WorkflowActionButtons object-type="bug" :object-id="row.id" mode="list" :transitions="workflowTransitionsFor(row)" :auto-load="false" :users="users" @executed="loadData" /><el-popconfirm v-if="canDeleteBugRow(row)" title="确认删除该 Bug？" @confirm="removeBug(row.id)"><template #reference><el-button link type="danger">删除</el-button></template></el-popconfirm>
             </div>
           </template>
         </el-table-column>
@@ -52,8 +47,8 @@
           <el-form-item label="任务"><el-select v-model="form.task_id" clearable filterable placeholder="请选择任务"><el-option v-for="task in tasks" :key="task.id" :label="task.title" :value="task.id" /></el-select></el-form-item>
           <el-form-item label="来源用例"><el-select v-model="form.test_case_id" clearable filterable placeholder="请选择用例"><el-option v-for="item in testCases" :key="item.id" :label="item.title" :value="item.id" /></el-select></el-form-item>
           <el-form-item label="来源测试单"><el-select v-model="form.test_run_id" clearable filterable placeholder="请选择测试单"><el-option v-for="run in testRuns" :key="run.id" :label="run.name" :value="run.id" /></el-select></el-form-item>
-          <el-form-item label="所属迭代"><el-select v-model="form.iteration_id" clearable filterable placeholder="请选择迭代"><el-option v-for="iteration in iterations" :key="iteration.id" :label="iteration.name" :value="iteration.id" /></el-select></el-form-item>
-          <el-form-item label="负责人"><el-select v-model="form.owner_id" clearable filterable placeholder="请选择负责人"><el-option v-for="user in users" :key="user.id" :label="user.full_name" :value="user.id" /></el-select></el-form-item>
+          <el-form-item label="所属迭代"><el-select v-model="form.iteration_id" clearable filterable placeholder="请选择迭代"><el-option v-for="iteration in editableIterationDisplayOptions" :key="iteration.id" :label="iteration.name" :value="iteration.id" :disabled="iteration.disabled" /></el-select></el-form-item>
+          <el-form-item label="当前处理人"><el-select v-model="form.owner_id" clearable filterable placeholder="请选择当前处理人"><el-option v-for="user in users" :key="user.id" :label="user.full_name" :value="user.id" /></el-select></el-form-item>
           <el-form-item label="提出人"><el-select v-model="form.reporter_id" clearable filterable placeholder="请选择提出人"><el-option v-for="user in users" :key="user.id" :label="user.full_name" :value="user.id" /></el-select></el-form-item>
         </div>
         <div class="form-grid">
@@ -67,51 +62,34 @@
       <template #footer><el-button @click="dialogVisible = false">取消</el-button><el-button type="primary" :loading="saving" @click="submitBug">保存</el-button></template>
     </el-dialog>
 
-    <el-dialog v-model="actionDialogVisible" :title="bugActionTitle" width="480px">
-      <el-form label-position="top">
-        <el-form-item v-if="actionType === 'resolve'" label="解决方案" required>
-          <el-select v-model="actionForm.resolution">
-            <el-option v-for="option in bugResolutionOptions" :key="option" :label="option" :value="option" />
-          </el-select>
-        </el-form-item>
-        <el-form-item v-if="actionType === 'start_fixing'" label="解决迭代">
-          <el-select v-model="actionForm.iteration_id" clearable filterable placeholder="请选择解决迭代">
-            <el-option v-for="iteration in iterations" :key="iteration.id" :label="iteration.name" :value="iteration.id" />
-          </el-select>
-        </el-form-item>
-        <el-form-item v-if="actionType === 'suspend'" label="原因">
-          <el-input v-model="actionForm.reason" />
-        </el-form-item>
-        <el-form-item label="备注">
-          <el-input v-model="actionForm.remark" type="textarea" :rows="3" />
-        </el-form-item>
-      </el-form>
-      <template #footer><el-button @click="actionDialogVisible = false">取消</el-button><el-button type="primary" :loading="saving" @click="submitBugAction">确认</el-button></template>
-    </el-dialog>
   </section>
 </template>
 
 <script setup>
 import { computed, onMounted, reactive, ref } from 'vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
-import { activateBug, closeBug, createBug, deleteBug, fetchBugs, resolveBug, startFixingBug, suspendBug, updateBug } from '../api/bugs'
-import { fetchProjects } from '../api/projects'
+import { ElMessage } from 'element-plus'
+import { createBug, deleteBug, fetchBugs, updateBug } from '../api/bugs'
+import { fetchProjectMembers, fetchProjects } from '../api/projects'
 import { fetchRequirements } from '../api/requirements'
 import { fetchTasks } from '../api/tasks'
 import { fetchTestCases } from '../api/testCases'
 import { fetchTestRuns } from '../api/testRuns'
 import { fetchUsers } from '../api/users'
 import { fetchIterations } from '../api/iterations'
+import { fetchWorkflowTransitionsBatch } from '../api/workflowRuntime'
 import RequirementPriorityBadge from '../components/RequirementPriorityBadge.vue'
 import RichTextPasteEditor from '../components/RichTextPasteEditor.vue'
+import WorkflowActionButtons from '../components/WorkflowActionButtons.vue'
+import { showActionError } from '../utils/actionFeedback'
 import { labelById, userLabel } from '../utils/referenceLabels'
+import { bugIterationOptions, includeSelectedIterationOption } from '../utils/bugIterations'
+import { canCreateWorkItem, canDeleteWorkItem, canExecuteWorkItem, currentUserFromStorage } from '../utils/permissions'
 import { usePagination } from '../utils/usePagination'
 
 const loading = ref(false), saving = ref(false), dialogVisible = ref(false), editingId = ref(null)
-const actionDialogVisible = ref(false)
-const actionType = ref('')
-const actingBug = ref(null)
 const bugs = ref([]), projects = ref([]), requirements = ref([]), tasks = ref([]), testCases = ref([]), testRuns = ref([]), users = ref([]), iterations = ref([])
+const projectMembersById = ref({})
+const workflowTransitions = ref({})
 const {
   page: bugPage,
   pageSize: bugPageSize,
@@ -129,49 +107,61 @@ const priorityLevelOptions = [
 const bugStatusOptions = [
   { label: '待确认', value: 'open' },
   { label: '修复中', value: 'fixing' },
-  { label: '已解决', value: 'resolved' },
   { label: '待验证', value: 'verifying' },
   { label: '已关闭', value: 'closed' },
   { label: '重新打开', value: 'reopened' },
   { label: '已挂起', value: 'suspended' }
 ]
-const bugResolutionOptions = ['设计如此', '重复Bug', '外部原因', '已解决', '无法重现', '延期处理', '不予解决']
 const form = reactive({ project_id: null, iteration_id: null, requirement_id: null, task_id: null, test_case_id: null, test_run_id: null, title: '', severity: '3', priority: '3', owner_id: null, reporter_id: null, reproduce_steps: '', expected_result: '', actual_result: '' })
-const actionForm = reactive({ resolution: '', verify_result: '', iteration_id: null, reason: '', remark: '' })
-const bugActionTitle = computed(() => ({
-  start_fixing: '确认 Bug',
-  resolve: '解决 Bug',
-  activate: '激活 Bug',
-  suspend: '挂起 Bug',
-  close: '关闭 Bug'
-}[actionType.value] || 'Bug 操作'))
+const currentUser = computed(() => currentUserFromStorage(users.value))
+const canCreateAnyBug = computed(() => projects.value.some((project) => canCreateWorkItem(project, currentUser.value, membersForProject(project.id))))
+const editableIterationOptions = computed(() => bugIterationOptions(iterations.value, projects.value, form.project_id))
+const editableIterationDisplayOptions = computed(() => includeSelectedIterationOption(editableIterationOptions.value, iterations.value, form.iteration_id))
 
 function optionLabel(options, value) { return options.find((option) => option.value === value)?.label || value || '-' }
 function bugStatusLabel(value) { return optionLabel(bugStatusOptions, value) }
+function workflowTransitionsFor(row) { return workflowTransitions.value[`bug:${row.id}`] || [] }
+function projectForBug(row) { return projects.value.find((item) => item.id === row.project_id) || null }
+function membersForProject(projectId) { return projectMembersById.value[projectId] || [] }
+function canEditBug(row) {
+  const project = projectForBug(row)
+  return canExecuteWorkItem(row, currentUser.value, project, membersForProject(project?.id))
+}
+function canDeleteBugRow(row) {
+  const project = projectForBug(row)
+  return canDeleteWorkItem(project, currentUser.value, membersForProject(project?.id))
+}
 function resetForm() { Object.assign(form, { project_id: null, iteration_id: null, requirement_id: null, task_id: null, test_case_id: null, test_run_id: null, title: '', severity: '3', priority: '3', owner_id: null, reporter_id: null, reproduce_steps: '', expected_result: '', actual_result: '' }) }
 function openCreate() { editingId.value = null; resetForm(); dialogVisible.value = true }
 function openEdit(row) { editingId.value = row.id; Object.assign(form, { ...row, reproduce_steps: row.reproduce_steps || '', expected_result: row.expected_result || '', actual_result: row.actual_result || '' }); dialogVisible.value = true }
-function apiErrorMessage(error, fallback) { return error?.response?.data?.detail || fallback }
-function showActionError(error, fallback) { ElMessageBox.alert(apiErrorMessage(error, fallback), '提示', { type: 'warning' }) }
-function openBugAction(row, type) {
-  actingBug.value = row
-  actionType.value = type
-  Object.assign(actionForm, {
-    resolution: type === 'resolve' ? '已解决' : '',
-    verify_result: type === 'close' ? 'passed' : type === 'activate' ? 'failed' : '',
-    iteration_id: type === 'start_fixing' ? row.iteration_id || null : null,
-    reason: '',
-    remark: ''
-  })
-  actionDialogVisible.value = true
-}
 
 async function loadData() {
   loading.value = true
   try {
     const [bugRes, projectRes, reqRes, taskRes, caseRes, runRes, userRes, iterationRes] = await Promise.all([fetchBugs(), fetchProjects(), fetchRequirements(), fetchTasks(), fetchTestCases(), fetchTestRuns(), fetchUsers(), fetchIterations()])
     bugs.value = bugRes.data; projects.value = projectRes.data; requirements.value = reqRes.data; tasks.value = taskRes.data; testCases.value = caseRes.data; testRuns.value = runRes.data; users.value = userRes.data; iterations.value = iterationRes.data
+    await loadProjectMembers()
+    await loadWorkflowTransitions()
   } catch { ElMessage.error('Bug 列表加载失败') } finally { loading.value = false }
+}
+async function loadProjectMembers() {
+  const entries = await Promise.all(projects.value.map(async (project) => {
+    try {
+      const { data } = await fetchProjectMembers(project.id)
+      return [project.id, data]
+    } catch {
+      return [project.id, []]
+    }
+  }))
+  projectMembersById.value = Object.fromEntries(entries)
+}
+async function loadWorkflowTransitions() {
+  if (!bugs.value.length) {
+    workflowTransitions.value = {}
+    return
+  }
+  const { data } = await fetchWorkflowTransitionsBatch(bugs.value.map((item) => ({ object_type: 'bug', id: item.id })))
+  workflowTransitions.value = Object.fromEntries((data.items || []).map((item) => [`${item.object_type}:${item.id}`, item.transitions || []]))
 }
 async function submitBug() {
   if (!form.project_id || !form.title.trim()) return ElMessage.warning('请选择项目并填写 Bug 标题')
@@ -181,29 +171,16 @@ async function submitBug() {
     delete payload.status
     if (editingId.value) await updateBug(editingId.value, payload); else await createBug(payload)
     dialogVisible.value = false; await loadData()
+  } catch (error) {
+    showActionError(error, editingId.value ? 'Bug 保存失败' : 'Bug 创建失败')
   } finally { saving.value = false }
 }
-async function removeBug(id) { await deleteBug(id); await loadData() }
-async function submitBugAction() {
-  if (actionType.value === 'resolve' && !actionForm.resolution) return ElMessage.warning('请选择解决方案')
-  saving.value = true
+async function removeBug(id) {
   try {
-    const actions = {
-      start_fixing: startFixingBug,
-      resolve: resolveBug,
-      activate: activateBug,
-      suspend: suspendBug,
-      close: closeBug
-    }
-    const payload = ['activate', 'close'].includes(actionType.value) ? { remark: actionForm.remark } : { ...actionForm }
-    await actions[actionType.value](actingBug.value.id, payload)
-    actionDialogVisible.value = false
+    await deleteBug(id)
     await loadData()
-    ElMessage.success('Bug 状态已更新')
   } catch (error) {
-    showActionError(error, 'Bug 状态更新失败')
-  } finally {
-    saving.value = false
+    showActionError(error, 'Bug 删除失败')
   }
 }
 onMounted(loadData)

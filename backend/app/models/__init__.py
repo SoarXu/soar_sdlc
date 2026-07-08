@@ -1,6 +1,8 @@
 from app.models.audit_log import AuditLog
+from app.models.assignee_rule_config import AssigneeRuleConfig
 from app.models.bug import Attachment, Bug, ObjectTag, Tag
 from app.models.field_registry import CustomFieldValue, FormFieldRegistry, FormLayoutConfig
+from app.models.handler_transition_rule import HandlerTransitionRule
 from app.models.integration_mapping import ExternalIntegrationMapping
 from app.models.iteration import Iteration, IterationProject
 from app.models.notification import Notification, NotificationChannelConfig, NotificationDeliveryLog
@@ -17,16 +19,19 @@ from app.models.test_case_execution import TestCaseExecutionLog
 from app.models.test_run import TestRun, TestRunCase
 from app.models.user import User
 from app.models.workflow_component import WorkflowComponent
+from app.models.workflow_definition import WorkflowDefinition, WorkflowState, WorkflowTransition
 from app.models.workflow_rule import WorkflowRule
 
 __all__ = [
     "Attachment",
+    "AssigneeRuleConfig",
     "AuditLog",
     "Bug",
     "CustomFieldValue",
     "ExternalIntegrationMapping",
     "FormFieldRegistry",
     "FormLayoutConfig",
+    "HandlerTransitionRule",
     "Iteration",
     "IterationProject",
     "Notification",
@@ -49,5 +54,8 @@ __all__ = [
     "User",
     "UserRole",
     "WorkflowComponent",
+    "WorkflowDefinition",
     "WorkflowRule",
+    "WorkflowState",
+    "WorkflowTransition",
 ]

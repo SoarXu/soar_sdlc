@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import BigInteger, DateTime, String, Text, text
+from sqlalchemy import BigInteger, Boolean, DateTime, String, Text, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.session import Base
@@ -19,4 +19,9 @@ class StatusOperationLog(Base):
     effective_time: Mapped[datetime] = mapped_column(DateTime)
     remark: Mapped[str | None] = mapped_column(Text, nullable=True)
     actor_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    actor_name: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    is_delegated: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("0"))
+    delegated_owner_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    delegated_owner_name: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    delegate_reason: Mapped[str | None] = mapped_column(String(255), nullable=True)
     create_time: Mapped[datetime] = mapped_column(DateTime, server_default=text("CURRENT_TIMESTAMP"))

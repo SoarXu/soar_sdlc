@@ -5,6 +5,14 @@
       <el-tag effect="plain">#{{ task.id }}</el-tag>
       <h1>{{ task.title || '任务详情' }}</h1>
       <router-link v-if="task.project_id" class="detail-link" :to="`/projects/${task.project_id}`">进入项目</router-link>
+      <WorkflowActionButtons
+        v-if="!editing && task.id"
+        object-type="task"
+        :object-id="taskId"
+        mode="detail"
+        :users="users"
+        @executed="loadData"
+      />
       <el-button v-if="!editing" type="primary" @click="startEdit">编辑</el-button>
       <template v-else>
         <el-button @click="cancelEdit">取消</el-button>
@@ -18,10 +26,7 @@
         <div class="form-grid">
           <el-form-item label="关联需求"><el-select v-model="taskForm.requirement_id" clearable filterable><el-option v-for="requirement in requirements" :key="requirement.id" :label="requirement.title" :value="requirement.id" /></el-select></el-form-item>
           <el-form-item label="负责人"><el-select v-model="taskForm.owner_id" clearable filterable><el-option v-for="user in users" :key="user.id" :label="user.full_name" :value="user.id" /></el-select></el-form-item>
-          <el-form-item label="任务类型"><el-input v-model="taskForm.task_type" /></el-form-item>
           <el-form-item label="优先级"><el-select v-model="taskForm.priority"><el-option label="高" value="high" /><el-option label="中" value="medium" /><el-option label="低" value="low" /></el-select></el-form-item>
-          <el-form-item label="预计工时"><el-input-number v-model="taskForm.estimated_hours" :min="0" /></el-form-item>
-          <el-form-item label="实际工时"><el-input-number v-model="taskForm.actual_hours" :min="0" /></el-form-item>
           <el-form-item label="截止日期"><el-date-picker v-model="taskForm.due_date" value-format="YYYY-MM-DD" type="date" /></el-form-item>
         </div>
         <el-form-item label="描述"><el-input v-model="taskForm.description" type="textarea" :rows="4" /></el-form-item>
@@ -37,9 +42,6 @@
         <el-descriptions-item label="负责人">{{ userLabel(users, task.owner_id) }}</el-descriptions-item>
         <el-descriptions-item label="优先级">{{ task.priority || '-' }}</el-descriptions-item>
         <el-descriptions-item label="状态">{{ task.status || '-' }}</el-descriptions-item>
-        <el-descriptions-item label="任务类型">{{ task.task_type || '-' }}</el-descriptions-item>
-        <el-descriptions-item label="预计工时">{{ task.estimated_hours ?? '-' }}</el-descriptions-item>
-        <el-descriptions-item label="实际工时">{{ task.actual_hours ?? '-' }}</el-descriptions-item>
         <el-descriptions-item label="截止日期">{{ task.due_date || '-' }}</el-descriptions-item>
       </el-descriptions>
 
@@ -47,10 +49,6 @@
         <section class="detail-section">
           <h2>任务描述</h2>
           <div class="rich-text">{{ task.description || '-' }}</div>
-        </section>
-        <section class="detail-section">
-          <h2>来源快照</h2>
-          <div class="rich-text">{{ task.source_requirement_review_status || '-' }}</div>
         </section>
       </div>
       </template>
@@ -105,6 +103,7 @@ import { fetchRequirements } from '../api/requirements'
 import { fetchTask, fetchTaskAuditLogs, fetchTaskStatusOperations, updateTask } from '../api/tasks'
 import { fetchUsers } from '../api/users'
 import CommitRecordsPanel from '../components/CommitRecordsPanel.vue'
+import WorkflowActionButtons from '../components/WorkflowActionButtons.vue'
 import { labelById, userLabel } from '../utils/referenceLabels'
 import { formatAuditValue } from '../utils/auditHistoryLabels'
 
@@ -121,7 +120,7 @@ const users = ref([])
 const statusOperations = ref([])
 const auditLogs = ref([])
 const expandedHistory = reactive({})
-const taskForm = reactive({ requirement_id: null, title: '', task_type: '', priority: 'medium', owner_id: null, estimated_hours: null, actual_hours: null, due_date: null, description: '' })
+const taskForm = reactive({ requirement_id: null, title: '', priority: 'medium', owner_id: null, due_date: null, description: '' })
 const taskStatusOptions = [
   { label: '待办', value: 'todo' },
   { label: '进行中', value: 'doing' },
@@ -144,7 +143,7 @@ const taskHistory = computed(() => {
     key: `audit-${item.id}`,
     type: 'audit',
     time: item.create_time,
-    actor: '系统',
+    actor: item.actor_name || '系统',
     actionLabel: '编辑',
     changes: Object.keys(item.after_data || {}).map((field) => ({
       field,
@@ -173,11 +172,8 @@ function taskFieldLabel(field) {
     { label: '来源项目', value: 'source_project_id' },
     { label: '关联需求', value: 'requirement_id' },
     { label: '任务标题', value: 'title' },
-    { label: '任务类型', value: 'task_type' },
     { label: '优先级', value: 'priority' },
     { label: '负责人', value: 'owner_id' },
-    { label: '预计工时', value: 'estimated_hours' },
-    { label: '实际工时', value: 'actual_hours' },
     { label: '截止日期', value: 'due_date' },
     { label: '状态', value: 'status' },
     { label: '描述', value: 'description' }
@@ -204,11 +200,8 @@ function fillTaskForm() {
   Object.assign(taskForm, {
     requirement_id: task.value.requirement_id || null,
     title: task.value.title || '',
-    task_type: task.value.task_type || '',
     priority: task.value.priority || 'medium',
     owner_id: task.value.owner_id || null,
-    estimated_hours: task.value.estimated_hours ?? null,
-    actual_hours: task.value.actual_hours ?? null,
     due_date: task.value.due_date || null,
     description: task.value.description || ''
   })

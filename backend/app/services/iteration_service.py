@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import date, datetime
 
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
@@ -11,7 +11,7 @@ from app.models.task import Task
 from app.models.test_case import TestCase
 from app.services.lifecycle_service import project_lifecycle_phase
 from app.services.status_operation_service import create_status_operation, list_status_operations
-from app.views.iteration_view import IterationCreate, IterationUpdate
+from app.views.iteration_view import DeferIterationWorkItemsRequest, IterationCreate, IterationUpdate
 from app.views.status_operation_view import StatusOperationCreate
 
 
@@ -170,6 +170,7 @@ def finish_iteration(db: Session, iteration_id: int, payload: StatusOperationCre
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="只有进行中的迭代可以结束")
     if not payload or not payload.effective_time:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="请选择实际结束日期")
+    _ensure_iteration_work_items_finished(db, iteration_id)
     from_status = iteration.status
     iteration.status = "finished"
     iteration.actual_end_date = payload.effective_time.date()
@@ -186,6 +187,37 @@ def finish_iteration(db: Session, iteration_id: int, payload: StatusOperationCre
     db.commit()
     db.refresh(iteration)
     return _iteration_to_dict(iteration, _iteration_project_ids(db, iteration.id))
+
+
+def defer_work_items(db: Session, iteration_id: int, payload: DeferIterationWorkItemsRequest) -> dict:
+    source_iteration = _get_active_iteration(db, iteration_id)
+    target_iteration = _get_active_iteration(db, payload.target_iteration_id)
+    if source_iteration.id == target_iteration.id:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="目标迭代不能和当前迭代相同")
+
+    target_project_ids = _iteration_scoped_project_ids(db, target_iteration.id)
+    requirements = _unfinished_requirements_for_defer(db, source_iteration.id, payload.requirement_ids)
+    direct_tasks = _unfinished_direct_tasks_for_defer(db, source_iteration.id, payload.task_ids)
+
+    if not requirements and not direct_tasks:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="没有可延期的未完成需求或任务")
+
+    moved_requirement_ids = []
+    moved_task_ids = []
+    for requirement in requirements:
+        if requirement.project_id not in target_project_ids:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="存在需求不在目标迭代项目范围内")
+        requirement.iteration_id = target_iteration.id
+        moved_requirement_ids.append(requirement.id)
+
+    for task in direct_tasks:
+        if task.project_id not in target_project_ids:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="存在任务不在目标迭代项目范围内")
+        task.iteration_id = target_iteration.id
+        moved_task_ids.append(task.id)
+
+    db.commit()
+    return {"moved_requirement_ids": moved_requirement_ids, "moved_task_ids": moved_task_ids}
 
 
 def list_iteration_status_operations(db: Session, iteration_id: int) -> list[dict]:
@@ -365,6 +397,30 @@ def _iteration_project_ids(db: Session, iteration_id: int) -> list[int]:
     ]
 
 
+def auto_start_due_iterations(db: Session, iteration_id: int | None = None) -> int:
+    today = date.today()
+    query = db.query(Iteration).filter(
+        Iteration.deleted == 0,
+        Iteration.status == "planning",
+        Iteration.start_date.isnot(None),
+        Iteration.start_date <= today,
+    )
+    if iteration_id:
+        query = query.filter(Iteration.id == iteration_id)
+    iterations = query.all()
+    for iteration in iterations:
+        _start_iteration_record(
+            db,
+            iteration,
+            effective_date=iteration.start_date,
+            remark="到达计划开始日期自动开始",
+            actor_id=None,
+        )
+    if iterations:
+        db.commit()
+    return len(iterations)
+
+
 def _iteration_scoped_project_ids(db: Session, iteration_id: int) -> set[int]:
     _get_active_iteration(db, iteration_id)
     result: set[int] = set()
@@ -401,6 +457,69 @@ def _linked_tasks(db: Session, iteration_id: int, requirement_ids: list[int]) ->
     return list(tasks_by_id.values())
 
 
+def _unfinished_requirements_for_defer(
+    db: Session,
+    iteration_id: int,
+    requirement_ids: list[int] | None = None,
+) -> list[Requirement]:
+    query = db.query(Requirement).filter(
+        Requirement.deleted == 0,
+        Requirement.iteration_id == iteration_id,
+        Requirement.status.notin_(["done", "closed"]),
+    )
+    if requirement_ids is not None:
+        if not requirement_ids:
+            return []
+        query = query.filter(Requirement.id.in_(requirement_ids))
+    requirements = query.order_by(Requirement.id.desc()).all()
+    if requirement_ids is not None and len(requirements) != len(set(requirement_ids)):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="存在需求不属于当前迭代或已完成")
+    return requirements
+
+
+def _unfinished_direct_tasks_for_defer(
+    db: Session,
+    iteration_id: int,
+    task_ids: list[int] | None = None,
+) -> list[Task]:
+    query = db.query(Task).filter(
+        Task.deleted == 0,
+        Task.iteration_id == iteration_id,
+        Task.status.notin_(["done", "closed"]),
+    )
+    if task_ids is not None:
+        if not task_ids:
+            return []
+        query = query.filter(Task.id.in_(task_ids))
+    tasks = query.order_by(Task.id.desc()).all()
+    if task_ids is not None and len(tasks) != len(set(task_ids)):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="存在任务不属于当前迭代或已完成")
+    return tasks
+
+
+def _ensure_iteration_work_items_finished(db: Session, iteration_id: int) -> None:
+    requirements = _linked_requirements(db, iteration_id)
+    requirement_ids = [item.id for item in requirements]
+    unfinished_requirements = [item for item in requirements if item.status not in {"done", "closed"}]
+    unfinished_tasks = [item for item in _linked_tasks(db, iteration_id, requirement_ids) if item.status not in {"done", "closed"}]
+    if not unfinished_requirements and not unfinished_tasks:
+        return
+    messages = []
+    if unfinished_requirements:
+        messages.append(
+            f"存在未完成需求 {len(unfinished_requirements)} 个：{_sample_titles(unfinished_requirements)}"
+        )
+    if unfinished_tasks:
+        messages.append(f"存在未完成任务 {len(unfinished_tasks)} 个：{_sample_titles(unfinished_tasks)}")
+    raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="；".join(messages))
+
+
+def _sample_titles(items) -> str:
+    titles = [item.title for item in items[:5]]
+    suffix = "等" if len(items) > 5 else ""
+    return "、".join(titles) + suffix
+
+
 def _activate_iteration_work_items(db: Session, iteration_id: int, actor_id: int | None = None) -> None:
     payload = StatusOperationCreate(remark="迭代开始自动激活")
     requirements = _linked_requirements(db, iteration_id)
@@ -433,6 +552,30 @@ def _activate_iteration_work_items(db: Session, iteration_id: int, actor_id: int
                 payload=payload,
                 actor_id=actor_id,
             )
+
+
+def _start_iteration_record(
+    db: Session,
+    iteration: Iteration,
+    effective_date: date,
+    remark: str | None = None,
+    actor_id: int | None = None,
+) -> None:
+    from_status = iteration.status
+    iteration.status = "active"
+    iteration.actual_start_date = effective_date
+    payload = StatusOperationCreate(effective_time=datetime.combine(effective_date, datetime.min.time()), remark=remark)
+    create_status_operation(
+        db,
+        object_type="iteration",
+        object_id=iteration.id,
+        action="start",
+        from_status=from_status,
+        to_status=iteration.status,
+        payload=payload,
+        actor_id=actor_id,
+    )
+    _activate_iteration_work_items(db, iteration.id, actor_id=actor_id)
 
 
 def _projects_to_tree(db: Session, root_project_ids: list[int]) -> list[dict]:

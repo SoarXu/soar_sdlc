@@ -51,6 +51,7 @@ class ProgramRead(ProgramBase):
 class ProgramProjectRead(BaseModel):
     id: int
     parent_id: int | None = None
+    program_id: int | None = None
     name: str
     owner_id: int | None = None
     status: str
@@ -67,5 +68,9 @@ class ProgramStatusOption(BaseModel):
 
 
 class ProgramTreeRead(ProgramRead):
+    node_type: str | None = None
+    program_id: int | None = None
+    start_date: date | None = None
+    end_date: date | None = None
     children: list[ProgramTreeRead] = []
     projects: list[ProgramProjectRead] = []

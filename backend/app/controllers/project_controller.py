@@ -1,9 +1,14 @@
 from fastapi import APIRouter, Depends, Response, status
 from sqlalchemy.orm import Session
 
-from app.core.auth_dependencies import get_optional_current_user
+from app.core.auth_dependencies import get_optional_current_user, require_system_admin
 from app.db.session import get_db
 from app.models.user import User
+from app.services.project_permission_service import (
+    ensure_audit_view_permission,
+    ensure_project_delete_permission,
+    ensure_project_manage_permission,
+)
 from app.services.project_service import (
     activate_project,
     close_project,
@@ -61,7 +66,13 @@ def get_project_members(project_id: int, db: Session = Depends(get_db)):
 
 
 @router.put("/{project_id}/members", response_model=list[ProjectMemberRead])
-def put_project_members(project_id: int, payload: list[ProjectMemberCreate], db: Session = Depends(get_db)):
+def put_project_members(
+    project_id: int,
+    payload: list[ProjectMemberCreate],
+    db: Session = Depends(get_db),
+    current_user: User | None = Depends(get_optional_current_user),
+):
+    ensure_project_manage_permission(db, project_id, current_user)
     return replace_project_members(db, project_id, payload)
 
 
@@ -148,22 +159,42 @@ def get_project_bugs(
 
 
 @router.post("", response_model=ProjectRead)
-def post_project(payload: ProjectCreate, db: Session = Depends(get_db)):
+def post_project(
+    payload: ProjectCreate,
+    db: Session = Depends(get_db),
+    _admin=Depends(require_system_admin),
+):
     return create_project(db, payload)
 
 
 @router.patch("/{project_id}", response_model=ProjectRead)
-def patch_project(project_id: int, payload: ProjectUpdate, db: Session = Depends(get_db)):
-    return update_project(db, project_id, payload)
+def patch_project(
+    project_id: int,
+    payload: ProjectUpdate,
+    db: Session = Depends(get_db),
+    current_user: User | None = Depends(get_optional_current_user),
+):
+    ensure_project_manage_permission(db, project_id, current_user)
+    return update_project(db, project_id, payload, actor_id=current_user.id if current_user else None)
 
 
 @router.get("/{project_id}/status-operations", response_model=list[StatusOperationRead])
-def get_project_status_operations(project_id: int, db: Session = Depends(get_db)):
+def get_project_status_operations(
+    project_id: int,
+    db: Session = Depends(get_db),
+    current_user: User | None = Depends(get_optional_current_user),
+):
+    ensure_audit_view_permission(db, project_id, current_user)
     return list_project_status_operations(db, project_id)
 
 
 @router.get("/{project_id}/audit-logs", response_model=list[AuditLogRead])
-def get_project_audit_logs(project_id: int, db: Session = Depends(get_db)):
+def get_project_audit_logs(
+    project_id: int,
+    db: Session = Depends(get_db),
+    current_user: User | None = Depends(get_optional_current_user),
+):
+    ensure_audit_view_permission(db, project_id, current_user)
     return list_project_audit_logs(db, project_id)
 
 
@@ -174,6 +205,7 @@ def start_project_status(
     db: Session = Depends(get_db),
     current_user: User | None = Depends(get_optional_current_user),
 ):
+    ensure_project_manage_permission(db, project_id, current_user)
     return start_project(db, project_id, payload, actor_id=current_user.id if current_user else None)
 
 
@@ -184,6 +216,7 @@ def suspend_project_status(
     db: Session = Depends(get_db),
     current_user: User | None = Depends(get_optional_current_user),
 ):
+    ensure_project_manage_permission(db, project_id, current_user)
     return suspend_project(db, project_id, payload, actor_id=current_user.id if current_user else None)
 
 
@@ -194,6 +227,7 @@ def close_project_status(
     db: Session = Depends(get_db),
     current_user: User | None = Depends(get_optional_current_user),
 ):
+    ensure_project_manage_permission(db, project_id, current_user)
     return close_project(db, project_id, payload, actor_id=current_user.id if current_user else None)
 
 
@@ -204,10 +238,16 @@ def activate_project_status(
     db: Session = Depends(get_db),
     current_user: User | None = Depends(get_optional_current_user),
 ):
+    ensure_project_manage_permission(db, project_id, current_user)
     return activate_project(db, project_id, payload, actor_id=current_user.id if current_user else None)
 
 
 @router.delete("/{project_id}", status_code=status.HTTP_204_NO_CONTENT)
-def remove_project(project_id: int, db: Session = Depends(get_db)):
+def remove_project(
+    project_id: int,
+    db: Session = Depends(get_db),
+    current_user: User | None = Depends(get_optional_current_user),
+):
+    ensure_project_delete_permission(db, current_user)
     delete_project(db, project_id)
     return Response(status_code=status.HTTP_204_NO_CONTENT)

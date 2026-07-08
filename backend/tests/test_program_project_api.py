@@ -170,7 +170,7 @@ def test_project_crud_uses_prd_fields(client: TestClient):
     assert deleted.status_code == 204
 
 
-def test_project_members_drive_default_assignees(client: TestClient):
+def test_project_without_assignee_rule_leaves_default_assignees_empty(client: TestClient):
     db = SessionLocal()
     try:
         users = []
@@ -195,9 +195,9 @@ def test_project_members_drive_default_assignees(client: TestClient):
     saved_members = client.put(
         f"/api/v1/projects/{project_id}/members",
         json=[
-            {"user_id": product_owner_id, "project_role": "product_owner", "is_default_assignee": True},
-            {"user_id": developer_id, "project_role": "developer", "is_default_assignee": True},
-            {"user_id": tester_id, "project_role": "tester", "is_default_assignee": True},
+            {"user_id": product_owner_id, "project_role": "product_owner", "is_default_assignee": True, "sort_order": 0},
+            {"user_id": developer_id, "project_role": "developer", "sort_order": 1},
+            {"user_id": tester_id, "project_role": "tester", "sort_order": 2},
         ],
     )
     assert saved_members.status_code == 200
@@ -206,49 +206,172 @@ def test_project_members_drive_default_assignees(client: TestClient):
 
     requirement = client.post(
         "/api/v1/requirements",
-        json={"project_id": project_id, "title": "Requirement uses product owner"},
+        json={"project_id": project_id, "title": "Requirement has no default owner"},
     ).json()
-    assert requirement["owner_id"] == product_owner_id
+    assert requirement["owner_id"] is None
 
     standalone_task = client.post(
         "/api/v1/tasks",
-        json={"project_id": project_id, "title": "Standalone task uses default developer"},
+        json={"project_id": project_id, "title": "Standalone task has no default owner"},
     ).json()
-    assert standalone_task["owner_id"] == developer_id
+    assert standalone_task["owner_id"] is None
 
     requirement_task = client.post(
         "/api/v1/tasks",
-        json={"project_id": project_id, "requirement_id": requirement["id"], "title": "Requirement task keeps requirement owner"},
+        json={"project_id": project_id, "requirement_id": requirement["id"], "title": "Requirement task has no default owner"},
     ).json()
-    assert requirement_task["owner_id"] == product_owner_id
+    assert requirement_task["owner_id"] is None
 
     test_case = client.post(
         "/api/v1/test-cases",
-        json={"project_id": project_id, "requirement_id": requirement["id"], "title": "Case uses default tester"},
+        json={"project_id": project_id, "requirement_id": requirement["id"], "title": "Case has no default tester"},
     ).json()
-    assert test_case["default_tester_id"] == tester_id
+    assert test_case["default_tester_id"] is None
 
     bug = client.post(
         "/api/v1/bugs",
-        json={"project_id": project_id, "requirement_id": requirement["id"], "title": "Bug uses team developer"},
+        json={"project_id": project_id, "requirement_id": requirement["id"], "title": "Bug has no default owner"},
     ).json()
-    assert bug["owner_id"] == developer_id
+    assert bug["owner_id"] is None
+
+    generated_task = client.post(
+        f"/api/v1/requirements/{requirement['id']}/generate-task",
+        json={"title": "Generated task has no default owner"},
+    ).json()
+    assert generated_task["owner_id"] is None
+
+
+def test_project_workflow_scheme_does_not_drive_work_item_current_handlers(client: TestClient):
+    db = SessionLocal()
+    try:
+        users = []
+        for username in ["rule_product_api", "rule_developer_api", "rule_tester_api"]:
+            user = User(
+                username=f"{username}_{uuid4().hex[:6]}",
+                full_name=username,
+                password_hash=get_password_hash("User123456"),
+                is_active=True,
+            )
+            db.add(user)
+            db.flush()
+            users.append(user)
+        db.commit()
+        product_owner_id, developer_id, tester_id = [user.id for user in users]
+    finally:
+        db.close()
+
+    config = client.post(
+        "/api/v1/assignee-rule-configs",
+        json={
+            "name": f"测试责任人规则-{uuid4().hex[:8]}",
+            "requirement_owner_roles": "tester",
+            "task_owner_roles": "product_owner",
+            "test_case_tester_roles": "developer",
+            "test_run_owner_roles": "tester",
+            "bug_owner_roles": "product_owner",
+        },
+    ).json()
+    project = client.post(
+        "/api/v1/projects",
+        json={"name": f"Rule Defaults Project-{uuid4().hex[:8]}", "assignee_rule_config_id": config["id"]},
+    ).json()
+    project_id = project["id"]
+    assert project["assignee_rule_config_id"] == config["id"]
+
+    saved_members = client.put(
+        f"/api/v1/projects/{project_id}/members",
+        json=[
+            {"user_id": product_owner_id, "project_role": "product_owner", "sort_order": 0},
+            {"user_id": developer_id, "project_role": "developer", "sort_order": 1},
+            {"user_id": tester_id, "project_role": "tester", "sort_order": 2},
+        ],
+    )
+    assert saved_members.status_code == 200
+
+    requirement = client.post(
+        "/api/v1/requirements",
+        json={"project_id": project_id, "title": "Requirement has no current handler from scheme"},
+    ).json()
+    assert requirement["owner_id"] is None
+
+    standalone_task = client.post(
+        "/api/v1/tasks",
+        json={"project_id": project_id, "title": "Task has no current handler from scheme"},
+    ).json()
+    assert standalone_task["owner_id"] is None
+
+    test_case = client.post(
+        "/api/v1/test-cases",
+        json={"project_id": project_id, "title": "Case uses configured developer"},
+    ).json()
+    assert test_case["default_tester_id"] == developer_id
+
+    test_run = client.post(
+        "/api/v1/test-runs",
+        json={"project_id": project_id, "name": "Test run uses configured tester"},
+    ).json()
+    assert test_run["test_owner_id"] == tester_id
+
+    bug = client.post(
+        "/api/v1/bugs",
+        json={"project_id": project_id, "title": "Bug has no current handler from scheme"},
+    ).json()
+    assert bug["owner_id"] is None
+
+    failed_execution = client.post(
+        f"/api/v1/test-cases/{test_case['id']}/executions",
+        json={"steps_result_json": [{"step": "submit", "expected": "ok", "result": "failed", "actual": "error"}]},
+    )
+    assert failed_execution.status_code == 200
+    bug_from_case = client.post(
+        f"/api/v1/test-cases/{test_case['id']}/bugs",
+        json={"title": "Bug from failed case has no current handler from scheme"},
+    ).json()
+    assert bug_from_case["owner_id"] is None
+
+    generated_task = client.post(
+        f"/api/v1/requirements/{requirement['id']}/generate-task",
+        json={"title": "Generated task has no current handler from scheme"},
+    ).json()
+    assert generated_task["owner_id"] is None
+
+    updated = client.patch(f"/api/v1/projects/{project_id}", json={"assignee_rule_config_id": None})
+    assert updated.status_code == 200
+    assert updated.json()["assignee_rule_config_id"] is None
 
 
 def test_project_update_records_only_changed_fields(client: TestClient):
-    project = client.post(
-        "/api/v1/projects",
-        json={
-            "name": f"编辑记录项目-{uuid4().hex[:8]}",
-            "description": "原描述",
-            "start_date": "2026-07-01",
-        },
-    ).json()
+    db = SessionLocal()
+    try:
+        user = User(
+            username=f"project.audit.{uuid4().hex[:6]}",
+            full_name="Project Auditor",
+            password_hash=get_password_hash("User123456"),
+            is_active=True,
+        )
+        db.add(user)
+        db.commit()
+        db.refresh(user)
+        token = create_access_token(user.username)
+        actor_id = user.id
+    finally:
+        db.close()
+
+        project = client.post(
+            "/api/v1/projects",
+            json={
+                "name": f"编辑记录项目-{uuid4().hex[:8]}",
+                "description": "原描述",
+                "start_date": "2026-07-01",
+                "owner_id": actor_id,
+            },
+        ).json()
     project_id = project["id"]
 
     updated = client.patch(
         f"/api/v1/projects/{project_id}",
         json={"name": "编辑后项目", "description": "原描述", "start_date": "2026-07-02"},
+        headers={"Authorization": f"Bearer {token}"},
     )
     assert updated.status_code == 200
 
@@ -259,6 +382,8 @@ def test_project_update_records_only_changed_fields(client: TestClient):
     assert data[0]["action"] == "update"
     assert data[0]["object_type"] == "project"
     assert data[0]["object_id"] == project_id
+    assert data[0]["actor_id"] == actor_id
+    assert data[0]["actor_name"] == "Project Auditor"
     assert data[0]["before_data"] == {"name": project["name"], "start_date": "2026-07-01"}
     assert data[0]["after_data"] == {"name": "编辑后项目", "start_date": "2026-07-02"}
 
@@ -465,8 +590,27 @@ def test_program_tree_contains_child_programs_and_bound_projects(client: TestCli
     assert any(item["id"] == project["id"] and item["name"] == project["name"] for item in child_node["projects"])
 
 
+def test_program_tree_contains_unbound_projects_as_top_level_nodes(client: TestClient):
+    project = client.post(
+        "/api/v1/projects",
+        json={"name": f"独立项目-{uuid4().hex[:8]}"},
+    ).json()
+
+    response = client.get("/api/v1/programs/tree")
+
+    assert response.status_code == 200
+    assert any(
+        item["id"] == project["id"] and item["name"] == project["name"] and item.get("node_type") == "project"
+        for item in response.json()
+    )
+
+
 def test_project_start_activates_parent_program(client: TestClient):
-    program = client.post("/api/v1/programs", json={"name": f"同步项目集-{uuid4().hex[:8]}"}).json()
+    parent_program = client.post("/api/v1/programs", json={"name": f"同步父项目集-{uuid4().hex[:8]}"}).json()
+    program = client.post(
+        "/api/v1/programs",
+        json={"name": f"同步项目集-{uuid4().hex[:8]}", "parent_id": parent_program["id"]},
+    ).json()
     project = client.post(
         "/api/v1/projects",
         json={"name": f"同步项目-{uuid4().hex[:8]}", "program_id": program["id"]},
@@ -481,7 +625,11 @@ def test_project_start_activates_parent_program(client: TestClient):
     assert response.json()["status"] == "active"
     programs = client.get("/api/v1/programs").json()
     synced_program = next(item for item in programs if item["id"] == program["id"])
+    synced_parent_program = next(item for item in programs if item["id"] == parent_program["id"])
     assert synced_program["status"] == "active"
+    assert synced_program["actual_start_date"] == "2026-06-01"
+    assert synced_parent_program["status"] == "active"
+    assert synced_parent_program["actual_start_date"] == "2026-06-01"
 
 
 def test_project_status_dates_follow_action_rules(client: TestClient):
@@ -532,10 +680,10 @@ def test_project_status_history_uses_authenticated_user_name(client: TestClient)
     finally:
         db.close()
 
-    project = client.post(
-        "/api/v1/projects",
-        json={"name": f"真实操作人项目-{uuid4().hex[:8]}"},
-    ).json()
+        project = client.post(
+            "/api/v1/projects",
+            json={"name": f"真实操作人项目-{uuid4().hex[:8]}", "owner_id": user.id},
+        ).json()
 
     started = client.post(
         f"/api/v1/projects/{project['id']}/start",

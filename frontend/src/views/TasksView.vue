@@ -3,9 +3,9 @@
     <div class="page-head">
       <div>
         <h1>任务</h1>
-        <p>维护研发执行任务，关联项目、需求和负责人均以名称展示。</p>
+        <p>维护研发执行任务，关联项目、需求和当前处理人均以名称展示。</p>
       </div>
-      <el-button type="primary" @click="openCreate">新增任务</el-button>
+      <el-button v-if="canCreateAnyTask" type="primary" @click="openCreate">新增任务</el-button>
     </div>
 
     <el-card shadow="never">
@@ -15,8 +15,7 @@
         <el-table-column label="项目" width="180"><template #default="{ row }">{{ labelById(projects, row.project_id) }}</template></el-table-column>
         <el-table-column label="来源项目" width="180"><template #default="{ row }">{{ labelById(projects, row.source_project_id) }}</template></el-table-column>
         <el-table-column label="需求" width="180"><template #default="{ row }">{{ labelById(requirements, row.requirement_id, 'title') }}</template></el-table-column>
-        <el-table-column label="负责人" width="150"><template #default="{ row }">{{ userLabel(users, row.owner_id) }}</template></el-table-column>
-        <el-table-column prop="actual_hours" label="实际工时" width="110" />
+        <el-table-column label="当前处理人" width="150"><template #default="{ row }">{{ userLabel(users, row.owner_id) }}</template></el-table-column>
         <el-table-column prop="due_date" label="截止日期" width="130" />
         <el-table-column label="状态" width="110">
           <template #default="{ row }">
@@ -28,11 +27,9 @@
         </el-table-column>
         <el-table-column label="操作" width="240" fixed="right">
           <template #default="{ row }">
-            <el-button link type="primary" :disabled="isTaskProjectClosed(row)" @click="openEdit(row)">编辑</el-button>
-            <el-button v-if="canActivateTask(row)" link type="warning" @click="activateTaskRow(row.id)">激活</el-button>
-            <el-button v-if="row.status !== 'closed'" link type="danger" @click="openClose(row)">关闭</el-button>
-            <el-popconfirm title="确认删除该任务？" :disabled="isTaskProjectClosed(row)" @confirm="removeTask(row.id)">
-              <template #reference><el-button link type="danger" :disabled="isTaskProjectClosed(row)">删除</el-button></template>
+            <el-button v-if="canEditTask(row)" link type="primary" @click="openEdit(row)">编辑</el-button>
+            <WorkflowActionButtons object-type="task" :object-id="row.id" mode="list" :transitions="workflowTransitionsFor(row)" :auto-load="false" :users="users" @executed="loadData" /><el-popconfirm v-if="canDeleteTaskRow(row)" title="确认删除该任务？" @confirm="removeTask(row.id)">
+              <template #reference><el-button link type="danger">删除</el-button></template>
             </el-popconfirm>
           </template>
         </el-table-column>
@@ -67,17 +64,14 @@
               <el-option v-for="requirement in availableRequirements" :key="requirement.id" :label="requirement.title" :value="requirement.id" />
             </el-select>
           </el-form-item>
-          <el-form-item label="负责人">
-            <el-select v-model="form.owner_id" clearable filterable placeholder="请选择负责人" @change="onOwnerChange">
+          <el-form-item label="当前处理人">
+            <el-select v-model="form.owner_id" clearable filterable placeholder="请选择当前处理人" @change="onOwnerChange">
               <el-option v-for="user in users" :key="user.id" :label="user.full_name" :value="user.id" />
             </el-select>
           </el-form-item>
           <el-form-item label="截止日期"><el-date-picker v-model="form.due_date" value-format="YYYY-MM-DD" type="date" /></el-form-item>
-          <el-form-item label="预计工时"><el-input-number v-model="form.estimated_hours" :min="0" :precision="2" /></el-form-item>
-          <el-form-item label="实际工时"><el-input-number v-model="form.actual_hours" :min="0" :precision="2" /></el-form-item>
         </div>
         <div class="form-grid">
-          <el-form-item label="类型"><el-input v-model="form.task_type" /></el-form-item>
           <el-form-item label="优先级"><el-select v-model="form.priority"><el-option label="高" value="high" /><el-option label="中" value="medium" /><el-option label="低" value="low" /></el-select></el-form-item>
           <el-form-item label="状态"><el-select v-model="form.status"><el-option label="待办" value="todo" /><el-option label="进行中" value="doing" /><el-option label="完成" value="done" /><el-option label="关闭" value="closed" /></el-select></el-form-item>
         </div>
@@ -86,29 +80,21 @@
       <template #footer><el-button @click="dialogVisible = false">取消</el-button><el-button type="primary" :loading="saving" @click="submitTask">保存</el-button></template>
     </el-dialog>
 
-    <el-dialog v-model="closeVisible" title="关闭任务" width="480px">
-      <el-form label-position="top">
-        <el-form-item label="关闭原因" required>
-          <el-select v-model="closeForm.reason" placeholder="请选择关闭原因">
-            <el-option v-for="option in closeReasons" :key="option" :label="option" :value="option" />
-          </el-select>
-        </el-form-item>
-        <el-form-item label="备注">
-          <el-input v-model="closeForm.remark" type="textarea" :rows="3" placeholder="补充说明本次关闭原因" />
-        </el-form-item>
-      </el-form>
-      <template #footer><el-button @click="closeVisible = false">取消</el-button><el-button type="primary" :loading="saving" @click="submitClose">确认关闭</el-button></template>
-    </el-dialog>
+    
   </section>
 </template>
 
 <script setup>
 import { computed, onMounted, reactive, ref } from 'vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
-import { fetchProjects } from '../api/projects'
+import { ElMessage } from 'element-plus'
+import { fetchProjectMembers, fetchProjects } from '../api/projects'
 import { fetchRequirements } from '../api/requirements'
-import { activateTask, closeTask, createTask, deleteTask, fetchTasks, fetchTaskStatusOperations, updateTask } from '../api/tasks'
+import { createTask, deleteTask, fetchTasks, fetchTaskStatusOperations, updateTask } from '../api/tasks'
 import { fetchUsers } from '../api/users'
+import { fetchWorkflowTransitionsBatch } from '../api/workflowRuntime'
+import WorkflowActionButtons from '../components/WorkflowActionButtons.vue'
+import { showActionError } from '../utils/actionFeedback'
+import { canCreateWorkItem, canDeleteWorkItem, canExecuteWorkItem, currentUserFromStorage } from '../utils/permissions'
 import { labelById, userLabel } from '../utils/referenceLabels'
 import { loadCloseReasonMap } from '../utils/closeReasonTooltip'
 import { usePagination } from '../utils/usePagination'
@@ -116,14 +102,16 @@ import { usePagination } from '../utils/usePagination'
 const loading = ref(false)
 const saving = ref(false)
 const dialogVisible = ref(false)
-const closeVisible = ref(false)
 const editingId = ref(null)
-const closingTaskId = ref(null)
 const tasks = ref([])
 const closeReasonByTask = ref({})
+const workflowTransitions = ref({})
 const projects = ref([])
+const projectMembersById = ref({})
 const requirements = ref([])
 const users = ref([])
+const currentUser = computed(() => currentUserFromStorage(users.value))
+const canCreateAnyTask = computed(() => projects.value.some((project) => canCreateWorkItem(project, currentUser.value, membersForProject(project.id))))
 const {
   page: taskPage,
   pageSize: taskPageSize,
@@ -131,14 +119,12 @@ const {
   total: taskTotal,
   pagedItems: pagedTasks
 } = usePagination(tasks)
-const form = reactive({ project_id: null, source_project_id: null, requirement_id: null, title: '', task_type: '', priority: 'medium', owner_id: null, estimated_hours: null, actual_hours: null, due_date: null, status: 'todo', description: '' })
-const closeForm = reactive({ reason: '', remark: '' })
+const form = reactive({ project_id: null, source_project_id: null, requirement_id: null, title: '', priority: 'medium', owner_id: null, due_date: null, status: 'todo', description: '' })
 const ownerManuallySet = ref(false)
 const availableRequirements = computed(() => {
   if (!form.project_id) return requirements.value
   return requirements.value.filter((item) => item.project_id === form.project_id)
 })
-const closeReasons = ['已完成', '重复', '延期', '不做', '设计如此']
 const taskStatusOptions = [
   { label: '待办', value: 'todo' },
   { label: '进行中', value: 'doing' },
@@ -148,26 +134,46 @@ const taskStatusOptions = [
 
 function optionLabel(options, value) { return options.find((option) => option.value === value)?.label || value || '-' }
 function taskStatusLabel(value) { return optionLabel(taskStatusOptions, value) }
-function canActivateTask(row) { return ['todo', 'closed'].includes(row.status) }
 function isTaskProjectClosed(row) { return projects.value.find((item) => item.id === row.project_id)?.status === 'closed' }
-function apiErrorMessage(error, fallback) { return error?.response?.data?.detail || fallback }
-function showActionError(error, fallback) { ElMessageBox.alert(apiErrorMessage(error, fallback), '提示', { type: 'warning' }) }
-function resetForm() { Object.assign(form, { project_id: null, source_project_id: null, requirement_id: null, title: '', task_type: '', priority: 'medium', owner_id: null, estimated_hours: null, actual_hours: null, due_date: null, status: 'todo', description: '' }); ownerManuallySet.value = false }
+function workflowTransitionsFor(row) { return workflowTransitions.value[`task:${row.id}`] || [] }
+function projectForTask(row) { return projects.value.find((item) => item.id === row.project_id) || null }
+function membersForProject(projectId) { return projectMembersById.value[projectId] || [] }
+function canEditTask(row) {
+  const project = projectForTask(row)
+  return !isTaskProjectClosed(row) && canExecuteWorkItem(row, currentUser.value, project, membersForProject(project?.id))
+}
+function canDeleteTaskRow(row) {
+  const project = projectForTask(row)
+  return !isTaskProjectClosed(row) && canDeleteWorkItem(project, currentUser.value, membersForProject(project?.id))
+}
+function resetForm() { Object.assign(form, { project_id: null, source_project_id: null, requirement_id: null, title: '', priority: 'medium', owner_id: null, due_date: null, status: 'todo', description: '' }); ownerManuallySet.value = false }
 function openCreate() { editingId.value = null; resetForm(); dialogVisible.value = true }
-function openEdit(row) { editingId.value = row.id; ownerManuallySet.value = true; Object.assign(form, { ...row, task_type: row.task_type || '', description: row.description || '' }); dialogVisible.value = true }
-function openClose(row) { closingTaskId.value = row.id; Object.assign(closeForm, { reason: '', remark: '' }); closeVisible.value = true }
-function onSourceProjectChange(projectId) { if (!projectId || ownerManuallySet.value) return; const project = projects.value.find(p => p.id === projectId); if (project && project.owner_id) { form.owner_id = project.owner_id } }
+function openEdit(row) {
+  editingId.value = row.id
+  ownerManuallySet.value = true
+  Object.assign(form, {
+    project_id: row.project_id || null,
+    source_project_id: row.source_project_id || null,
+    requirement_id: row.requirement_id || null,
+    title: row.title || '',
+    priority: row.priority || 'medium',
+    owner_id: row.owner_id || null,
+    due_date: row.due_date || null,
+    status: row.status || 'todo',
+    description: row.description || ''
+  })
+  dialogVisible.value = true
+}
+function onSourceProjectChange() {}
 function onProjectChange(projectId) {
   const requirement = requirements.value.find((item) => item.id === form.requirement_id)
   if (requirement && requirement.project_id !== projectId) form.requirement_id = null
-  if (!ownerManuallySet.value) form.owner_id = projectOwner(projectId)
+  if (!ownerManuallySet.value) form.owner_id = null
 }
 function onRequirementChange(requirementId) {
   if (ownerManuallySet.value) return
-  const requirement = requirements.value.find((item) => item.id === requirementId)
-  form.owner_id = requirement?.owner_id || projectOwner(form.project_id)
+  form.owner_id = null
 }
-function projectOwner(projectId) { return projects.value.find((item) => item.id === projectId)?.owner_id || null }
 function onOwnerChange() { ownerManuallySet.value = true }
 
 async function loadData() {
@@ -175,8 +181,31 @@ async function loadData() {
   try {
     const [taskRes, projectRes, reqRes, userRes] = await Promise.all([fetchTasks(), fetchProjects(), fetchRequirements(), fetchUsers()])
     tasks.value = taskRes.data; projects.value = projectRes.data; requirements.value = reqRes.data; users.value = userRes.data
+    await loadProjectMembers()
     closeReasonByTask.value = await loadCloseReasonMap(tasks.value, fetchTaskStatusOperations)
+    await loadWorkflowTransitions()
   } catch { ElMessage.error('任务列表加载失败') } finally { loading.value = false }
+}
+
+async function loadProjectMembers() {
+  const entries = await Promise.all(projects.value.map(async (project) => {
+    try {
+      const { data } = await fetchProjectMembers(project.id)
+      return [project.id, data]
+    } catch {
+      return [project.id, []]
+    }
+  }))
+  projectMembersById.value = Object.fromEntries(entries)
+}
+
+async function loadWorkflowTransitions() {
+  if (!tasks.value.length) {
+    workflowTransitions.value = {}
+    return
+  }
+  const { data } = await fetchWorkflowTransitionsBatch(tasks.value.map((item) => ({ object_type: 'task', id: item.id })))
+  workflowTransitions.value = Object.fromEntries((data.items || []).map((item) => [`${item.object_type}:${item.id}`, item.transitions || []]))
 }
 async function submitTask() {
   if (!form.project_id || !form.title.trim()) return ElMessage.warning('请选择项目并填写任务标题')
@@ -185,31 +214,17 @@ async function submitTask() {
     const payload = { ...form, requirement_id: form.requirement_id || null, owner_id: form.owner_id || null }
     if (editingId.value) await updateTask(editingId.value, payload); else await createTask(payload)
     dialogVisible.value = false; await loadData()
+  } catch (error) {
+    showActionError(error, editingId.value ? '任务保存失败' : '任务创建失败')
   } finally { saving.value = false }
 }
-async function activateTaskRow(id) {
+async function removeTask(id) {
   try {
-    await activateTask(id)
+    await deleteTask(id)
     await loadData()
-    ElMessage.success('任务已激活')
   } catch (error) {
-    showActionError(error, '任务激活失败')
+    showActionError(error, '任务删除失败')
   }
 }
-async function submitClose() {
-  if (!closeForm.reason) return ElMessage.warning('请选择关闭原因')
-  saving.value = true
-  try {
-    await closeTask(closingTaskId.value, { ...closeForm })
-    closeVisible.value = false
-    await loadData()
-    ElMessage.success('任务已关闭')
-  } catch (error) {
-    showActionError(error, '任务关闭失败')
-  } finally {
-    saving.value = false
-  }
-}
-async function removeTask(id) { await deleteTask(id); await loadData() }
 onMounted(loadData)
 </script>

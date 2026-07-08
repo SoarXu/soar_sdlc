@@ -1,0 +1,48 @@
+from fastapi import APIRouter, Depends, Response, status
+from sqlalchemy.orm import Session
+
+from app.core.auth_dependencies import require_system_admin
+from app.db.session import get_db
+from app.services import assignee_rule_config_service
+from app.views.assignee_rule_config_view import (
+    AssigneeRuleConfigCreate,
+    AssigneeRuleConfigRead,
+    AssigneeRuleConfigUpdate,
+)
+
+
+router = APIRouter()
+
+
+@router.get("", response_model=list[AssigneeRuleConfigRead])
+def get_configs(db: Session = Depends(get_db)):
+    return assignee_rule_config_service.list_configs(db)
+
+
+@router.post("", response_model=AssigneeRuleConfigRead, status_code=status.HTTP_201_CREATED)
+def create_config(
+    payload: AssigneeRuleConfigCreate,
+    db: Session = Depends(get_db),
+    _admin=Depends(require_system_admin),
+):
+    return assignee_rule_config_service.create_config(db, payload)
+
+
+@router.patch("/{config_id}", response_model=AssigneeRuleConfigRead)
+def update_config(
+    config_id: int,
+    payload: AssigneeRuleConfigUpdate,
+    db: Session = Depends(get_db),
+    _admin=Depends(require_system_admin),
+):
+    return assignee_rule_config_service.update_config(db, config_id, payload)
+
+
+@router.delete("/{config_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_config(
+    config_id: int,
+    db: Session = Depends(get_db),
+    _admin=Depends(require_system_admin),
+):
+    assignee_rule_config_service.delete_config(db, config_id)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)

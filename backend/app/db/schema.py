@@ -38,6 +38,113 @@ def ensure_runtime_schema(engine: Engine) -> None:
                 ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='工作流组件注册表'"
             ))
 
+    if "handler_transition_rules" not in inspector0.get_table_names():
+        with engine.begin() as conn:
+            conn.execute(text(
+                "CREATE TABLE handler_transition_rules ("
+                "id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,"
+                "config_id BIGINT UNSIGNED NOT NULL COMMENT 'assignee config id',"
+                "rule_type VARCHAR(32) NOT NULL DEFAULT 'advanced' COMMENT 'rule type',"
+                "object_type VARCHAR(32) NOT NULL COMMENT 'object type',"
+                "action VARCHAR(64) NOT NULL COMMENT 'workflow action',"
+                "from_status VARCHAR(32) NULL COMMENT 'from status',"
+                "to_status VARCHAR(32) NULL COMMENT 'to status',"
+                "target_type VARCHAR(32) NOT NULL DEFAULT 'keep_current' COMMENT 'target type',"
+                "target_roles VARCHAR(255) NOT NULL DEFAULT '' COMMENT 'project roles',"
+                "fallback_type VARCHAR(32) NOT NULL DEFAULT 'keep_current' COMMENT 'fallback type',"
+                "fallback_roles VARCHAR(255) NOT NULL DEFAULT '' COMMENT 'fallback roles',"
+                "enabled TINYINT(1) NOT NULL DEFAULT 1 COMMENT 'enabled',"
+                "create_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT 'create time',"
+                "update_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT 'update time',"
+                "KEY idx_htr_config (config_id),"
+                "KEY idx_htr_match (config_id, rule_type, object_type, action, enabled)"
+                ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='handler transition rules'"
+            ))
+    _ensure_column(engine, "handler_transition_rules", "rule_type",
+                   "ALTER TABLE handler_transition_rules ADD COLUMN rule_type VARCHAR(32) NOT NULL DEFAULT 'advanced' COMMENT 'rule type' AFTER config_id",
+                   "CREATE INDEX idx_htr_rule_type ON handler_transition_rules (config_id, rule_type, object_type, enabled)")
+    _ensure_column(engine, "handler_transition_rules", "fallback_roles",
+                   "ALTER TABLE handler_transition_rules ADD COLUMN fallback_roles VARCHAR(255) NOT NULL DEFAULT '' COMMENT 'fallback roles' AFTER fallback_type")
+    _ensure_column(engine, "status_operation_log", "actor_name",
+                   "ALTER TABLE status_operation_log ADD COLUMN actor_name VARCHAR(100) NULL COMMENT 'actor name snapshot' AFTER actor_id")
+    _ensure_column(engine, "status_operation_log", "is_delegated",
+                   "ALTER TABLE status_operation_log ADD COLUMN is_delegated TINYINT(1) NOT NULL DEFAULT 0 COMMENT 'delegated operation' AFTER actor_name")
+    _ensure_column(engine, "status_operation_log", "delegated_owner_id",
+                   "ALTER TABLE status_operation_log ADD COLUMN delegated_owner_id BIGINT UNSIGNED NULL COMMENT 'delegated owner id' AFTER is_delegated")
+    _ensure_column(engine, "status_operation_log", "delegated_owner_name",
+                   "ALTER TABLE status_operation_log ADD COLUMN delegated_owner_name VARCHAR(100) NULL COMMENT 'delegated owner name snapshot' AFTER delegated_owner_id")
+    _ensure_column(engine, "status_operation_log", "delegate_reason",
+                   "ALTER TABLE status_operation_log ADD COLUMN delegate_reason VARCHAR(255) NULL COMMENT 'delegate reason' AFTER delegated_owner_name")
+
+    if "workflow_definitions" not in inspector0.get_table_names():
+        with engine.begin() as conn:
+            conn.execute(text(
+                "CREATE TABLE workflow_definitions ("
+                "id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,"
+                "name VARCHAR(150) NOT NULL COMMENT 'workflow name',"
+                "object_type VARCHAR(32) NOT NULL COMMENT 'requirement/task/bug',"
+                "scope_type VARCHAR(32) NOT NULL DEFAULT 'system' COMMENT 'scope type',"
+                "scope_id BIGINT UNSIGNED NULL COMMENT 'scope id',"
+                "enabled TINYINT(1) NOT NULL DEFAULT 1 COMMENT 'enabled',"
+                "version INT NOT NULL DEFAULT 1 COMMENT 'version',"
+                "create_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT 'create time',"
+                "update_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT 'update time',"
+                "KEY idx_wfd_object_scope (object_type, scope_type, scope_id, enabled)"
+                ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='visual workflow definitions'"
+            ))
+
+    if "workflow_states" not in inspector0.get_table_names():
+        with engine.begin() as conn:
+            conn.execute(text(
+                "CREATE TABLE workflow_states ("
+                "id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,"
+                "definition_id BIGINT UNSIGNED NOT NULL COMMENT 'workflow definition id',"
+                "status_key VARCHAR(64) NOT NULL COMMENT 'status key',"
+                "status_name VARCHAR(100) NOT NULL COMMENT 'status name',"
+                "category VARCHAR(32) NOT NULL DEFAULT 'normal' COMMENT 'status category',"
+                "color VARCHAR(32) NOT NULL DEFAULT '#2563eb' COMMENT 'node color',"
+                "x INT NOT NULL DEFAULT 0 COMMENT 'canvas x',"
+                "y INT NOT NULL DEFAULT 0 COMMENT 'canvas y',"
+                "sort_order INT NOT NULL DEFAULT 100 COMMENT 'sort order',"
+                "enabled TINYINT(1) NOT NULL DEFAULT 1 COMMENT 'enabled',"
+                "create_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT 'create time',"
+                "update_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT 'update time',"
+                "KEY idx_wfs_definition (definition_id),"
+                "KEY idx_wfs_status (definition_id, status_key)"
+                ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='visual workflow states'"
+            ))
+
+    if "workflow_transitions" not in inspector0.get_table_names():
+        with engine.begin() as conn:
+            conn.execute(text(
+                "CREATE TABLE workflow_transitions ("
+                "id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,"
+                "definition_id BIGINT UNSIGNED NOT NULL COMMENT 'workflow definition id',"
+                "action_key VARCHAR(64) NOT NULL COMMENT 'action key',"
+                "action_name VARCHAR(100) NOT NULL COMMENT 'action name',"
+                "from_status VARCHAR(64) NOT NULL COMMENT 'from status',"
+                "to_status VARCHAR(64) NOT NULL COMMENT 'to status',"
+                "allowed_roles VARCHAR(255) NOT NULL DEFAULT '' COMMENT 'allowed roles',"
+                "handler_rule JSON NULL COMMENT 'handler rule',"
+                "trigger_config JSON NULL COMMENT 'trigger config',"
+                "condition_config JSON NULL COMMENT 'condition config',"
+                "validator_config JSON NULL COMMENT 'validator config',"
+                "post_action_config JSON NULL COMMENT 'post action config',"
+                "ui_config JSON NULL COMMENT 'ui config',"
+                "form_config JSON NULL COMMENT 'form config',"
+                "enabled TINYINT(1) NOT NULL DEFAULT 1 COMMENT 'enabled',"
+                "sort_order INT NOT NULL DEFAULT 100 COMMENT 'sort order',"
+                "create_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT 'create time',"
+                "update_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT 'update time',"
+                "KEY idx_wft_definition (definition_id),"
+                "KEY idx_wft_action (definition_id, action_key, from_status, to_status)"
+                ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='visual workflow transitions'"
+            ))
+    _ensure_column(engine, "workflow_transitions", "ui_config",
+                   "ALTER TABLE workflow_transitions ADD COLUMN ui_config JSON NULL COMMENT 'ui config' AFTER post_action_config")
+    _ensure_column(engine, "workflow_transitions", "form_config",
+                   "ALTER TABLE workflow_transitions ADD COLUMN form_config JSON NULL COMMENT 'form config' AFTER ui_config")
+
     _ensure_column(engine, "programs", "parent_id",
                    "ALTER TABLE programs ADD COLUMN parent_id BIGINT UNSIGNED NULL COMMENT '父项目集 ID' AFTER id",
                    "CREATE INDEX idx_programs_parent ON programs (parent_id)")
@@ -65,6 +172,8 @@ def ensure_runtime_schema(engine: Engine) -> None:
                    "ALTER TABLE projects ADD COLUMN is_long_term TINYINT(1) NOT NULL DEFAULT 0 COMMENT '是否长期维护' AFTER actual_end_date")
     _ensure_column(engine, "projects", "deleted",
                    "ALTER TABLE projects ADD COLUMN deleted TINYINT(1) NOT NULL DEFAULT 0 COMMENT '是否删除 0否1是' AFTER delete_time")
+    _ensure_column(engine, "projects", "assignee_rule_config_id",
+                   "ALTER TABLE projects ADD COLUMN assignee_rule_config_id BIGINT UNSIGNED NULL COMMENT '责任人规则配置ID' AFTER workflow_config_id")
 
     _ensure_column(engine, "requirements", "source_project_id",
                    "ALTER TABLE requirements ADD COLUMN source_project_id BIGINT UNSIGNED NULL COMMENT '来源项目 ID' AFTER project_id",
@@ -185,3 +294,5 @@ def ensure_runtime_schema(engine: Engine) -> None:
 
     _ensure_column(engine, "users", "deleted",
                    "ALTER TABLE users ADD COLUMN deleted TINYINT(1) NOT NULL DEFAULT 0 COMMENT '是否删除 0否1是' AFTER delete_time")
+    _ensure_column(engine, "users", "must_change_password",
+                   "ALTER TABLE users ADD COLUMN must_change_password TINYINT(1) NOT NULL DEFAULT 0 COMMENT '是否需要修改密码' AFTER is_active")

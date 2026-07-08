@@ -3,12 +3,15 @@
     <div class="page-head">
       <div>
         <h1>工作台</h1>
-        <p>按项目成员范围聚合迭代相关需求、任务、测试用例和 Bug，可通过进行中、有工作项等条件筛选。</p>
+        <p>按当前处理人聚合需要自己处理的需求、任务和 Bug，团队视图用于管理者查看范围内事项。</p>
       </div>
       <div class="workbench-view-switch">
         <span>工作视图</span>
         <el-radio-group v-model="viewMode" size="small">
           <el-radio-button label="mine">我的</el-radio-button>
+          <el-radio-button label="unassigned">待分派</el-radio-button>
+          <el-radio-button label="unplanned">待规划</el-radio-button>
+          <el-radio-button label="team">团队待办</el-radio-button>
           <el-radio-button label="all">全部</el-radio-button>
         </el-radio-group>
       </div>
@@ -31,11 +34,11 @@
               </el-button>
             </template>
             <div class="workbench-extra-filters">
-              <label>负责人</label>
-              <el-select v-model="ownerFilter" clearable filterable placeholder="按工作项负责人筛选">
+              <label>当前处理人</label>
+              <el-select v-model="ownerFilter" clearable filterable placeholder="按当前处理人筛选">
                 <el-option v-for="owner in owners" :key="owner.id" :label="owner.full_name" :value="owner.id" />
               </el-select>
-              <p>工作台范围由项目成员决定，负责人只用于进一步定位具体工作项。</p>
+              <p>我的待办按当前处理人决定，团队视图可继续按项目范围查看。</p>
             </div>
           </el-popover>
         </div>
@@ -58,7 +61,8 @@
       <el-radio-button label="stats">统计</el-radio-button>
     </el-radio-group>
 
-    <el-empty v-if="!loading && !filteredIterations.length" class="workbench-empty" :description="emptyDescription" />
+    <el-empty v-if="!loading && !currentListItems.length && displayMode === 'list'" class="workbench-empty" :description="emptyDescription" />
+    <el-empty v-else-if="!loading && !filteredIterations.length && displayMode !== 'list'" class="workbench-empty" :description="emptyDescription" />
 
     <div v-else-if="displayMode === 'list'" v-loading="loading" class="workbench-list">
       <section v-for="section in listSections" :key="section.key" class="workbench-list-section">
@@ -70,19 +74,27 @@
           <el-tag :type="section.tagType || undefined">{{ section.items.length }} 项</el-tag>
         </header>
         <div v-if="section.items.length" class="workbench-list-table">
-          <el-table :data="section.items" border stripe height="100%">
+          <el-table :data="section.items" border stripe :row-class-name="workbenchRowClassName">
+            <el-table-column v-if="section.showId" prop="id" label="ID" width="90" />
             <el-table-column label="类型" width="100">
               <template #default="{ row }"><el-tag size="small" :type="typeTag(row.object_type)">{{ typeLabel(row.object_type) }}</el-tag></template>
             </el-table-column>
             <el-table-column label="标题" min-width="220" show-overflow-tooltip>
               <template #default="{ row }">
-                <el-button link type="primary" class="workbench-title-button" @click="openWorkItemDetail(row)">{{ row.title }}</el-button>
+                <el-button link type="primary" class="workbench-title-button" :class="{ 'is-terminal': isTerminalWorkItem(row) }" @click="openWorkItemDetail(row)">{{ row.title }}</el-button>
               </template>
             </el-table-column>
             <el-table-column prop="project_name" label="项目" min-width="140" show-overflow-tooltip />
-            <el-table-column prop="iteration_name" label="迭代" min-width="120" show-overflow-tooltip />
-            <el-table-column label="负责人" width="120"><template #default="{ row }">{{ ownerName(row.owner_id) }}</template></el-table-column>
-            <el-table-column label="状态" width="110"><template #default="{ row }">{{ itemStatusLabel(row) }}</template></el-table-column>
+            <el-table-column v-if="section.showIteration" prop="iteration_name" label="迭代" min-width="120" show-overflow-tooltip />
+            <el-table-column label="当前处理人" width="120"><template #default="{ row }">{{ ownerName(row.owner_id) }}</template></el-table-column>
+            <el-table-column label="状态" width="110">
+              <template #default="{ row }">
+                <el-tag size="small" :type="itemStatusTag(row)" effect="light" :class="{ 'workbench-status-tag-terminal': isTerminalWorkItem(row) }">{{ itemStatusLabel(row) }}</el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column v-if="section.showLastExecuteTime" label="最近执行时间" width="170">
+              <template #default="{ row }">{{ formatDateTime(row.last_execute_time) }}</template>
+            </el-table-column>
             <el-table-column label="优先级/结果" width="120">
               <template #default="{ row }">
                 <RequirementPriorityBadge v-if="row.priority || row.severity" :value="row.severity || row.priority" />
@@ -93,6 +105,16 @@
               <template #default="{ row }">
                 <div class="workbench-list-actions">
                   <el-button link type="primary" class="workbench-action-main" @click="openWorkItemDetail(row)">详情</el-button>
+                  <WorkflowActionButtons
+                    v-if="isWorkflowRuntimeItem(row)"
+                    :object-type="row.object_type"
+                    :object-id="row.id"
+                    mode="list"
+                    :transitions="workflowTransitionsFor(row)"
+                    :auto-load="false"
+                    :users="owners"
+                    @executed="loadWorkbench"
+                  />
                   <el-button
                     v-if="workbenchActionGroup(row).primary"
                     link
@@ -148,7 +170,7 @@
               <h2>{{ column.title }}</h2>
               <p>{{ column.iterations.length }} 个迭代</p>
             </div>
-            <el-tag>{{ column.total }} 项</el-tag>
+            <el-tag>{{ column.visibleTotal }} 项</el-tag>
           </header>
           <div class="workbench-project-column-list">
             <article v-for="iteration in column.iterations" :key="`${column.key}-${iteration.id}`" class="iteration-board">
@@ -165,7 +187,7 @@
                   </div>
                 </div>
                 <div class="iteration-board-tools">
-                  <el-tag>{{ boardTotal(iteration) }} 项</el-tag>
+                  <el-tag>{{ visibleBoardTotal(iteration) }} 项</el-tag>
                   <el-button link type="primary" @click="toggleIteration(iteration.context_key)">
                     {{ isIterationExpanded(iteration.context_key) ? '收起' : '展开' }}
                   </el-button>
@@ -192,7 +214,7 @@
                       v-for="item in visibleLaneItems(iteration.context_key, group.key, group.items)"
                       :key="item.drag_key"
                       class="workbench-card workbench-mini-card"
-                      :class="`workbench-card-${item.object_type}`"
+                      :class="[`workbench-card-${item.object_type}`, { 'workbench-card-terminal': isTerminalWorkItem(item) }]"
                       :data-id="item.id"
                       :data-type="item.object_type"
                     >
@@ -220,7 +242,7 @@
                 </section>
               </div>
               <button v-else class="iteration-collapsed-summary" type="button" @click="toggleIteration(iteration.context_key)">
-                展开查看 {{ boardTotal(iteration) }} 个工作项
+                展开查看 {{ visibleBoardTotal(iteration) }} 个工作项
               </button>
             </article>
           </div>
@@ -228,45 +250,27 @@
       </div>
     </div>
 
-    <el-dialog v-model="closeRequirementVisible" title="关闭需求" width="480px">
-      <el-form label-position="top">
-        <el-form-item label="关闭原因" required>
-          <el-select v-model="closeForm.reason">
-            <el-option v-for="option in closeReasons" :key="option" :label="option" :value="option" />
-          </el-select>
-        </el-form-item>
-        <el-form-item label="备注"><el-input v-model="closeForm.remark" type="textarea" :rows="3" /></el-form-item>
-      </el-form>
-      <template #footer><el-button @click="closeRequirementVisible = false">取消</el-button><el-button type="primary" :loading="saving" @click="submitRequirementClose">确认关闭</el-button></template>
-    </el-dialog>
+    
 
-    <el-dialog v-model="closeTaskVisible" title="关闭任务" width="480px">
-      <el-form label-position="top">
-        <el-form-item label="关闭原因" required>
-          <el-select v-model="closeForm.reason">
-            <el-option v-for="option in closeReasons" :key="option" :label="option" :value="option" />
-          </el-select>
-        </el-form-item>
-        <el-form-item label="备注"><el-input v-model="closeForm.remark" type="textarea" :rows="3" /></el-form-item>
-      </el-form>
-      <template #footer><el-button @click="closeTaskVisible = false">取消</el-button><el-button type="primary" :loading="saving" @click="submitTaskClose">确认关闭</el-button></template>
-    </el-dialog>
+    
 
-    <el-dialog v-model="bugActionVisible" :title="bugActionTitle" width="560px">
+    
+
+    <el-dialog v-model="assignVisible" title="指派当前处理人" width="480px">
       <el-form label-position="top">
-        <el-form-item v-if="bugActionType === 'start_fixing'" label="解决迭代">
-          <el-select v-model="bugActionForm.iteration_id" clearable filterable>
-            <el-option v-for="iteration in iterations" :key="iteration.id" :label="iteration.name" :value="iteration.id" />
+        <el-form-item label="工作项">
+          <el-input :model-value="selectedAssignItem?.title || ''" disabled />
+        </el-form-item>
+        <el-form-item label="当前处理人" required>
+          <el-select v-model="assignForm.owner_id" filterable placeholder="请选择当前处理人">
+            <el-option v-for="user in owners" :key="user.id" :label="user.full_name" :value="user.id" />
           </el-select>
         </el-form-item>
-        <el-form-item v-if="bugActionType === 'resolve'" label="解决方案" required>
-          <el-select v-model="bugActionForm.resolution">
-            <el-option v-for="option in bugResolutionOptions" :key="option" :label="option" :value="option" />
-          </el-select>
+        <el-form-item label="备注">
+          <el-input v-model="assignForm.remark" type="textarea" :rows="3" />
         </el-form-item>
-        <el-form-item label="备注"><el-input v-model="bugActionForm.remark" type="textarea" :rows="3" /></el-form-item>
       </el-form>
-      <template #footer><el-button @click="bugActionVisible = false">取消</el-button><el-button type="primary" :loading="saving" @click="submitBugAction">确认</el-button></template>
+      <template #footer><el-button @click="assignVisible = false">取消</el-button><el-button type="primary" :loading="saving" @click="submitAssign">确认指派</el-button></template>
     </el-dialog>
 
     <el-dialog v-model="caseExecutionVisible" :title="`执行用例 ${selectedCase?.title || ''}`" width="760px">
@@ -304,12 +308,17 @@ import { VueDraggable } from 'vue-draggable-plus'
 import { ElMessage, ElMessageBox } from 'element-plus'
 
 import { fetchWorkbench, moveWorkbenchItem } from '../api/dashboard'
-import { activateRequirement, closeRequirement, completeRequirement } from '../api/requirements'
-import { activateTask, closeTask, completeTask } from '../api/tasks'
+import { assignRequirement } from '../api/requirements'
+import { assignTask } from '../api/tasks'
 import { createBugFromTestCase, executeTestCase } from '../api/testCases'
-import { activateBug, closeBug, resolveBug, startFixingBug, suspendBug, verifyBugFailed, verifyBugPassed } from '../api/bugs'
+import { assignBug } from '../api/bugs'
+import { assignWorkItem, autoAssignWorkItems, claimWorkItem, fetchUnassignedWorkItems } from '../api/workItems'
+import { fetchUsers } from '../api/users'
+import { fetchWorkflowTransitionsBatch } from '../api/workflowRuntime'
 import RequirementPriorityBadge from '../components/RequirementPriorityBadge.vue'
 import RichTextPasteEditor from '../components/RichTextPasteEditor.vue'
+import WorkflowActionButtons from '../components/WorkflowActionButtons.vue'
+import { actionErrorMessage } from '../utils/permissions'
 
 const loading = ref(false)
 const saving = ref(false)
@@ -317,6 +326,9 @@ const router = useRouter()
 const iterations = ref([])
 const owners = ref([])
 const reviewTasks = ref([])
+const unassignedItems = ref([])
+const unassignedSummary = ref({ total: 0, overdue_count: 0 })
+const workflowTransitions = ref({})
 const viewMode = ref('mine')
 const displayMode = ref('list')
 const iterationFilter = ref([])
@@ -328,18 +340,12 @@ const hideEmptyIterations = ref(false)
 const expandedIterationIds = ref(new Set())
 const laneLimits = reactive({})
 const dragSnapshot = ref(null)
-const selectedRequirement = ref(null)
-const selectedTask = ref(null)
-const selectedBug = ref(null)
 const selectedCase = ref(null)
-const closeRequirementVisible = ref(false)
-const closeTaskVisible = ref(false)
-const bugActionVisible = ref(false)
-const bugActionType = ref('')
+const assignVisible = ref(false)
 const caseExecutionVisible = ref(false)
 const caseBugVisible = ref(false)
-const closeForm = reactive({ reason: '', remark: '' })
-const bugActionForm = reactive({ iteration_id: null, resolution: '已解决', remark: '' })
+const selectedAssignItem = ref(null)
+const assignForm = reactive({ owner_id: null, remark: '' })
 const caseExecutionForm = reactive({ execute_time: '', steps_result_json: [] })
 const caseBugForm = reactive({ title: '', bug_type: '代码错误', severity: '3', priority: '3', reproduce_steps: '', actual_result: '' })
 
@@ -350,7 +356,15 @@ const itemTypes = [
   { label: 'Bug', value: 'bug' },
   { label: 'Code Review', value: 'code_review' }
 ]
+const workbenchViewLabels = {
+  mine: '我的待办',
+  unassigned: '待分派',
+  unplanned: '待规划',
+  team: '团队待办',
+  all: '全部工作项'
+}
 const closeReasons = ['已完成', '不做', '重复', '延期', '其他']
+const taskCloseReasons = ['不做', '重复', '延期', '其他']
 const bugResolutionOptions = ['设计如此', '重复Bug', '外部原因', '已解决', '无法重现', '延期处理', '不予解决']
 const bugTypeOptions = ['代码错误', '配置相关', '安装部署', '安全相关', '性能问题', '标准规范', '测试脚本', '设计缺陷', '其他']
 const priorityLevelOptions = [
@@ -368,9 +382,9 @@ const executionResultOptions = [
 ]
 const statusOptions = {
   iteration: { planning: '规划中', active: '进行中', finished: '已完成', closed: '已关闭' },
-  requirement: { draft: '草稿', active: '激活', done: '完成', closed: '关闭' },
+  requirement: { draft: '草稿', active: '激活', pending_validation: '待验证', validation_failed: '验证未通过', done: '完成', closed: '关闭' },
   task: { todo: '待办', doing: '进行中', done: '完成', closed: '关闭' },
-  bug: { open: '待确认', fixing: '修复中', resolved: '已解决', verifying: '待验证', closed: '已关闭', reopened: '重新打开', suspended: '已挂起' }
+  bug: { open: '待确认', fixing: '修复中', verifying: '待验证', closed: '已关闭', reopened: '重新打开', suspended: '已挂起' }
 }
 const INITIAL_LANE_LIMIT = 8
 const LANE_LIMIT_STEP = 8
@@ -399,6 +413,15 @@ const filteredIterations = computed(() => iterations.value
 
 const summaryCards = computed(() => {
   const boards = filteredIterations.value
+  if (viewMode.value === 'unassigned') {
+    return [
+      { key: 'unassigned', label: '待分派', value: unassignedSummary.value.total || unassignedItems.value.length },
+      { key: 'overdue', label: '已超时', value: unassignedSummary.value.overdue_count || 0 },
+      { key: 'requirements', label: '需求', value: unassignedItems.value.filter((item) => item.object_type === 'requirement').length },
+      { key: 'tasks', label: '任务', value: unassignedItems.value.filter((item) => item.object_type === 'task').length },
+      { key: 'bugs', label: 'Bug', value: unassignedItems.value.filter((item) => item.object_type === 'bug').length }
+    ]
+  }
   return [
     { key: 'iterations', label: '迭代板块', value: boards.length },
     { key: 'requirements', label: '需求', value: boards.reduce((sum, item) => sum + item.requirements.length, 0) },
@@ -422,17 +445,52 @@ const flatWorkbenchItems = computed(() => filteredIterations.value.flatMap((iter
   ...(iteration.test_cases || []).map((item) => decorateListItem(item, iteration)),
   ...(iteration.bugs || []).map((item) => decorateListItem(item, iteration))
 ]).sort((a, b) => {
+  const terminalRank = Number(isTerminalWorkItem(a)) - Number(isTerminalWorkItem(b))
+  if (terminalRank !== 0) return terminalRank
   if (a.iteration_id !== b.iteration_id) return (b.iteration_id || 0) - (a.iteration_id || 0)
   return b.id - a.id
 }))
 
+const currentListItems = computed(() => {
+  if (viewMode.value === 'unassigned') {
+    return filterListItems(unassignedItems.value.map((item) => ({ ...item, iteration_name: item.iteration_name || '-' })))
+  }
+  if (viewMode.value === 'unplanned') {
+    return filterListItems(flatWorkbenchItems.value.filter((item) => !item.iteration_id && ['requirement', 'task', 'bug'].includes(item.object_type)))
+  }
+  return filterListItems(flatWorkbenchItems.value.filter((item) => ['requirement', 'task', 'bug'].includes(item.object_type)))
+})
+
 const listSections = computed(() => [
-  { key: 'requirement', label: typeLabel('requirement'), description: '按迭代汇总需要推进的需求', tagType: '', items: flatWorkbenchItems.value.filter((item) => item.object_type === 'requirement') },
-  { key: 'task', label: typeLabel('task'), description: '按迭代汇总需要执行的任务', tagType: 'success', items: flatWorkbenchItems.value.filter((item) => item.object_type === 'task') },
-  { key: 'test_case', label: typeLabel('test_case'), description: '按迭代汇总需要执行的测试用例', tagType: 'warning', items: flatWorkbenchItems.value.filter((item) => item.object_type === 'test_case') },
-  { key: 'bug', label: typeLabel('bug'), description: '按迭代汇总需要处理的 Bug', tagType: 'danger', items: flatWorkbenchItems.value.filter((item) => item.object_type === 'bug') },
-  { key: 'code_review', label: typeLabel('code_review'), description: '需要完成代码评审的提交', tagType: 'info', items: filteredReviewTasks.value }
-].filter((section) => isTypeSelected(section.key)))
+  {
+    key: 'work_item',
+    label: '工作项',
+    description: '需求、任务和 Bug 合并展示，通过类型区分。',
+    tagType: '',
+    showId: true,
+    showIteration: true,
+    items: currentListItems.value
+  },
+  {
+    key: 'test_case',
+    label: typeLabel('test_case'),
+    description: '需要执行的测试用例',
+    tagType: 'warning',
+    showId: false,
+    showIteration: true,
+    showLastExecuteTime: true,
+    items: flatWorkbenchItems.value.filter((item) => item.object_type === 'test_case')
+  },
+  {
+    key: 'code_review',
+    label: typeLabel('code_review'),
+    description: '需要完成代码评审的提交',
+    tagType: 'info',
+    showId: false,
+    showIteration: false,
+    items: filteredReviewTasks.value
+  }
+].filter((section) => viewMode.value === 'unassigned' ? section.key === 'work_item' : (section.items.length || section.key === 'work_item')))
 
 const boardColumns = computed(() => {
   const columns = new Map()
@@ -462,7 +520,8 @@ const boardColumns = computed(() => {
       return {
         ...column,
         iterations,
-        total: iterations.reduce((sum, iteration) => sum + boardTotal(iteration), 0)
+        total: iterations.reduce((sum, iteration) => sum + boardTotal(iteration), 0),
+        visibleTotal: iterations.reduce((sum, iteration) => sum + visibleBoardTotal(iteration), 0)
       }
     })
 })
@@ -506,20 +565,19 @@ watch(boardColumns, () => {
   }
 })
 
-const bugActionTitle = computed(() => ({
-  start_fixing: '确认 Bug',
-  resolve: '解决 Bug',
-  activate: '激活 Bug',
-  suspend: '挂起 Bug',
-  close: '关闭 Bug',
-  verify_passed: '验证通过',
-  verify_failed: '验证失败'
-}[bugActionType.value] || 'Bug 操作'))
-
 function filterItems(items) {
   const keyword = keywordFilter.value.trim().toLowerCase()
   const effectiveOwnerId = ownerFilter.value
   return items
+    .filter((item) => !effectiveOwnerId || item.owner_id === effectiveOwnerId)
+    .filter((item) => !keyword || `${item.title || ''} ${item.project_name || ''}`.toLowerCase().includes(keyword))
+    .map((item) => ({ ...item, drag_key: `${item.object_type}-${item.id}` }))
+}
+function filterListItems(items = []) {
+  const keyword = keywordFilter.value.trim().toLowerCase()
+  const effectiveOwnerId = ownerFilter.value
+  return items
+    .filter((item) => isTypeSelected(item.object_type))
     .filter((item) => !effectiveOwnerId || item.owner_id === effectiveOwnerId)
     .filter((item) => !keyword || `${item.title || ''} ${item.project_name || ''}`.toLowerCase().includes(keyword))
     .map((item) => ({ ...item, drag_key: `${item.object_type}-${item.id}` }))
@@ -571,9 +629,12 @@ function visibleGroups(iteration) {
   ].filter((group) => isTypeSelected(group.key))
 }
 function boardTotal(iteration) { return (iteration.requirements?.length || 0) + (iteration.tasks?.length || 0) + (iteration.test_cases?.length || 0) + (iteration.bugs?.length || 0) }
+function visibleBoardTotal(iteration) {
+  return visibleGroups(iteration).reduce((sum, group) => sum + group.items.length, 0)
+}
 function laneKey(iterationId, groupKey) { return `${iterationId}-${groupKey}` }
 function laneLimit(iterationId, groupKey) { return laneLimits[laneKey(iterationId, groupKey)] || INITIAL_LANE_LIMIT }
-function visibleLaneItems(iterationId, groupKey, items) { return items.slice(0, laneLimit(iterationId, groupKey)) }
+function visibleLaneItems(iterationId, groupKey, items) { return sortedWorkbenchItems(items).slice(0, laneLimit(iterationId, groupKey)) }
 function hiddenLaneCount(iterationId, groupKey, items) { return Math.max(0, items.length - laneLimit(iterationId, groupKey)) }
 function hasHiddenLaneItems(iterationId, groupKey, items) { return hiddenLaneCount(iterationId, groupKey, items) > 0 }
 function showMoreLaneItems(iterationId, groupKey) { laneLimits[laneKey(iterationId, groupKey)] = laneLimit(iterationId, groupKey) + LANE_LIMIT_STEP }
@@ -594,72 +655,85 @@ function typeLabel(value) { return itemTypes.find((item) => item.value === value
 function typeShortLabel(value) { return { requirement: '需', task: '任', test_case: '测', bug: 'Bug', code_review: 'CR' }[value] || typeLabel(value) }
 function typeTag(value) { return { requirement: 'primary', task: 'success', test_case: 'warning', bug: 'danger', code_review: 'info' }[value] || 'info' }
 function iterationStatusLabel(value) { return statusOptions.iteration[value] || value || '-' }
+function isTerminalWorkItem(item) {
+  if (item.object_type === 'requirement') return ['done', 'closed'].includes(item.status)
+  if (item.object_type === 'task') return ['done', 'closed'].includes(item.status)
+  if (item.object_type === 'bug') return item.status === 'closed'
+  return false
+}
+function sortedWorkbenchItems(items) {
+  return [...items].sort((a, b) => {
+    const terminalRank = Number(isTerminalWorkItem(a)) - Number(isTerminalWorkItem(b))
+    if (terminalRank !== 0) return terminalRank
+    return (b.id || 0) - (a.id || 0)
+  })
+}
+function workbenchRowClassName({ row }) {
+  return isTerminalWorkItem(row) ? 'workbench-row-terminal' : ''
+}
+function itemStatusTag(item) {
+  if (isTerminalWorkItem(item)) return item.status === 'closed' ? 'info' : 'success'
+  if (item.object_type === 'bug') return ['open', 'reopened'].includes(item.status) ? 'danger' : 'warning'
+  if (item.object_type === 'test_case') return item.last_execute_result === 'passed' ? 'success' : item.last_execute_result === 'failed' ? 'danger' : item.last_execute_result === 'blocked' ? 'warning' : 'info'
+  return ['active', 'doing'].includes(item.status) ? 'primary' : 'info'
+}
 function itemStatusLabel(item) {
   const status = item.object_type === 'test_case' ? executionResultLabel(item.last_execute_result) : (statusOptions[item.object_type]?.[item.status] || item.status || '-')
-  return item.marker ? `${status} · ${item.marker}` : status
+  return status
 }
 function executionResultLabel(value) { return executionResultOptions.find((item) => item.value === value)?.label || value || '未执行' }
+function formatDateTime(value) { return value ? new Date(value).toLocaleString('zh-CN', { hour12: false }) : '-' }
 function canCreateBugFromCase(item) { return ['failed', 'blocked'].includes(item.last_execute_result) }
 function workbenchActions(item) {
-  if (item.object_type === 'requirement') {
+  if (viewMode.value === 'unassigned') {
     return [
-      ['draft', 'closed'].includes(item.status) && { key: 'activate_requirement', label: '激活', type: 'warning' },
-      item.status === 'active' && { key: 'complete_requirement', label: '完成', type: 'success' },
-      item.status === 'active' && { key: 'close_requirement', label: '关闭', type: 'danger' }
-    ].filter(Boolean)
+      { key: 'claim_item', label: '认领', type: 'success' },
+      { key: 'assign_item', label: '指派', type: 'primary' },
+      { key: 'auto_assign_item', label: '自动分配', type: 'warning' }
+    ]
   }
-  if (item.object_type === 'task') {
-    return [
-      ['todo', 'closed'].includes(item.status) && { key: 'activate_task', label: '激活', type: 'warning' },
-      item.status === 'doing' && { key: 'complete_task', label: '完成', type: 'success' },
-      item.status !== 'closed' && { key: 'close_task', label: '关闭', type: 'danger' }
-    ].filter(Boolean)
-  }
+  const actions = businessWorkbenchActions(item)
+  if (canAssignWorkItem(item)) actions.push({ key: 'assign_item', label: '指派', type: 'primary' })
+  return actions
+}
+function businessWorkbenchActions(item) {
+  if (!canHandleWorkItem(item)) return []
   if (item.object_type === 'test_case') {
     return [
-      { key: 'execute_case', label: '执行', type: 'success' },
-      canCreateBugFromCase(item) && { key: 'create_case_bug', label: '提 Bug', type: 'warning' }
+      { key: 'execute_case', label: '??', type: 'success' },
+      canCreateBugFromCase(item) && { key: 'create_case_bug', label: '? Bug', type: 'warning' }
     ].filter(Boolean)
   }
-  if (item.object_type === 'bug') {
-    return [
-      ['open', 'reopened', 'suspended'].includes(item.status) && { key: 'bug_start_fixing', label: '确认', type: 'success' },
-      item.status === 'fixing' && { key: 'bug_resolve', label: '解决', type: 'success' },
-      item.status === 'verifying' && { key: 'bug_verify_passed', label: '验证通过', type: 'success' },
-      item.status === 'verifying' && { key: 'bug_verify_failed', label: '验证失败', type: 'danger' },
-      ['verifying', 'closed'].includes(item.status) && { key: 'bug_activate', label: '激活', type: 'warning' },
-      ['open', 'fixing', 'reopened'].includes(item.status) && { key: 'bug_suspend', label: '挂起', type: 'warning' },
-      ['open', 'suspended', 'verifying'].includes(item.status) && { key: 'bug_close', label: '关闭', type: 'danger' }
-    ].filter(Boolean)
-  }
-  if (item.object_type === 'code_review') return [{ key: 'devops_review', label: '评审', type: 'primary' }]
+  if (item.object_type === 'code_review') return [{ key: 'devops_review', label: '??', type: 'primary' }]
   return []
+}
+function canHandleWorkItem(item) {
+  if (item.object_type === 'test_case' || item.object_type === 'code_review') return true
+  return !currentUserId.value || item.owner_id === currentUserId.value
+}
+function canAssignWorkItem(item) {
+  return ['requirement', 'task', 'bug'].includes(item.object_type) && !isTerminalWorkItem(item)
+}
+function isWorkflowRuntimeItem(item) {
+  return ['requirement', 'task', 'bug'].includes(item.object_type)
+}
+function workflowTransitionKey(item) {
+  return `${item.object_type}:${item.id}`
+}
+function workflowTransitionsFor(item) {
+  return workflowTransitions.value[workflowTransitionKey(item)] || []
 }
 function workbenchActionGroup(item) {
   const actions = workbenchActions(item)
   return { primary: actions[0] || null, secondary: actions.slice(1) }
 }
-function runWorkbenchActionByKey(item, actionKey) {
-  const action = workbenchActions(item).find((candidate) => candidate.key === actionKey)
-  if (action) runWorkbenchAction(item, action)
-}
 function runWorkbenchAction(item, action) {
   const handlers = {
-    activate_requirement: activateRequirementRow,
-    complete_requirement: completeRequirementRow,
-    close_requirement: openRequirementClose,
-    activate_task: activateTaskRow,
-    complete_task: completeTaskRow,
-    close_task: openTaskClose,
     execute_case: openCaseExecution,
     create_case_bug: openCaseBug,
-    bug_start_fixing: (row) => openBugAction(row, 'start_fixing'),
-    bug_resolve: (row) => openBugAction(row, 'resolve'),
-    bug_verify_passed: (row) => openBugAction(row, 'verify_passed'),
-    bug_verify_failed: (row) => openBugAction(row, 'verify_failed'),
-    bug_activate: (row) => openBugAction(row, 'activate'),
-    bug_suspend: (row) => openBugAction(row, 'suspend'),
-    bug_close: (row) => openBugAction(row, 'close'),
+    claim_item: claimItemRow,
+    auto_assign_item: autoAssignItemRow,
+    assign_item: openAssignItem,
     devops_review: () => router.push({ name: 'devops' })
   }
   handlers[action.key]?.(item)
@@ -683,10 +757,21 @@ async function loadWorkbench() {
   loading.value = true
   try {
     const params = viewMode.value === 'mine' && currentUserId.value ? { user_id: currentUserId.value } : {}
-    const { data } = await fetchWorkbench(params)
+    const [workbenchResponse, usersResponse, unassignedResponse] = await Promise.all([
+      fetchWorkbench(params),
+      fetchUsers(),
+      viewMode.value === 'unassigned' ? fetchUnassignedWorkItems() : Promise.resolve({ data: { items: [], total: 0, overdue_count: 0 } })
+    ])
+    const data = workbenchResponse.data
     iterations.value = data.iterations || []
-    owners.value = data.owners || []
+    owners.value = usersResponse.data || data.owners || []
     reviewTasks.value = data.review_tasks || []
+    unassignedItems.value = unassignedResponse.data.items || []
+    unassignedSummary.value = {
+      total: unassignedResponse.data.total || 0,
+      overdue_count: unassignedResponse.data.overdue_count || 0
+    }
+    await loadWorkflowTransitions(data.iterations || [], unassignedItems.value)
     ensureExpandedIteration()
   } catch (error) {
     ElMessage.error('工作台加载失败，请确认后端服务已启动')
@@ -729,26 +814,87 @@ async function onDragAdd(event, targetIterationId) {
 function findWorkbenchItem(objectType, objectId) {
   return flatWorkbenchItems.value.find((item) => item.object_type === objectType && item.id === objectId)
 }
-async function activateRequirementRow(item) { try { await activateRequirement(item.id); await loadWorkbench(); ElMessage.success('需求已激活') } catch (error) { showActionError(error, '需求激活失败') } }
-async function completeRequirementRow(item) { try { await completeRequirement(item.id); await loadWorkbench(); ElMessage.success('需求已完成') } catch (error) { showActionError(error, '需求完成失败') } }
-function openRequirementClose(item) { selectedRequirement.value = item; Object.assign(closeForm, { reason: '', remark: '' }); closeRequirementVisible.value = true }
-async function submitRequirementClose() { if (!closeForm.reason) return ElMessage.warning('请选择关闭原因'); saving.value = true; try { await closeRequirement(selectedRequirement.value.id, { ...closeForm }); closeRequirementVisible.value = false; await loadWorkbench(); ElMessage.success('需求已关闭') } catch (error) { showActionError(error, '需求关闭失败') } finally { saving.value = false } }
-async function activateTaskRow(item) { try { await activateTask(item.id); await loadWorkbench(); ElMessage.success('任务已激活') } catch (error) { showActionError(error, '任务激活失败') } }
-async function completeTaskRow(item) { try { await completeTask(item.id); await loadWorkbench(); ElMessage.success('任务已完成') } catch (error) { showActionError(error, '任务完成失败') } }
-function openTaskClose(item) { selectedTask.value = item; Object.assign(closeForm, { reason: '', remark: '' }); closeTaskVisible.value = true }
-async function submitTaskClose() { if (!closeForm.reason) return ElMessage.warning('请选择关闭原因'); saving.value = true; try { await closeTask(selectedTask.value.id, { ...closeForm }); closeTaskVisible.value = false; await loadWorkbench(); ElMessage.success('任务已关闭') } catch (error) { showActionError(error, '任务关闭失败') } finally { saving.value = false } }
-function openBugAction(item, action) { selectedBug.value = item; bugActionType.value = action; Object.assign(bugActionForm, { iteration_id: item.iteration_id || null, resolution: '已解决', remark: '' }); bugActionVisible.value = true }
-async function submitBugAction() {
+
+
+
+async function loadWorkflowTransitions(iterationsData, unassignedData = []) {
+  const items = [
+    ...iterationsData.flatMap((iteration) => [
+      ...(iteration.requirements || []),
+      ...(iteration.tasks || []),
+      ...(iteration.bugs || [])
+    ]),
+    ...unassignedData
+  ].filter(isWorkflowRuntimeItem)
+  const uniqueItems = [...new Map(items.map((item) => [workflowTransitionKey(item), item])).values()]
+  if (!uniqueItems.length) {
+    workflowTransitions.value = {}
+    return
+  }
+  try {
+    const { data } = await fetchWorkflowTransitionsBatch(uniqueItems.map((item) => ({ object_type: item.object_type, id: item.id })))
+    workflowTransitions.value = Object.fromEntries((data.items || []).map((item) => [`${item.object_type}:${item.id}`, item.transitions || []]))
+  } catch {
+    workflowTransitions.value = {}
+  }
+}
+
+
+function openAssignItem(item) {
+  selectedAssignItem.value = item
+  Object.assign(assignForm, { owner_id: item.owner_id || null, remark: '' })
+  assignVisible.value = true
+}
+async function claimItemRow(item) {
   saving.value = true
   try {
-    const actions = { start_fixing: startFixingBug, resolve: resolveBug, activate: activateBug, suspend: suspendBug, close: closeBug, verify_passed: verifyBugPassed, verify_failed: verifyBugFailed }
-    const payload = ['activate', 'close'].includes(bugActionType.value) ? { remark: bugActionForm.remark } : { ...bugActionForm }
-    await actions[bugActionType.value](selectedBug.value.id, payload)
-    bugActionVisible.value = false
+    await claimWorkItem(item.object_type, item.id, {})
     await loadWorkbench()
-    ElMessage.success('Bug 状态已更新')
+    ElMessage.success('已认领')
   } catch (error) {
-    showActionError(error, 'Bug 操作失败')
+    showActionError(error, '认领失败')
+  } finally {
+    saving.value = false
+  }
+}
+async function autoAssignItemRow(item) {
+  saving.value = true
+  try {
+    const { data } = await autoAssignWorkItems({ items: [{ object_type: item.object_type, id: item.id }] })
+    await loadWorkbench()
+    if (data.failures?.length) {
+      ElMessage.warning(data.failures[0].reason || '自动分配失败')
+    } else {
+      ElMessage.success('已自动分配')
+    }
+  } catch (error) {
+    showActionError(error, '自动分配失败')
+  } finally {
+    saving.value = false
+  }
+}
+async function submitAssign() {
+  if (!assignForm.owner_id) return ElMessage.warning('请选择当前处理人')
+  const item = selectedAssignItem.value
+  const actions = {
+    requirement: assignRequirement,
+    task: assignTask,
+    bug: assignBug
+  }
+  const action = actions[item?.object_type]
+  if (!action) return
+  saving.value = true
+  try {
+    if (viewMode.value === 'unassigned') {
+      await assignWorkItem(item.object_type, item.id, { ...assignForm })
+    } else {
+      await action(item.id, { ...assignForm })
+    }
+    assignVisible.value = false
+    await loadWorkbench()
+    ElMessage.success('已指派当前处理人')
+  } catch (error) {
+    showActionError(error, '指派失败')
   } finally {
     saving.value = false
   }
@@ -813,7 +959,7 @@ function buildCaseReproduceText(item) {
   ].join('\n')
 }
 function showActionError(error, fallback) {
-  ElMessageBox.alert(error?.response?.data?.detail || fallback, '提示', { type: 'warning' })
+  ElMessageBox.alert(actionErrorMessage(error, fallback), '提示', { type: 'warning' })
 }
 
 onMounted(loadWorkbench)

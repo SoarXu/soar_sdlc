@@ -5,7 +5,7 @@
         <h1>测试管理</h1>
         <p>维护测试用例库和测试单，关联项目、需求、迭代、人员和用例均以名称展示。</p>
       </div>
-      <div class="page-actions"><el-button @click="openRunCreate">新增测试单</el-button><el-button type="primary" @click="openCaseCreate">新增用例</el-button></div>
+      <div class="page-actions"><el-button v-if="canManageAnyTestAsset" @click="openRunCreate">新增测试单</el-button><el-button v-if="canManageAnyTestAsset" type="primary" @click="openCaseCreate">新增用例</el-button></div>
     </div>
 
     <el-tabs v-model="activeTab">
@@ -17,12 +17,12 @@
               <template #default="{ row }"><router-link class="table-link" :to="{ name: 'test-case-detail', params: { id: row.id } }">{{ row.title }}</router-link></template>
             </el-table-column>
             <el-table-column label="项目" width="170"><template #default="{ row }">{{ labelById(projects, row.project_id) }}</template></el-table-column>
-            <el-table-column label="需求" width="180"><template #default="{ row }">{{ labelById(requirements, row.requirement_id, 'title') }}</template></el-table-column>
+            <el-table-column label="需求" width="180"><template #default="{ row }">{{ requirementLabel(row.requirement_id) }}</template></el-table-column>
             <el-table-column label="测试人" width="140"><template #default="{ row }">{{ userLabel(users, row.default_tester_id) }}</template></el-table-column>
             <el-table-column label="最近执行时间" width="170"><template #default="{ row }">{{ formatDateTime(row.last_execute_time) }}</template></el-table-column>
             <el-table-column label="最近结果" width="110"><template #default="{ row }">{{ executionResultLabel(row.last_execute_result) }}</template></el-table-column>
             <el-table-column label="操作" width="280" fixed="right">
-              <template #default="{ row }"><el-button link type="success" @click="openCaseExecution(row)">执行</el-button><el-button link type="warning" :disabled="!canCreateBugFromCase(row)" @click="openCaseBug(row)">提 Bug</el-button><el-button link type="primary" @click="openCaseEdit(row)">编辑</el-button><el-popconfirm title="确认删除该用例？" @confirm="removeCase(row.id)"><template #reference><el-button link type="danger">删除</el-button></template></el-popconfirm></template>
+              <template #default="{ row }"><el-button v-if="canManageCaseRow(row)" link type="success" @click="openCaseExecution(row)">执行</el-button><el-button v-if="canManageCaseRow(row)" link type="warning" :disabled="!canCreateBugFromCase(row)" @click="openCaseBug(row)">提 Bug</el-button><el-button v-if="canManageCaseRow(row)" link type="primary" @click="openCaseEdit(row)">编辑</el-button><el-popconfirm v-if="canManageCaseRow(row)" title="确认删除该用例？" @confirm="removeCase(row.id)"><template #reference><el-button link type="danger">删除</el-button></template></el-popconfirm></template>
             </el-table-column>
           </el-table>
           <div class="table-pagination">
@@ -46,7 +46,7 @@
             <el-table-column label="负责人" width="140"><template #default="{ row }">{{ userLabel(users, row.test_owner_id) }}</template></el-table-column>
             <el-table-column prop="status" label="状态" width="110" />
             <el-table-column label="操作" width="260" fixed="right">
-              <template #default="{ row }"><el-button link type="primary" @click="openRunEdit(row)">编辑</el-button><el-button link type="success" @click="openSelectCases(row)">选用例</el-button><el-button link type="warning" @click="openExecution">记录结果</el-button><el-popconfirm title="确认删除该测试单？" @confirm="removeRun(row.id)"><template #reference><el-button link type="danger">删除</el-button></template></el-popconfirm></template>
+              <template #default="{ row }"><el-button v-if="canManageRunRow(row)" link type="primary" @click="openRunEdit(row)">编辑</el-button><el-button v-if="canManageRunRow(row)" link type="success" @click="openSelectCases(row)">选用例</el-button><el-button v-if="canManageRunRow(row)" link type="warning" @click="openExecution">记录结果</el-button><el-popconfirm v-if="canManageRunRow(row)" title="确认删除该测试单？" @confirm="removeRun(row.id)"><template #reference><el-button link type="danger">删除</el-button></template></el-popconfirm></template>
             </el-table-column>
           </el-table>
           <div class="table-pagination">
@@ -169,16 +169,19 @@ import RichTextPasteEditor from '../components/RichTextPasteEditor.vue'
 import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { fetchIterations } from '../api/iterations'
-import { fetchProjects } from '../api/projects'
+import { fetchProjectMembers, fetchProjects } from '../api/projects'
 import { fetchRequirements } from '../api/requirements'
 import { createBugFromTestCase, createTestCase, deleteTestCase, executeTestCase, fetchTestCaseExecutions, fetchTestCases, updateTestCase } from '../api/testCases'
 import { createBugFromTestRunCase, createTestRun, deleteTestRun, fetchTestRunCases, fetchTestRuns, selectTestCases, updateTestRun, updateTestRunCase } from '../api/testRuns'
 import { fetchUsers } from '../api/users'
+import { showActionError } from '../utils/actionFeedback'
+import { canManageTestCase, currentUserFromStorage } from '../utils/permissions'
 import { labelById, userLabel } from '../utils/referenceLabels'
 import { usePagination } from '../utils/usePagination'
 
 const activeTab = ref('cases'), saving = ref(false), loading = ref(false)
 const testCases = ref([]), testRuns = ref([]), testRunCases = ref([]), projects = ref([]), requirements = ref([]), iterations = ref([]), users = ref([])
+const projectMembersById = ref({})
 const {
   page: casePage,
   pageSize: casePageSize,
@@ -235,8 +238,18 @@ const caseBugForm = reactive({ title: '', bug_type: '代码错误', severity: '3
 const runForm = reactive({ project_id: null, iteration_id: null, name: '', test_owner_id: null, status: 'planning', remark: '' })
 const selectForm = reactive({ test_case_ids: [], tester_id: null })
 const executionForm = reactive({ run_case_id: null, result: 'passed', remark: '', bug_title: '' })
+const currentUser = computed(() => currentUserFromStorage(users.value))
+const canManageAnyTestAsset = computed(() => projects.value.some((project) => canManageTestCase(project, currentUser.value, membersForProject(project.id))))
 
 function runCaseLabel(item) { return `${labelById(testRuns.value, item.test_run_id, 'name')} / ${labelById(testCases.value, item.test_case_id, 'title')} / ${item.result}` }
+function membersForProject(projectId) { return projectMembersById.value[projectId] || [] }
+function projectForId(projectId) { return projects.value.find((item) => item.id === projectId) || null }
+function canManageCaseRow(row) { return canManageTestCase(projectForId(row.project_id), currentUser.value, membersForProject(row.project_id)) }
+function canManageRunRow(row) { return canManageTestCase(projectForId(row.project_id), currentUser.value, membersForProject(row.project_id)) }
+function requirementLabel(requirementId) {
+  if (!requirementId) return '-'
+  return requirements.value.find((item) => item.id === requirementId)?.title || '-'
+}
 function normalizeCaseSteps(value) { return Array.isArray(value) && value.length ? value.map((item) => ({ step: item.step || '', expected: item.expected || '' })) : [{ step: '', expected: '' }] }
 function addCaseStep() { caseForm.steps_json.push({ step: '', expected: '' }) }
 function removeCaseStep(index) { if (caseForm.steps_json.length > 1) caseForm.steps_json.splice(index, 1) }
@@ -287,17 +300,29 @@ async function loadData() {
   try {
     const [caseRes, runRes, runCaseRes, projectRes, reqRes, iterationRes, userRes] = await Promise.all([fetchTestCases(), fetchTestRuns(), fetchTestRunCases(), fetchProjects(), fetchRequirements(), fetchIterations(), fetchUsers()])
     testCases.value = caseRes.data; testRuns.value = runRes.data; testRunCases.value = runCaseRes.data; projects.value = projectRes.data; requirements.value = reqRes.data; iterations.value = iterationRes.data; users.value = userRes.data
+    await loadProjectMembers()
   } catch { ElMessage.error('测试管理数据加载失败') } finally { loading.value = false }
 }
+async function loadProjectMembers() {
+  const entries = await Promise.all(projects.value.map(async (project) => {
+    try {
+      const { data } = await fetchProjectMembers(project.id)
+      return [project.id, data]
+    } catch {
+      return [project.id, []]
+    }
+  }))
+  projectMembersById.value = Object.fromEntries(entries)
+}
 async function loadRunCases() { testRunCases.value = (await fetchTestRunCases()).data }
-async function submitCase() { if (!caseForm.title.trim()) return ElMessage.warning('请填写用例标题'); saving.value = true; try { const payload = { ...caseForm, project_id: caseForm.project_id || null, requirement_id: caseForm.requirement_id || null, default_tester_id: caseForm.default_tester_id || null, steps_json: cleanCaseSteps() }; if (editingCaseId.value) await updateTestCase(editingCaseId.value, payload); else await createTestCase(payload); caseDialogVisible.value = false; await loadData() } finally { saving.value = false } }
-async function submitCaseExecution() { saving.value = true; try { const currentId = selectedCase.value.id; await executeTestCase(currentId, { execute_time: caseExecutionForm.execute_time, steps_result_json: caseExecutionForm.steps_result_json }); await loadData(); ElMessage.success('用例执行结果已保存'); await openNextCaseAfterExecution(currentId, pagedTestCases.value) } finally { saving.value = false } }
-async function submitCaseBug() { if (!caseBugForm.title.trim()) return ElMessage.warning('请填写 Bug 标题'); saving.value = true; try { await createBugFromTestCase(bugSourceCase.value.id, { ...caseBugForm }); caseBugVisible.value = false; await loadData(); ElMessage.success('Bug 已提交') } finally { saving.value = false } }
-async function submitRun() { if (!runForm.project_id || !runForm.name.trim()) return ElMessage.warning('请选择项目并填写测试单名称'); saving.value = true; try { const payload = { ...runForm, iteration_id: runForm.iteration_id || null, test_owner_id: runForm.test_owner_id || null }; if (editingRunId.value) await updateTestRun(editingRunId.value, payload); else await createTestRun(payload); runDialogVisible.value = false; await loadData() } finally { saving.value = false } }
-async function submitSelectCases() { if (!selectForm.test_case_ids.length) return ElMessage.warning('请选择测试用例'); saving.value = true; try { await selectTestCases(selectedRunId.value, { test_case_ids: selectForm.test_case_ids, tester_id: selectForm.tester_id || null }); selectDialogVisible.value = false; await loadData(); ElMessage.success('用例已加入测试单') } finally { saving.value = false } }
-async function submitExecution() { if (!executionForm.run_case_id) return ElMessage.warning('请选择执行记录'); saving.value = true; try { await updateTestRunCase(executionForm.run_case_id, { result: executionForm.result, remark: executionForm.remark }); if (executionForm.result === 'failed' && executionForm.bug_title.trim()) await createBugFromTestRunCase(executionForm.run_case_id, { title: executionForm.bug_title, actual_result: executionForm.remark }); executionDialogVisible.value = false; await loadData(); ElMessage.success('执行结果已保存') } finally { saving.value = false } }
-async function removeCase(id) { await deleteTestCase(id); await loadData() }
-async function removeRun(id) { await deleteTestRun(id); await loadData() }
+async function submitCase() { if (!caseForm.title.trim()) return ElMessage.warning('请填写用例标题'); saving.value = true; try { const payload = { ...caseForm, project_id: caseForm.project_id || null, requirement_id: caseForm.requirement_id || null, default_tester_id: caseForm.default_tester_id || null, steps_json: cleanCaseSteps() }; if (editingCaseId.value) await updateTestCase(editingCaseId.value, payload); else await createTestCase(payload); caseDialogVisible.value = false; await loadData() } catch (error) { showActionError(error, editingCaseId.value ? '用例保存失败' : '用例创建失败') } finally { saving.value = false } }
+async function submitCaseExecution() { saving.value = true; try { const currentId = selectedCase.value.id; await executeTestCase(currentId, { execute_time: caseExecutionForm.execute_time, steps_result_json: caseExecutionForm.steps_result_json }); await loadData(); ElMessage.success('用例执行结果已保存'); await openNextCaseAfterExecution(currentId, pagedTestCases.value) } catch (error) { showActionError(error, '用例执行结果保存失败') } finally { saving.value = false } }
+async function submitCaseBug() { if (!caseBugForm.title.trim()) return ElMessage.warning('请填写 Bug 标题'); saving.value = true; try { await createBugFromTestCase(bugSourceCase.value.id, { ...caseBugForm }); caseBugVisible.value = false; await loadData(); ElMessage.success('Bug 已提交') } catch (error) { showActionError(error, 'Bug 提交失败') } finally { saving.value = false } }
+async function submitRun() { if (!runForm.project_id || !runForm.name.trim()) return ElMessage.warning('请选择项目并填写测试单名称'); saving.value = true; try { const payload = { ...runForm, iteration_id: runForm.iteration_id || null, test_owner_id: runForm.test_owner_id || null }; if (editingRunId.value) await updateTestRun(editingRunId.value, payload); else await createTestRun(payload); runDialogVisible.value = false; await loadData() } catch (error) { showActionError(error, editingRunId.value ? '测试单保存失败' : '测试单创建失败') } finally { saving.value = false } }
+async function submitSelectCases() { if (!selectForm.test_case_ids.length) return ElMessage.warning('请选择测试用例'); saving.value = true; try { await selectTestCases(selectedRunId.value, { test_case_ids: selectForm.test_case_ids, tester_id: selectForm.tester_id || null }); selectDialogVisible.value = false; await loadData(); ElMessage.success('用例已加入测试单') } catch (error) { showActionError(error, '选择用例失败') } finally { saving.value = false } }
+async function submitExecution() { if (!executionForm.run_case_id) return ElMessage.warning('请选择执行记录'); saving.value = true; try { await updateTestRunCase(executionForm.run_case_id, { result: executionForm.result, remark: executionForm.remark }); if (executionForm.result === 'failed' && executionForm.bug_title.trim()) await createBugFromTestRunCase(executionForm.run_case_id, { title: executionForm.bug_title, actual_result: executionForm.remark }); executionDialogVisible.value = false; await loadData(); ElMessage.success('执行结果已保存') } catch (error) { showActionError(error, '执行结果保存失败') } finally { saving.value = false } }
+async function removeCase(id) { try { await deleteTestCase(id); await loadData() } catch (error) { showActionError(error, '用例删除失败') } }
+async function removeRun(id) { try { await deleteTestRun(id); await loadData() } catch (error) { showActionError(error, '测试单删除失败') } }
 onMounted(loadData)
 
 async function openNextCaseAfterExecution(currentId, rows) {

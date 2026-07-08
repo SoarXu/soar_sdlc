@@ -1,923 +1,399 @@
-<template>
-  <section class="workflow-page">
+﻿<template>
+  <section v-if="viewMode === 'list'">
     <div class="page-head">
       <div>
         <h1>工作流配置</h1>
-        <p>通过组件节点配置状态触发关系，例如项目关闭后触发未关闭需求和任务状态变更。</p>
+        <p>维护工作流方案，点击方案名称进入详情页面编辑需求、任务、Bug 的流转和项目关联。</p>
       </div>
-      <div v-if="activeWorkflowTab === 'designer'" class="workflow-head-actions">
-        <el-select v-model="selectedTemplateKey" clearable filterable placeholder="选择模板" style="width: 260px" @change="loadTemplate">
-          <el-option v-for="template in templates" :key="template.template_key" :label="template.template_name" :value="template.template_key" />
-        </el-select>
-        <el-button @click="resetDesigner">新建</el-button>
-        <el-button type="primary" :loading="saving" @click="saveRule">保存工作流</el-button>
-      </div>
-      <div v-else class="workflow-head-actions">
-        <el-button @click="resetComponentForm">新建组件</el-button>
-        <el-button type="primary" :loading="savingComponent" @click="saveComponent">保存组件</el-button>
-      </div>
+      <el-button v-if="canEditWorkflow" type="primary" @click="openCreate">新增方案</el-button>
     </div>
 
-    <el-tabs v-model="activeWorkflowTab" class="workflow-tabs">
-      <el-tab-pane label="工作流设计器" name="designer" />
-      <el-tab-pane label="组件管理" name="components" />
-    </el-tabs>
-
-    <div v-if="activeWorkflowTab === 'designer'" class="workflow-layout">
-      <aside class="workflow-panel workflow-palette">
-        <h2>组件</h2>
-        <el-tabs v-model="componentTab" stretch>
-          <el-tab-pane label="触发" name="trigger" />
-          <el-tab-pane label="条件" name="condition" />
-          <el-tab-pane label="动作" name="action" />
-        </el-tabs>
-        <div class="workflow-component-list">
-          <button
-            v-for="component in filteredComponents"
-            :key="component.component_key"
-            class="workflow-component"
-            draggable="true"
-            type="button"
-            @click="addNode(component)"
-            @dragstart="onComponentDragStart(component)"
-          >
-            <span :class="['workflow-dot', `workflow-dot--${component.category}`]" />
-            <strong>{{ component.label }}</strong>
-            <small>{{ component.description }}</small>
-          </button>
-        </div>
-      </aside>
-
-      <main class="workflow-canvas-wrap">
-        <div class="workflow-rule-form">
-          <el-input v-model="ruleForm.rule_name" placeholder="工作流名称" />
-          <el-select v-model="ruleForm.scope_type" style="width: 130px">
-            <el-option label="系统默认" value="system" />
-            <el-option label="项目级" value="project" />
-          </el-select>
-          <el-input-number v-model="ruleForm.priority" :min="1" :max="999" />
-          <el-switch v-model="ruleForm.enabled" active-text="启用" inactive-text="停用" />
-        </div>
-
-        <div class="workflow-canvas" @dragover.prevent @drop="onCanvasDrop">
-          <svg class="workflow-lines" :viewBox="`0 0 ${canvasWidth} ${canvasHeight}`" preserveAspectRatio="none">
-            <line
-              v-for="edge in edgesWithPosition"
-              :key="edge.id"
-              :x1="edge.x1"
-              :y1="edge.y1"
-              :x2="edge.x2"
-              :y2="edge.y2"
-              stroke="#7b8ea8"
-              stroke-width="2"
-              marker-end="url(#workflow-arrow)"
-            />
-            <defs>
-              <marker id="workflow-arrow" markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto">
-                <path d="M0,0 L0,6 L8,3 z" fill="#7b8ea8" />
-              </marker>
-            </defs>
-          </svg>
-
-          <button
-            v-for="node in nodes"
-            :key="node.id"
-            :class="['workflow-node', `workflow-node--${node.category}`, { active: selectedNodeId === node.id }]"
-            :style="{ left: `${node.x}px`, top: `${node.y}px` }"
-            type="button"
-            draggable="true"
-            @click="selectNode(node.id)"
-            @dragstart="onNodeDragStart(node, $event)"
-            @dragend="onNodeDragEnd(node, $event)"
-          >
-            <span>{{ categoryLabel(node.category) }}</span>
-            <strong>{{ node.label }}</strong>
-            <small>{{ node.component_key }}</small>
-          </button>
-
-          <el-empty v-if="!nodes.length" description="从左侧拖拽或点击组件添加到工作流" />
-        </div>
-
-        <div class="workflow-edge-editor">
-          <span>上下级触发关系</span>
-          <el-select v-model="edgeForm.source" placeholder="上级节点" clearable style="width: 220px">
-            <el-option v-for="node in nodes" :key="node.id" :label="node.label" :value="node.id" />
-          </el-select>
-          <el-select v-model="edgeForm.target" placeholder="下级节点" clearable style="width: 220px">
-            <el-option v-for="node in nodes" :key="node.id" :label="node.label" :value="node.id" />
-          </el-select>
-          <el-button @click="addEdge">添加关系</el-button>
-        </div>
-        <div v-if="edgesWithNames.length" class="workflow-edge-list">
-          <el-tag v-for="edge in edgesWithNames" :key="edge.id" closable @close="removeEdge(edge.id)">
-            {{ edge.sourceLabel }} -> {{ edge.targetLabel }}
-          </el-tag>
-        </div>
-      </main>
-
-      <aside class="workflow-panel workflow-inspector">
-        <h2>属性</h2>
-        <template v-if="selectedNode">
-          <el-form label-position="top">
-            <el-form-item label="节点名称"><el-input v-model="selectedNode.label" /></el-form-item>
-            <el-form-item v-for="field in selectedComponentSchema" :key="field.field" :label="field.label">
-              <el-select v-if="field.type === 'select'" v-model="selectedNode.config[field.field]" clearable filterable>
-                <el-option v-if="field.allow_any" label="任意" value="*" />
-                <el-option v-for="option in field.options || []" :key="option.value" :label="option.label" :value="option.value" />
-              </el-select>
-              <el-select v-else-if="field.type === 'multi_select'" v-model="selectedNode.config[field.field]" multiple clearable filterable>
-                <el-option v-for="option in field.options || []" :key="option.value" :label="option.label" :value="option.value" />
-              </el-select>
-              <el-input v-else-if="field.type === 'textarea'" v-model="selectedNode.config[field.field]" type="textarea" :rows="3" />
-              <el-input v-else v-model="selectedNode.config[field.field]" />
-            </el-form-item>
-          </el-form>
-          <el-button type="danger" plain @click="removeSelectedNode">删除节点</el-button>
-        </template>
-        <el-empty v-else description="选择节点后配置属性" />
-
-        <h2 class="workflow-side-title">规则列表</h2>
-        <div class="workflow-rule-list">
-          <button v-for="rule in rules" :key="rule.id" type="button" :class="{ active: rule.id === editingRuleId }" @click="loadRule(rule)">
-            <strong>{{ rule.rule_name }}</strong>
-            <span>{{ rule.target_object }} / {{ rule.trigger_action }}</span>
-          </button>
-        </div>
-        <el-button v-if="editingRuleId" type="danger" plain @click="removeRule">删除当前规则</el-button>
-      </aside>
-    </div>
-
-    <div v-else class="workflow-component-admin">
-      <el-card class="workflow-component-form" shadow="never">
-        <template #header>
-          <span>{{ editingComponentId ? '编辑组件' : '新增组件' }}</span>
-        </template>
-        <el-form label-position="top">
-          <div class="workflow-admin-grid">
-            <el-form-item label="组件标识">
-              <el-input v-model="componentForm.component_key" placeholder="例如 custom_project_close_bugs" />
-            </el-form-item>
-            <el-form-item label="组件名称">
-              <el-input v-model="componentForm.component_name" />
-            </el-form-item>
-            <el-form-item label="组件类型">
-              <el-select v-model="componentForm.component_type">
-                <el-option label="触发" value="trigger" />
-                <el-option label="条件" value="condition" />
-                <el-option label="动作" value="action" />
-              </el-select>
-            </el-form-item>
-            <el-form-item label="后端 Handler">
-              <el-select v-model="componentForm.handler_key" filterable>
-                <el-option
-                  v-for="handler in filteredHandlers"
-                  :key="handler.handler_key"
-                  :label="`${handler.label}（${handler.handler_key}）`"
-                  :value="handler.handler_key"
-                />
-              </el-select>
-            </el-form-item>
-            <el-form-item label="适用对象">
-              <el-select v-model="componentForm.object_type" clearable>
-                <el-option label="项目" value="project" />
-                <el-option label="项目集" value="program" />
-                <el-option label="迭代" value="iteration" />
-                <el-option label="需求" value="requirement" />
-                <el-option label="任务" value="task" />
-                <el-option label="Bug" value="bug" />
-                <el-option label="测试用例" value="test_case" />
-              </el-select>
-            </el-form-item>
-            <el-form-item label="排序">
-              <el-input-number v-model="componentForm.sort_order" :min="1" :max="999" />
-            </el-form-item>
-            <el-form-item label="启用">
-              <el-switch v-model="componentForm.enabled" active-text="启用" inactive-text="停用" />
-            </el-form-item>
-            <el-form-item label="系统内置">
-              <el-switch v-model="componentForm.is_system" disabled active-text="是" inactive-text="否" />
-            </el-form-item>
-          </div>
-          <el-form-item label="描述">
-            <el-input v-model="componentForm.description" type="textarea" :rows="2" />
-          </el-form-item>
-          <el-form-item label="参数 Schema JSON">
-            <el-input v-model="componentSchemaText" type="textarea" :rows="8" spellcheck="false" />
-          </el-form-item>
-        </el-form>
-      </el-card>
-
-      <el-card class="workflow-component-table" shadow="never">
-        <template #header>
-          <span>组件列表</span>
-        </template>
-        <el-table :data="componentRegistry" height="100%">
-          <el-table-column prop="component_name" label="组件名称" min-width="150" />
-          <el-table-column prop="component_key" label="标识" min-width="190" />
-          <el-table-column prop="component_type" label="类型" width="90">
-            <template #default="{ row }">{{ categoryLabel(row.component_type) }}</template>
-          </el-table-column>
-          <el-table-column prop="handler_key" label="Handler" min-width="170" />
-          <el-table-column prop="enabled" label="状态" width="80">
-            <template #default="{ row }">
-              <el-tag :type="row.enabled ? 'success' : 'info'">{{ row.enabled ? '启用' : '停用' }}</el-tag>
-            </template>
-          </el-table-column>
-          <el-table-column label="操作" width="160" fixed="right">
-            <template #default="{ row }">
-              <div class="table-actions">
-                <el-button link type="primary" @click="editComponent(row)">编辑</el-button>
-                <el-button link type="danger" :disabled="row.is_system" @click="removeComponent(row)">删除</el-button>
-              </div>
-            </template>
-          </el-table-column>
-        </el-table>
-      </el-card>
-    </div>
+    <el-card shadow="never">
+      <template #header>工作流方案列表</template>
+      <el-table v-loading="loading" :data="configs" stripe>
+        <el-table-column label="方案名称" min-width="180">
+          <template #default="{ row }">
+            <el-button link type="primary" class="table-link-button" @click="openDetail(row)">
+              {{ row.name }}
+            </el-button>
+          </template>
+        </el-table-column>
+        <el-table-column prop="description" label="说明" min-width="240" />
+        <el-table-column label="状态" width="90">
+          <template #default="{ row }">{{ row.enabled ? '启用' : '停用' }}</template>
+        </el-table-column>
+        <el-table-column label="关联项目" min-width="260">
+          <template #default="{ row }">
+            <div class="rule-project-tags">
+              <el-tag v-for="project in projectsForConfig(row.id).slice(0, 4)" :key="project.id" effect="plain">
+                {{ project.name }}
+              </el-tag>
+              <el-tag v-if="projectsForConfig(row.id).length > 4" type="info" effect="plain">
+                +{{ projectsForConfig(row.id).length - 4 }}
+              </el-tag>
+              <span v-if="!projectsForConfig(row.id).length" class="muted-text">未关联项目</span>
+            </div>
+          </template>
+        </el-table-column>
+        <el-table-column v-if="canEditWorkflow" label="操作" width="100" fixed="right">
+          <template #default="{ row }">
+            <el-popconfirm title="确认停用该方案？" @confirm="removeConfig(row)">
+              <template #reference><el-button link type="danger">停用</el-button></template>
+            </el-popconfirm>
+          </template>
+        </el-table-column>
+      </el-table>
+    </el-card>
   </section>
+
+  <section v-else>
+    <div class="page-head">
+      <div>
+        <h1>{{ editingId ? '工作流方案详情' : '新增工作流方案' }}</h1>
+        <p>一个方案内分别维护需求、任务、Bug 的可视化工作流，并绑定到项目后生效。</p>
+      </div>
+      <div class="page-actions">
+        <el-button @click="backToList">返回列表</el-button>
+        <el-button v-if="canEditWorkflow" type="primary" :loading="saving" @click="saveDetail">保存</el-button>
+      </div>
+    </div>
+
+    <el-card shadow="never">
+      <el-form label-position="top">
+        <el-form-item label="方案名称" required>
+          <el-input v-model="form.name" />
+        </el-form-item>
+        <el-form-item label="说明">
+          <el-input v-model="form.description" type="textarea" :rows="2" />
+        </el-form-item>
+        <el-form-item label="状态">
+          <el-switch v-model="form.enabled" active-text="启用" inactive-text="停用" />
+        </el-form-item>
+      </el-form>
+    </el-card>
+
+    <el-card v-if="editingId && canEditWorkflow" shadow="never" class="mt-16">
+      <WorkflowDesigner
+        :config-id="editingId"
+        :config-name="form.name"
+        :role-options="projectMemberRoleOptions"
+      />
+    </el-card>
+
+
+    <el-card v-if="editingId" shadow="never" class="mt-16">
+      <template #header>
+        <div class="card-header-row">
+          <span>已关联项目</span>
+          <el-tag type="info" effect="plain">{{ linkedProjects.length }} 个项目</el-tag>
+        </div>
+      </template>
+      <el-table :data="linkedProjects" stripe empty-text="未关联项目">
+        <el-table-column prop="name" label="项目" min-width="180" />
+        <el-table-column label="所属项目集" min-width="140">
+          <template #default="{ row }">{{ programName(row.program_id) }}</template>
+        </el-table-column>
+        <el-table-column v-if="canEditWorkflow" label="切换到方案" min-width="220">
+          <template #default="{ row }">
+            <el-select
+              v-model="transferTargets[row.id]"
+              clearable
+              filterable
+              placeholder="选择目标方案"
+              :disabled="projectUpdatingIds.has(row.id)"
+            >
+              <el-option
+                v-for="config in transferConfigOptions"
+                :key="config.id"
+                :label="config.name"
+                :value="config.id"
+              />
+            </el-select>
+          </template>
+        </el-table-column>
+        <el-table-column v-if="canEditWorkflow" label="操作" width="180" fixed="right">
+          <template #default="{ row }">
+            <el-button
+              link
+              type="primary"
+              :loading="projectUpdatingIds.has(row.id)"
+              :disabled="!transferTargets[row.id]"
+              @click="transferProject(row)"
+            >
+              转移
+            </el-button>
+            <el-popconfirm title="确认取消该项目与当前方案的关联？" @confirm="unlinkProject(row)">
+              <template #reference>
+                <el-button link type="danger" :loading="projectUpdatingIds.has(row.id)">取消关联</el-button>
+              </template>
+            </el-popconfirm>
+          </template>
+        </el-table-column>
+      </el-table>
+    </el-card>
+
+    <el-card v-if="canEditWorkflow" shadow="never" class="mt-16">
+      <template #header>关联未配置工作流方案的项目</template>
+      <div class="rule-project-toolbar">
+        <span>未配置工作流方案的项目，可勾选后随方案一起保存。</span>
+      </div>
+      <el-table
+        ref="projectLinkTableRef"
+        :data="unassignedProjects"
+        stripe
+        max-height="420"
+        row-key="id"
+        @selection-change="onProjectSelectionChange"
+      >
+        <el-table-column type="selection" width="48" />
+        <el-table-column prop="name" label="项目" min-width="180" />
+        <el-table-column label="所属项目集" min-width="140">
+          <template #default="{ row }">{{ programName(row.program_id) }}</template>
+        </el-table-column>
+      </el-table>
+    </el-card>
+  </section>
+
 </template>
 
 <script setup>
 import { computed, onMounted, reactive, ref } from 'vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessage } from 'element-plus'
+
 import {
-  createWorkflowRule,
-  createWorkflowComponent,
-  deleteWorkflowComponent,
-  deleteWorkflowRule,
-  fetchWorkflowComponentRegistry,
-  fetchWorkflowComponents,
-  fetchWorkflowHandlers,
-  fetchWorkflowRules,
-  fetchWorkflowTemplates,
-  updateWorkflowComponent,
-  updateWorkflowRule
-} from '../api/workflowRules'
+  createAssigneeRuleConfig,
+  deleteAssigneeRuleConfig,
+  fetchAssigneeRuleConfigs,
+  updateAssigneeRuleConfig
+} from '../api/assigneeRuleConfigs'
+import { fetchPrograms } from '../api/programs'
+import { fetchProjects, updateProject } from '../api/projects'
+import { fetchUsers } from '../api/users'
+import WorkflowDesigner from '../components/WorkflowDesigner.vue'
+import { showActionError } from '../utils/actionFeedback'
+import { canConfigureWorkflow, currentUserFromStorage } from '../utils/permissions'
 
-const canvasWidth = 1120
-const canvasHeight = 620
-const components = ref([])
-const componentRegistry = ref([])
-const workflowHandlers = ref([])
-const templates = ref([])
-const rules = ref([])
-const nodes = ref([])
-const edges = ref([])
-const selectedNodeId = ref(null)
-const selectedTemplateKey = ref('')
-const componentTab = ref('trigger')
-const editingRuleId = ref(null)
-const editingComponentId = ref(null)
+const loading = ref(false)
 const saving = ref(false)
-const savingComponent = ref(false)
-const draggedComponent = ref(null)
-const draggedNode = ref(null)
-const activeWorkflowTab = ref('designer')
-const ruleForm = reactive({ rule_name: '', scope_type: 'system', priority: 100, enabled: true, description: '' })
-const edgeForm = reactive({ source: null, target: null })
-const componentForm = reactive({
-  component_key: '',
-  component_type: 'action',
-  component_name: '',
+const configs = ref([])
+const projects = ref([])
+const programs = ref([])
+const users = ref([])
+const editingId = ref(null)
+const viewMode = ref('list')
+const selectedProjectIds = ref([])
+const transferTargets = reactive({})
+const projectUpdatingIds = ref(new Set())
+const projectLinkTableRef = ref(null)
+const currentUser = computed(() => currentUserFromStorage(users.value))
+const canEditWorkflow = computed(() => canConfigureWorkflow(currentUser.value))
+const projectMemberRoleOptions = [
+  { label: '产品/需求负责人', value: 'product_owner' },
+  { label: '产品经理', value: 'product_manager' },
+  { label: '部门负责人', value: 'department_head' },
+  { label: '开发主管', value: 'tech_lead' },
+  { label: '开发主管', value: 'development_lead' },
+  { label: '开发', value: 'developer' },
+  { label: '测试主管', value: 'test_lead' },
+  { label: '测试', value: 'tester' },
+  { label: '访客', value: 'viewer' }
+]
+const form = reactive({
+  name: '',
   description: '',
-  object_type: '',
-  handler_key: '',
-  enabled: true,
-  is_system: false,
-  sort_order: 100
+  requirement_owner_roles: '',
+  task_owner_roles: '',
+  test_case_tester_roles: '',
+  test_run_owner_roles: '',
+  bug_owner_roles: '',
+  enabled: true
 })
-const componentSchemaText = ref('[]')
+const unassignedProjects = computed(() => projects.value.filter((item) => !item.assignee_rule_config_id))
+const linkedProjects = computed(() => projectsForConfig(editingId.value))
+const transferConfigOptions = computed(() => {
+  return configs.value.filter((item) => item.enabled && item.id !== editingId.value)
+})
 
-const filteredComponents = computed(() => components.value.filter((item) => item.category === componentTab.value))
-const filteredHandlers = computed(() => workflowHandlers.value.filter((handler) => handler.handler_type === componentForm.component_type))
-const selectedNode = computed(() => nodes.value.find((node) => node.id === selectedNodeId.value))
-const selectedComponentSchema = computed(() => components.value.find((item) => item.component_key === selectedNode.value?.component_key)?.config_schema || [])
-const edgesWithPosition = computed(() => edges.value.map((edge) => {
-  const source = nodes.value.find((node) => node.id === edge.source)
-  const target = nodes.value.find((node) => node.id === edge.target)
-  if (!source || !target) return null
-  return { ...edge, x1: source.x + 180, y1: source.y + 44, x2: target.x, y2: target.y + 44 }
-}).filter(Boolean))
-const edgesWithNames = computed(() => edges.value.map((edge) => {
-  const source = nodes.value.find((node) => node.id === edge.source)
-  const target = nodes.value.find((node) => node.id === edge.target)
-  if (!source || !target) return null
-  return { ...edge, sourceLabel: source.label, targetLabel: target.label }
-}).filter(Boolean))
 
-function categoryLabel(category) {
-  return { trigger: '触发', condition: '条件', action: '动作' }[category] || category
-}
-
-function onComponentDragStart(component) {
-  draggedComponent.value = component
-}
-
-function onCanvasDrop(event) {
-  if (!draggedComponent.value) return
-  const rect = event.currentTarget.getBoundingClientRect()
-  addNode(draggedComponent.value, event.clientX - rect.left, event.clientY - rect.top)
-  draggedComponent.value = null
-}
-
-function addNode(component, x = null, y = null) {
-  const index = nodes.value.length
-  const node = {
-    id: `node-${Date.now()}-${index}`,
-    component_key: component.component_key,
-    handler_key: component.handler_key,
-    category: component.category,
-    label: component.label,
-    x: x ?? 80 + index * 32,
-    y: y ?? 80 + index * 96,
-    config: defaultConfig(component)
-  }
-  nodes.value.push(node)
-  selectedNodeId.value = node.id
-}
-
-function defaultConfig(component) {
-  const config = {}
-  for (const field of component.config_schema || []) {
-    if (field.type === 'multi_select') config[field.field] = []
-    else if (field.allow_any) config[field.field] = '*'
-    else config[field.field] = ''
-  }
-  return config
-}
-
-function selectNode(id) {
-  selectedNodeId.value = id
-}
-
-function onNodeDragStart(node, event) {
-  draggedNode.value = { id: node.id, offsetX: event.offsetX, offsetY: event.offsetY }
-}
-
-function onNodeDragEnd(node, event) {
-  if (!draggedNode.value) return
-  const canvas = document.querySelector('.workflow-canvas')
-  const rect = canvas.getBoundingClientRect()
-  node.x = Math.max(16, Math.min(canvasWidth - 210, event.clientX - rect.left - draggedNode.value.offsetX))
-  node.y = Math.max(16, Math.min(canvasHeight - 100, event.clientY - rect.top - draggedNode.value.offsetY))
-  draggedNode.value = null
-}
-
-function addEdge() {
-  if (!edgeForm.source || !edgeForm.target) return ElMessage.warning('请选择上下级节点')
-  if (edgeForm.source === edgeForm.target) return ElMessage.warning('上下级节点不能相同')
-  if (edges.value.some((edge) => edge.source === edgeForm.source && edge.target === edgeForm.target)) return ElMessage.warning('关系已存在')
-  if (createsCycle(edgeForm.source, edgeForm.target)) return ElMessage.warning('上下级关系不能形成循环')
-  edges.value.push({ id: `edge-${Date.now()}`, source: edgeForm.source, target: edgeForm.target })
-  Object.assign(edgeForm, { source: null, target: null })
-}
-
-function createsCycle(sourceId, targetId) {
-  const nextMap = new Map()
-  for (const edge of edges.value) {
-    if (!nextMap.has(edge.source)) nextMap.set(edge.source, [])
-    nextMap.get(edge.source).push(edge.target)
-  }
-  if (!nextMap.has(sourceId)) nextMap.set(sourceId, [])
-  nextMap.get(sourceId).push(targetId)
-
-  const visited = new Set()
-  const stack = [targetId]
-  while (stack.length) {
-    const current = stack.pop()
-    if (current === sourceId) return true
-    if (visited.has(current)) continue
-    visited.add(current)
-    stack.push(...(nextMap.get(current) || []))
-  }
-  return false
-}
-
-function removeEdge(edgeId) {
-  edges.value = edges.value.filter((edge) => edge.id !== edgeId)
-}
-
-function removeSelectedNode() {
-  if (!selectedNode.value) return
-  nodes.value = nodes.value.filter((node) => node.id !== selectedNode.value.id)
-  edges.value = edges.value.filter((edge) => edge.source !== selectedNode.value.id && edge.target !== selectedNode.value.id)
-  selectedNodeId.value = null
-}
-
-function resetDesigner() {
-  editingRuleId.value = null
-  selectedTemplateKey.value = ''
-  Object.assign(ruleForm, { rule_name: '', scope_type: 'system', priority: 100, enabled: true, description: '' })
-  nodes.value = []
-  edges.value = []
-  selectedNodeId.value = null
-}
-
-function loadTemplate(templateKey) {
-  const template = templates.value.find((item) => item.template_key === templateKey)
-  if (!template) return
-  editingRuleId.value = null
-  Object.assign(ruleForm, {
-    rule_name: template.template_name,
-    scope_type: 'system',
-    priority: 100,
-    enabled: true,
-    description: template.description
+function resetForm() {
+  editingId.value = null
+  Object.assign(form, {
+    name: '',
+    description: '',
+    requirement_owner_roles: '',
+    task_owner_roles: '',
+    test_case_tester_roles: '',
+    test_run_owner_roles: '',
+    bug_owner_roles: '',
+    enabled: true
   })
-  nodes.value = clone(template.condition_json.nodes || [])
-  edges.value = clone(template.condition_json.edges || [])
-  selectedNodeId.value = nodes.value[0]?.id || null
+  selectedProjectIds.value = []
+  clearTransferTargets()
 }
 
-function loadRule(rule) {
-  editingRuleId.value = rule.id
-  selectedTemplateKey.value = ''
-  Object.assign(ruleForm, {
-    rule_name: rule.rule_name,
-    scope_type: rule.scope_type,
-    priority: rule.priority,
-    enabled: rule.enabled,
-    description: rule.description || ''
+function openCreate() {
+  resetForm()
+  viewMode.value = 'detail'
+  setTimeout(syncProjectSelection)
+}
+
+function openDetail(row) {
+  editingId.value = row.id
+  selectedProjectIds.value = []
+  Object.assign(form, {
+    name: row.name,
+    description: row.description || '',
+    requirement_owner_roles: '',
+    task_owner_roles: '',
+    test_case_tester_roles: '',
+    test_run_owner_roles: '',
+    bug_owner_roles: '',
+    enabled: row.enabled
   })
-  nodes.value = clone(rule.condition_json?.nodes || [])
-  edges.value = clone(rule.condition_json?.edges || [])
-  selectedNodeId.value = nodes.value[0]?.id || null
+  viewMode.value = 'detail'
+  setTimeout(syncProjectSelection)
 }
 
-async function saveRule() {
-  if (!ruleForm.rule_name.trim()) return ElMessage.warning('请填写工作流名称')
-  if (!nodes.value.length) return ElMessage.warning('请至少添加一个节点')
-  const trigger = nodes.value.find((node) => node.category === 'trigger')
-  if (!trigger) return ElMessage.warning('请添加触发节点')
+function backToList() {
+  viewMode.value = 'list'
+  resetForm()
+}
+
+async function loadData() {
+  loading.value = true
+  try {
+    const [configRes, projectRes, programRes, userRes] = await Promise.all([
+      fetchAssigneeRuleConfigs(),
+      fetchProjects(),
+      fetchPrograms(),
+      fetchUsers()
+    ])
+    configs.value = configRes.data
+    projects.value = projectRes.data
+    programs.value = programRes.data
+    users.value = userRes.data
+    pruneTransferTargets()
+  } finally {
+    loading.value = false
+  }
+}
+
+async function saveDetail() {
+  if (!form.name.trim()) return ElMessage.warning('请填写方案名称')
   saving.value = true
   try {
-    const payload = buildPayload(trigger)
-    if (editingRuleId.value) await updateWorkflowRule(editingRuleId.value, payload)
-    else {
-      const created = await createWorkflowRule(payload)
-      editingRuleId.value = created.data.id
+    const payload = {
+      ...form,
+      requirement_owner_roles: '',
+      task_owner_roles: '',
+      test_case_tester_roles: '',
+      test_run_owner_roles: '',
+      bug_owner_roles: ''
     }
+    const response = editingId.value
+      ? await updateAssigneeRuleConfig(editingId.value, payload)
+      : await createAssigneeRuleConfig(payload)
+    const configId = editingId.value || response.data.id
+    await bindSelectedProjects(configId)
     await loadData()
-    ElMessage.success('工作流已保存')
+    editingId.value = configId
+    ElMessage.success('工作流方案已保存')
+  } catch (error) {
+    showActionError(error, '工作流方案保存失败')
   } finally {
     saving.value = false
   }
 }
 
-function buildPayload(trigger) {
-  const relations = edges.value.map((edge) => {
-    const source = nodes.value.find((node) => node.id === edge.source)
-    const target = nodes.value.find((node) => node.id === edge.target)
-    return {
-      source: edge.source,
-      source_component: source?.component_key || '',
-      source_handler: source?.handler_key || '',
-      target: edge.target,
-      target_component: target?.component_key || '',
-      target_handler: target?.handler_key || ''
-    }
-  })
-  const conditionJson = { designer_version: 1, nodes: nodes.value, edges: edges.value, relations }
-  const actionJson = {
-    trigger: {
-      target_object: targetObjectFromTrigger(trigger.component_key),
-      trigger_action: triggerActionFromComponent(trigger.component_key),
-      config: trigger.config
-    },
-    relations,
-    steps: nodes.value.filter((node) => node.id !== trigger.id).map((node) => ({
-      id: node.id,
-      type: node.category,
-      component_key: node.component_key,
-      handler_key: node.handler_key,
-      config: node.config
-    }))
-  }
-  return {
-    ...ruleForm,
-    target_object: actionJson.trigger.target_object,
-    trigger_action: actionJson.trigger.trigger_action,
-    condition_json: conditionJson,
-    action_json: actionJson
-  }
-}
-
-function targetObjectFromTrigger(componentKey) {
-  if (componentKey.startsWith('project_')) return 'project'
-  if (componentKey.startsWith('program_')) return 'program'
-  if (componentKey.startsWith('iteration_')) return 'iteration'
-  if (componentKey.startsWith('requirement_')) return 'requirement'
-  if (componentKey.startsWith('task_')) return 'task'
-  if (componentKey.startsWith('bug_')) return 'bug'
-  if (componentKey.startsWith('test_case_')) return 'test_case'
-  return 'object'
-}
-
-function triggerActionFromComponent(componentKey) {
-  if (componentKey.includes('status_changed')) return 'status_changed'
-  if (componentKey.includes('result_changed')) return 'execution_result_changed'
-  if (componentKey.includes('field_changed')) return 'field_changed'
-  return 'triggered'
-}
-
-async function removeRule() {
-  if (!editingRuleId.value) return
-  await ElMessageBox.confirm('确认删除当前工作流规则？', '提示', { type: 'warning' })
-  await deleteWorkflowRule(editingRuleId.value)
-  resetDesigner()
-  await loadData()
-}
-
-function resetComponentForm() {
-  editingComponentId.value = null
-  Object.assign(componentForm, {
-    component_key: '',
-    component_type: 'action',
-    component_name: '',
-    description: '',
-    object_type: '',
-    handler_key: '',
-    enabled: true,
-    is_system: false,
-    sort_order: 100
-  })
-  componentSchemaText.value = '[]'
-}
-
-function editComponent(component) {
-  editingComponentId.value = component.id
-  Object.assign(componentForm, {
-    component_key: component.component_key,
-    component_type: component.component_type,
-    component_name: component.component_name,
-    description: component.description || '',
-    object_type: component.object_type || '',
-    handler_key: component.handler_key,
-    enabled: component.enabled,
-    is_system: component.is_system,
-    sort_order: component.sort_order
-  })
-  componentSchemaText.value = JSON.stringify(component.config_schema || [], null, 2)
-}
-
-async function saveComponent() {
-  if (!componentForm.component_key.trim()) return ElMessage.warning('请填写组件标识')
-  if (!componentForm.component_name.trim()) return ElMessage.warning('请填写组件名称')
-  if (!componentForm.handler_key) return ElMessage.warning('请选择后端 Handler')
-  let configSchema
+async function removeConfig(row) {
   try {
-    configSchema = JSON.parse(componentSchemaText.value || '[]')
-  } catch {
-    return ElMessage.warning('参数 Schema JSON 格式不正确')
-  }
-  savingComponent.value = true
-  try {
-    const payload = { ...componentForm, object_type: componentForm.object_type || null, config_schema: configSchema }
-    if (editingComponentId.value) await updateWorkflowComponent(editingComponentId.value, payload)
-    else await createWorkflowComponent(payload)
+    await deleteAssigneeRuleConfig(row.id)
+    ElMessage.success('方案已停用')
     await loadData()
-    resetComponentForm()
-    ElMessage.success('组件已保存')
-  } finally {
-    savingComponent.value = false
+  } catch (error) {
+    showActionError(error, '方案停用失败')
   }
 }
 
-async function removeComponent(component) {
-  await ElMessageBox.confirm(`确认删除组件「${component.component_name}」？`, '提示', { type: 'warning' })
-  await deleteWorkflowComponent(component.id)
-  await loadData()
-  if (editingComponentId.value === component.id) resetComponentForm()
+async function bindSelectedProjects(configId) {
+  const selectedIds = new Set(selectedProjectIds.value)
+  const updates = unassignedProjects.value
+    .filter((project) => selectedIds.has(project.id))
+    .map((project) => {
+      return updateProject(project.id, { assignee_rule_config_id: configId }).then(() => {
+        project.assignee_rule_config_id = configId
+      })
+    })
+  await Promise.all(updates)
 }
 
-async function loadData() {
-  const [componentRes, registryRes, handlerRes, templateRes, ruleRes] = await Promise.all([
-    fetchWorkflowComponents(),
-    fetchWorkflowComponentRegistry(),
-    fetchWorkflowHandlers(),
-    fetchWorkflowTemplates(),
-    fetchWorkflowRules()
-  ])
-  components.value = componentRes.data
-  componentRegistry.value = registryRes.data
-  workflowHandlers.value = handlerRes.data
-  templates.value = templateRes.data
-  rules.value = ruleRes.data
+async function transferProject(project) {
+  const targetConfigId = transferTargets[project.id]
+  if (!targetConfigId) return ElMessage.warning('请选择目标方案')
+  try {
+    await updateProjectRule(project, targetConfigId, '项目已切换到目标工作流方案')
+    delete transferTargets[project.id]
+  } catch (error) {
+    showActionError(error, '项目切换工作流方案失败')
+  }
 }
 
-function clone(value) {
-  return JSON.parse(JSON.stringify(value))
+async function unlinkProject(project) {
+  try {
+    await updateProjectRule(project, null, '项目已取消关联')
+    delete transferTargets[project.id]
+  } catch (error) {
+    showActionError(error, '项目取消关联失败')
+  }
+}
+
+async function updateProjectRule(project, configId, message) {
+  if (projectUpdatingIds.value.has(project.id)) return
+  projectUpdatingIds.value = new Set([...projectUpdatingIds.value, project.id])
+  try {
+    await updateProject(project.id, { assignee_rule_config_id: configId })
+    project.assignee_rule_config_id = configId
+    await loadData()
+    ElMessage.success(message)
+  } finally {
+    const nextIds = new Set(projectUpdatingIds.value)
+    nextIds.delete(project.id)
+    projectUpdatingIds.value = nextIds
+  }
+}
+
+function projectsForConfig(configId) {
+  if (!configId) return []
+  return projects.value.filter((item) => item.assignee_rule_config_id === configId)
+}
+
+function programName(programId) {
+  return programs.value.find((item) => item.id === programId)?.name || '-'
+}
+
+function onProjectSelectionChange(rows) {
+  selectedProjectIds.value = rows.map((item) => item.id)
+}
+
+function syncProjectSelection() {
+  if (!projectLinkTableRef.value) return
+  projectLinkTableRef.value.clearSelection()
+  const selectedIds = new Set(selectedProjectIds.value)
+  unassignedProjects.value.forEach((project) => {
+    if (selectedIds.has(project.id)) projectLinkTableRef.value.toggleRowSelection(project, true)
+  })
+}
+
+function clearTransferTargets() {
+  Object.keys(transferTargets).forEach((key) => delete transferTargets[key])
+}
+
+function pruneTransferTargets() {
+  const validProjectIds = new Set(projects.value.map((project) => String(project.id)))
+  Object.keys(transferTargets).forEach((key) => {
+    if (!validProjectIds.has(key)) delete transferTargets[key]
+  })
 }
 
 onMounted(loadData)
 </script>
-
-<style scoped>
-.workflow-page {
-  display: flex;
-  flex-direction: column;
-  height: 100%;
-  min-height: 0;
-}
-
-.workflow-head-actions,
-.workflow-rule-form,
-.workflow-edge-editor,
-.workflow-edge-list {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  min-width: 0;
-}
-
-.workflow-layout {
-  display: grid;
-  grid-template-columns: 260px minmax(540px, 1fr) 300px;
-  gap: 12px;
-  flex: 1 1 auto;
-  min-height: 0;
-}
-
-.workflow-tabs {
-  flex: 0 0 auto;
-  margin-bottom: 10px;
-}
-
-.workflow-panel,
-.workflow-canvas-wrap {
-  min-width: 0;
-  min-height: 0;
-  background: #ffffff;
-  border: 1px solid #d9e2ef;
-  border-radius: 6px;
-}
-
-.workflow-panel {
-  display: flex;
-  flex-direction: column;
-  padding: 12px;
-  overflow: hidden;
-}
-
-.workflow-panel h2 {
-  margin: 0 0 10px;
-  color: #17213a;
-  font-size: 16px;
-}
-
-.workflow-component-list,
-.workflow-rule-list {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  min-height: 0;
-  overflow-y: auto;
-  padding-right: 4px;
-}
-
-.workflow-component {
-  display: grid;
-  grid-template-columns: 10px minmax(0, 1fr);
-  gap: 4px 8px;
-  width: 100%;
-  padding: 10px;
-  text-align: left;
-  background: #f7f9fc;
-  border: 1px solid #dce5f0;
-  border-radius: 6px;
-  cursor: grab;
-}
-
-.workflow-component:hover {
-  border-color: #2f80ed;
-  box-shadow: 0 2px 8px rgba(47, 128, 237, .12);
-}
-
-.workflow-component strong,
-.workflow-rule-list strong {
-  overflow: hidden;
-  color: #17213a;
-  font-size: 14px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.workflow-component small,
-.workflow-rule-list span {
-  grid-column: 2;
-  color: #667085;
-  font-size: 12px;
-  line-height: 1.45;
-}
-
-.workflow-dot {
-  width: 9px;
-  height: 9px;
-  margin-top: 5px;
-  border-radius: 50%;
-}
-
-.workflow-dot--trigger {
-  background: #2f80ed;
-}
-
-.workflow-dot--condition {
-  background: #d98a00;
-}
-
-.workflow-dot--action {
-  background: #16845f;
-}
-
-.workflow-canvas-wrap {
-  display: flex;
-  flex-direction: column;
-  padding: 12px;
-  overflow: hidden;
-}
-
-.workflow-rule-form {
-  flex: 0 0 auto;
-  margin-bottom: 10px;
-}
-
-.workflow-canvas {
-  position: relative;
-  flex: 1 1 auto;
-  min-height: 420px;
-  overflow: auto;
-  background:
-    linear-gradient(#edf2f8 1px, transparent 1px),
-    linear-gradient(90deg, #edf2f8 1px, transparent 1px),
-    #fbfdff;
-  background-size: 24px 24px;
-  border: 1px solid #d9e2ef;
-  border-radius: 6px;
-}
-
-.workflow-lines {
-  position: absolute;
-  inset: 0;
-  width: 1120px;
-  height: 620px;
-  pointer-events: none;
-}
-
-.workflow-node {
-  position: absolute;
-  display: grid;
-  gap: 3px;
-  width: 190px;
-  min-height: 78px;
-  padding: 10px 12px;
-  text-align: left;
-  background: #ffffff;
-  border: 2px solid #9eb2c9;
-  border-radius: 6px;
-  box-shadow: 0 6px 18px rgba(31, 45, 61, .12);
-  cursor: move;
-}
-
-.workflow-node.active {
-  border-color: #2f80ed;
-  box-shadow: 0 0 0 3px rgba(47, 128, 237, .16);
-}
-
-.workflow-node--trigger {
-  border-color: #2f80ed;
-}
-
-.workflow-node--condition {
-  border-color: #d98a00;
-}
-
-.workflow-node--action {
-  border-color: #16845f;
-}
-
-.workflow-node span {
-  color: #667085;
-  font-size: 12px;
-}
-
-.workflow-node strong {
-  color: #17213a;
-  font-size: 15px;
-}
-
-.workflow-node small {
-  overflow: hidden;
-  color: #8a94a6;
-  font-size: 12px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.workflow-edge-editor {
-  flex-wrap: wrap;
-  flex: 0 0 auto;
-  padding-top: 10px;
-}
-
-.workflow-edge-editor > span {
-  color: #344054;
-  font-weight: 700;
-}
-
-.workflow-edge-list {
-  flex-wrap: wrap;
-  padding-top: 8px;
-}
-
-.workflow-inspector :deep(.el-form-item) {
-  margin-bottom: 12px;
-}
-
-.workflow-side-title {
-  padding-top: 16px;
-  margin-top: 16px !important;
-  border-top: 1px solid #e4eaf2;
-}
-
-.workflow-rule-list {
-  margin-bottom: 10px;
-}
-
-.workflow-rule-list button {
-  display: grid;
-  gap: 4px;
-  width: 100%;
-  padding: 9px 10px;
-  text-align: left;
-  background: #f7f9fc;
-  border: 1px solid #dce5f0;
-  border-radius: 6px;
-  cursor: pointer;
-}
-
-.workflow-rule-list button.active {
-  background: #ecf4ff;
-  border-color: #2f80ed;
-}
-
-.workflow-component-admin {
-  display: grid;
-  grid-template-columns: minmax(360px, 440px) minmax(0, 1fr);
-  gap: 12px;
-  flex: 1 1 auto;
-  min-height: 0;
-}
-
-.workflow-component-form,
-.workflow-component-table {
-  min-width: 0;
-  min-height: 0;
-}
-
-.workflow-component-form :deep(.el-card__body),
-.workflow-component-table :deep(.el-card__body) {
-  height: calc(100% - 56px);
-  min-height: 0;
-  overflow: auto;
-}
-
-.workflow-admin-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 0 12px;
-}
-
-@media (max-width: 1200px) {
-  .workflow-layout {
-    grid-template-columns: 230px minmax(480px, 1fr);
-  }
-
-  .workflow-inspector {
-    grid-column: 1 / -1;
-    max-height: 280px;
-  }
-}
-
-@media (max-width: 820px) {
-  .workflow-layout {
-    grid-template-columns: minmax(0, 1fr);
-  }
-
-  .workflow-palette {
-    max-height: 260px;
-  }
-
-  .workflow-head-actions,
-  .workflow-rule-form {
-    flex-wrap: wrap;
-  }
-
-  .workflow-component-admin {
-    grid-template-columns: minmax(0, 1fr);
-  }
-
-  .workflow-admin-grid {
-    grid-template-columns: minmax(0, 1fr);
-  }
-}
-</style>

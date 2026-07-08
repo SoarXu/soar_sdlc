@@ -10,6 +10,7 @@ from app.views.role_view import RoleCreate, RoleUpdate
 
 DEFAULT_ROLES = [
     ("system_admin", "系统管理员", "系统初始化、用户、角色、基础配置"),
+    ("department_head", "部门负责人", "负责部门内项目集、项目资源协调和交付治理"),
     ("project_owner", "项目负责人", "管理项目交付"),
     ("product_manager", "产品经理", "维护需求和产品规划"),
     ("development_lead", "开发主管", "负责技术评审和开发协调"),

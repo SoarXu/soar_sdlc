@@ -3,6 +3,7 @@ import { createRouter, createWebHistory } from 'vue-router'
 import MainLayout from '../layout/MainLayout.vue'
 import BugDetailView from '../views/BugDetailView.vue'
 import BugsView from '../views/BugsView.vue'
+import ChangePasswordView from '../views/ChangePasswordView.vue'
 import DashboardView from '../views/DashboardView.vue'
 import DevopsView from '../views/DevopsView.vue'
 import IterationsView from '../views/IterationsView.vue'
@@ -22,6 +23,7 @@ import WorkflowView from '../views/WorkflowView.vue'
 
 const routes = [
   { path: '/login', name: 'login', component: LoginView },
+  { path: '/change-password', name: 'change-password', component: ChangePasswordView },
   {
     path: '/',
     component: MainLayout,
@@ -50,6 +52,23 @@ const routes = [
 const router = createRouter({
   history: createWebHistory(),
   routes
+})
+
+router.beforeEach((to) => {
+  const token = localStorage.getItem('access_token')
+  if (to.name === 'login') {
+    return token ? { name: 'dashboard' } : true
+  }
+  if (to.name === 'change-password') {
+    return token ? true : { name: 'login', query: { redirect: to.fullPath } }
+  }
+  if (!token) {
+    return { name: 'login', query: { redirect: to.fullPath } }
+  }
+  if (localStorage.getItem('must_change_password') === 'true') {
+    return { name: 'change-password', query: { redirect: to.fullPath } }
+  }
+  return true
 })
 
 export default router

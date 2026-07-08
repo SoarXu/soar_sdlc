@@ -5,6 +5,7 @@
       <el-tag effect="plain">#{{ requirement.id }}</el-tag>
       <h1>{{ requirement.title || '需求详情' }}</h1>
       <router-link v-if="requirement.project_id" class="detail-link" :to="`/projects/${requirement.project_id}`">进入项目</router-link>
+      <WatchToggleButton v-if="requirement.id" object-type="requirement" :object-id="requirementId" />
       <WorkflowActionButtons
         v-if="!editing && requirement.id"
         object-type="requirement"
@@ -166,7 +167,14 @@
       <template #footer><el-button @click="caseBugVisible = false">取消</el-button><el-button type="primary" :loading="saving" @click="submitCaseBug">保存</el-button></template>
     </el-dialog>
 
-        <CommitRecordsPanel object-type="requirement" :object-id="requirementId" />
+    <WorkItemCommentPanel
+      v-if="requirement.id"
+      object-type="requirement"
+      :object-id="requirementId"
+      :users="users"
+    />
+
+    <CommitRecordsPanel object-type="requirement" :object-id="requirementId" />
 
 <el-card shadow="never" class="detail-panel requirement-history-card">
       <template #header>历史记录</template>
@@ -219,6 +227,8 @@ import { fetchUsers } from '../api/users'
 import CommitRecordsPanel from '../components/CommitRecordsPanel.vue'
 import RequirementPriorityBadge from '../components/RequirementPriorityBadge.vue'
 import RichTextPasteEditor from '../components/RichTextPasteEditor.vue'
+import WatchToggleButton from '../components/WatchToggleButton.vue'
+import WorkItemCommentPanel from '../components/WorkItemCommentPanel.vue'
 import WorkflowActionButtons from '../components/WorkflowActionButtons.vue'
 import { labelById, userLabel } from '../utils/referenceLabels'
 import { formatAuditValue } from '../utils/auditHistoryLabels'

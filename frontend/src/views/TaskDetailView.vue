@@ -5,6 +5,7 @@
       <el-tag effect="plain">#{{ task.id }}</el-tag>
       <h1>{{ task.title || '任务详情' }}</h1>
       <router-link v-if="task.project_id" class="detail-link" :to="`/projects/${task.project_id}`">进入项目</router-link>
+      <WatchToggleButton v-if="task.id" object-type="task" :object-id="taskId" />
       <WorkflowActionButtons
         v-if="!editing && task.id"
         object-type="task"
@@ -54,7 +55,14 @@
       </template>
     </el-card>
 
-        <CommitRecordsPanel object-type="task" :object-id="taskId" />
+    <WorkItemCommentPanel
+      v-if="task.id"
+      object-type="task"
+      :object-id="taskId"
+      :users="users"
+    />
+
+    <CommitRecordsPanel object-type="task" :object-id="taskId" />
 
 <el-card shadow="never" class="detail-panel requirement-history-card">
       <template #header>历史记录</template>
@@ -103,6 +111,8 @@ import { fetchRequirements } from '../api/requirements'
 import { fetchTask, fetchTaskAuditLogs, fetchTaskStatusOperations, updateTask } from '../api/tasks'
 import { fetchUsers } from '../api/users'
 import CommitRecordsPanel from '../components/CommitRecordsPanel.vue'
+import WatchToggleButton from '../components/WatchToggleButton.vue'
+import WorkItemCommentPanel from '../components/WorkItemCommentPanel.vue'
 import WorkflowActionButtons from '../components/WorkflowActionButtons.vue'
 import { labelById, userLabel } from '../utils/referenceLabels'
 import { formatAuditValue } from '../utils/auditHistoryLabels'

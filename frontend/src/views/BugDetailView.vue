@@ -5,6 +5,7 @@
       <el-tag effect="plain">#{{ bug.id }}</el-tag>
       <h1>{{ bug.title || 'Bug 详情' }}</h1>
       <router-link v-if="bug.project_id" class="detail-link" :to="`/projects/${bug.project_id}?tab=bugs`">进入项目</router-link>
+      <WatchToggleButton v-if="bug.id" object-type="bug" :object-id="bugId" />
       <WorkflowActionButtons
         v-if="!editing && bug.id"
         object-type="bug"
@@ -129,7 +130,14 @@
       <template #footer><el-button @click="caseBugVisible = false">取消</el-button><el-button type="primary" :loading="saving" @click="submitCaseBug">保存</el-button></template>
     </el-dialog>
 
-        <CommitRecordsPanel object-type="bug" :object-id="bugId" />
+    <WorkItemCommentPanel
+      v-if="bug.id"
+      object-type="bug"
+      :object-id="bugId"
+      :users="users"
+    />
+
+    <CommitRecordsPanel object-type="bug" :object-id="bugId" />
 
 <el-card shadow="never" class="detail-panel requirement-history-card">
       <template #header>历史记录</template>
@@ -170,6 +178,8 @@ import { fetchUsers } from '../api/users'
 import CommitRecordsPanel from '../components/CommitRecordsPanel.vue'
 import RequirementPriorityBadge from '../components/RequirementPriorityBadge.vue'
 import RichTextPasteEditor from '../components/RichTextPasteEditor.vue'
+import WatchToggleButton from '../components/WatchToggleButton.vue'
+import WorkItemCommentPanel from '../components/WorkItemCommentPanel.vue'
 import WorkflowActionButtons from '../components/WorkflowActionButtons.vue'
 import { labelById, userLabel } from '../utils/referenceLabels'
 import { bugIterationOptions, includeSelectedIterationOption } from '../utils/bugIterations'

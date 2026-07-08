@@ -92,6 +92,31 @@
           />
         </el-form-item>
 
+        <el-form-item v-if="needsTargetStatusSelection" label="目标状态">
+          <el-select
+            v-model="selectedTargetStatus"
+            clearable
+            filterable
+            :placeholder="targetStatusPlaceholder"
+          >
+            <el-option
+              v-for="option in targetStatusOptions"
+              :key="option.value"
+              :label="option.label"
+              :value="option.value"
+            />
+          </el-select>
+        </el-form-item>
+
+        <el-form-item v-if="showOverrideReason" label="覆盖原因">
+          <el-input
+            v-model="overrideReason"
+            type="textarea"
+            :rows="2"
+            placeholder="手工指定目标状态时可填写"
+          />
+        </el-form-item>
+
         <el-form-item v-if="allowManualOwner" label="下一处理人">
           <el-select v-model="nextOwnerId" clearable filterable placeholder="不指定则按规则自动分配">
             <el-option v-for="user in users" :key="user.id" :label="user.full_name || user.username" :value="user.id" />
@@ -120,7 +145,13 @@ import { executeWorkflowTransition, fetchWorkflowTransitions } from '../api/work
 import { fetchUsers } from '../api/users'
 import { showActionError } from '../utils/actionFeedback'
 import { isDelegateReasonRequiredError } from '../utils/permissions'
-import { sortWorkflowActions, splitListActions, visibleDetailActions } from '../utils/workflowRuntimeActions'
+import {
+  actionNeedsDialog,
+  actionNeedsTargetStatusSelection,
+  sortWorkflowActions,
+  splitListActions,
+  visibleDetailActions
+} from '../utils/workflowRuntimeActions'
 
 const props = defineProps({
   objectType: { type: String, required: true },
@@ -141,6 +172,8 @@ const submittingAction = ref('')
 const formPayload = reactive({})
 const nextOwnerId = ref(null)
 const delegateReason = ref('')
+const selectedTargetStatus = ref('')
+const overrideReason = ref('')
 const delegateReasonRequired = ref(false)
 const loadedUsers = ref([])
 
@@ -156,6 +189,17 @@ const formFields = computed(() => activeAction.value?.form_config?.fields || [])
 const dialogTitle = computed(() => activeAction.value?.form_config?.title || activeAction.value?.action_name || '执行流转')
 const submitText = computed(() => activeAction.value?.form_config?.submit_text || activeAction.value?.action_name || '确认')
 const allowManualOwner = computed(() => actionAllowsManualOwner(activeAction.value))
+const needsTargetStatusSelection = computed(() => actionNeedsTargetStatusSelection(activeAction.value))
+const showOverrideReason = computed(() => needsTargetStatusSelection.value && Boolean(selectedTargetStatus.value))
+const targetStatusOptions = computed(() => {
+  const statuses = activeAction.value?.allowed_target_statuses || []
+  return statuses.map((status) => ({ label: formatStatusLabel(status), value: status }))
+})
+const targetStatusPlaceholder = computed(() => (
+  activeAction.value?.routing_mode === 'manual_allowed'
+    ? '请选择目标状态'
+    : '默认按规则自动流转，可按需覆盖'
+))
 const users = computed(() => props.users.length ? props.users : loadedUsers.value)
 
 function buttonType(action) {
@@ -176,6 +220,14 @@ function fieldOptions(field) {
   })
 }
 
+function formatStatusLabel(status) {
+  return String(status || '')
+    .split('_')
+    .filter(Boolean)
+    .map((segment) => segment.charAt(0).toUpperCase() + segment.slice(1))
+    .join(' ')
+}
+
 function resetForm(action) {
   Object.keys(formPayload).forEach((key) => delete formPayload[key])
   for (const field of action?.form_config?.fields || []) {
@@ -183,11 +235,9 @@ function resetForm(action) {
   }
   nextOwnerId.value = null
   delegateReason.value = ''
+  selectedTargetStatus.value = ''
+  overrideReason.value = ''
   delegateReasonRequired.value = false
-}
-
-function requiresDialog(action) {
-  return Boolean(action?.requires_form || action?.confirm_required || (action?.form_config?.fields || []).length || actionAllowsManualOwner(action))
 }
 
 function confirmMessage(action) {
@@ -204,7 +254,7 @@ async function openAction(action) {
   activeAction.value = action
   resetForm(action)
   await ensureUsersLoaded()
-  if (requiresDialog(action)) {
+  if (actionNeedsDialog(action)) {
     dialogVisible.value = true
     return
   }
@@ -222,6 +272,10 @@ function handleMoreCommand(actionKey) {
 function validatePayload() {
   if (delegateReasonRequired.value && !delegateReason.value.trim()) {
     ElMessage.warning('请填写代处理原因')
+    return false
+  }
+  if (activeAction.value?.routing_mode === 'manual_allowed' && !selectedTargetStatus.value) {
+    ElMessage.warning('请选择目标状态')
     return false
   }
   for (const field of formFields.value) {
@@ -252,6 +306,8 @@ async function submitAction(action) {
     }
     if (nextOwnerId.value) payload.next_owner_id = nextOwnerId.value
     if (delegateReason.value.trim()) payload.delegate_reason = delegateReason.value.trim()
+    if (selectedTargetStatus.value) payload.selected_target_status = selectedTargetStatus.value
+    if (overrideReason.value.trim()) payload.override_reason = overrideReason.value.trim()
     const { data } = await executeWorkflowTransition(props.objectType, props.objectId, payload)
     dialogVisible.value = false
     ElMessage.success(`${action.action_name}成功`)

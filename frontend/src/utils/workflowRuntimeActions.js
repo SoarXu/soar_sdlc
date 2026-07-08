@@ -16,6 +16,22 @@ function actionKeyOf(action) {
   return action?.action_key || ''
 }
 
+export function actionNeedsTargetStatusSelection(action) {
+  const routingMode = action?.routing_mode
+  const allowedTargetStatuses = action?.allowed_target_statuses || []
+  return ['manual_allowed', 'automatic_with_override'].includes(routingMode) && allowedTargetStatuses.length > 0
+}
+
+export function actionNeedsDialog(action) {
+  return Boolean(
+    action?.requires_form ||
+      action?.confirm_required ||
+      actionNeedsTargetStatusSelection(action) ||
+      action?.form_config?.allow_manual_owner ||
+      (action?.form_config?.fields || []).length
+  )
+}
+
 export function sortWorkflowActions(actions = []) {
   return [...actions].sort((a, b) => {
     const priorityDelta = priorityOf(a) - priorityOf(b)

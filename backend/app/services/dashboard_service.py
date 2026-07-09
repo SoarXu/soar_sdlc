@@ -1,10 +1,9 @@
-from fastapi import HTTPException, status
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.models.bug import Bug
 from app.models.devops import DevopsCodeReviewTask, DevopsCommit, DevopsCommitLink
-from app.models.iteration import Iteration, IterationProject
+from app.models.iteration import Iteration
 from app.models.object_watch import ObjectWatch
 from app.models.program import Program
 from app.models.project import Project
@@ -15,12 +14,10 @@ from app.models.test_case import TestCase
 from app.models.user import User
 from app.models.work_item_comment import WorkItemComment
 from app.services.exception_center_service import list_exception_refs
-from app.services.project_permission_service import ensure_project_manage_permission
 from app.services.project_team_service import workbench_project_ids_for_user
 from app.views.dashboard_view import (
     DashboardSummary,
     WorkbenchItem,
-    WorkbenchProjectBoardSection,
     WorkbenchResponse,
     WorkbenchSection,
 )
@@ -42,69 +39,20 @@ def get_workbench(db: Session, user_id: int | None = None) -> WorkbenchResponse:
     view_mode = _workbench_view_mode(role_keys)
     team_project_ids = workbench_project_ids_for_user(db, user_id) if user_id else set()
     scoped_project_ids = _expand_project_scope_ids(db, team_project_ids) if team_project_ids else set()
-    owner_iteration_ids = _owner_work_item_iteration_ids(db, user_id) if user_id and view_mode == "mine" else set()
-    iterations = (
-        db.query(Iteration)
-        .filter(Iteration.deleted == 0)
-        .order_by(Iteration.id.desc())
-        .all()
-    )
-    if user_id and view_mode == "lead" and not team_project_ids:
-        iterations = []
-    if user_id and view_mode == "mine":
-        iterations = [iteration for iteration in iterations if iteration.id in owner_iteration_ids]
-    iteration_ids = [item.id for item in iterations]
     projects = {item.id: item for item in db.query(Project).filter(Project.deleted == 0).all()}
-    iteration_projects = _iteration_projects(db, iteration_ids, projects)
-    iteration_scoped_project_ids = _iteration_scoped_projects(db, iteration_ids)
-    if scoped_project_ids:
-        iterations = [
-            iteration
-            for iteration in iterations
-            if iteration_scoped_project_ids.get(iteration.id, set()) & scoped_project_ids
-        ]
-        iteration_ids = [item.id for item in iterations]
-    requirements = _items_by_iteration(
-        db.query(Requirement).filter(Requirement.deleted == 0, Requirement.iteration_id.in_(iteration_ids)).all(),
-        lambda item: _requirement_item(item, projects),
-    )
-    requirement_iteration_ids = {
-        item.requirement_id: iteration_id
-        for iteration_id, values in requirements.items()
-        for item in values
-        if item.requirement_id
-    }
-    tasks = _items_by_iteration(
-        db.query(Task).filter(Task.deleted == 0, Task.iteration_id.in_(iteration_ids)).all(),
-        lambda item: _task_item(item, projects),
-    )
-    _merge_requirement_linked_items(
-        tasks,
-        db.query(Task).filter(Task.deleted == 0, Task.requirement_id.in_(requirement_iteration_ids)).all(),
-        requirement_iteration_ids,
-        lambda item, iteration_id: _task_item(item, projects, iteration_id),
-    )
-    test_cases = _items_by_iteration(
-        db.query(TestCase).filter(TestCase.deleted == 0, TestCase.iteration_id.in_(iteration_ids)).all(),
-        lambda item: _test_case_item(item, projects),
-    )
-    _merge_requirement_linked_items(
-        test_cases,
-        db.query(TestCase).filter(TestCase.deleted == 0, TestCase.requirement_id.in_(requirement_iteration_ids)).all(),
-        requirement_iteration_ids,
-        lambda item, iteration_id: _test_case_item(item, projects, iteration_id),
-    )
-    bugs = _items_by_iteration(
-        db.query(Bug).filter(Bug.deleted == 0, Bug.iteration_id.in_(iteration_ids)).all(),
-        lambda item: _bug_item(item, projects),
-    )
-
-    review_tasks = _review_tasks(db)
+    iteration_names = {item.id: item.name for item in db.query(Iteration).filter(Iteration.deleted == 0).all()}
+    queue_scope_ids = scoped_project_ids if user_id and view_mode != "all" else set()
+    pending_items = _pending_handling_items(db, projects, iteration_names, user_id, queue_scope_ids)
+    unassigned_items = _unassigned_items(db, projects, iteration_names, queue_scope_ids)
+    created_items = _created_by_me_items(db, projects, iteration_names, user_id)
+    watched_items = _watched_by_me_items(db, projects, iteration_names, user_id)
+    mentioned_items = _mentioned_me_items(db, projects, iteration_names, user_id)
+    exception_items = _exception_center_items(db, projects, iteration_names, queue_scope_ids)
+    review_tasks = _filter_review_tasks_for_role(_review_tasks(db), user_id, view_mode)
     owner_ids = {
         item.owner_id
-        for group in [requirements, tasks, test_cases, bugs]
-        for values in group.values()
-        for item in values
+        for section in [pending_items, unassigned_items, created_items, watched_items, mentioned_items, exception_items]
+        for item in section
         if item.owner_id
     }
     owner_ids.update(item.get("owner_id") for item in review_tasks if item.get("owner_id"))
@@ -112,47 +60,6 @@ def get_workbench(db: Session, user_id: int | None = None) -> WorkbenchResponse:
         {"id": user.id, "full_name": user.full_name}
         for user in db.query(User).filter(User.deleted == 0, User.id.in_(owner_ids)).order_by(User.full_name.asc()).all()
     ] if owner_ids else []
-
-    boards = []
-    for iteration in iterations:
-        reqs = requirements.get(iteration.id, [])
-        task_items = tasks.get(iteration.id, [])
-        case_items = test_cases.get(iteration.id, [])
-        bug_items = bugs.get(iteration.id, [])
-        reqs = _filter_items_for_role(reqs, user_id, view_mode, include_test_cases=False, scoped_project_ids=scoped_project_ids)
-        task_items = _filter_items_for_role(task_items, user_id, view_mode, include_test_cases=False, scoped_project_ids=scoped_project_ids)
-        case_items = _filter_items_for_role(case_items, user_id, view_mode, include_test_cases=True, scoped_project_ids=scoped_project_ids)
-        bug_items = _filter_items_for_role(bug_items, user_id, view_mode, include_test_cases=False, scoped_project_ids=scoped_project_ids)
-        boards.append({
-            "id": iteration.id,
-            "name": iteration.name,
-            "status": iteration.status,
-            "lifecycle_phase": iteration.lifecycle_phase,
-            "owner_id": iteration.owner_id,
-            "start_date": _date_value(iteration.start_date),
-            "end_date": _date_value(iteration.end_date),
-            "create_time": _datetime_value(iteration.create_time),
-            "projects": iteration_projects.get(iteration.id, []),
-            "scoped_project_ids": sorted(iteration_scoped_project_ids.get(iteration.id, set())),
-            "requirements": reqs,
-            "tasks": task_items,
-            "test_cases": case_items,
-            "bugs": bug_items,
-            "counts": {
-                "requirements": len(reqs),
-                "tasks": len(task_items),
-                "test_cases": len(case_items),
-                "bugs": len(bug_items),
-            },
-        })
-    review_tasks = _filter_review_tasks_for_role(review_tasks, user_id, view_mode)
-    queue_scope_ids = scoped_project_ids if user_id and view_mode != "all" else set()
-    pending_items = _pending_handling_items(db, projects, user_id, queue_scope_ids)
-    unassigned_items = _unassigned_items(db, projects, queue_scope_ids)
-    created_items = _created_by_me_items(db, projects, user_id)
-    watched_items = _watched_by_me_items(db, projects, user_id)
-    mentioned_items = _mentioned_me_items(db, projects, user_id)
-    exception_items = _exception_center_items(db, projects, queue_scope_ids)
     return WorkbenchResponse(
         pending_handling=WorkbenchSection(label="待处理", items=pending_items, total=len(pending_items)),
         unassigned=WorkbenchSection(label="未分派", items=unassigned_items, total=len(unassigned_items)),
@@ -160,72 +67,37 @@ def get_workbench(db: Session, user_id: int | None = None) -> WorkbenchResponse:
         watched_by_me=WorkbenchSection(label="我关注的", items=watched_items, total=len(watched_items)),
         mentioned_me=WorkbenchSection(label="提到我的", items=mentioned_items, total=len(mentioned_items)),
         exception_center=WorkbenchSection(label="异常中心", items=exception_items, total=len(exception_items)),
-        project_board=WorkbenchProjectBoardSection(label="项目看板", iterations=boards, total=len(boards)),
-        iterations=boards,
         owners=owners,
         review_tasks=review_tasks,
         role_keys=role_keys,
         view_mode=view_mode,
     )
-
-
-def move_workbench_item(
-    db: Session,
-    object_type: str,
-    object_id: int,
-    target_iteration_id: int,
-    actor: User | None = None,
-) -> WorkbenchItem:
-    iteration = db.query(Iteration).filter(Iteration.id == target_iteration_id, Iteration.deleted == 0).first()
-    if not iteration:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="目标迭代不存在")
-    model_map = {
-        "requirement": Requirement,
-        "task": Task,
-        "test_case": TestCase,
-        "bug": Bug,
-    }
-    model = model_map.get(object_type)
-    if not model:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="不支持的工作项类型")
-    item = db.query(model).filter(model.id == object_id, model.deleted == 0).first()
-    if not item:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="工作项不存在")
-    if item.project_id not in _iteration_scoped_project_ids(db, target_iteration_id):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="工作项不在目标迭代的项目范围内")
-    ensure_project_manage_permission(db, item.project_id, actor)
-    item.iteration_id = target_iteration_id
-    db.commit()
-    db.refresh(item)
-    projects = {project.id: project for project in db.query(Project).filter(Project.deleted == 0).all()}
-    return _item_for_type(object_type, item, projects)
-
-
 def _pending_handling_items(
     db: Session,
     projects: dict[int, Project],
+    iteration_names: dict[int, str],
     user_id: int | None,
     scoped_project_ids: set[int],
 ) -> list[WorkbenchItem]:
     if not user_id:
         return []
     items = [
-        _requirement_item(item, projects)
+        _requirement_item(item, projects, iteration_names)
         for item in db.query(Requirement).filter(Requirement.deleted == 0, Requirement.owner_id == user_id).all()
         if not _is_terminal_status("requirement", item.status) and _in_project_scope(item.project_id, scoped_project_ids)
     ]
     items.extend(
-        _task_item(item, projects)
+        _task_item(item, projects, iteration_names)
         for item in db.query(Task).filter(Task.deleted == 0, Task.owner_id == user_id).all()
         if not _is_terminal_status("task", item.status) and _in_project_scope(item.project_id, scoped_project_ids)
     )
     items.extend(
-        _bug_item(item, projects)
+        _bug_item(item, projects, iteration_names)
         for item in db.query(Bug).filter(Bug.deleted == 0, Bug.owner_id == user_id).all()
         if not _is_terminal_status("bug", item.status) and _in_project_scope(item.project_id, scoped_project_ids)
     )
     items.extend(
-        _test_case_item(item, projects)
+        _test_case_item(item, projects, iteration_names)
         for item in db.query(TestCase).filter(TestCase.deleted == 0, TestCase.default_tester_id == user_id).all()
         if _in_project_scope(item.project_id, scoped_project_ids)
     )
@@ -235,20 +107,21 @@ def _pending_handling_items(
 def _unassigned_items(
     db: Session,
     projects: dict[int, Project],
+    iteration_names: dict[int, str],
     scoped_project_ids: set[int],
 ) -> list[WorkbenchItem]:
     items = [
-        _requirement_item(item, projects)
+        _requirement_item(item, projects, iteration_names)
         for item in db.query(Requirement).filter(Requirement.deleted == 0, Requirement.owner_id.is_(None)).all()
         if not _is_terminal_status("requirement", item.status) and _in_project_scope(item.project_id, scoped_project_ids)
     ]
     items.extend(
-        _task_item(item, projects)
+        _task_item(item, projects, iteration_names)
         for item in db.query(Task).filter(Task.deleted == 0, Task.owner_id.is_(None)).all()
         if not _is_terminal_status("task", item.status) and _in_project_scope(item.project_id, scoped_project_ids)
     )
     items.extend(
-        _bug_item(item, projects)
+        _bug_item(item, projects, iteration_names)
         for item in db.query(Bug).filter(Bug.deleted == 0, Bug.owner_id.is_(None)).all()
         if not _is_terminal_status("bug", item.status) and _in_project_scope(item.project_id, scoped_project_ids)
     )
@@ -258,26 +131,27 @@ def _unassigned_items(
 def _created_by_me_items(
     db: Session,
     projects: dict[int, Project],
+    iteration_names: dict[int, str],
     user_id: int | None,
 ) -> list[WorkbenchItem]:
     if not user_id:
         return []
     items = [
-        _requirement_item(item, projects)
+        _requirement_item(item, projects, iteration_names)
         for item in db.query(Requirement).filter(Requirement.deleted == 0).all()
         if item.creator_id == user_id or item.proposer_id == user_id
     ]
     items.extend(
-        _task_item(item, projects)
+        _task_item(item, projects, iteration_names)
         for item in db.query(Task).filter(Task.deleted == 0, Task.creator_id == user_id).all()
     )
     items.extend(
-        _bug_item(item, projects)
+        _bug_item(item, projects, iteration_names)
         for item in db.query(Bug).filter(Bug.deleted == 0).all()
         if item.creator_id == user_id or item.reporter_id == user_id
     )
     items.extend(
-        _test_case_item(item, projects)
+        _test_case_item(item, projects, iteration_names)
         for item in db.query(TestCase).filter(TestCase.deleted == 0, TestCase.creator_id == user_id).all()
     )
     return _dedup_and_sort_workbench_items(items)
@@ -286,6 +160,7 @@ def _created_by_me_items(
 def _watched_by_me_items(
     db: Session,
     projects: dict[int, Project],
+    iteration_names: dict[int, str],
     user_id: int | None,
 ) -> list[WorkbenchItem]:
     if not user_id:
@@ -301,12 +176,13 @@ def _watched_by_me_items(
         .order_by(ObjectWatch.id.desc())
         .all()
     ]
-    return _load_workbench_items_by_refs(db, projects, refs)
+    return _load_workbench_items_by_refs(db, projects, iteration_names, refs)
 
 
 def _mentioned_me_items(
     db: Session,
     projects: dict[int, Project],
+    iteration_names: dict[int, str],
     user_id: int | None,
 ) -> list[WorkbenchItem]:
     if not user_id:
@@ -323,21 +199,23 @@ def _mentioned_me_items(
                 "mentioned_in_comment_id": comment.id,
             }
         )
-    return _load_workbench_items_by_refs(db, projects, refs)
+    return _load_workbench_items_by_refs(db, projects, iteration_names, refs)
 
 
 def _exception_center_items(
     db: Session,
     projects: dict[int, Project],
+    iteration_names: dict[int, str],
     scoped_project_ids: set[int],
 ) -> list[WorkbenchItem]:
     refs = list_exception_refs(db, scoped_project_ids if scoped_project_ids else None)
-    return _load_workbench_items_by_refs(db, projects, refs)
+    return _load_workbench_items_by_refs(db, projects, iteration_names, refs)
 
 
 def _load_workbench_items_by_refs(
     db: Session,
     projects: dict[int, Project],
+    iteration_names: dict[int, str],
     refs: list[dict],
 ) -> list[WorkbenchItem]:
     grouped_ids: dict[str, set[int]] = {}
@@ -350,16 +228,16 @@ def _load_workbench_items_by_refs(
     items_by_ref: dict[tuple[str, int], WorkbenchItem] = {}
     if grouped_ids.get("requirement"):
         for item in db.query(Requirement).filter(Requirement.deleted == 0, Requirement.id.in_(grouped_ids["requirement"])).all():
-            items_by_ref[("requirement", item.id)] = _requirement_item(item, projects)
+            items_by_ref[("requirement", item.id)] = _requirement_item(item, projects, iteration_names)
     if grouped_ids.get("task"):
         for item in db.query(Task).filter(Task.deleted == 0, Task.id.in_(grouped_ids["task"])).all():
-            items_by_ref[("task", item.id)] = _task_item(item, projects)
+            items_by_ref[("task", item.id)] = _task_item(item, projects, iteration_names)
     if grouped_ids.get("bug"):
         for item in db.query(Bug).filter(Bug.deleted == 0, Bug.id.in_(grouped_ids["bug"])).all():
-            items_by_ref[("bug", item.id)] = _bug_item(item, projects)
+            items_by_ref[("bug", item.id)] = _bug_item(item, projects, iteration_names)
     if grouped_ids.get("test_case"):
         for item in db.query(TestCase).filter(TestCase.deleted == 0, TestCase.id.in_(grouped_ids["test_case"])).all():
-            items_by_ref[("test_case", item.id)] = _test_case_item(item, projects)
+            items_by_ref[("test_case", item.id)] = _test_case_item(item, projects, iteration_names)
 
     result: list[WorkbenchItem] = []
     seen: set[tuple[str, int]] = set()
@@ -384,79 +262,12 @@ def _count_active(db: Session, model) -> int:
     return db.query(func.count(model.id)).filter(model.deleted == 0).scalar() or 0
 
 
-def _items_by_iteration(items, mapper) -> dict[int, list[WorkbenchItem]]:
-    result: dict[int, list[WorkbenchItem]] = {}
-    for item in items:
-        if item.iteration_id is None:
-            continue
-        result.setdefault(item.iteration_id, []).append(mapper(item))
-    for values in result.values():
-        values.sort(key=lambda item: item.id, reverse=True)
-    return result
-
-
-def _merge_requirement_linked_items(result: dict[int, list[WorkbenchItem]], items, requirement_iteration_ids: dict[int, int], mapper) -> None:
-    existing = {
-        (item.object_type, item.id)
-        for values in result.values()
-        for item in values
-    }
-    for item in items:
-        iteration_id = requirement_iteration_ids.get(item.requirement_id)
-        if not iteration_id:
-            continue
-        workbench_item = mapper(item, iteration_id)
-        if (workbench_item.object_type, workbench_item.id) in existing:
-            continue
-        result.setdefault(iteration_id, []).append(workbench_item)
-        existing.add((workbench_item.object_type, workbench_item.id))
-    for values in result.values():
-        values.sort(key=lambda item: item.id, reverse=True)
-
-
-def _iteration_projects(db: Session, iteration_ids: list[int], projects: dict[int, Project]) -> dict[int, list[dict]]:
-    result: dict[int, list[dict]] = {iteration_id: [] for iteration_id in iteration_ids}
-    if not iteration_ids:
-        return result
-    rows = db.query(IterationProject).filter(IterationProject.iteration_id.in_(iteration_ids)).all()
-    for row in rows:
-        project = projects.get(row.project_id)
-        if project:
-            result.setdefault(row.iteration_id, []).append({"id": project.id, "name": project.name})
-    for values in result.values():
-        deduped = {item["id"]: item for item in values}
-        values[:] = list(deduped.values())
-        values.sort(key=lambda item: item["name"])
-    return result
-
-
-def _iteration_scoped_projects(db: Session, iteration_ids: list[int]) -> dict[int, set[int]]:
-    result: dict[int, set[int]] = {iteration_id: set() for iteration_id in iteration_ids}
-    if not iteration_ids:
-        return result
-    rows = db.query(IterationProject).filter(IterationProject.iteration_id.in_(iteration_ids)).all()
-    for row in rows:
-        result.setdefault(row.iteration_id, set()).add(row.project_id)
-        result[row.iteration_id].update(_collect_descendant_project_ids(db, row.project_id))
-    return result
-
-
 def _expand_project_scope_ids(db: Session, project_ids: set[int]) -> set[int]:
     expanded = set(project_ids)
     for project_id in project_ids:
         expanded.update(_collect_descendant_project_ids(db, project_id))
         expanded.update(_collect_ancestor_project_ids(db, project_id))
     return expanded
-
-
-def _iteration_scoped_project_ids(db: Session, iteration_id: int) -> set[int]:
-    root_ids = [
-        row.project_id for row in db.query(IterationProject).filter(IterationProject.iteration_id == iteration_id).all()
-    ]
-    result = set(root_ids)
-    for project_id in root_ids:
-        result.update(_collect_descendant_project_ids(db, project_id))
-    return result
 
 
 def _collect_descendant_project_ids(db: Session, project_id: int) -> set[int]:
@@ -511,19 +322,7 @@ def _review_tasks(db: Session) -> list[dict]:
             "links": links.get(task.commit_id, []),
         })
     return result
-
-
-def _item_for_type(object_type: str, item, projects: dict[int, Project]) -> WorkbenchItem:
-    if object_type == "requirement":
-        return _requirement_item(item, projects)
-    if object_type == "task":
-        return _task_item(item, projects)
-    if object_type == "test_case":
-        return _test_case_item(item, projects)
-    return _bug_item(item, projects)
-
-
-def _requirement_item(item: Requirement, projects: dict[int, Project]) -> WorkbenchItem:
+def _requirement_item(item: Requirement, projects: dict[int, Project], iteration_names: dict[int, str]) -> WorkbenchItem:
     return WorkbenchItem(
         id=item.id,
         object_type="requirement",
@@ -531,6 +330,7 @@ def _requirement_item(item: Requirement, projects: dict[int, Project]) -> Workbe
         project_id=item.project_id,
         project_name=_project_name(projects, item.project_id),
         iteration_id=item.iteration_id,
+        iteration_name=_iteration_name(iteration_names, item.iteration_id),
         lifecycle_phase=item.lifecycle_phase,
         owner_id=item.owner_id,
         status=item.status,
@@ -542,14 +342,21 @@ def _requirement_item(item: Requirement, projects: dict[int, Project]) -> Workbe
     )
 
 
-def _task_item(item: Task, projects: dict[int, Project], iteration_id: int | None = None) -> WorkbenchItem:
+def _task_item(
+    item: Task,
+    projects: dict[int, Project],
+    iteration_names: dict[int, str],
+    iteration_id: int | None = None,
+) -> WorkbenchItem:
+    resolved_iteration_id = iteration_id if iteration_id is not None else item.iteration_id
     return WorkbenchItem(
         id=item.id,
         object_type="task",
         title=item.title,
         project_id=item.project_id,
         project_name=_project_name(projects, item.project_id),
-        iteration_id=iteration_id if iteration_id is not None else item.iteration_id,
+        iteration_id=resolved_iteration_id,
+        iteration_name=_iteration_name(iteration_names, resolved_iteration_id),
         lifecycle_phase=item.lifecycle_phase,
         owner_id=item.owner_id,
         status=item.status,
@@ -564,15 +371,18 @@ def _task_item(item: Task, projects: dict[int, Project], iteration_id: int | Non
 def _test_case_item(
     item: TestCase,
     projects: dict[int, Project],
+    iteration_names: dict[int, str],
     iteration_id: int | None = None,
 ) -> WorkbenchItem:
+    resolved_iteration_id = iteration_id if iteration_id is not None else item.iteration_id
     return WorkbenchItem(
         id=item.id,
         object_type="test_case",
         title=item.title,
         project_id=item.project_id,
         project_name=_project_name(projects, item.project_id),
-        iteration_id=iteration_id if iteration_id is not None else item.iteration_id,
+        iteration_id=resolved_iteration_id,
+        iteration_name=_iteration_name(iteration_names, resolved_iteration_id),
         lifecycle_phase=item.lifecycle_phase,
         owner_id=item.default_tester_id,
         status=item.status,
@@ -586,7 +396,7 @@ def _test_case_item(
     )
 
 
-def _bug_item(item: Bug, projects: dict[int, Project]) -> WorkbenchItem:
+def _bug_item(item: Bug, projects: dict[int, Project], iteration_names: dict[int, str]) -> WorkbenchItem:
     return WorkbenchItem(
         id=item.id,
         object_type="bug",
@@ -594,6 +404,7 @@ def _bug_item(item: Bug, projects: dict[int, Project]) -> WorkbenchItem:
         project_id=item.project_id,
         project_name=_project_name(projects, item.project_id),
         iteration_id=item.iteration_id,
+        iteration_name=_iteration_name(iteration_names, item.iteration_id),
         lifecycle_phase=item.lifecycle_phase,
         owner_id=item.owner_id,
         status=item.status,
@@ -611,6 +422,10 @@ def _bug_item(item: Bug, projects: dict[int, Project]) -> WorkbenchItem:
 
 def _project_name(projects: dict[int, Project], project_id: int | None) -> str | None:
     return projects.get(project_id).name if project_id in projects else None
+
+
+def _iteration_name(iteration_names: dict[int, str], iteration_id: int | None) -> str | None:
+    return iteration_names.get(iteration_id) if iteration_id else None
 
 
 def _date_value(value) -> str | None:
@@ -669,75 +484,6 @@ def _workbench_view_mode(role_keys: list[str]) -> str:
     if role_set & {"project_owner", "product_manager", "development_lead"}:
         return "lead"
     return "mine"
-
-
-def _owner_work_item_iteration_ids(db: Session, user_id: int | None) -> set[int]:
-    if not user_id:
-        return set()
-    requirement_ids = {
-        row.iteration_id
-        for row in db.query(Requirement.iteration_id)
-        .filter(
-            Requirement.deleted == 0,
-            Requirement.owner_id == user_id,
-            Requirement.iteration_id.isnot(None),
-            Requirement.status.notin_(("done", "closed")),
-        )
-        .all()
-    }
-    task_ids = {
-        row.iteration_id
-        for row in db.query(Task.iteration_id)
-        .filter(
-            Task.deleted == 0,
-            Task.owner_id == user_id,
-            Task.iteration_id.isnot(None),
-            Task.status.notin_(("done", "closed")),
-        )
-        .all()
-    }
-    bug_ids = {
-        row.iteration_id
-        for row in db.query(Bug.iteration_id)
-        .filter(
-            Bug.deleted == 0,
-            Bug.owner_id == user_id,
-            Bug.iteration_id.isnot(None),
-            Bug.status != "closed",
-        )
-        .all()
-    }
-    return {item for item in requirement_ids | task_ids | bug_ids if item}
-
-
-def _filter_items_for_role(
-    items: list[WorkbenchItem],
-    user_id: int | None,
-    view_mode: str,
-    include_test_cases: bool,
-    scoped_project_ids: set[int] | None = None,
-) -> list[WorkbenchItem]:
-    if view_mode in {"all", "lead"} or not user_id:
-        if scoped_project_ids:
-            return [item for item in items if item.project_id in scoped_project_ids]
-        return items
-    if scoped_project_ids:
-        items = [item for item in items if item.project_id in scoped_project_ids]
-    if include_test_cases:
-        return [item for item in items if item.owner_id == user_id]
-    return [item for item in items if item.owner_id == user_id and not _is_terminal_workbench_item(item)]
-
-
-def _is_terminal_workbench_item(item: WorkbenchItem) -> bool:
-    if item.object_type == "requirement":
-        return item.status in {"done", "closed"}
-    if item.object_type == "task":
-        return item.status in {"done", "closed"}
-    if item.object_type == "bug":
-        return item.status == "closed"
-    return False
-
-
 def _filter_review_tasks_for_role(review_tasks: list[dict], user_id: int | None, view_mode: str) -> list[dict]:
     if view_mode in {"all", "lead"} or not user_id:
         return review_tasks

@@ -3,7 +3,7 @@
     <div class="page-head">
       <div>
         <h1>工作台</h1>
-        <p>围绕默认工作流展示待处理、未分派、异常项和项目迭代看板。</p>
+        <p>围绕默认工作流展示待处理、未分派、异常项以及我发起/关注的工作项。</p>
       </div>
       <div class="page-actions">
         <div class="workbench-action-filters">
@@ -55,7 +55,7 @@
       </el-tabs>
     </div>
 
-    <div v-if="activeView !== 'project_board'" v-loading="loading" class="workbench-list">
+    <div v-loading="loading" class="workbench-list">
       <section class="workbench-list-section">
         <header class="workbench-list-section-head">
           <div>
@@ -90,7 +90,7 @@
             </el-table-column>
             <el-table-column prop="project_name" label="项目" min-width="140" show-overflow-tooltip />
             <el-table-column label="迭代" min-width="140" show-overflow-tooltip>
-              <template #default="{ row }">{{ iterationLabel(row.iteration_id) }}</template>
+              <template #default="{ row }">{{ iterationLabel(row.iteration_id, row.iteration_name) }}</template>
             </el-table-column>
             <el-table-column label="当前处理人" width="130">
               <template #default="{ row }">{{ ownerName(row.owner_id) }}</template>
@@ -154,60 +154,6 @@
           </el-table>
         </div>
       </section>
-    </div>
-
-    <div v-else v-loading="loading" class="workbench-board-wrap">
-      <el-empty v-if="!boardIterations.length" class="workbench-empty" description="当前筛选下暂无迭代工作项" />
-
-      <div v-else class="workbench-board">
-        <article v-for="iteration in boardIterations" :key="iteration.id" class="iteration-board">
-          <header class="iteration-board-head">
-            <div>
-              <h2>{{ iteration.name }}</h2>
-              <span>{{ iterationStatusLabel(iteration.status) }}</span>
-              <div class="iteration-project-scope">
-                <span>关联项目</span>
-                <el-tag v-for="project in iteration.projects || []" :key="project.id" size="small" effect="plain">
-                  {{ project.name }}
-                </el-tag>
-                <el-tag v-if="!(iteration.projects || []).length" size="small" type="info" effect="plain">未绑定项目</el-tag>
-              </div>
-            </div>
-            <el-tag>{{ iteration.visibleTotal }} 项</el-tag>
-          </header>
-
-          <div class="workbench-lanes">
-            <section v-for="group in iteration.groups" :key="`${iteration.id}-${group.key}`" class="workbench-lane">
-              <header>
-                <span>{{ group.label }}</span>
-                <strong>{{ group.items.length }}</strong>
-              </header>
-
-              <div class="workbench-card-list">
-                <div
-                  v-for="item in group.items"
-                  :key="`${item.object_type}-${item.id}`"
-                  class="workbench-card workbench-mini-card"
-                  :class="[`workbench-card-${item.object_type}`, { 'workbench-card-terminal': isTerminalWorkItem(item) }]"
-                >
-                  <div class="workbench-card-top">
-                    <span class="workbench-type-dot" :class="`type-${item.object_type}`">{{ typeShortLabel(item.object_type) }}</span>
-                    <button class="workbench-title workbench-card-button" type="button" @click="openWorkItemDetail(item)">
-                      {{ item.title }}
-                    </button>
-                    <span class="workbench-status">{{ itemStatusLabel(item) }}</span>
-                  </div>
-                  <div class="workbench-meta">
-                    <span class="owner-chip">{{ ownerName(item.owner_id) }}</span>
-                    <span class="workbench-project-name">{{ item.project_name || '-' }}</span>
-                    <RequirementPriorityBadge v-if="item.priority || item.severity" :value="item.severity || item.priority" />
-                  </div>
-                </div>
-              </div>
-            </section>
-          </div>
-        </article>
-      </div>
     </div>
 
     <el-dialog v-model="caseExecutionVisible" :title="`执行用例 ${selectedCase?.title || ''}`" width="760px">
@@ -277,7 +223,6 @@ import RichTextPasteEditor from '../components/RichTextPasteEditor.vue'
 import WorkflowActionButtons from '../components/WorkflowActionButtons.vue'
 import { showActionError } from '../utils/actionFeedback'
 import {
-  buildProjectBoard,
   buildWorkbenchViewModel,
   executionResultLabel,
   filterWorkbenchItems,
@@ -286,7 +231,6 @@ import {
   itemStatusLabel,
   itemStatusTag,
   typeLabel,
-  typeShortLabel,
   typeTag,
   workbenchItemActionGroup,
   workbenchMetaText
@@ -338,11 +282,6 @@ const activeListSection = computed(() => (
     : viewModel.value.queueSectionsByKey[activeView.value]
 ))
 const filteredListItems = computed(() => filterWorkbenchItems(activeListSection.value?.items || [], activeFilters.value))
-const boardIterations = computed(() => buildProjectBoard(viewModel.value.boardIterations, { ...activeFilters.value, hideEmpty: true }))
-const iterationNameById = computed(() => {
-  const entries = viewModel.value.boardIterations.map((iteration) => [iteration.id, iteration.name])
-  return Object.fromEntries(entries)
-})
 const activeFilters = computed(() => ({
   keyword: keywordFilter.value,
   types: typeFilter.value
@@ -357,8 +296,10 @@ function ownerName(id) {
   return users.value.find((item) => item.id === id)?.full_name || '未分配'
 }
 
-function iterationLabel(id) {
-  return iterationNameById.value[id] || '-'
+function iterationLabel(id, name) {
+  if (name) return name
+  if (id) return `迭代 #${id}`
+  return '-'
 }
 
 function extraInfo(item) {
@@ -366,15 +307,6 @@ function extraInfo(item) {
   if (meta) return meta
   if (item.object_type === 'test_case' && item.last_execute_time) return formatWorkbenchDateTime(item.last_execute_time)
   return '-'
-}
-
-function iterationStatusLabel(status) {
-  return {
-    planning: '规划中',
-    active: '进行中',
-    completed: '已完成',
-    canceled: '已取消'
-  }[status] || status || '-'
 }
 
 function actionGroupFor(item) {
@@ -530,12 +462,7 @@ async function loadWorkflowTransitions(data) {
     ...(data.mentioned_me?.items || []),
     ...(data.exception_center?.items || [])
   ]
-  const boardItems = (data.project_board?.iterations || data.iterations || []).flatMap((iteration) => [
-    ...(iteration.requirements || []),
-    ...(iteration.tasks || []),
-    ...(iteration.bugs || [])
-  ])
-  const runtimeItems = [...sectionItems, ...boardItems].filter(isWorkflowRuntimeItem)
+  const runtimeItems = sectionItems.filter(isWorkflowRuntimeItem)
   const uniqueItems = [...new Map(runtimeItems.map((item) => [`${item.object_type}:${item.id}`, item])).values()]
   if (!uniqueItems.length) {
     workflowTransitions.value = {}

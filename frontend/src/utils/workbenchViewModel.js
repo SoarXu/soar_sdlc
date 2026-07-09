@@ -2,8 +2,7 @@ const ENTRY_TABS = [
   { key: 'pending_handling', label: '待处理', description: '当前处理人是当前登录用户。' },
   { key: 'unassigned', label: '未分派', description: '当前处理人为空，等待认领或指派。' },
   { key: 'exception_center', label: '异常中心', description: '聚合默认工作流下需要额外关注的异常项。' },
-  { key: 'following', label: '我发起/关注', description: '只展示我发起、关注或被评论提及的工作项。' },
-  { key: 'project_board', label: '项目看板', description: '按迭代查看项目内需求、任务、用例和 Bug。' }
+  { key: 'following', label: '我发起/关注', description: '只显示我发起、关注或被评论提及的工作项。' }
 ]
 
 const TRACKING_TABS = [
@@ -16,7 +15,7 @@ const TYPE_LABELS = {
   requirement: '需求',
   task: '任务',
   test_case: '测试用例',
-  bug: 'Bug',
+  bug: '缺陷',
   code_review: '代码评审'
 }
 
@@ -24,7 +23,7 @@ const TYPE_SHORT_LABELS = {
   requirement: '需',
   task: '任',
   test_case: '测',
-  bug: 'Bug',
+  bug: '缺',
   code_review: 'CR'
 }
 
@@ -93,24 +92,10 @@ function filterMatch(item, filters = {}) {
   const haystack = [
     item.title,
     item.project_name,
+    item.iteration_name,
     item.exception_label
   ].filter(Boolean).join(' ').toLowerCase()
   return haystack.includes(keyword)
-}
-
-function cloneIterationWithGroups(iteration, filters = {}) {
-  const groups = [
-    { key: 'requirement', label: '需求', items: filterWorkbenchItems(iteration.requirements || [], filters) },
-    { key: 'task', label: '任务', items: filterWorkbenchItems(iteration.tasks || [], filters) },
-    { key: 'test_case', label: '测试用例', items: filterWorkbenchItems(iteration.test_cases || [], filters) },
-    { key: 'bug', label: 'Bug', items: filterWorkbenchItems(iteration.bugs || [], filters) }
-  ].filter((group) => !filters.types?.length || filters.types.includes(group.key))
-
-  return {
-    ...iteration,
-    groups,
-    visibleTotal: groups.reduce((sum, group) => sum + group.items.length, 0)
-  }
 }
 
 export function buildWorkbenchViewModel(payload = {}) {
@@ -119,9 +104,6 @@ export function buildWorkbenchViewModel(payload = {}) {
   const exceptionCenter = normalizeSection('exception_center', payload.exception_center, '异常中心', ENTRY_TABS[2].description)
   const trackingTabs = TRACKING_TABS.map((tab) => normalizeSection(tab.key, payload[tab.key], tab.label, tab.description))
   const trackingTotal = trackingTabs.reduce((sum, tab) => sum + tab.total, 0)
-  const boardIterations = Array.isArray(payload.project_board?.iterations)
-    ? payload.project_board.iterations
-    : (Array.isArray(payload.iterations) ? payload.iterations : [])
 
   return {
     entryTabs: ENTRY_TABS,
@@ -129,17 +111,15 @@ export function buildWorkbenchViewModel(payload = {}) {
     trackingTabs,
     queueSectionsByKey: {
       pending_handling: pending,
-      unassigned: unassigned,
+      unassigned,
       exception_center: exceptionCenter
     },
     trackingTabsByKey: Object.fromEntries(trackingTabs.map((tab) => [tab.key, tab])),
-    boardIterations,
     summaryCards: [
       { key: 'pending_handling', label: pending.label, value: pending.total },
       { key: 'unassigned', label: unassigned.label, value: unassigned.total },
       { key: 'exception_center', label: exceptionCenter.label, value: exceptionCenter.total },
-      { key: 'following', label: '关注范围', value: trackingTotal },
-      { key: 'project_board', label: '看板迭代', value: boardIterations.length }
+      { key: 'following', label: '关注范围', value: trackingTotal }
     ],
     owners: Array.isArray(payload.owners) ? payload.owners : [],
     roleKeys: Array.isArray(payload.role_keys) ? payload.role_keys : [],
@@ -149,12 +129,6 @@ export function buildWorkbenchViewModel(payload = {}) {
 
 export function filterWorkbenchItems(items = [], filters = {}) {
   return items.filter((item) => filterMatch(item, filters))
-}
-
-export function buildProjectBoard(iterations = [], filters = {}) {
-  return iterations
-    .map((iteration) => cloneIterationWithGroups(iteration, filters))
-    .filter((iteration) => iteration.visibleTotal > 0 || !filters.hideEmpty)
 }
 
 export function isTerminalWorkItem(item = {}) {

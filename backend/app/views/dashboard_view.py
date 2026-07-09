@@ -9,12 +9,6 @@ class DashboardSummary(BaseModel):
     open_bugs: int
 
 
-class WorkbenchMoveRequest(BaseModel):
-    object_type: str
-    object_id: int
-    target_iteration_id: int
-
-
 class WorkbenchItem(BaseModel):
     id: int
     object_type: str
@@ -22,6 +16,7 @@ class WorkbenchItem(BaseModel):
     project_id: int | None = None
     project_name: str | None = None
     iteration_id: int | None = None
+    iteration_name: str | None = None
     lifecycle_phase: str | None = None
     owner_id: int | None = None
     status: str | None = None
@@ -45,38 +40,9 @@ class WorkbenchItem(BaseModel):
     exception_label: str | None = None
 
 
-class WorkbenchProject(BaseModel):
-    id: int
-    name: str
-
-
-class WorkbenchIteration(BaseModel):
-    id: int
-    name: str
-    status: str
-    lifecycle_phase: str | None = None
-    owner_id: int | None = None
-    start_date: str | None = None
-    end_date: str | None = None
-    create_time: str | None = None
-    projects: list[WorkbenchProject] = Field(default_factory=list)
-    scoped_project_ids: list[int] = Field(default_factory=list)
-    requirements: list[WorkbenchItem]
-    tasks: list[WorkbenchItem]
-    test_cases: list[WorkbenchItem]
-    bugs: list[WorkbenchItem]
-    counts: dict[str, int]
-
-
 class WorkbenchSection(BaseModel):
     label: str
     items: list[WorkbenchItem] = Field(default_factory=list)
-    total: int = 0
-
-
-class WorkbenchProjectBoardSection(BaseModel):
-    label: str
-    iterations: list[WorkbenchIteration] = Field(default_factory=list)
     total: int = 0
 
 
@@ -87,9 +53,7 @@ class WorkbenchResponse(BaseModel):
     watched_by_me: WorkbenchSection = Field(default_factory=lambda: WorkbenchSection(label="我关注的"))
     mentioned_me: WorkbenchSection = Field(default_factory=lambda: WorkbenchSection(label="提到我的"))
     exception_center: WorkbenchSection = Field(default_factory=lambda: WorkbenchSection(label="异常中心"))
-    project_board: WorkbenchProjectBoardSection = Field(default_factory=lambda: WorkbenchProjectBoardSection(label="项目看板"))
-    iterations: list[WorkbenchIteration]
-    owners: list[dict]
+    owners: list[dict] = Field(default_factory=list)
     review_tasks: list[dict] = Field(default_factory=list)
     role_keys: list[str] = Field(default_factory=list)
     view_mode: str = "all"

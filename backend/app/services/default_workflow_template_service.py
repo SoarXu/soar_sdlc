@@ -160,36 +160,36 @@ def _default_template_specs() -> list[dict]:
         {
             "template_key": "requirement.default",
             "object_type": "requirement",
-            "name": "Default Requirement Template",
-            "description": "Baseline requirement workflow template.",
+            "name": "默认需求工作流模板",
+            "description": "系统内置的需求默认工作流模板。",
             "graph": _requirement_graph(),
         },
         {
             "template_key": "task.default",
             "object_type": "task",
-            "name": "Default Task Template",
-            "description": "Baseline task workflow template.",
+            "name": "默认任务工作流模板",
+            "description": "系统内置的任务默认工作流模板。",
             "graph": _task_graph(),
         },
         {
             "template_key": "bug.default",
             "object_type": "bug",
-            "name": "Default Bug Template",
-            "description": "Baseline bug workflow template.",
+            "name": "默认缺陷工作流模板",
+            "description": "系统内置的缺陷默认工作流模板。",
             "graph": _bug_graph(),
         },
         {
             "template_key": "iteration.default",
             "object_type": "iteration",
-            "name": "Default Iteration Template",
-            "description": "Baseline iteration workflow template.",
+            "name": "默认迭代工作流模板",
+            "description": "系统内置的迭代默认工作流模板。",
             "graph": _iteration_graph(),
         },
         {
             "template_key": "project.default",
             "object_type": "project",
-            "name": "Default Project Template",
-            "description": "Baseline project workflow template.",
+            "name": "默认项目工作流模板",
+            "description": "系统内置的项目默认工作流模板。",
             "graph": _project_graph(),
         },
     ]
@@ -198,18 +198,18 @@ def _default_template_specs() -> list[dict]:
 def _requirement_graph() -> WorkflowGraphSave:
     return WorkflowGraphSave(
         states=[
-            _state("pending_assignment", "Pending Assignment", "start", "#6b7280", 80, 100),
-            _state("in_processing", "In Processing", "normal", "#2563eb", 280, 100),
-            _state("pending_confirmation", "Pending Confirmation", "normal", "#7c3aed", 480, 100),
-            _state("completed", "Completed", "terminal", "#059669", 680, 100),
-            _state("canceled", "Canceled", "terminal", "#94a3b8", 480, 240),
+            _state("pending_assignment", "待分派", "start", "#6b7280", 80, 100),
+            _state("in_processing", "处理中", "normal", "#2563eb", 280, 100),
+            _state("pending_confirmation", "待确认", "normal", "#7c3aed", 480, 100),
+            _state("completed", "已完成", "terminal", "#059669", 680, 100),
+            _state("canceled", "已取消", "terminal", "#94a3b8", 480, 240),
         ],
         transitions=[
-            _transition("claim", "Claim", "pending_assignment", "in_processing", target_type="actor"),
-            _transition("assign", "Assign", "pending_assignment", "in_processing", target_type="explicit_owner"),
+            _transition("claim", "认领", "pending_assignment", "in_processing", target_type="actor"),
+            _transition("assign", "指派", "pending_assignment", "in_processing", target_type="explicit_owner"),
             _transition(
                 "complete",
-                "Complete",
+                "完成",
                 "in_processing",
                 "completed",
                 target_type="keep_current",
@@ -218,7 +218,7 @@ def _requirement_graph() -> WorkflowGraphSave:
             ),
             _transition(
                 "cancel",
-                "Cancel",
+                "取消",
                 "pending_assignment",
                 "canceled",
                 target_type="keep_current",
@@ -227,14 +227,14 @@ def _requirement_graph() -> WorkflowGraphSave:
             ),
             _transition(
                 "cancel",
-                "Cancel",
+                "取消",
                 "in_processing",
                 "canceled",
                 target_type="keep_current",
                 validator_config={"type": "requirement_terminal_gate", "block_on_open_bugs": True, "block_on_open_tasks": True},
                 ui_config={"list_display": "more", "list_priority": 90},
             ),
-            _transition("reactivate", "Reactivate", "canceled", "pending_assignment", target_type="keep_current"),
+            _transition("reactivate", "重新激活", "canceled", "pending_assignment", target_type="keep_current"),
         ],
     )
 
@@ -242,18 +242,18 @@ def _requirement_graph() -> WorkflowGraphSave:
 def _task_graph() -> WorkflowGraphSave:
     return WorkflowGraphSave(
         states=[
-            _state("pending_assignment", "Pending Assignment", "start", "#6b7280", 80, 120),
-            _state("in_processing", "In Processing", "normal", "#2563eb", 280, 120),
-            _state("pending_confirmation", "Pending Confirmation", "normal", "#7c3aed", 480, 120),
-            _state("completed", "Completed", "terminal", "#059669", 680, 120),
-            _state("canceled", "Canceled", "terminal", "#94a3b8", 480, 260),
+            _state("pending_assignment", "待分派", "start", "#6b7280", 80, 120),
+            _state("in_processing", "处理中", "normal", "#2563eb", 280, 120),
+            _state("pending_confirmation", "待确认", "normal", "#7c3aed", 480, 120),
+            _state("completed", "已完成", "terminal", "#059669", 680, 120),
+            _state("canceled", "已取消", "terminal", "#94a3b8", 480, 260),
         ],
         transitions=[
-            _transition("claim", "Claim", "pending_assignment", "in_processing", target_type="actor"),
-            _transition("assign", "Assign", "pending_assignment", "in_processing", target_type="explicit_owner"),
+            _transition("claim", "认领", "pending_assignment", "in_processing", target_type="actor"),
+            _transition("assign", "指派", "pending_assignment", "in_processing", target_type="explicit_owner"),
             _transition(
                 "complete",
-                "Complete",
+                "完成",
                 "in_processing",
                 "completed",
                 target_type="keep_current",
@@ -262,7 +262,7 @@ def _task_graph() -> WorkflowGraphSave:
             ),
             _transition(
                 "submit_confirmation",
-                "Submit Confirmation",
+                "提交确认",
                 "in_processing",
                 "pending_confirmation",
                 target_type="project_role",
@@ -272,12 +272,12 @@ def _task_graph() -> WorkflowGraphSave:
                 condition_config={"task_types": ["bug_fix", "test_support"]},
                 ui_config={"list_display": "primary", "list_priority": 10},
             ),
-            _transition("approve_confirmation", "Approve Confirmation", "pending_confirmation", "completed", target_type="keep_current"),
-            _transition("return_rework", "Return Rework", "pending_confirmation", "in_processing", target_type="previous_handler"),
-            _transition("cancel", "Cancel", "pending_assignment", "canceled", target_type="keep_current"),
-            _transition("cancel", "Cancel", "in_processing", "canceled", target_type="keep_current"),
-            _transition("cancel", "Cancel", "pending_confirmation", "canceled", target_type="keep_current"),
-            _transition("reactivate", "Reactivate", "canceled", "pending_assignment", target_type="keep_current"),
+            _transition("approve_confirmation", "确认通过", "pending_confirmation", "completed", target_type="keep_current"),
+            _transition("return_rework", "退回返工", "pending_confirmation", "in_processing", target_type="previous_handler"),
+            _transition("cancel", "取消", "pending_assignment", "canceled", target_type="keep_current"),
+            _transition("cancel", "取消", "in_processing", "canceled", target_type="keep_current"),
+            _transition("cancel", "取消", "pending_confirmation", "canceled", target_type="keep_current"),
+            _transition("reactivate", "重新激活", "canceled", "pending_assignment", target_type="keep_current"),
         ],
     )
 
@@ -285,16 +285,16 @@ def _task_graph() -> WorkflowGraphSave:
 def _bug_graph() -> WorkflowGraphSave:
     return WorkflowGraphSave(
         states=[
-            _state("pending_handling", "Pending Handling", "start", "#6b7280", 80, 100),
-            _state("fixing", "Fixing", "normal", "#2563eb", 280, 100),
-            _state("pending_verification", "Pending Verification", "normal", "#7c3aed", 480, 100),
-            _state("verified", "Verified", "normal", "#0f766e", 680, 100),
-            _state("closed", "Closed", "terminal", "#059669", 880, 100),
+            _state("pending_handling", "待处理", "start", "#6b7280", 80, 100),
+            _state("fixing", "修复中", "normal", "#2563eb", 280, 100),
+            _state("pending_verification", "待验证", "normal", "#7c3aed", 480, 100),
+            _state("verified", "已验证", "normal", "#0f766e", 680, 100),
+            _state("closed", "已关闭", "terminal", "#059669", 880, 100),
         ],
         transitions=[
             _transition(
                 "confirm_bug_type",
-                "Confirm Bug Type",
+                "确认缺陷类型",
                 "pending_handling",
                 "fixing",
                 target_type="keep_current",
@@ -318,7 +318,7 @@ def _bug_graph() -> WorkflowGraphSave:
             ),
             _transition(
                 "reclassify_bug_type",
-                "Reclassify Bug Type",
+                "重新判定缺陷类型",
                 "fixing",
                 "fixing",
                 target_type="keep_current",
@@ -343,7 +343,7 @@ def _bug_graph() -> WorkflowGraphSave:
             ),
             _transition(
                 "submit_verification",
-                "Submit Verification",
+                "提交验证",
                 "fixing",
                 "pending_verification",
                 target_type="project_role",
@@ -352,18 +352,18 @@ def _bug_graph() -> WorkflowGraphSave:
                 fallback_roles="project_owner",
                 ui_config={"list_display": "primary", "list_priority": 10},
             ),
-            _transition("verification_passed", "Verification Passed", "pending_verification", "verified", ui_config={"list_display": "primary", "list_priority": 10}),
-            _transition("verification_failed", "Verification Failed", "pending_verification", "pending_handling", target_type="previous_handler", ui_config={"list_display": "primary", "list_priority": 20}),
+            _transition("verification_passed", "验证通过", "pending_verification", "verified", ui_config={"list_display": "primary", "list_priority": 10}),
+            _transition("verification_failed", "验证不通过", "pending_verification", "pending_handling", target_type="previous_handler", ui_config={"list_display": "primary", "list_priority": 20}),
             _transition(
                 "close",
-                "Close",
+                "关闭",
                 "verified",
                 "closed",
                 target_type="keep_current",
                 validator_config={"type": "bug_close_gate", "direct_tasks_terminal_statuses": ["completed", "canceled"]},
                 ui_config={"list_display": "primary", "list_priority": 10},
             ),
-            _transition("activate", "Activate", "closed", "pending_handling", target_type="previous_handler"),
+            _transition("activate", "激活", "closed", "pending_handling", target_type="previous_handler"),
         ],
     )
 
@@ -371,15 +371,15 @@ def _bug_graph() -> WorkflowGraphSave:
 def _iteration_graph() -> WorkflowGraphSave:
     return WorkflowGraphSave(
         states=[
-            _state("planning", "Planning", "start", "#6b7280", 80, 120),
-            _state("active", "Active", "normal", "#2563eb", 280, 120),
-            _state("completed", "Completed", "terminal", "#059669", 480, 120),
-            _state("canceled", "Canceled", "terminal", "#94a3b8", 480, 260),
+            _state("planning", "规划中", "start", "#6b7280", 80, 120),
+            _state("active", "进行中", "normal", "#2563eb", 280, 120),
+            _state("completed", "已完成", "terminal", "#059669", 480, 120),
+            _state("canceled", "已取消", "terminal", "#94a3b8", 480, 260),
         ],
         transitions=[
-            _transition("start", "Start", "planning", "active"),
-            _transition("complete", "Complete", "active", "completed", validator_config={"type": "iteration_terminal_gate"}),
-            _transition("cancel", "Cancel", "active", "canceled", validator_config={"type": "iteration_terminal_gate"}),
+            _transition("start", "开始", "planning", "active"),
+            _transition("complete", "完成", "active", "completed", validator_config={"type": "iteration_terminal_gate"}),
+            _transition("cancel", "取消", "active", "canceled", validator_config={"type": "iteration_terminal_gate"}),
         ],
     )
 
@@ -387,17 +387,17 @@ def _iteration_graph() -> WorkflowGraphSave:
 def _project_graph() -> WorkflowGraphSave:
     return WorkflowGraphSave(
         states=[
-            _state("planning", "Planning", "start", "#6b7280", 80, 120),
-            _state("active", "Active", "normal", "#2563eb", 280, 120),
-            _state("paused", "Paused", "normal", "#7c3aed", 480, 120),
-            _state("closed", "Closed", "terminal", "#059669", 680, 120),
+            _state("planning", "规划中", "start", "#6b7280", 80, 120),
+            _state("active", "进行中", "normal", "#2563eb", 280, 120),
+            _state("paused", "已暂停", "normal", "#7c3aed", 480, 120),
+            _state("closed", "已关闭", "terminal", "#059669", 680, 120),
         ],
         transitions=[
-            _transition("start", "Start", "planning", "active"),
-            _transition("suspend", "Suspend", "active", "paused"),
-            _transition("resume", "Resume", "paused", "active"),
-            _transition("close", "Close", "active", "closed", validator_config={"type": "project_close_gate"}),
-            _transition("close", "Close", "paused", "closed", validator_config={"type": "project_close_gate"}),
+            _transition("start", "开始", "planning", "active"),
+            _transition("suspend", "暂停", "active", "paused"),
+            _transition("resume", "恢复", "paused", "active"),
+            _transition("close", "关闭", "active", "closed", validator_config={"type": "project_close_gate"}),
+            _transition("close", "关闭", "paused", "closed", validator_config={"type": "project_close_gate"}),
         ],
     )
 

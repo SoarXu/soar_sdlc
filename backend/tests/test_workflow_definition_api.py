@@ -234,6 +234,11 @@ def test_default_template_definitions_exist_for_core_objects(client: TestClient)
     assert {"requirement", "task", "bug", "iteration", "project"} <= set(by_object_type)
     assert by_object_type["bug"]["is_default_template"] is True
     assert by_object_type["task"]["is_default_template"] is True
+    assert by_object_type["requirement"]["name"] == "默认需求工作流模板"
+    assert by_object_type["task"]["name"] == "默认任务工作流模板"
+    assert by_object_type["bug"]["name"] == "默认缺陷工作流模板"
+    assert by_object_type["iteration"]["name"] == "默认迭代工作流模板"
+    assert by_object_type["project"]["name"] == "默认项目工作流模板"
 
 
 def test_bug_default_template_matches_prd_baseline(client: TestClient):
@@ -256,6 +261,22 @@ def test_bug_default_template_matches_prd_baseline(client: TestClient):
         "activate",
         "reclassify_bug_type",
     } <= transitions
+    state_names = {node["status_key"]: node["status_name"] for node in graph.json()["states"]}
+    assert state_names == {
+        "pending_handling": "待处理",
+        "fixing": "修复中",
+        "pending_verification": "待验证",
+        "verified": "已验证",
+        "closed": "已关闭",
+    }
+    action_names = {item["action_key"]: item["action_name"] for item in graph.json()["transitions"]}
+    assert action_names["confirm_bug_type"] == "确认缺陷类型"
+    assert action_names["reclassify_bug_type"] == "重新判定缺陷类型"
+    assert action_names["submit_verification"] == "提交验证"
+    assert action_names["verification_passed"] == "验证通过"
+    assert action_names["verification_failed"] == "验证不通过"
+    assert action_names["close"] == "关闭"
+    assert action_names["activate"] == "激活"
     assert graph.json()["definition"]["template_key"] == "bug.default"
 
 
@@ -269,3 +290,24 @@ def test_requirement_and_project_default_templates_expose_default_metadata(clien
     project_definition = next(item for item in project_list.json() if item["is_default_template"] is True)
     assert requirement_definition["template_key"] == "requirement.default"
     assert project_definition["template_key"] == "project.default"
+    assert requirement_definition["name"] == "默认需求工作流模板"
+    assert project_definition["name"] == "默认项目工作流模板"
+
+    requirement_graph = client.get(f"/api/v1/workflow-definitions/{requirement_definition['id']}")
+    assert requirement_graph.status_code == 200
+    requirement_state_names = {node["status_key"]: node["status_name"] for node in requirement_graph.json()["states"]}
+    assert requirement_state_names == {
+        "pending_assignment": "待分派",
+        "in_processing": "处理中",
+        "pending_confirmation": "待确认",
+        "completed": "已完成",
+        "canceled": "已取消",
+    }
+    requirement_action_names = {
+        item["action_key"]: item["action_name"] for item in requirement_graph.json()["transitions"]
+    }
+    assert requirement_action_names["claim"] == "认领"
+    assert requirement_action_names["assign"] == "指派"
+    assert requirement_action_names["complete"] == "完成"
+    assert requirement_action_names["cancel"] == "取消"
+    assert requirement_action_names["reactivate"] == "重新激活"

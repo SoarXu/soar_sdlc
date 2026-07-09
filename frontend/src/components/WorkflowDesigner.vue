@@ -31,12 +31,26 @@
           @click.self="clearSelection"
         >
           <defs>
-            <marker id="workflow-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <marker
+              id="workflow-arrow"
+              viewBox="0 0 10 10"
+              refX="9"
+              refY="5"
+              markerWidth="7"
+              markerHeight="7"
+              orient="auto-start-reverse"
+            >
               <path d="M 0 0 L 10 5 L 0 10 z" fill="#94a3b8" />
             </marker>
           </defs>
           <g :transform="`translate(${viewportOffset.x}, ${viewportOffset.y})`">
-            <g v-for="edge in transitionViews" :key="edge.key" class="workflow-edge" :class="{ selected: isSelectedTransition(edge.transition) }" @click.stop="selectTransition(edge.transition)">
+            <g
+              v-for="edge in transitionViews"
+              :key="edge.key"
+              class="workflow-edge"
+              :class="{ selected: isSelectedTransition(edge.transition) }"
+              @click.stop="selectTransition(edge.transition)"
+            >
               <path :d="edge.path" />
               <rect :x="edge.labelX - 40" :y="edge.labelY - 13" width="80" height="26" rx="5" />
               <text :x="edge.labelX" :y="edge.labelY + 4">{{ edge.transition.action_name }}</text>
@@ -62,12 +76,12 @@
           <h3>状态配置</h3>
           <el-form label-position="top">
             <el-form-item label="状态名称"><el-input v-model="selectedState.status_name" /></el-form-item>
-            <el-form-item label="状态值"><el-input v-model="selectedState.status_key" /></el-form-item>
+            <el-form-item label="状态键"><el-input v-model="selectedState.status_key" /></el-form-item>
             <el-form-item label="状态类型">
               <el-select v-model="selectedState.category">
                 <el-option label="开始" value="start" />
                 <el-option label="普通" value="normal" />
-                <el-option label="终态" value="terminal" />
+                <el-option label="结束" value="terminal" />
               </el-select>
             </el-form-item>
             <el-form-item label="颜色"><el-color-picker v-model="selectedState.color" /></el-form-item>
@@ -80,27 +94,44 @@
           <h3>流转配置</h3>
           <el-form label-position="top">
             <el-form-item label="动作名称"><el-input v-model="selectedTransition.action_name" /></el-form-item>
-            <el-form-item label="动作值"><el-input v-model="selectedTransition.action_key" /></el-form-item>
+            <el-form-item label="动作键"><el-input v-model="selectedTransition.action_key" /></el-form-item>
             <el-form-item label="来源状态">
               <el-select v-model="selectedTransition.from_status">
-                <el-option v-for="state in states" :key="state.status_key" :label="state.status_name" :value="state.status_key" />
+                <el-option
+                  v-for="state in states"
+                  :key="state.status_key"
+                  :label="state.status_name"
+                  :value="state.status_key"
+                />
               </el-select>
             </el-form-item>
             <el-form-item label="目标状态">
               <el-select v-model="selectedTransition.to_status">
-                <el-option v-for="state in states" :key="state.status_key" :label="state.status_name" :value="state.status_key" />
+                <el-option
+                  v-for="state in states"
+                  :key="state.status_key"
+                  :label="state.status_name"
+                  :value="state.status_key"
+                />
               </el-select>
             </el-form-item>
-            <el-form-item label="允许角色"><el-select v-model="selectedTransition.allowed_role_list" multiple filterable>
-              <el-option v-for="role in roleOptions" :key="role.value" :label="role.label" :value="role.value" />
-            </el-select></el-form-item>
+            <el-form-item label="允许角色">
+              <el-select v-model="selectedTransition.allowed_role_list" multiple filterable>
+                <el-option v-for="role in roleOptions" :key="role.value" :label="role.label" :value="role.value" />
+              </el-select>
+            </el-form-item>
             <el-form-item label="下一处理人">
               <el-select v-model="selectedTransition.handler_rule.target_type">
                 <el-option v-for="item in targetTypes" :key="item.value" :label="item.label" :value="item.value" />
               </el-select>
             </el-form-item>
             <el-form-item label="目标角色">
-              <el-select v-model="selectedTransition.handler_target_roles" multiple filterable :disabled="selectedTransition.handler_rule.target_type !== 'project_role'">
+              <el-select
+                v-model="selectedTransition.handler_target_roles"
+                multiple
+                filterable
+                :disabled="selectedTransition.handler_rule.target_type !== 'project_role'"
+              >
                 <el-option v-for="role in roleOptions" :key="role.value" :label="role.label" :value="role.value" />
               </el-select>
             </el-form-item>
@@ -112,7 +143,12 @@
               </el-select>
             </el-form-item>
             <el-form-item label="兜底角色">
-              <el-select v-model="selectedTransition.handler_fallback_roles" multiple filterable :disabled="selectedTransition.handler_rule.fallback_type !== 'project_role'">
+              <el-select
+                v-model="selectedTransition.handler_fallback_roles"
+                multiple
+                filterable
+                :disabled="selectedTransition.handler_rule.fallback_type !== 'project_role'"
+              >
                 <el-option v-for="role in roleOptions" :key="role.value" :label="role.label" :value="role.value" />
               </el-select>
             </el-form-item>
@@ -154,13 +190,13 @@ const props = defineProps({
 const objectTypes = [
   { label: '需求', value: 'requirement' },
   { label: '任务', value: 'task' },
-  { label: 'Bug', value: 'bug' }
+  { label: '缺陷', value: 'bug' }
 ]
 const targetTypes = [
   { label: '项目角色', value: 'project_role' },
   { label: '保持当前处理人', value: 'keep_current' },
   { label: '需求提出人', value: 'proposer' },
-  { label: 'Bug 报告人', value: 'reporter' },
+  { label: '缺陷报告人', value: 'reporter' },
   { label: '上次修复人', value: 'last_resolver' },
   { label: '无处理人', value: 'none' }
 ]
@@ -178,17 +214,27 @@ const viewportOffset = reactive({ x: 0, y: 0 })
 const dragging = reactive({ state: null, startX: 0, startY: 0, originX: 0, originY: 0 })
 const viewportDrag = reactive({ active: false, startX: 0, startY: 0, originX: 0, originY: 0 })
 
-const selectedState = computed(() => selectedKind.value === 'state' ? states.value.find((item) => item.status_key === selectedKey.value) : null)
-const selectedTransition = computed(() => selectedKind.value === 'transition' ? transitions.value.find((item) => transitionKey(item) === selectedKey.value) : null)
+const selectedState = computed(() => (
+  selectedKind.value === 'state'
+    ? states.value.find((item) => item.status_key === selectedKey.value)
+    : null
+))
+const selectedTransition = computed(() => (
+  selectedKind.value === 'transition'
+    ? transitions.value.find((item) => transitionKey(item) === selectedKey.value)
+    : null
+))
 const canvasGridStyle = computed(() => ({
   backgroundPosition: `${viewportOffset.x}px ${viewportOffset.y}px`
 }))
-const transitionViews = computed(() => transitions.value.map((transition) => {
-  const from = states.value.find((item) => item.status_key === transition.from_status)
-  const to = states.value.find((item) => item.status_key === transition.to_status)
-  if (!from || !to) return null
-  return { key: transitionKey(transition), transition, ...buildWorkflowEdgeView(from, to) }
-}).filter(Boolean))
+const transitionViews = computed(() => transitions.value
+  .map((transition) => {
+    const from = states.value.find((item) => item.status_key === transition.from_status)
+    const to = states.value.find((item) => item.status_key === transition.to_status)
+    if (!from || !to) return null
+    return { key: transitionKey(transition), transition, ...buildWorkflowEdgeView(from, to) }
+  })
+  .filter(Boolean))
 
 watch(() => props.configId, () => loadDefinition())
 
@@ -304,7 +350,12 @@ function addTransition() {
     from_status: from.status_key,
     to_status: to.status_key,
     allowed_roles: '',
-    handler_rule: { target_type: 'keep_current', target_roles: '', fallback_type: 'keep_current', fallback_roles: '' },
+    handler_rule: {
+      target_type: 'keep_current',
+      target_roles: '',
+      fallback_type: 'keep_current',
+      fallback_roles: ''
+    },
     enabled: true,
     sort_order: (transitions.value.length + 1) * 10
   })
@@ -412,7 +463,12 @@ function transitionKey(transition) {
 }
 
 function normalizeTransition(item) {
-  const handlerRule = item.handler_rule || { target_type: 'keep_current', target_roles: '', fallback_type: 'keep_current', fallback_roles: '' }
+  const handlerRule = item.handler_rule || {
+    target_type: 'keep_current',
+    target_roles: '',
+    fallback_type: 'keep_current',
+    fallback_roles: ''
+  }
   return {
     ...item,
     handler_rule: {
@@ -442,7 +498,10 @@ function serializeTransition(item) {
 
 function roleArray(value) {
   if (Array.isArray(value)) return value
-  return String(value || '').split(',').map((item) => item.trim()).filter(Boolean)
+  return String(value || '')
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean)
 }
 </script>
 

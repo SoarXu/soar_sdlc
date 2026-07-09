@@ -111,10 +111,9 @@
             <el-table-column :label="extraInfoLabel" min-width="170" show-overflow-tooltip>
               <template #default="{ row }">{{ extraInfo(row) }}</template>
             </el-table-column>
-            <el-table-column label="操作" width="220" fixed="right">
+            <el-table-column label="操作" width="180" fixed="right">
               <template #default="{ row }">
                 <div class="workbench-list-actions">
-                  <el-button link type="primary" class="workbench-action-main" @click="openWorkItemDetail(row)">详情</el-button>
                   <WorkflowActionButtons
                     v-if="shouldShowWorkflowActions(row)"
                     :object-type="row.object_type"

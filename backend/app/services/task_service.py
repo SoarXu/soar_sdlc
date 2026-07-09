@@ -1,4 +1,4 @@
-from datetime import date, datetime
+﻿from datetime import date, datetime
 from decimal import Decimal
 
 from fastapi import HTTPException, status
@@ -11,10 +11,7 @@ from app.models.user import User
 from app.services.current_handler_service import ensure_work_item_action
 from app.services.lifecycle_service import project_lifecycle_phase, requirement_lifecycle_phase
 from app.services.status_operation_service import list_status_operations
-from app.services.workflow_runtime_service import execute_transition
-from app.views.status_operation_view import StatusOperationCreate
 from app.views.task_view import TaskCreate, TaskUpdate
-from app.views.workflow_runtime_view import WorkflowTransitionExecuteRequest
 
 
 def list_tasks(db: Session) -> list[Task]:
@@ -42,7 +39,7 @@ def create_task(db: Session, payload: TaskCreate) -> Task:
 
 def update_task(db: Session, task_id: int, payload: TaskUpdate, actor_id: int | None = None) -> Task:
     task = _get_active_task(db, task_id)
-    ensure_work_item_action(db, task, actor_id, "任务")
+    ensure_work_item_action(db, task, actor_id, "task")
     _ensure_project_editable_for_task(db, task)
     data = payload.model_dump(exclude_unset=True)
     before_data, after_data = _task_change_data(task, data)
@@ -62,47 +59,6 @@ def update_task(db: Session, task_id: int, payload: TaskUpdate, actor_id: int | 
     db.commit()
     db.refresh(task)
     return task
-
-
-def activate_task(db: Session, task_id: int, actor_id: int | None = None) -> Task:
-    task = _get_active_task(db, task_id)
-    ensure_work_item_action(db, task, actor_id, "任务")
-    _ensure_project_open_for_task(db, task)
-    if task.status in {"completed", "done"}:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Completed task cannot be activated")
-    if task.status in {"canceled", "closed"}:
-        return _run_task_transition(db, task, "reactivate", actor_id=actor_id)
-    if task.status in {"pending_assignment", "todo"}:
-        if task.owner_id:
-            return _run_task_transition(db, task, "assign", actor_id=actor_id, next_owner_id=task.owner_id)
-        return _run_task_transition(db, task, "claim", actor_id=actor_id)
-    return task
-
-
-def close_task(db: Session, task_id: int, payload: StatusOperationCreate, actor_id: int | None = None) -> Task:
-    if not payload.reason:
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Close reason is required")
-    task = _get_active_task(db, task_id)
-    ensure_work_item_action(db, task, actor_id, "任务")
-    if task.status in {"done", "completed"}:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Completed task cannot be canceled")
-    return close_task_record(db, task, payload, actor_id=actor_id)
-
-
-def complete_task(db: Session, task_id: int, actor_id: int | None = None) -> Task:
-    task = _get_active_task(db, task_id)
-    ensure_work_item_action(db, task, actor_id, "任务")
-    _ensure_project_open_for_task(db, task)
-    if task.status in {"done", "completed"}:
-        return task
-    action_key = "submit_confirmation" if task.task_type in {"bug_fix", "test_support"} else "complete"
-    return _run_task_transition(db, task, action_key, actor_id=actor_id)
-
-
-def close_task_record(db: Session, task: Task, payload: StatusOperationCreate, actor_id: int | None = None) -> Task:
-    if task.status in {"done", "completed", "closed", "canceled"}:
-        return task
-    return _run_task_transition(db, task, "cancel", payload=payload, actor_id=actor_id)
 
 
 def list_task_status_operations(db: Session, task_id: int) -> list[dict]:
@@ -138,47 +94,6 @@ def _get_active_task(db: Session, task_id: int) -> Task:
 
 def _initial_task_status(owner_id: int | None) -> str:
     return "in_processing" if owner_id else "pending_assignment"
-
-
-def _run_task_transition(
-    db: Session,
-    task: Task,
-    action_key: str,
-    *,
-    payload: StatusOperationCreate | None = None,
-    actor_id: int | None = None,
-    next_owner_id: int | None = None,
-) -> Task:
-    actor = _actor_user(db, actor_id)
-    request = WorkflowTransitionExecuteRequest(
-        action_key=action_key,
-        payload=_status_payload_dict(payload),
-        next_owner_id=next_owner_id,
-        delegate_reason=_delegate_reason(task.owner_id, actor, payload),
-    )
-    execute_transition(db, "task", task.id, request, actor)
-    db.refresh(task)
-    return task
-
-
-def _status_payload_dict(payload: StatusOperationCreate | None) -> dict:
-    return payload.model_dump(exclude_none=True) if payload else {}
-
-
-def _actor_user(db: Session, actor_id: int | None) -> User | None:
-    if not actor_id:
-        return None
-    return db.query(User).filter(User.id == actor_id).first()
-
-
-def _delegate_reason(owner_id: int | None, actor: User | None, payload: StatusOperationCreate | None) -> str | None:
-    if not actor:
-        return None
-    if owner_id == actor.id:
-        return payload.delegate_reason if payload else None
-    if payload and payload.delegate_reason:
-        return payload.delegate_reason
-    return "legacy task endpoint proxy"
 
 
 def _task_change_data(task: Task, data: dict) -> tuple[dict, dict]:
@@ -226,12 +141,6 @@ def _audit_logs_with_actor_names(db: Session, logs: list[AuditLog]) -> list[dict
 
 
 def _ensure_project_editable_for_task(db: Session, task: Task) -> None:
-    project = db.query(Project).filter(Project.id == task.project_id, Project.deleted == 0).first()
-    if project and project.status == "closed":
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Project is closed")
-
-
-def _ensure_project_open_for_task(db: Session, task: Task) -> None:
     project = db.query(Project).filter(Project.id == task.project_id, Project.deleted == 0).first()
     if project and project.status == "closed":
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Project is closed")

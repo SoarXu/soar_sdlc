@@ -179,21 +179,13 @@ def test_iteration_start_keeps_child_work_items_on_their_own_workflows(client: T
     project_id = _create_project(client)
     iteration_id = _create_iteration(client, [project_id])
     requirement_id = _create_requirement(client, project_id, "Requirement for iteration start")
-    canceled_requirement_id = _create_requirement(client, project_id, "Canceled requirement")
-    canceled_requirement = client.post(
-        f"/api/v1/requirements/{canceled_requirement_id}/close",
-        json={"reason": "done", "remark": "canceled before iteration start"},
-    )
-    assert canceled_requirement.status_code == 200
+    canceled_requirement_id = _create_requirement(client, project_id, "Canceled requirement", owner_id=1)
+    _set_requirement_status(canceled_requirement_id, "canceled")
 
     requirement_task_id = _create_task(client, project_id, "Task under requirement", requirement_id=requirement_id)
     standalone_task_id = _create_task(client, project_id, "Standalone task linked to iteration")
-    canceled_task_id = _create_task(client, project_id, "Canceled task")
-    canceled_task = client.post(
-        f"/api/v1/tasks/{canceled_task_id}/close",
-        json={"reason": "done", "remark": "canceled before iteration start"},
-    )
-    assert canceled_task.status_code == 200
+    canceled_task_id = _create_task(client, project_id, "Canceled task", owner_id=1)
+    _set_task_status(canceled_task_id, "canceled")
 
     assert client.post(
         f"/api/v1/iterations/{iteration_id}/requirements",

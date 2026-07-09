@@ -22,7 +22,6 @@ from app.controllers import (
     work_item_controller,
     work_item_comment_controller,
     workflow_component_controller,
-    workflow_controller,
     workflow_definition_controller,
     workflow_runtime_controller,
 )
@@ -52,7 +51,6 @@ api_router.include_router(test_case_controller.router, prefix="/test-cases", tag
 api_router.include_router(test_run_controller.router, tags=["test-runs"])
 api_router.include_router(bug_controller.router, prefix="/bugs", tags=["bugs"])
 api_router.include_router(devops_controller.router, prefix="/devops", tags=["devops"])
-api_router.include_router(workflow_controller.router, prefix="/workflow-rules", tags=["workflow-rules"])
 api_router.include_router(workflow_definition_controller.router, prefix="/workflow-definitions", tags=["workflow-definitions"])
 api_router.include_router(workflow_runtime_controller.router, prefix="/workflow-runtime", tags=["workflow-runtime"])
 api_router.include_router(workflow_component_controller.component_router, prefix="/workflow-components", tags=["workflow-components"])

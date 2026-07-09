@@ -1,4 +1,4 @@
-from uuid import uuid4
+﻿from uuid import uuid4
 
 from fastapi.testclient import TestClient
 
@@ -71,6 +71,21 @@ def _add_project_member(project_id: int, user_id: int, project_role: str) -> Non
         db.commit()
     finally:
         db.close()
+
+
+def _runtime_transition(
+    client: TestClient,
+    object_type: str,
+    object_id: int,
+    action_key: str,
+    token: str,
+    payload: dict | None = None,
+):
+    return client.post(
+        f"/api/v1/workflow-runtime/{object_type}/{object_id}/transition",
+        json={"action_key": action_key, "payload": payload or {}},
+        headers={"Authorization": f"Bearer {token}"},
+    )
 
 
 def test_requirement_and_task_create_default_to_template_statuses_and_prd_fields(client: TestClient):
@@ -196,63 +211,66 @@ def test_task_update_records_only_changed_fields(client: TestClient):
     assert data[0]["after_data"] == {"title": "任务编辑后标题", "priority": "high"}
 
 
-def test_requirement_close_requires_reason_and_records_canceled_history(client: TestClient):
+def test_requirement_cancel_records_history_through_runtime(client: TestClient):
     project_id = _create_project(client)
-    _, owner_id = _create_actor_token("Requirement Closer")
+    token, owner_id = _create_actor_token("Requirement Closer")
     requirement = client.post(
         "/api/v1/requirements",
-        json={"project_id": project_id, "title": f"待关闭需求-{uuid4().hex[:8]}", "owner_id": owner_id},
+        json={"project_id": project_id, "title": f"Cancelable requirement {uuid4().hex[:8]}", "owner_id": owner_id},
     )
     assert requirement.status_code == 200
 
-    rejected = client.post(f"/api/v1/requirements/{requirement.json()['id']}/close", json={"remark": "缺少原因"})
-    assert rejected.status_code == 422
-
-    closed = client.post(
-        f"/api/v1/requirements/{requirement.json()['id']}/close",
-        json={"reason": "done", "remark": "已完成上线"},
+    canceled = _runtime_transition(
+        client,
+        "requirement",
+        requirement.json()["id"],
+        "cancel",
+        token,
+        {"reason": "done", "remark": "scope removed"},
     )
-    assert closed.status_code == 200
-    assert closed.json()["status"] == "canceled"
 
+    assert canceled.status_code == 200
+    assert canceled.json()["status"] == "canceled"
     history = client.get(f"/api/v1/requirements/{requirement.json()['id']}/status-operations")
     assert history.status_code == 200
     assert history.json()[-1]["action"] == "cancel"
     assert history.json()[-1]["reason"] == "done"
-    assert history.json()[-1]["remark"] == "已完成上线"
-
+    assert history.json()[-1]["remark"] == "scope removed"
 
 def test_requirement_close_blocks_on_open_linked_tasks_and_does_not_cancel_them(client: TestClient):
     project_id = _create_project(client)
-    _, owner_id = _create_actor_token("Requirement Handler")
+    token, owner_id = _create_actor_token("Requirement Handler")
     requirement = client.post(
         "/api/v1/requirements",
-        json={"project_id": project_id, "title": f"关闭阻塞需求-{uuid4().hex[:8]}", "owner_id": owner_id},
+        json={"project_id": project_id, "title": f"Blocked requirement {uuid4().hex[:8]}", "owner_id": owner_id},
     ).json()
     task = client.post(
         "/api/v1/tasks",
-        json={"project_id": project_id, "requirement_id": requirement["id"], "title": f"打开任务-{uuid4().hex[:8]}", "owner_id": owner_id},
+        json={"project_id": project_id, "requirement_id": requirement["id"], "title": f"Open task {uuid4().hex[:8]}", "owner_id": owner_id},
     ).json()
 
-    blocked = client.post(
-        f"/api/v1/requirements/{requirement['id']}/close",
-        json={"reason": "不做", "remark": "需求取消"},
+    blocked = _runtime_transition(
+        client,
+        "requirement",
+        requirement["id"],
+        "cancel",
+        token,
+        {"reason": "not needed", "remark": "cancel requirement"},
     )
 
     assert blocked.status_code == 400
     assert client.get(f"/api/v1/requirements/{requirement['id']}").json()["status"] == "in_processing"
     assert client.get(f"/api/v1/tasks/{task['id']}").json()["status"] == "in_processing"
 
-
 def test_requirement_complete_goes_directly_to_completed_and_blocks_on_open_tasks(client: TestClient):
     project_id = _create_project(client)
-    _, owner_id = _create_actor_token("Requirement Completer")
+    token, owner_id = _create_actor_token("Requirement Completer")
     requirement = client.post(
         "/api/v1/requirements",
-        json={"project_id": project_id, "title": f"可完成需求-{uuid4().hex[:8]}", "owner_id": owner_id},
+        json={"project_id": project_id, "title": f"Completable requirement {uuid4().hex[:8]}", "owner_id": owner_id},
     ).json()
 
-    completed = client.post(f"/api/v1/requirements/{requirement['id']}/complete")
+    completed = _runtime_transition(client, "requirement", requirement["id"], "complete", token)
     assert completed.status_code == 200
     assert completed.json()["status"] == "completed"
     history = client.get(f"/api/v1/requirements/{requirement['id']}/status-operations").json()
@@ -260,104 +278,45 @@ def test_requirement_complete_goes_directly_to_completed_and_blocks_on_open_task
 
     blocked_requirement = client.post(
         "/api/v1/requirements",
-        json={"project_id": project_id, "title": f"阻塞完成需求-{uuid4().hex[:8]}", "owner_id": owner_id},
+        json={"project_id": project_id, "title": f"Blocked completion requirement {uuid4().hex[:8]}", "owner_id": owner_id},
     ).json()
     client.post(
         "/api/v1/tasks",
-        json={"project_id": project_id, "requirement_id": blocked_requirement["id"], "title": f"未完成任务-{uuid4().hex[:8]}", "owner_id": owner_id},
+        json={"project_id": project_id, "requirement_id": blocked_requirement["id"], "title": f"Open task {uuid4().hex[:8]}", "owner_id": owner_id},
     )
 
-    blocked = client.post(f"/api/v1/requirements/{blocked_requirement['id']}/complete")
+    blocked = _runtime_transition(client, "requirement", blocked_requirement["id"], "complete", token)
     assert blocked.status_code == 400
     assert client.get(f"/api/v1/requirements/{blocked_requirement['id']}").json()["status"] == "in_processing"
 
-
-def test_requirement_defer_moves_linked_items_and_resets_status(client: TestClient):
+def test_task_claim_and_cancel_follow_default_statuses(client: TestClient):
     project_id = _create_project(client)
-    _, owner_id = _create_actor_token("Defer Owner")
-    current_iteration = client.post(
-        "/api/v1/iterations",
-        json={"project_ids": [project_id], "name": f"当前迭代-{uuid4().hex[:8]}", "status": "active"},
-    ).json()
-    target_iteration = client.post(
-        "/api/v1/iterations",
-        json={"project_ids": [project_id], "name": f"下一迭代-{uuid4().hex[:8]}", "status": "planning"},
-    ).json()
-    requirement = client.post(
-        "/api/v1/requirements",
-        json={
-            "project_id": project_id,
-            "iteration_id": current_iteration["id"],
-            "title": f"延期需求-{uuid4().hex[:8]}",
-            "owner_id": owner_id,
-        },
-    ).json()
+    token, _ = _create_actor_token("Task Claimer")
     task = client.post(
         "/api/v1/tasks",
-        json={
-            "project_id": project_id,
-            "requirement_id": requirement["id"],
-            "iteration_id": current_iteration["id"],
-            "title": f"延期任务-{uuid4().hex[:8]}",
-            "owner_id": owner_id,
-        },
-    ).json()
-    test_case = client.post(
-        "/api/v1/test-cases",
-        json={
-            "project_id": project_id,
-            "requirement_id": requirement["id"],
-            "iteration_id": current_iteration["id"],
-            "title": f"延期用例-{uuid4().hex[:8]}",
-        },
-    ).json()
-
-    deferred = client.post(
-        f"/api/v1/requirements/{requirement['id']}/close",
-        json={"reason": "延期", "target_iteration_id": target_iteration["id"], "remark": "延期到下一迭代"},
-    )
-
-    assert deferred.status_code == 200
-    assert deferred.json()["status"] == "in_processing"
-    assert deferred.json()["iteration_id"] == target_iteration["id"]
-    assert client.get(f"/api/v1/tasks/{task['id']}").json()["iteration_id"] == target_iteration["id"]
-    assert client.get(f"/api/v1/tasks/{task['id']}").json()["status"] == "pending_assignment"
-    db = SessionLocal()
-    try:
-        persisted_case = db.query(TestCase).filter(TestCase.id == test_case["id"]).first()
-        assert persisted_case is not None
-        assert persisted_case.iteration_id == target_iteration["id"]
-    finally:
-        db.close()
-
-
-def test_task_activate_and_close_follow_default_statuses(client: TestClient):
-    project_id = _create_project(client)
-    task = client.post(
-        "/api/v1/tasks",
-        json={"project_id": project_id, "title": f"任务状态流转-{uuid4().hex[:8]}"},
+        json={"project_id": project_id, "title": f"Task status flow {uuid4().hex[:8]}"},
     )
     assert task.status_code == 200
     assert task.json()["status"] == "pending_assignment"
 
-    activated = client.post(f"/api/v1/tasks/{task.json()['id']}/activate")
-    assert activated.status_code == 200
-    assert activated.json()["status"] == "in_processing"
+    claimed = _runtime_transition(client, "task", task.json()["id"], "claim", token)
+    assert claimed.status_code == 200
+    assert claimed.json()["status"] == "in_processing"
 
-    rejected = client.post(f"/api/v1/tasks/{task.json()['id']}/close", json={"remark": "缺少原因"})
-    assert rejected.status_code == 422
-
-    closed = client.post(
-        f"/api/v1/tasks/{task.json()['id']}/close",
-        json={"reason": "不做", "remark": "任务取消"},
+    canceled = _runtime_transition(
+        client,
+        "task",
+        task.json()["id"],
+        "cancel",
+        token,
+        {"reason": "not needed", "remark": "cancel task"},
     )
-    assert closed.status_code == 200
-    assert closed.json()["status"] == "canceled"
+    assert canceled.status_code == 200
+    assert canceled.json()["status"] == "canceled"
 
     history = client.get(f"/api/v1/tasks/{task.json()['id']}/status-operations")
     assert history.status_code == 200
     assert [item["action"] for item in history.json()][-2:] == ["claim", "cancel"]
-
 
 def test_bug_fix_task_complete_routes_to_pending_confirmation(client: TestClient):
     project_id = _create_project(client)
@@ -375,10 +334,7 @@ def test_bug_fix_task_complete_routes_to_pending_confirmation(client: TestClient
         },
     ).json()
 
-    completed = client.post(
-        f"/api/v1/tasks/{task['id']}/complete",
-        headers={"Authorization": f"Bearer {developer_token}"},
-    )
+    completed = _runtime_transition(client, "task", task["id"], "submit_confirmation", developer_token)
 
     assert completed.status_code == 200
     assert completed.json()["status"] == "pending_confirmation"

@@ -5,7 +5,9 @@ from fastapi.testclient import TestClient
 from app.core.security import create_access_token, get_password_hash
 from app.db.session import SessionLocal
 from app.models.project_member import ProjectMember
+from app.models.requirement import Requirement
 from app.models.role import Role, UserRole
+from app.models.task import Task
 from app.models.user import User
 
 
@@ -58,6 +60,39 @@ def _add_project_member(project_id: int, user_id: int, project_role: str = "deve
         db.commit()
     finally:
         db.close()
+
+
+def _set_requirement_status(requirement_id: int, status: str) -> None:
+    db = SessionLocal()
+    try:
+        db.query(Requirement).filter(Requirement.id == requirement_id).update({"status": status})
+        db.commit()
+    finally:
+        db.close()
+
+
+def _set_task_status(task_id: int, status: str) -> None:
+    db = SessionLocal()
+    try:
+        db.query(Task).filter(Task.id == task_id).update({"status": status})
+        db.commit()
+    finally:
+        db.close()
+
+
+def _runtime_transition(
+    client: TestClient,
+    object_type: str,
+    object_id: int,
+    action_key: str,
+    token: str,
+    payload: dict | None = None,
+):
+    return client.post(
+        f"/api/v1/workflow-runtime/{object_type}/{object_id}/transition",
+        json={"action_key": action_key, "payload": payload or {}},
+        headers={"Authorization": f"Bearer {token}"},
+    )
 
 
 def test_create_work_items_do_not_use_default_owner_roles(client: TestClient):
@@ -161,8 +196,7 @@ def test_batch_assign_returns_success_and_failure_items(client: TestClient):
         "/api/v1/requirements",
         json={"project_id": project_id, "title": f"Batch closed-{uuid4().hex[:8]}", "owner_id": owner_id},
     ).json()
-    client.post(f"/api/v1/requirements/{closed_requirement['id']}/activate")
-    client.post(f"/api/v1/requirements/{closed_requirement['id']}/close", json={"reason": "不做"})
+    _set_requirement_status(closed_requirement["id"], "canceled")
 
     response = client.post(
         "/api/v1/requirements/batch-assign",
@@ -186,7 +220,12 @@ def test_non_current_handler_cannot_update_or_transition_task(client: TestClient
     _add_project_member(project_id, other_id)
     task = client.post(
         "/api/v1/tasks",
-        json={"project_id": project_id, "title": f"Protected task-{uuid4().hex[:8]}", "owner_id": owner_id},
+        json={
+            "project_id": project_id,
+            "title": f"Protected task-{uuid4().hex[:8]}",
+            "task_type": "requirement_implementation",
+            "owner_id": owner_id,
+        },
     ).json()
 
     rejected_update = client.patch(
@@ -194,14 +233,8 @@ def test_non_current_handler_cannot_update_or_transition_task(client: TestClient
         json={"title": "Should not update"},
         headers={"Authorization": f"Bearer {other_token}"},
     )
-    rejected_transition = client.post(
-        f"/api/v1/tasks/{task['id']}/activate",
-        headers={"Authorization": f"Bearer {other_token}"},
-    )
-    accepted_transition = client.post(
-        f"/api/v1/tasks/{task['id']}/activate",
-        headers={"Authorization": f"Bearer {owner_token}"},
-    )
+    rejected_transition = _runtime_transition(client, "task", task["id"], "complete", other_token)
+    accepted_transition = _runtime_transition(client, "task", task["id"], "complete", owner_token)
 
     assert rejected_update.status_code == 403
     assert rejected_transition.status_code == 403
@@ -225,18 +258,24 @@ def test_workbench_defaults_to_current_users_non_terminal_items(client: TestClie
     ).json()
     done_task = client.post(
         "/api/v1/tasks",
-        json={"project_id": project_id, "iteration_id": iteration_id, "title": "Done task", "owner_id": user_id},
+        json={
+            "project_id": project_id,
+            "iteration_id": iteration_id,
+            "title": "Done task",
+            "task_type": "requirement_implementation",
+            "owner_id": user_id,
+        },
     ).json()
-    client.post(f"/api/v1/tasks/{done_task['id']}/activate")
-    client.post(f"/api/v1/tasks/{done_task['id']}/complete")
+    _set_task_status(done_task["id"], "completed")
 
     response = client.get(f"/api/v1/dashboard/workbench?user_id={user_id}")
 
     assert response.status_code == 200
-    board = next(item for item in response.json()["iterations"] if item["id"] == iteration_id)
-    assert {item["id"] for item in board["requirements"]} == {my_requirement["id"]}
-    assert other_requirement["id"] not in {item["id"] for item in board["requirements"]}
-    assert done_task["id"] not in {item["id"] for item in board["tasks"]}
+    pending_items = response.json()["pending_handling"]["items"]
+    pending_refs = {(item["object_type"], item["id"]) for item in pending_items}
+    assert ("requirement", my_requirement["id"]) in pending_refs
+    assert ("requirement", other_requirement["id"]) not in pending_refs
+    assert ("task", done_task["id"]) not in pending_refs
 
 
 def test_workbench_my_queue_uses_owner_not_project_membership(client: TestClient):
@@ -258,11 +297,11 @@ def test_workbench_my_queue_uses_owner_not_project_membership(client: TestClient
     teammate_response = client.get(f"/api/v1/dashboard/workbench?user_id={teammate_id}")
 
     assert owner_response.status_code == 200
-    owner_board = next(item for item in owner_response.json()["iterations"] if item["id"] == iteration_id)
-    assert {item["id"] for item in owner_board["bugs"]} == {my_bug["id"]}
-    assert teammate_task["id"] not in {item["id"] for item in owner_board["tasks"]}
+    owner_refs = {(item["object_type"], item["id"]) for item in owner_response.json()["pending_handling"]["items"]}
+    assert ("bug", my_bug["id"]) in owner_refs
+    assert ("task", teammate_task["id"]) not in owner_refs
 
     assert teammate_response.status_code == 200
-    teammate_board = next(item for item in teammate_response.json()["iterations"] if item["id"] == iteration_id)
-    assert {item["id"] for item in teammate_board["tasks"]} == {teammate_task["id"]}
-    assert my_bug["id"] not in {item["id"] for item in teammate_board["bugs"]}
+    teammate_refs = {(item["object_type"], item["id"]) for item in teammate_response.json()["pending_handling"]["items"]}
+    assert ("task", teammate_task["id"]) in teammate_refs
+    assert ("bug", my_bug["id"]) not in teammate_refs

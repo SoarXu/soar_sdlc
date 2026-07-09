@@ -56,7 +56,6 @@ TRACKED_TABLES = [
     "workflow_transitions",
     "workflow_states",
     "workflow_definitions",
-    "workflow_rules",
     "work_item_comments",
     "object_watch",
     "notifications",

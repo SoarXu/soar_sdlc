@@ -539,7 +539,8 @@ def test_closed_project_move_only_changes_parent_after_phase_removed(client: Tes
         json={"project_id": project["id"], "title": f"转移前任务-{uuid4().hex[:8]}"},
     ).json()
     client.post(f"/api/v1/projects/{project['id']}/start", json={"effective_time": "2026-06-01T09:00:00"})
-    client.post(f"/api/v1/projects/{project['id']}/close", json={"effective_time": "2026-06-10T18:00:00"})
+    blocked_close = client.post(f"/api/v1/projects/{project['id']}/close", json={"effective_time": "2026-06-10T18:00:00"})
+    assert blocked_close.status_code == 400
 
     moved = client.patch(
         f"/api/v1/projects/{project['id']}",
@@ -552,7 +553,7 @@ def test_closed_project_move_only_changes_parent_after_phase_removed(client: Tes
 
     assert moved.status_code == 200
     assert moved.json()["parent_id"] == parent["id"]
-    assert moved.json()["status"] == "closed"
+    assert moved.json()["status"] == "active"
     assert "lifecycle_phase" not in moved.json()
     assert "maintenance_start_time" not in moved.json()
     assert client.get(f"/api/v1/requirements/{development_requirement['id']}").status_code == 200

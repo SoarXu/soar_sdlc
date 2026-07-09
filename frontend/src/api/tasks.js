@@ -24,18 +24,6 @@ export function batchAssignTasks(payload) {
   return http.post('/tasks/batch-assign', payload)
 }
 
-export function activateTask(id) {
-  return http.post(`/tasks/${id}/activate`)
-}
-
-export function closeTask(id, payload) {
-  return http.post(`/tasks/${id}/close`, payload)
-}
-
-export function completeTask(id) {
-  return http.post(`/tasks/${id}/complete`)
-}
-
 export function fetchTaskStatusOperations(id) {
   return http.get(`/tasks/${id}/status-operations`)
 }

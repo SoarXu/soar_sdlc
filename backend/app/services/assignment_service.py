@@ -11,8 +11,8 @@ from app.views.status_operation_view import AssignOwnerRequest, BatchAssignOwner
 
 
 TERMINAL_STATUSES = {
-    "requirement": {"done", "closed"},
-    "task": {"done", "closed"},
+    "requirement": {"completed", "canceled", "done", "closed"},
+    "task": {"completed", "canceled", "done", "closed"},
     "bug": {"closed"},
 }
 

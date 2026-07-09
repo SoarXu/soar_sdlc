@@ -10,23 +10,16 @@ from app.services.project_permission_service import (
     ensure_work_item_delete_permission,
 )
 from app.services.bug_service import (
-    activate_bug,
-    close_bug,
     create_bug,
     delete_bug,
     get_bug,
     list_bug_status_operations,
     list_bugs,
-    resolve_bug,
-    start_fixing_bug,
-    suspend_bug,
     update_bug,
-    verify_bug_failed,
-    verify_bug_passed,
 )
 from app.services.assignment_service import assign_bug_owner, batch_assign_bug_owner
 from app.services.validation_case_service import bug_validation_context
-from app.views.bug_view import BugCreate, BugRead, BugStatusActionRequest, BugUpdate
+from app.views.bug_view import BugCreate, BugRead, BugUpdate
 from app.views.status_operation_view import AssignOwnerRequest, BatchAssignOwnerRead, BatchAssignOwnerRequest, StatusOperationRead
 from app.views.test_case_view import BugValidationContextRead
 
@@ -86,84 +79,6 @@ def assign_bug(
     current_user: User | None = Depends(get_optional_current_user),
 ):
     return assign_bug_owner(db, bug_id, payload, actor=current_user)
-
-
-@router.post("/{bug_id}/start-fixing", response_model=BugRead)
-def start_bug_fixing(
-    bug_id: int,
-    payload: BugStatusActionRequest | None = None,
-    db: Session = Depends(get_db),
-    current_user: User | None = Depends(get_optional_current_user),
-):
-    return start_fixing_bug(db, bug_id, _with_operator(payload, current_user))
-
-
-@router.post("/{bug_id}/resolve", response_model=BugRead)
-def post_bug_resolve(
-    bug_id: int,
-    payload: BugStatusActionRequest,
-    db: Session = Depends(get_db),
-    current_user: User | None = Depends(get_optional_current_user),
-):
-    return resolve_bug(db, bug_id, _with_operator(payload, current_user))
-
-
-@router.post("/{bug_id}/verify-passed", response_model=BugRead)
-def post_bug_verify_passed(
-    bug_id: int,
-    payload: BugStatusActionRequest | None = None,
-    db: Session = Depends(get_db),
-    current_user: User | None = Depends(get_optional_current_user),
-):
-    return verify_bug_passed(db, bug_id, _with_operator(payload, current_user))
-
-
-@router.post("/{bug_id}/verify-failed", response_model=BugRead)
-def post_bug_verify_failed(
-    bug_id: int,
-    payload: BugStatusActionRequest | None = None,
-    db: Session = Depends(get_db),
-    current_user: User | None = Depends(get_optional_current_user),
-):
-    return verify_bug_failed(db, bug_id, _with_operator(payload, current_user))
-
-
-@router.post("/{bug_id}/suspend", response_model=BugRead)
-def post_bug_suspend(
-    bug_id: int,
-    payload: BugStatusActionRequest | None = None,
-    db: Session = Depends(get_db),
-    current_user: User | None = Depends(get_optional_current_user),
-):
-    return suspend_bug(db, bug_id, _with_operator(payload, current_user))
-
-
-@router.post("/{bug_id}/close", response_model=BugRead)
-def post_bug_close(
-    bug_id: int,
-    payload: BugStatusActionRequest | None = None,
-    db: Session = Depends(get_db),
-    current_user: User | None = Depends(get_optional_current_user),
-):
-    return close_bug(db, bug_id, _with_operator(payload, current_user))
-
-
-@router.post("/{bug_id}/activate", response_model=BugRead)
-def post_bug_activate(
-    bug_id: int,
-    payload: BugStatusActionRequest | None = None,
-    db: Session = Depends(get_db),
-    current_user: User | None = Depends(get_optional_current_user),
-):
-    return activate_bug(db, bug_id, _with_operator(payload, current_user))
-
-
-def _with_operator(payload: BugStatusActionRequest | None, current_user: User | None) -> BugStatusActionRequest | None:
-    if not current_user:
-        return payload
-    action_payload = payload or BugStatusActionRequest()
-    action_payload.operator_id = current_user.id
-    return action_payload
 
 
 @router.get("/{bug_id}/status-operations", response_model=list[StatusOperationRead])

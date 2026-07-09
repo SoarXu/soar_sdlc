@@ -9,7 +9,6 @@ from app.models.project import Project
 from app.models.requirement import Requirement
 from app.models.test_case import TestCase
 from app.models.test_run import TestRun, TestRunCase
-from app.models.user import User
 from app.services.current_handler_service import ensure_work_item_action
 from app.services.lifecycle_service import (
     project_lifecycle_phase,
@@ -17,12 +16,7 @@ from app.services.lifecycle_service import (
     test_case_lifecycle_phase,
 )
 from app.services.status_operation_service import list_status_operations
-from app.services.workflow_runtime_service import execute_transition
-from app.views.bug_view import BugCreate, BugFromTestRunCaseRequest, BugStatusActionRequest, BugUpdate
-from app.views.workflow_runtime_view import WorkflowTransitionExecuteRequest
-
-
-BUG_RESOLUTIONS = {"设计如此", "重复Bug", "外部原因", "已解决", "无法重现", "延期处理", "不予解决"}
+from app.views.bug_view import BugCreate, BugFromTestRunCaseRequest, BugUpdate
 
 
 def list_bugs(db: Session) -> list[Bug]:
@@ -107,61 +101,6 @@ def update_bug(db: Session, bug_id: int, payload: BugUpdate, actor_id: int | Non
     return bug
 
 
-def start_fixing_bug(db: Session, bug_id: int, payload: BugStatusActionRequest | None = None) -> Bug:
-    bug = _get_active_bug(db, bug_id)
-    ensure_work_item_action(db, bug, payload.operator_id if payload else None, "Bug")
-    if payload and payload.iteration_id:
-        _ensure_iteration_can_fix_bug(db, payload.iteration_id, bug)
-        bug.iteration_id = payload.iteration_id
-    return _run_bug_transition(
-        db,
-        bug,
-        "confirm_bug_type",
-        payload=payload,
-        actor_id=payload.operator_id if payload else None,
-        selected_values={"bug_type": "code_issue"},
-    )
-
-
-def resolve_bug(db: Session, bug_id: int, payload: BugStatusActionRequest) -> Bug:
-    if not payload.resolution:
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Resolution is required")
-    if payload.resolution not in BUG_RESOLUTIONS:
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Unknown resolution")
-    bug = _get_active_bug(db, bug_id)
-    ensure_work_item_action(db, bug, payload.operator_id, "Bug")
-    bug.resolution = payload.resolution
-    return _run_bug_transition(db, bug, "submit_verification", payload=payload, actor_id=payload.operator_id)
-
-
-def verify_bug_passed(db: Session, bug_id: int, payload: BugStatusActionRequest | None = None) -> Bug:
-    bug = _get_active_bug(db, bug_id)
-    ensure_work_item_action(db, bug, payload.operator_id if payload else None, "Bug")
-    return _run_bug_transition(db, bug, "verification_passed", payload=payload, actor_id=payload.operator_id if payload else None)
-
-
-def verify_bug_failed(db: Session, bug_id: int, payload: BugStatusActionRequest | None = None) -> Bug:
-    bug = _get_active_bug(db, bug_id)
-    ensure_work_item_action(db, bug, payload.operator_id if payload else None, "Bug")
-    return _run_bug_transition(db, bug, "verification_failed", payload=payload, actor_id=payload.operator_id if payload else None)
-
-
-def suspend_bug(db: Session, bug_id: int, payload: BugStatusActionRequest | None = None) -> Bug:
-    raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Suspend is not supported by the default bug workflow")
-
-
-def close_bug(db: Session, bug_id: int, payload: BugStatusActionRequest | None = None) -> Bug:
-    bug = _get_active_bug(db, bug_id)
-    ensure_work_item_action(db, bug, payload.operator_id if payload else None, "Bug")
-    return _run_bug_transition(db, bug, "close", payload=payload, actor_id=payload.operator_id if payload else None)
-
-
-def activate_bug(db: Session, bug_id: int, payload: BugStatusActionRequest | None = None) -> Bug:
-    bug = _get_active_bug(db, bug_id)
-    ensure_work_item_action(db, bug, payload.operator_id if payload else None, "Bug")
-    return _run_bug_transition(db, bug, "activate", payload=payload, actor_id=payload.operator_id if payload else None)
-
-
 def list_bug_status_operations(db: Session, bug_id: int) -> list[dict]:
     _get_active_bug(db, bug_id)
     return list_status_operations(db, "bug", bug_id)
@@ -179,49 +118,6 @@ def _get_active_bug(db: Session, bug_id: int) -> Bug:
     if not bug:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Bug not found")
     return bug
-
-
-def _run_bug_transition(
-    db: Session,
-    bug: Bug,
-    action_key: str,
-    *,
-    payload: BugStatusActionRequest | None = None,
-    actor_id: int | None = None,
-    selected_values: dict | None = None,
-) -> Bug:
-    actor = _actor_user(db, actor_id)
-    request = WorkflowTransitionExecuteRequest(
-        action_key=action_key,
-        payload=_payload_dict(payload),
-        selected_values=selected_values or {},
-        delegate_reason=_delegate_reason(bug.owner_id, actor, payload),
-    )
-    execute_transition(db, "bug", bug.id, request, actor)
-    db.refresh(bug)
-    return bug
-
-
-def _payload_dict(payload: BugStatusActionRequest | None) -> dict:
-    return payload.model_dump(exclude_none=True) if payload else {}
-
-
-def _actor_user(db: Session, actor_id: int | None) -> User | None:
-    if not actor_id:
-        return None
-    return db.query(User).filter(User.id == actor_id).first()
-
-
-def _delegate_reason(owner_id: int | None, actor: User | None, payload: BugStatusActionRequest | None) -> str | None:
-    if not actor:
-        return None
-    if owner_id == actor.id:
-        return None
-    return (payload.remark if payload and payload.remark else "legacy bug endpoint proxy")
-
-
-def _ensure_iteration_can_fix_bug(db: Session, iteration_id: int, bug: Bug) -> None:
-    _ensure_iteration_can_accept_bug(db, iteration_id, bug.project_id)
 
 
 def _ensure_iteration_can_accept_bug(db: Session, iteration_id: int, bug_project_id: int | None) -> None:

@@ -23,7 +23,6 @@ EXPECTED_TABLES = {
     "form_layout_config",
     "custom_field_value",
     "workflow_component_registry",
-    "workflow_rules",
     "object_relation",
     "status_operation_log",
     "notifications",

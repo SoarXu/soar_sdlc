@@ -10,9 +10,6 @@ from app.services.project_permission_service import (
     ensure_work_item_delete_permission,
 )
 from app.services.task_service import (
-    activate_task,
-    close_task,
-    complete_task,
     create_task,
     delete_task,
     get_task,
@@ -23,7 +20,7 @@ from app.services.task_service import (
 )
 from app.services.assignment_service import assign_task_owner, batch_assign_task_owner
 from app.views.audit_log_view import AuditLogRead
-from app.views.status_operation_view import AssignOwnerRequest, BatchAssignOwnerRead, BatchAssignOwnerRequest, StatusOperationCreate, StatusOperationRead
+from app.views.status_operation_view import AssignOwnerRequest, BatchAssignOwnerRead, BatchAssignOwnerRequest, StatusOperationRead
 from app.views.task_view import TaskCreate, TaskRead, TaskUpdate
 
 
@@ -77,34 +74,6 @@ def assign_task(
     current_user: User | None = Depends(get_optional_current_user),
 ):
     return assign_task_owner(db, task_id, payload, actor=current_user)
-
-
-@router.post("/{task_id}/activate", response_model=TaskRead)
-def activate_task_status(
-    task_id: int,
-    db: Session = Depends(get_db),
-    current_user: User | None = Depends(get_optional_current_user),
-):
-    return activate_task(db, task_id, actor_id=current_user.id if current_user else None)
-
-
-@router.post("/{task_id}/close", response_model=TaskRead)
-def close_task_status(
-    task_id: int,
-    payload: StatusOperationCreate,
-    db: Session = Depends(get_db),
-    current_user: User | None = Depends(get_optional_current_user),
-):
-    return close_task(db, task_id, payload, actor_id=current_user.id if current_user else None)
-
-
-@router.post("/{task_id}/complete", response_model=TaskRead)
-def complete_task_status(
-    task_id: int,
-    db: Session = Depends(get_db),
-    current_user: User | None = Depends(get_optional_current_user),
-):
-    return complete_task(db, task_id, actor_id=current_user.id if current_user else None)
 
 
 @router.get("/{task_id}/status-operations", response_model=list[StatusOperationRead])

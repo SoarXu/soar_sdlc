@@ -22,7 +22,6 @@ from app.models.user import User
 from app.models.work_item_comment import WorkItemComment
 from app.models.workflow_component import WorkflowComponent
 from app.models.workflow_definition import WorkflowDefinition, WorkflowState, WorkflowTransition
-from app.models.workflow_rule import WorkflowRule
 
 __all__ = [
     "Attachment",
@@ -59,7 +58,6 @@ __all__ = [
     "WorkItemComment",
     "WorkflowComponent",
     "WorkflowDefinition",
-    "WorkflowRule",
     "WorkflowState",
     "WorkflowTransition",
 ]

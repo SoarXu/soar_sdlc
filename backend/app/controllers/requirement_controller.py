@@ -18,9 +18,6 @@ from app.services.requirement_import_service import (
     preview_requirement_import,
 )
 from app.services.requirement_service import (
-    activate_requirement,
-    close_requirement,
-    complete_requirement,
     create_requirement,
     delete_requirement,
     generate_task_from_requirement,
@@ -41,7 +38,7 @@ from app.views.requirement_view import (
     RequirementUpdate,
 )
 from app.views.audit_log_view import AuditLogRead
-from app.views.status_operation_view import AssignOwnerRequest, BatchAssignOwnerRead, BatchAssignOwnerRequest, StatusOperationCreate, StatusOperationRead
+from app.views.status_operation_view import AssignOwnerRequest, BatchAssignOwnerRead, BatchAssignOwnerRequest, StatusOperationRead
 from app.views.task_view import TaskRead
 from app.views.test_case_view import RequirementValidationCasesRead
 
@@ -140,34 +137,6 @@ def assign_requirement(
     current_user: User | None = Depends(get_optional_current_user),
 ):
     return assign_requirement_owner(db, requirement_id, payload, actor=current_user)
-
-
-@router.post("/{requirement_id}/activate", response_model=RequirementRead)
-def activate_requirement_status(
-    requirement_id: int,
-    db: Session = Depends(get_db),
-    current_user: User | None = Depends(get_optional_current_user),
-):
-    return activate_requirement(db, requirement_id, actor_id=current_user.id if current_user else None)
-
-
-@router.post("/{requirement_id}/close", response_model=RequirementRead)
-def close_requirement_status(
-    requirement_id: int,
-    payload: StatusOperationCreate,
-    db: Session = Depends(get_db),
-    current_user: User | None = Depends(get_optional_current_user),
-):
-    return close_requirement(db, requirement_id, payload, actor_id=current_user.id if current_user else None)
-
-
-@router.post("/{requirement_id}/complete", response_model=RequirementRead)
-def complete_requirement_status(
-    requirement_id: int,
-    db: Session = Depends(get_db),
-    current_user: User | None = Depends(get_optional_current_user),
-):
-    return complete_requirement(db, requirement_id, actor_id=current_user.id if current_user else None)
 
 
 @router.get("/{requirement_id}/status-operations", response_model=list[StatusOperationRead])

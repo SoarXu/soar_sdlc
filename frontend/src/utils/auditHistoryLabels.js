@@ -9,7 +9,6 @@ const TEST_RUN_FIELDS = new Set(['test_run_id'])
 const ITERATION_FIELDS = new Set(['iteration_id'])
 const PROGRAM_FIELDS = new Set(['program_id'])
 const ASSIGNEE_RULE_CONFIG_FIELDS = new Set(['assignee_rule_config_id'])
-const WORKFLOW_RULE_FIELDS = new Set(['workflow_config_id', 'workflow_rule_id'])
 
 const FIELD_OPTION_CONTEXT = {
   status: 'statusOptions',
@@ -36,7 +35,6 @@ export function formatAuditValue(field, value, context = {}) {
   if (PROJECT_FIELDS.has(field)) return labelById(context.projects || [], value)
   if (PROGRAM_FIELDS.has(field)) return labelById(context.programs || [], value)
   if (ASSIGNEE_RULE_CONFIG_FIELDS.has(field)) return labelById(context.assigneeRuleConfigs || [], value)
-  if (WORKFLOW_RULE_FIELDS.has(field)) return labelById(context.workflowRules || [], value)
   if (ITERATION_FIELDS.has(field)) return labelById(context.iterations || [], value)
   if (REQUIREMENT_FIELDS.has(field)) return labelById(context.requirements || [], value, 'title')
   if (TASK_FIELDS.has(field)) return labelById(context.tasks || [], value, 'title')

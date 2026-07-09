@@ -187,9 +187,10 @@ def _create_project_with_requirement_workflow(client: TestClient) -> tuple[int, 
 
 def test_runtime_lists_configured_transitions_and_batch(client: TestClient):
     _, project_id = _create_project_with_bug_workflow(client)
+    owner_id, _ = _create_user("Runtime Listed Owner", "developer")
     bug = client.post(
         "/api/v1/bugs",
-        json={"project_id": project_id, "title": f"Runtime Bug {uuid4().hex[:8]}", "owner_id": None},
+        json={"project_id": project_id, "title": f"Runtime Bug {uuid4().hex[:8]}", "owner_id": owner_id},
     ).json()
 
     listed = client.get(f"/api/v1/workflow-runtime/bug/{bug['id']}/transitions")
@@ -208,9 +209,10 @@ def test_runtime_lists_configured_transitions_and_batch(client: TestClient):
 
 def test_runtime_exposes_manual_owner_flag_from_handler_rule(client: TestClient):
     _, project_id = _create_project_with_bug_workflow(client)
+    owner_id, _ = _create_user("Runtime Manual Flag Owner", "developer")
     bug = client.post(
         "/api/v1/bugs",
-        json={"project_id": project_id, "title": f"Manual Owner Bug {uuid4().hex[:8]}", "owner_id": None},
+        json={"project_id": project_id, "title": f"Manual Owner Bug {uuid4().hex[:8]}", "owner_id": owner_id},
     ).json()
     db = SessionLocal()
     try:

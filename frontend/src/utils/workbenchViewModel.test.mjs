@@ -72,9 +72,9 @@ import {
 }
 
 {
-  assert.equal(shouldShowWorkbenchWorkflowActions('unassigned', { object_type: 'requirement' }), false)
-  assert.equal(shouldShowWorkbenchWorkflowActions('unassigned', { object_type: 'task' }), false)
-  assert.equal(shouldShowWorkbenchWorkflowActions('unassigned', { object_type: 'bug' }), false)
+  assert.equal(shouldShowWorkbenchWorkflowActions('unassigned', { object_type: 'requirement' }), true)
+  assert.equal(shouldShowWorkbenchWorkflowActions('unassigned', { object_type: 'task' }), true)
+  assert.equal(shouldShowWorkbenchWorkflowActions('unassigned', { object_type: 'bug' }), true)
   assert.equal(shouldShowWorkbenchWorkflowActions('pending_handling', { object_type: 'requirement' }), true)
   assert.equal(shouldShowWorkbenchWorkflowActions('exception_center', { object_type: 'bug' }), true)
   assert.equal(shouldShowWorkbenchWorkflowActions('pending_handling', { object_type: 'test_case' }), false)

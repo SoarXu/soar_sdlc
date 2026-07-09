@@ -286,6 +286,8 @@ def _matches_transition_condition(item, transition: WorkflowTransition) -> bool:
 def _can_see_transition(db: Session, object_type: str, item, transition: WorkflowTransition, actor: User | None) -> bool:
     if transition.ui_config and transition.ui_config.get("hidden") is True:
         return False
+    if not _matches_ownerless_visibility(object_type, item, transition):
+        return False
     if not _handler_allowed(db, object_type, item, actor):
         return False
     return _role_allowed(db, object_type, item, transition, actor)
@@ -300,6 +302,8 @@ def _ensure_can_execute(
     request: WorkflowTransitionExecuteRequest,
 ) -> None:
     delegated = _is_delegated(db, item, actor)
+    if not _matches_ownerless_visibility(object_type, item, transition):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Workflow transition not available for current handler state")
     if not _handler_allowed(db, object_type, item, actor):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only current handler can execute transition")
     if delegated and not request.delegate_reason:
@@ -317,6 +321,16 @@ def _handler_allowed(db: Session, object_type: str, item, actor: User | None) ->
     if object_type in {"iteration", "project"}:
         return True
     return True
+
+
+def _matches_ownerless_visibility(object_type: str, item, transition: WorkflowTransition) -> bool:
+    if object_type not in {"requirement", "task", "bug"}:
+        return True
+    ownerless_only = bool((transition.ui_config or {}).get("ownerless_only"))
+    owner_id = getattr(item, "owner_id", None)
+    if owner_id is None:
+        return ownerless_only
+    return not ownerless_only
 
 
 def _role_allowed(db: Session, object_type: str, item, transition: WorkflowTransition, actor: User | None) -> bool:

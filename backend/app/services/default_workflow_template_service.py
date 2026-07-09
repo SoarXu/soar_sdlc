@@ -293,6 +293,24 @@ def _bug_graph() -> WorkflowGraphSave:
         ],
         transitions=[
             _transition(
+                "claim",
+                "认领",
+                "pending_handling",
+                "pending_handling",
+                target_type="actor",
+                ui_config={"list_display": "primary", "list_priority": 5, "ownerless_only": True},
+            ),
+            _transition(
+                "assign",
+                "指派",
+                "pending_handling",
+                "pending_handling",
+                allowed_roles="project_owner",
+                target_type="explicit_owner",
+                allow_manual_owner=True,
+                ui_config={"list_display": "more", "list_priority": 10, "ownerless_only": True},
+            ),
+            _transition(
                 "confirm_bug_type",
                 "确认缺陷类型",
                 "pending_handling",
@@ -354,6 +372,7 @@ def _bug_graph() -> WorkflowGraphSave:
             ),
             _transition("verification_passed", "验证通过", "pending_verification", "verified", ui_config={"list_display": "primary", "list_priority": 10}),
             _transition("verification_failed", "验证不通过", "pending_verification", "pending_handling", target_type="previous_handler", ui_config={"list_display": "primary", "list_priority": 20}),
+            _transition("return_reopen", "退回打开", "verified", "pending_handling", target_type="previous_handler", ui_config={"list_display": "more", "list_priority": 20}),
             _transition(
                 "close",
                 "关闭",
@@ -412,28 +431,47 @@ def _transition(
     from_status: str,
     to_status: str,
     *,
+    allowed_roles: str = "",
     target_type: str = "keep_current",
     target_roles: str = "",
     fallback_type: str = "keep_current",
     fallback_roles: str = "",
+    allow_manual_owner: bool = False,
+    manual_owner_roles: str = "",
     condition_config: dict | None = None,
     validator_config: dict | None = None,
     form_config: dict | None = None,
     ui_config: dict | None = None,
 ) -> WorkflowTransitionBase:
+    resolved_allowed_roles = allowed_roles
+    resolved_allow_manual_owner = allow_manual_owner
+    resolved_ui_config = dict(ui_config or {})
+    if action_key in {"claim", "assign"} and from_status in {"pending_assignment", "pending_handling"}:
+        resolved_ui_config.setdefault("ownerless_only", True)
+        if action_key == "claim":
+            resolved_ui_config.setdefault("list_display", "primary")
+            resolved_ui_config.setdefault("list_priority", 10)
+        if action_key == "assign":
+            resolved_allowed_roles = resolved_allowed_roles or "project_owner"
+            resolved_allow_manual_owner = True
+            resolved_ui_config.setdefault("list_display", "more")
+            resolved_ui_config.setdefault("list_priority", 20)
     return WorkflowTransitionBase(
         action_key=action_key,
         action_name=action_name,
         from_status=from_status,
         to_status=to_status,
+        allowed_roles=resolved_allowed_roles,
         handler_rule={
             "target_type": target_type,
             "target_roles": target_roles,
             "fallback_type": fallback_type,
             "fallback_roles": fallback_roles,
+            "allow_manual_owner": resolved_allow_manual_owner,
+            "manual_owner_roles": manual_owner_roles,
         },
         condition_config=condition_config,
         validator_config=validator_config,
         form_config=form_config,
-        ui_config=ui_config,
+        ui_config=resolved_ui_config,
     )

@@ -139,7 +139,6 @@ export function isTerminalWorkItem(item = {}) {
 }
 
 export function shouldShowWorkbenchWorkflowActions(sectionKey, item = {}) {
-  if (sectionKey === 'unassigned') return false
   return ['requirement', 'task', 'bug'].includes(item.object_type)
 }
 

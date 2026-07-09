@@ -116,7 +116,7 @@
                 <div class="workbench-list-actions">
                   <el-button link type="primary" class="workbench-action-main" @click="openWorkItemDetail(row)">详情</el-button>
                   <WorkflowActionButtons
-                    v-if="isWorkflowRuntimeItem(row)"
+                    v-if="shouldShowWorkflowActions(row)"
                     :object-type="row.object_type"
                     :object-id="row.id"
                     mode="list"
@@ -217,6 +217,7 @@ import {
   isTerminalWorkItem,
   itemStatusLabel,
   itemStatusTag,
+  shouldShowWorkbenchWorkflowActions,
   typeLabel,
   typeTag,
   workbenchInlineActions,
@@ -300,8 +301,8 @@ function inlineActionsFor(item) {
   return workbenchInlineActions(activeListSection.value?.key, item)
 }
 
-function isWorkflowRuntimeItem(item) {
-  return ['requirement', 'task', 'bug'].includes(item.object_type)
+function shouldShowWorkflowActions(item, sectionKey = activeListSection.value?.key) {
+  return shouldShowWorkbenchWorkflowActions(sectionKey, item)
 }
 
 function workflowTransitionsFor(item) {
@@ -436,15 +437,17 @@ function buildCaseReproduceText(item) {
 }
 
 async function loadWorkflowTransitions(data) {
-  const sectionItems = [
-    ...(data.pending_handling?.items || []),
-    ...(data.unassigned?.items || []),
-    ...(data.created_by_me?.items || []),
-    ...(data.watched_by_me?.items || []),
-    ...(data.mentioned_me?.items || []),
-    ...(data.exception_center?.items || [])
+  const sections = [
+    ['pending_handling', data.pending_handling?.items || []],
+    ['unassigned', data.unassigned?.items || []],
+    ['created_by_me', data.created_by_me?.items || []],
+    ['watched_by_me', data.watched_by_me?.items || []],
+    ['mentioned_me', data.mentioned_me?.items || []],
+    ['exception_center', data.exception_center?.items || []]
   ]
-  const runtimeItems = sectionItems.filter(isWorkflowRuntimeItem)
+  const runtimeItems = sections.flatMap(([sectionKey, items]) => (
+    items.filter((item) => shouldShowWorkflowActions(item, sectionKey))
+  ))
   const uniqueItems = [...new Map(runtimeItems.map((item) => [`${item.object_type}:${item.id}`, item])).values()]
   if (!uniqueItems.length) {
     workflowTransitions.value = {}

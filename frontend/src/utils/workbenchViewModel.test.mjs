@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 
 import {
   buildWorkbenchViewModel,
+  shouldShowWorkbenchWorkflowActions,
   workbenchInlineActions,
   workbenchItemActionGroup,
   workbenchMetaText
@@ -68,6 +69,15 @@ import {
 
   assert.deepEqual(actions.map((item) => item.key), ['auto_assign_item'])
   assert.deepEqual(actions.map((item) => item.label), ['自动分配'])
+}
+
+{
+  assert.equal(shouldShowWorkbenchWorkflowActions('unassigned', { object_type: 'requirement' }), false)
+  assert.equal(shouldShowWorkbenchWorkflowActions('unassigned', { object_type: 'task' }), false)
+  assert.equal(shouldShowWorkbenchWorkflowActions('unassigned', { object_type: 'bug' }), false)
+  assert.equal(shouldShowWorkbenchWorkflowActions('pending_handling', { object_type: 'requirement' }), true)
+  assert.equal(shouldShowWorkbenchWorkflowActions('exception_center', { object_type: 'bug' }), true)
+  assert.equal(shouldShowWorkbenchWorkflowActions('pending_handling', { object_type: 'test_case' }), false)
 }
 
 console.log('workbenchViewModel tests passed')

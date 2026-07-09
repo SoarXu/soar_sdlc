@@ -138,6 +138,11 @@ export function isTerminalWorkItem(item = {}) {
   return false
 }
 
+export function shouldShowWorkbenchWorkflowActions(sectionKey, item = {}) {
+  if (sectionKey === 'unassigned') return false
+  return ['requirement', 'task', 'bug'].includes(item.object_type)
+}
+
 export function typeLabel(type) {
   return TYPE_LABELS[type] || type || '-'
 }

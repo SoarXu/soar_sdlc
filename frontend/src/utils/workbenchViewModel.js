@@ -217,6 +217,14 @@ export function workbenchItemActionGroup(sectionKey, item = {}) {
   return { primary: null, secondary: [] }
 }
 
+export function workbenchInlineActions(sectionKey, item = {}) {
+  const group = workbenchItemActionGroup(sectionKey, item)
+  return [
+    ...(group.primary ? [group.primary] : []),
+    ...group.secondary
+  ]
+}
+
 export function formatWorkbenchDateTime(value) {
   return value ? new Date(value).toLocaleString('zh-CN', { hour12: false }) : '-'
 }

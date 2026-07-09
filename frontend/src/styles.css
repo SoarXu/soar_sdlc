@@ -1106,7 +1106,7 @@ body {
 }
 
 .workbench-list-actions {
-  display: flex;
+  display: inline-flex;
   flex-wrap: nowrap;
   gap: 8px;
   align-items: center;
@@ -1114,19 +1114,24 @@ body {
   white-space: nowrap;
 }
 
+.workflow-action-buttons-list {
+  display: inline-flex;
+  gap: 8px;
+  align-items: center;
+}
+
 .workbench-list-actions .el-button,
-.workbench-list-actions .el-dropdown {
+.workbench-list-actions .el-dropdown,
+.workflow-action-buttons-list .el-button,
+.workflow-action-buttons-list .el-dropdown {
   margin-left: 0;
 }
 
-.workbench-list-actions .el-button {
+.workbench-list-actions .el-button,
+.workflow-action-buttons-list .el-button {
   min-height: 22px;
   padding: 0 2px;
   font-size: 13px;
-}
-
-.workbench-action-more {
-  color: #64748b;
 }
 
 .status-history {

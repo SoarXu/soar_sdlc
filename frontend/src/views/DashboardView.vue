@@ -126,28 +126,15 @@
                     @executed="loadWorkbench"
                   />
                   <el-button
-                    v-if="actionGroupFor(row).primary"
+                    v-for="action in inlineActionsFor(row)"
+                    :key="action.key"
                     link
-                    :type="actionGroupFor(row).primary.type"
+                    :type="action.type"
                     class="workbench-action-main"
-                    @click="runItemAction(row, actionGroupFor(row).primary)"
+                    @click="runItemAction(row, action)"
                   >
-                    {{ actionGroupFor(row).primary.label }}
+                    {{ action.label }}
                   </el-button>
-                  <el-dropdown
-                    v-if="actionGroupFor(row).secondary.length"
-                    trigger="click"
-                    @command="(actionKey) => runSecondaryAction(row, actionKey)"
-                  >
-                    <el-button link type="primary" class="workbench-action-more">更多</el-button>
-                    <template #dropdown>
-                      <el-dropdown-menu>
-                        <el-dropdown-item v-for="action in actionGroupFor(row).secondary" :key="action.key" :command="action.key">
-                          {{ action.label }}
-                        </el-dropdown-item>
-                      </el-dropdown-menu>
-                    </template>
-                  </el-dropdown>
                 </div>
               </template>
             </el-table-column>
@@ -232,7 +219,7 @@ import {
   itemStatusTag,
   typeLabel,
   typeTag,
-  workbenchItemActionGroup,
+  workbenchInlineActions,
   workbenchMetaText
 } from '../utils/workbenchViewModel'
 
@@ -309,8 +296,8 @@ function extraInfo(item) {
   return '-'
 }
 
-function actionGroupFor(item) {
-  return workbenchItemActionGroup(activeListSection.value?.key, item)
+function inlineActionsFor(item) {
+  return workbenchInlineActions(activeListSection.value?.key, item)
 }
 
 function isWorkflowRuntimeItem(item) {
@@ -350,17 +337,12 @@ function normalizeCaseSteps(value) {
 
 function runItemAction(item, action) {
   if (!action) return
-  if (action.key === 'execute_case') {
-    openCaseExecution(item)
-  }
-}
-
-function runSecondaryAction(item, actionKey) {
   const handlers = {
+    execute_case: openCaseExecution,
     auto_assign_item: autoAssignItemRow,
     create_case_bug: openCaseBug
   }
-  handlers[actionKey]?.(item)
+  handlers[action.key]?.(item)
 }
 
 async function autoAssignItemRow(item) {

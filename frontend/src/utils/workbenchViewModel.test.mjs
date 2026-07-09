@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 
 import {
   buildWorkbenchViewModel,
+  workbenchInlineActions,
   workbenchItemActionGroup,
   workbenchMetaText
 } from './workbenchViewModel.js'
@@ -60,6 +61,13 @@ import {
   assert.deepEqual(failedCase.secondary.map((item) => item.key), ['create_case_bug'])
   assert.equal(unassignedBug.primary, null)
   assert.deepEqual(unassignedBug.secondary.map((item) => item.key), ['auto_assign_item'])
+}
+
+{
+  const actions = workbenchInlineActions('unassigned', { object_type: 'bug' })
+
+  assert.deepEqual(actions.map((item) => item.key), ['auto_assign_item'])
+  assert.deepEqual(actions.map((item) => item.label), ['自动分配'])
 }
 
 console.log('workbenchViewModel tests passed')

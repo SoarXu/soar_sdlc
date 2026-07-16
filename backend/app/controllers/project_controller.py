@@ -98,12 +98,14 @@ def get_project_requirements(
     page: int = 1,
     page_size: int = 10,
     keyword: str | None = None,
-    status: str | None = None,
+    current_state_id: int | None = None,
     owner_id: int | None = None,
     iteration_id: int | None = None,
     db: Session = Depends(get_db),
 ):
-    return list_project_requirements_page(db, project_id, page, page_size, keyword, status, owner_id, iteration_id)
+    return list_project_requirements_page(
+        db, project_id, page, page_size, keyword, current_state_id, owner_id, iteration_id
+    )
 
 
 @router.get("/{project_id}/tasks", response_model=ProjectTaskPage)
@@ -112,12 +114,14 @@ def get_project_tasks(
     page: int = 1,
     page_size: int = 10,
     keyword: str | None = None,
-    status: str | None = None,
+    current_state_id: int | None = None,
     owner_id: int | None = None,
     requirement_id: int | None = None,
     db: Session = Depends(get_db),
 ):
-    return list_project_tasks_page(db, project_id, page, page_size, keyword, status, owner_id, requirement_id)
+    return list_project_tasks_page(
+        db, project_id, page, page_size, keyword, current_state_id, owner_id, requirement_id
+    )
 
 
 @router.get("/{project_id}/test-cases", response_model=ProjectTestCasePage)
@@ -153,12 +157,14 @@ def get_project_bugs(
     page: int = 1,
     page_size: int = 10,
     keyword: str | None = None,
-    status: str | None = None,
+    current_state_id: int | None = None,
     owner_id: int | None = None,
     iteration_id: int | None = None,
     db: Session = Depends(get_db),
 ):
-    return list_project_bugs_page(db, project_id, page, page_size, keyword, status, owner_id, iteration_id)
+    return list_project_bugs_page(
+        db, project_id, page, page_size, keyword, current_state_id, owner_id, iteration_id
+    )
 
 
 @router.post("", response_model=ProjectRead)

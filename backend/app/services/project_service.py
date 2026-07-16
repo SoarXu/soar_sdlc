@@ -63,7 +63,7 @@ def list_project_requirements_page(
     page: int = 1,
     page_size: int = 10,
     keyword: str | None = None,
-    status: str | None = None,
+    current_state_id: int | None = None,
     owner_id: int | None = None,
     iteration_id: int | None = None,
 ) -> dict:
@@ -71,8 +71,8 @@ def list_project_requirements_page(
     query = db.query(Requirement).filter(Requirement.deleted == 0, Requirement.project_id == project_id)
     if keyword:
         query = query.filter(Requirement.title.like(f"%{keyword}%"))
-    if status:
-        query = query.filter(Requirement.status == status)
+    if current_state_id is not None:
+        query = query.filter(Requirement.current_state_id == current_state_id)
     if owner_id:
         query = query.filter(Requirement.owner_id == owner_id)
     if iteration_id:
@@ -86,7 +86,7 @@ def list_project_tasks_page(
     page: int = 1,
     page_size: int = 10,
     keyword: str | None = None,
-    status: str | None = None,
+    current_state_id: int | None = None,
     owner_id: int | None = None,
     requirement_id: int | None = None,
 ) -> dict:
@@ -94,8 +94,8 @@ def list_project_tasks_page(
     query = db.query(Task).filter(Task.deleted == 0, Task.project_id == project_id)
     if keyword:
         query = query.filter(Task.title.like(f"%{keyword}%"))
-    if status:
-        query = query.filter(Task.status == status)
+    if current_state_id is not None:
+        query = query.filter(Task.current_state_id == current_state_id)
     if owner_id:
         query = query.filter(Task.owner_id == owner_id)
     if requirement_id:
@@ -152,7 +152,7 @@ def list_project_bugs_page(
     page: int = 1,
     page_size: int = 10,
     keyword: str | None = None,
-    status: str | None = None,
+    current_state_id: int | None = None,
     owner_id: int | None = None,
     iteration_id: int | None = None,
 ) -> dict:
@@ -161,8 +161,8 @@ def list_project_bugs_page(
     if keyword:
         like = f"%{keyword}%"
         query = query.filter(or_(Bug.title.like(like), Bug.bug_type.like(like)))
-    if status:
-        query = query.filter(Bug.status == status)
+    if current_state_id is not None:
+        query = query.filter(Bug.current_state_id == current_state_id)
     if owner_id:
         query = query.filter(Bug.owner_id == owner_id)
     if iteration_id:

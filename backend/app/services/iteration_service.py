@@ -11,11 +11,9 @@ from app.models.task import Task
 from app.models.test_case import TestCase
 from app.services.lifecycle_service import project_lifecycle_phase
 from app.services.status_operation_service import create_status_operation, list_status_operations
+from app.services.workflow_state_query_service import is_terminal_state, non_terminal_state_clause
 from app.views.iteration_view import DeferIterationWorkItemsRequest, IterationCreate, IterationUpdate
 from app.views.status_operation_view import StatusOperationCreate
-
-
-WORK_ITEM_TERMINAL_STATUSES = {"completed", "canceled"}
 
 
 def list_iterations(db: Session, project_id: int | None = None) -> list[dict]:
@@ -203,7 +201,7 @@ def get_iteration_detail(db: Session, iteration_id: int) -> dict:
     )
     covered_requirement_ids = {case.requirement_id for case in test_cases if case.requirement_id}
     requirement_total = len(requirements)
-    closed_requirement_total = len([item for item in requirements if item.status in WORK_ITEM_TERMINAL_STATUSES])
+    closed_requirement_total = len([item for item in requirements if is_terminal_state(item)])
     detail_project_ids = _merge_detail_project_ids(project_ids, requirements, tasks_by_id.values(), test_cases, bugs)
     return {
         "iteration": _iteration_to_dict(iteration, project_ids),
@@ -419,7 +417,7 @@ def _unfinished_requirements_for_defer(
     query = db.query(Requirement).filter(
         Requirement.deleted == 0,
         Requirement.iteration_id == iteration_id,
-        Requirement.status.notin_(WORK_ITEM_TERMINAL_STATUSES),
+        non_terminal_state_clause(Requirement),
     )
     if requirement_ids is not None:
         if not requirement_ids:
@@ -439,7 +437,7 @@ def _unfinished_direct_tasks_for_defer(
     query = db.query(Task).filter(
         Task.deleted == 0,
         Task.iteration_id == iteration_id,
-        Task.status.notin_(WORK_ITEM_TERMINAL_STATUSES),
+        non_terminal_state_clause(Task),
     )
     if task_ids is not None:
         if not task_ids:

@@ -2,6 +2,10 @@ from uuid import uuid4
 
 from fastapi.testclient import TestClient
 
+from app.db.session import SessionLocal
+from app.models.bug import Bug
+from app.models.workflow_definition import WorkflowState
+
 
 def _create_project(client: TestClient) -> int:
     response = client.post("/api/v1/projects", json={"name": f"Project-{uuid4().hex[:8]}"})
@@ -216,6 +220,45 @@ def test_requirement_validation_cases_returns_cases_and_summary(client: TestClie
     assert rows[failed_case]["latest_result"] == "failed"
     assert rows[failed_case]["open_bug_count"] == 1
     assert rows[pending_case]["latest_result"] is None
+
+
+def test_validation_case_open_bug_count_uses_current_state_category(client: TestClient):
+    project_id = _create_project(client)
+    requirement_id = _create_requirement(client, project_id)
+    case_id = _create_test_case_for_requirement(client, project_id, requirement_id, "Terminal bug case")
+    executed = client.post(
+        f"/api/v1/test-cases/{case_id}/executions",
+        json={"steps_result_json": [{"step": "verify", "expected": "ok", "result": "failed", "actual": "bad"}]},
+    )
+    assert executed.status_code == 200
+    bug = client.post(
+        f"/api/v1/test-cases/{case_id}/bugs",
+        json={"title": "Terminal state bug"},
+    ).json()
+
+    db = SessionLocal()
+    try:
+        stored = db.query(Bug).filter(Bug.id == bug["id"]).first()
+        terminal = WorkflowState(
+            definition_id=stored.workflow_definition_id,
+            status_key=f"test_terminal_{uuid4().hex[:8]}",
+            status_name="已结束测试节点",
+            category="terminal",
+            enabled=True,
+        )
+        db.add(terminal)
+        db.flush()
+        stored.current_state_id = terminal.id
+        stored.status = "pending_handling"
+        db.commit()
+    finally:
+        db.close()
+
+    response = client.get(f"/api/v1/requirements/{requirement_id}/validation-cases")
+
+    assert response.status_code == 200
+    listed = next(item for item in response.json()["items"] if item["id"] == case_id)
+    assert listed["open_bug_count"] == 0
 
 
 def test_bug_validation_context_prefers_source_case_or_requirement_cases(client: TestClient):

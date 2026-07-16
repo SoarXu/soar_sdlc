@@ -6,7 +6,9 @@ from app.core.security import create_access_token, get_password_hash
 from app.db.session import SessionLocal
 from app.models.project_member import ProjectMember
 from app.models.role import Role, UserRole
+from app.models.task import Task
 from app.models.user import User
+from app.models.workflow_definition import WorkflowState
 
 
 def _create_user(full_name: str, role_key: str | None = None) -> tuple[int, str]:
@@ -60,15 +62,68 @@ def _create_project(client: TestClient) -> tuple[int, int]:
             "test_case_tester_roles": "tester",
             "test_run_owner_roles": "tester",
             "bug_owner_roles": "",
+            "creation_mode": "template",
+            "template_source": {"source_type": "system", "source_id": "system-standard"},
         },
     )
     assert config.status_code == 201
+    enabled = client.post(f"/api/v1/assignee-rule-configs/{config.json()['id']}/enable")
+    assert enabled.status_code == 200, enabled.text
     project = client.post(
         "/api/v1/projects",
         json={"name": f"Work Item Project {uuid4().hex[:8]}", "assignee_rule_config_id": config.json()["id"]},
     )
     assert project.status_code == 200
     return config.json()["id"], project.json()["id"]
+
+
+def test_unassigned_list_uses_state_category_and_displays_renamed_state(client: TestClient):
+    _, project_id = _create_project(client)
+    task = client.post(
+        "/api/v1/tasks",
+        json={"project_id": project_id, "title": f"Renamed State Task {uuid4().hex[:8]}", "owner_id": None},
+    ).json()
+
+    db = SessionLocal()
+    try:
+        stored = db.query(Task).filter(Task.id == task["id"]).first()
+        state = db.query(WorkflowState).filter(WorkflowState.id == stored.current_state_id).first()
+        state.status_name = "等待团队认领"
+        stored.status = "closed"
+        db.commit()
+    finally:
+        db.close()
+
+    response = client.get("/api/v1/work-items/unassigned")
+
+    assert response.status_code == 200
+    listed = next(item for item in response.json()["items"] if item["object_type"] == "task" and item["id"] == task["id"])
+    assert listed["status"] == "等待团队认领"
+
+
+def test_unassigned_list_excludes_terminal_state_even_when_legacy_status_is_open(client: TestClient):
+    _, project_id = _create_project(client)
+    task = client.post(
+        "/api/v1/tasks",
+        json={"project_id": project_id, "title": f"Terminal State Task {uuid4().hex[:8]}", "owner_id": None},
+    ).json()
+
+    db = SessionLocal()
+    try:
+        stored = db.query(Task).filter(Task.id == task["id"]).first()
+        state = db.query(WorkflowState).filter(WorkflowState.id == stored.current_state_id).first()
+        state.category = "terminal"
+        stored.status = "pending_assignment"
+        db.commit()
+    finally:
+        db.close()
+
+    response = client.get("/api/v1/work-items/unassigned")
+
+    assert response.status_code == 200
+    assert ("task", task["id"]) not in {
+        (item["object_type"], item["id"]) for item in response.json()["items"]
+    }
 
 
 def test_unassigned_list_contains_only_open_items_without_owner(client: TestClient):
@@ -166,7 +221,7 @@ def test_manager_can_assign_unassigned_work_items_through_runtime(client: TestCl
 
 
 def test_unassigned_list_is_scoped_to_project_members_and_system_admin(client: TestClient):
-    project_id, _ = _create_project(client)
+    _, project_id = _create_project(client)
     member_id, member_token = _create_user("Unassigned Queue Member", "developer")
     _, outsider_token = _create_user("Unassigned Queue Outsider", "developer")
     _, admin_token = _create_user("Unassigned Queue Admin", "system_admin")

@@ -9,6 +9,7 @@ from app.models.requirement import Requirement
 from app.models.task import Task
 from app.models.user import User
 from app.services.project_permission_service import can_view_project_work_items, ensure_authenticated
+from app.services.workflow_state_query_service import current_state_name, non_terminal_state_clause
 from app.views.work_item_view import WorkItemListRead, WorkItemRead
 
 
@@ -16,11 +17,6 @@ MODEL_BY_TYPE = {
     "requirement": Requirement,
     "task": Task,
     "bug": Bug,
-}
-TERMINAL_STATUSES = {
-    "requirement": {"completed", "canceled"},
-    "task": {"completed", "canceled"},
-    "bug": {"closed"},
 }
 DEFAULT_OVERDUE_HOURS = {
     "1": 4,
@@ -45,7 +41,7 @@ def list_unassigned_work_items(db: Session, actor: User | None) -> WorkItemListR
             .filter(
                 model.deleted == 0,
                 model.owner_id.is_(None),
-                model.status.notin_(TERMINAL_STATUSES[object_type]),
+                non_terminal_state_clause(model),
             )
             .all()
         )
@@ -86,7 +82,7 @@ def _read_item(
         project_name=projects.get(item.project_id).name if item.project_id in projects else None,
         iteration_id=getattr(item, "iteration_id", None),
         iteration_name=iterations.get(item.iteration_id).name if getattr(item, "iteration_id", None) in iterations else None,
-        status=item.status,
+        status=current_state_name(item) or "",
         priority=getattr(item, "priority", None),
         severity=getattr(item, "severity", None),
         owner_id=item.owner_id,

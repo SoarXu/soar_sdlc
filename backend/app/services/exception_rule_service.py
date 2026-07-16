@@ -78,7 +78,8 @@ def resolve_exception_rule(
     object_type: str,
     project_id: int | None,
     priority: str | None,
-    current_status: str | None,
+    current_state_id: int | None,
+    current_state_name: str | None = None,
 ) -> ExceptionRule | None:
     candidates = db.query(ExceptionRule).filter(
         ExceptionRule.exception_key == exception_key,
@@ -89,7 +90,7 @@ def resolve_exception_rule(
         item for item in candidates
         if item.project_id in {None, project_id}
         and item.priority in {None, priority}
-        and item.status in {None, current_status}
+        and item.status in {None, str(current_state_id) if current_state_id is not None else None}
     ]
     if not candidates:
         return None

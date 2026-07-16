@@ -7,6 +7,8 @@ from app.db.session import SessionLocal
 from app.core.security import get_password_hash
 from app.core.security import create_access_token
 from app.models.user import User
+from app.models.requirement import Requirement
+from app.models.workflow_definition import WorkflowState
 
 
 def _configure_and_enable_scheme(client: TestClient, config_id: int) -> None:
@@ -592,6 +594,64 @@ def test_dashboard_summary_reads_database_counts(client: TestClient):
     data = response.json()
     assert {"programs", "projects", "requirements", "tasks", "open_bugs"} <= set(data)
     assert isinstance(data["projects"], int)
+
+
+def test_project_requirement_list_filters_by_current_state_id(client: TestClient):
+    project = client.post("/api/v1/projects", json={"name": f"状态筛选项目-{uuid4().hex[:8]}"}).json()
+    requirement = client.post(
+        "/api/v1/requirements",
+        json={"project_id": project["id"], "title": "按节点 ID 筛选的需求"},
+    ).json()
+
+    matched = client.get(
+        f"/api/v1/projects/{project['id']}/requirements",
+        params={"current_state_id": requirement["current_state_id"]},
+    )
+    unmatched = client.get(
+        f"/api/v1/projects/{project['id']}/requirements",
+        params={"current_state_id": requirement["current_state_id"] + 999999},
+    )
+
+    assert matched.status_code == 200
+    assert requirement["id"] in {item["id"] for item in matched.json()["items"]}
+    assert unmatched.status_code == 200
+    assert requirement["id"] not in {item["id"] for item in unmatched.json()["items"]}
+
+
+def test_project_close_gate_uses_work_item_state_category(client: TestClient):
+    project = client.post("/api/v1/projects", json={"name": f"终态门禁项目-{uuid4().hex[:8]}"}).json()
+    requirement = client.post(
+        "/api/v1/requirements",
+        json={"project_id": project["id"], "title": "终态门禁需求"},
+    ).json()
+    db = SessionLocal()
+    try:
+        stored = db.query(Requirement).filter(Requirement.id == requirement["id"]).first()
+        terminal = WorkflowState(
+            definition_id=stored.workflow_definition_id,
+            status_key=f"test_terminal_{uuid4().hex[:8]}",
+            status_name="业务已结束",
+            category="terminal",
+            enabled=True,
+        )
+        db.add(terminal)
+        db.flush()
+        stored.current_state_id = terminal.id
+        stored.status = "pending_assignment"
+        db.commit()
+    finally:
+        db.close()
+
+    assert client.post(
+        f"/api/v1/projects/{project['id']}/start",
+        json={"effective_time": "2026-07-01T09:00:00"},
+    ).status_code == 200
+    closed = client.post(
+        f"/api/v1/projects/{project['id']}/close",
+        json={"effective_time": "2026-07-15T18:00:00"},
+    )
+
+    assert closed.status_code == 200, closed.text
 
 
 def test_program_tree_contains_child_programs_and_bound_projects(client: TestClient):

@@ -32,6 +32,7 @@ from app.services.project_permission_service import (
     is_system_admin,
 )
 from app.services.status_operation_service import create_status_operation
+from app.services.workflow_state_query_service import current_state_name, is_terminal_state
 from app.views.status_operation_view import StatusOperationCreate
 from app.views.workflow_runtime_view import (
     WorkflowTransitionActionRead,
@@ -167,7 +168,7 @@ def execute_transition(
             }
         )
     _apply_domain_payload(db, object_type, item, transition, request, actor, selected_values)
-    _run_transition_validator(db, object_type, item, transition, resolved_target_status)
+    _run_transition_validator(db, object_type, item, transition, resolved_target_state)
     automation_results = _run_transition_automations(
         db,
         transition.trigger_config,
@@ -769,11 +770,17 @@ def _apply_domain_payload(
             item.actual_end_date = effective_time.date()
 
 
-def _run_transition_validator(db: Session, object_type: str, item, transition: WorkflowTransition, resolved_target_status: str) -> None:
+def _run_transition_validator(
+    db: Session,
+    object_type: str,
+    item,
+    transition: WorkflowTransition,
+    resolved_target_state: WorkflowState | None,
+) -> None:
     validators = transition.validator_config if isinstance(transition.validator_config, list) else [transition.validator_config]
     for validator in validators:
         if validator:
-            _run_single_transition_validator(db, object_type, item, validator, resolved_target_status)
+            _run_single_transition_validator(db, object_type, item, validator, resolved_target_state)
 
 
 def _run_single_transition_validator(
@@ -781,7 +788,7 @@ def _run_single_transition_validator(
     object_type: str,
     item,
     validator: dict[str, Any],
-    resolved_target_status: str,
+    resolved_target_state: WorkflowState | None,
 ) -> None:
     validator_type = validator.get("type")
     if not validator_type:
@@ -789,7 +796,7 @@ def _run_single_transition_validator(
     if validator_type == "bug_close_gate":
         _require_bug_close_tasks_complete(db, item, validator)
     elif validator_type == "requirement_terminal_gate":
-        _require_requirement_relations_complete(db, item, resolved_target_status)
+        _require_requirement_relations_complete(db, item, resolved_target_state)
     elif validator_type == "iteration_terminal_gate":
         ensure_iteration_items_complete(db, item.id)
     elif validator_type == "project_close_gate":
@@ -882,7 +889,6 @@ def _automation_receiver_id(
 
 
 def _require_bug_close_tasks_complete(db: Session, bug: Bug, validator: dict[str, Any]) -> None:
-    statuses = set(validator.get("direct_tasks_terminal_statuses") or ["completed", "canceled"])
     task_ids = {
         relation.target_id
         for relation in db.query(ObjectRelation).filter(
@@ -897,29 +903,33 @@ def _require_bug_close_tasks_complete(db: Session, bug: Bug, validator: dict[str
     if not task_ids:
         return
     tasks = db.query(Task).filter(Task.id.in_(task_ids), Task.deleted == 0).order_by(Task.id.asc()).all()
-    blockers = [task for task in tasks if _normalized_status("task", task) not in statuses]
+    blockers = [task for task in tasks if not is_terminal_state(task)]
     if blockers:
-        summaries = ", ".join(f"#{task.id} {task.title} [{task.status}]" for task in blockers)
+        summaries = ", ".join(f"#{task.id} {task.title} [{current_state_name(task) or '-'}]" for task in blockers)
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Bug has {len(blockers)} unfinished linked task blocker(s): {summaries}",
         )
 
 
-def _require_requirement_relations_complete(db: Session, requirement: Requirement, resolved_target_status: str) -> None:
-    if resolved_target_status not in {"completed", "canceled"}:
+def _require_requirement_relations_complete(
+    db: Session,
+    requirement: Requirement,
+    resolved_target_state: WorkflowState | None,
+) -> None:
+    if not resolved_target_state or resolved_target_state.category != "terminal":
         return
     blocking_tasks = [
         task
         for task in db.query(Task).filter(Task.requirement_id == requirement.id, Task.deleted == 0).all()
-        if _normalized_status("task", task) not in {"completed", "canceled"}
+        if not is_terminal_state(task)
     ]
     if blocking_tasks:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Requirement has unfinished task blockers")
     blocking_bugs = [
         bug
         for bug in db.query(Bug).filter(Bug.requirement_id == requirement.id, Bug.deleted == 0).all()
-        if _normalized_status("bug", bug) != "closed"
+        if not is_terminal_state(bug)
     ]
     if blocking_bugs:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Requirement has unclosed bug blockers")
@@ -928,13 +938,13 @@ def _require_requirement_relations_complete(db: Session, requirement: Requiremen
 def ensure_iteration_items_complete(db: Session, iteration_id: int) -> None:
     requirements = db.query(Requirement).filter(Requirement.iteration_id == iteration_id, Requirement.deleted == 0).all()
     blocking_messages: list[str] = []
-    if any(_normalized_status("requirement", item) not in {"completed", "canceled"} for item in requirements):
+    if any(not is_terminal_state(item) for item in requirements):
         blocking_messages.append("requirement")
     tasks = db.query(Task).filter(Task.iteration_id == iteration_id, Task.deleted == 0).all()
-    if any(_normalized_status("task", item) not in {"completed", "canceled"} for item in tasks):
+    if any(not is_terminal_state(item) for item in tasks):
         blocking_messages.append("task")
     bugs = db.query(Bug).filter(Bug.iteration_id == iteration_id, Bug.deleted == 0).all()
-    if any(_normalized_status("bug", item) != "closed" for item in bugs):
+    if any(not is_terminal_state(item) for item in bugs):
         blocking_messages.append("bug")
     test_runs = db.query(TestRun).filter(TestRun.iteration_id == iteration_id, TestRun.deleted == 0).all()
     if any(not _test_run_is_terminal(item) for item in test_runs):
@@ -957,13 +967,13 @@ def _require_project_items_complete(db: Session, project_id: int) -> None:
     if any(_normalized_status("iteration", item) not in {"completed", "canceled"} for item in iterations):
         blocking_messages.append("iteration")
     requirements = db.query(Requirement).filter(Requirement.project_id == project_id, Requirement.deleted == 0).all()
-    if any(_normalized_status("requirement", item) not in {"completed", "canceled"} for item in requirements):
+    if any(not is_terminal_state(item) for item in requirements):
         blocking_messages.append("requirement")
     tasks = db.query(Task).filter(Task.project_id == project_id, Task.deleted == 0).all()
-    if any(_normalized_status("task", item) not in {"completed", "canceled"} for item in tasks):
+    if any(not is_terminal_state(item) for item in tasks):
         blocking_messages.append("task")
     bugs = db.query(Bug).filter(Bug.project_id == project_id, Bug.deleted == 0).all()
-    if any(_normalized_status("bug", item) != "closed" for item in bugs):
+    if any(not is_terminal_state(item) for item in bugs):
         blocking_messages.append("bug")
     test_runs = db.query(TestRun).filter(TestRun.project_id == project_id, TestRun.deleted == 0).all()
     if any(not _test_run_is_terminal(item) for item in test_runs):

@@ -16,6 +16,7 @@ from app.models.user import User
 from app.models.work_item_comment import WorkItemComment
 from app.services.exception_center_service import list_exception_refs
 from app.services.project_team_service import workbench_project_ids_for_user
+from app.services.workflow_state_query_service import current_state_name, is_terminal_state, non_terminal_state_clause
 from app.views.dashboard_view import (
     DashboardSummary,
     WorkbenchItem,
@@ -30,7 +31,7 @@ def get_dashboard_summary(db: Session) -> DashboardSummary:
         projects=_count_active(db, Project),
         requirements=_count_active(db, Requirement),
         tasks=_count_active(db, Task),
-        open_bugs=db.query(func.count(Bug.id)).filter(Bug.deleted == 0, Bug.status != "closed").scalar()
+        open_bugs=db.query(func.count(Bug.id)).filter(Bug.deleted == 0, non_terminal_state_clause(Bug)).scalar()
         or 0,
     )
 
@@ -85,17 +86,17 @@ def _pending_handling_items(
     items = [
         _requirement_item(item, projects, iteration_names)
         for item in db.query(Requirement).filter(Requirement.deleted == 0, Requirement.owner_id == user_id).all()
-        if not _is_terminal_status("requirement", item.status) and _in_project_scope(item.project_id, scoped_project_ids)
+        if not is_terminal_state(item) and _in_project_scope(item.project_id, scoped_project_ids)
     ]
     items.extend(
         _task_item(item, projects, iteration_names)
         for item in db.query(Task).filter(Task.deleted == 0, Task.owner_id == user_id).all()
-        if not _is_terminal_status("task", item.status) and _in_project_scope(item.project_id, scoped_project_ids)
+        if not is_terminal_state(item) and _in_project_scope(item.project_id, scoped_project_ids)
     )
     items.extend(
         _bug_item(item, projects, iteration_names)
         for item in db.query(Bug).filter(Bug.deleted == 0, Bug.owner_id == user_id).all()
-        if not _is_terminal_status("bug", item.status) and _in_project_scope(item.project_id, scoped_project_ids)
+        if not is_terminal_state(item) and _in_project_scope(item.project_id, scoped_project_ids)
     )
     items.extend(
         _test_case_item(item, projects, iteration_names)
@@ -114,17 +115,17 @@ def _unassigned_items(
     items = [
         _requirement_item(item, projects, iteration_names)
         for item in db.query(Requirement).filter(Requirement.deleted == 0, Requirement.owner_id.is_(None)).all()
-        if not _is_terminal_status("requirement", item.status) and _in_project_scope(item.project_id, scoped_project_ids)
+        if not is_terminal_state(item) and _in_project_scope(item.project_id, scoped_project_ids)
     ]
     items.extend(
         _task_item(item, projects, iteration_names)
         for item in db.query(Task).filter(Task.deleted == 0, Task.owner_id.is_(None)).all()
-        if not _is_terminal_status("task", item.status) and _in_project_scope(item.project_id, scoped_project_ids)
+        if not is_terminal_state(item) and _in_project_scope(item.project_id, scoped_project_ids)
     )
     items.extend(
         _bug_item(item, projects, iteration_names)
         for item in db.query(Bug).filter(Bug.deleted == 0, Bug.owner_id.is_(None)).all()
-        if not _is_terminal_status("bug", item.status) and _in_project_scope(item.project_id, scoped_project_ids)
+        if not is_terminal_state(item) and _in_project_scope(item.project_id, scoped_project_ids)
     )
     return _sort_workbench_items(items)
 
@@ -347,7 +348,7 @@ def _requirement_item(item: Requirement, projects: dict[int, Project], iteration
         owner_id=item.owner_id,
         handler_id=item.owner_id,
         iteration_group_key=str(item.iteration_id) if item.iteration_id else "uniterated",
-        status=item.status,
+        status=current_state_name(item),
         priority=item.priority,
         create_time=_datetime_value(item.create_time),
         creator_id=item.creator_id,
@@ -375,7 +376,7 @@ def _task_item(
         owner_id=item.owner_id,
         handler_id=item.owner_id,
         iteration_group_key=str(resolved_iteration_id) if resolved_iteration_id else "uniterated",
-        status=item.status,
+        status=current_state_name(item),
         priority=item.priority,
         due_date=_date_value(item.due_date),
         create_time=_datetime_value(item.create_time),
@@ -403,7 +404,7 @@ def _test_case_item(
         owner_id=item.default_tester_id,
         handler_id=item.default_tester_id,
         iteration_group_key=str(resolved_iteration_id) if resolved_iteration_id else "uniterated",
-        status=item.status,
+        status=current_state_name(item),
         create_time=_datetime_value(item.create_time),
         creator_id=item.creator_id,
         last_execute_time=_datetime_value(item.last_execute_time),
@@ -490,17 +491,6 @@ def _dedup_and_sort_workbench_items(items: list[WorkbenchItem]) -> list[Workbenc
     for item in items:
         deduped[(item.object_type, item.id)] = item
     return _sort_workbench_items(list(deduped.values()))
-
-
-def _is_terminal_status(object_type: str, status_value: str | None) -> bool:
-    status_value = status_value or ""
-    if object_type == "requirement":
-        return status_value in {"completed", "canceled"}
-    if object_type == "task":
-        return status_value in {"completed", "canceled"}
-    if object_type == "bug":
-        return status_value == "closed"
-    return False
 
 
 def _role_keys_for_user(db: Session, user_id: int | None) -> list[str]:

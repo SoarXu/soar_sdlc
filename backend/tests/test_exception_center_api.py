@@ -12,7 +12,9 @@ from app.models.role import Role, UserRole
 from app.models.status_operation import StatusOperationLog
 from app.models.task import Task
 from app.models.user import User
+from app.models.workflow_definition import WorkflowTransition
 from app.services.exception_center_service import list_exception_refs
+from app.services.exception_center_service import _latest_state_time
 
 
 EXPECTED_KEYS = {
@@ -59,15 +61,77 @@ def _add_member(project_id: int, user_id: int, role: str = "developer") -> None:
         db.close()
 
 
-def _operation(object_type: str, object_id: int, status: str, entered_at: datetime, action: str = "enter_state"):
+def _target_state_id(db, definition_id: int, action_key: str) -> int:
+    state_id = db.query(WorkflowTransition.to_state_id).filter(
+        WorkflowTransition.definition_id == definition_id,
+        WorkflowTransition.action_key == action_key,
+    ).scalar()
+    assert state_id is not None
+    return state_id
+
+
+def _operation(
+    object_type: str,
+    object_id: int,
+    definition_id: int,
+    state_id: int,
+    entered_at: datetime,
+    action: str = "enter_state",
+):
     return StatusOperationLog(
         object_type=object_type,
         object_id=object_id,
         action=action,
-        from_status="previous",
-        to_status=status,
+        workflow_definition_id=definition_id,
+        from_state_id=state_id,
+        to_state_id=state_id,
+        from_state_name="previous snapshot",
+        to_state_name="current snapshot",
+        from_status="legacy_previous",
+        to_status="legacy_target",
         effective_time=entered_at,
     )
+
+
+def test_latest_state_entry_time_matches_state_id_not_legacy_status(client: TestClient):
+    project = client.post("/api/v1/projects", json={"name": f"State Time Project {uuid4().hex[:8]}"}).json()
+    requirement = client.post(
+        "/api/v1/requirements",
+        json={"project_id": project["id"], "title": "State time requirement"},
+    ).json()
+    entered_at = datetime(2026, 7, 12, 9, 30, 0)
+    fallback = datetime(2026, 7, 1, 8, 0, 0)
+
+    db = SessionLocal()
+    try:
+        db.add(
+            StatusOperationLog(
+                object_type="requirement",
+                object_id=requirement["id"],
+                action="enter_state",
+                workflow_definition_id=requirement["workflow_definition_id"],
+                from_state_id=requirement["current_state_id"],
+                to_state_id=requirement["current_state_id"],
+                from_state_name="旧快照",
+                to_state_name="新快照",
+                from_status="mismatched_previous",
+                to_status="mismatched_target",
+                effective_time=entered_at,
+            )
+        )
+        db.commit()
+
+        actual = _latest_state_time(
+            db,
+            "requirement",
+            requirement["id"],
+            requirement["current_state_id"],
+            fallback,
+        )
+    finally:
+        db.close()
+
+    assert actual == entered_at
 
 
 def test_exception_rule_defaults_and_admin_update(client: TestClient):
@@ -125,22 +189,64 @@ def test_exception_center_covers_eight_types_and_uses_latest_state_entry_time(cl
 
     db = SessionLocal()
     try:
-        db.query(Requirement).filter(Requirement.id == requirement["id"]).update({"create_time": now - timedelta(hours=100)})
-        db.query(Task).filter(Task.id == task["id"]).update({"status": "in_processing", "create_time": now - timedelta(hours=100)})
-        for bug, (_, status, owner_id, _,) in zip(bugs, bug_payloads):
-            db.query(Bug).filter(Bug.id == bug["id"]).update(
-                {"status": status, "owner_id": owner_id, "create_time": now - timedelta(hours=100)}
-            )
+        requirement_row = db.query(Requirement).filter(Requirement.id == requirement["id"]).first()
+        requirement_row.create_time = now - timedelta(hours=100)
+        task_row = db.query(Task).filter(Task.id == task["id"]).first()
+        task_row.current_state_id = _target_state_id(db, task_row.workflow_definition_id, "claim")
+        task_row.create_time = now - timedelta(hours=100)
+        action_by_status = {
+            "fixing": "confirm_bug_type",
+            "pending_verification": "submit_verification",
+            "verified": "verification_passed",
+            "closed": "close",
+        }
+        bug_rows = []
+        for bug, (_, legacy_status, owner_id, _,) in zip(bugs, bug_payloads):
+            bug_row = db.query(Bug).filter(Bug.id == bug["id"]).first()
+            if legacy_status in action_by_status:
+                bug_row.current_state_id = _target_state_id(
+                    db,
+                    bug_row.workflow_definition_id,
+                    action_by_status[legacy_status],
+                )
+            bug_row.owner_id = owner_id
+            bug_row.create_time = now - timedelta(hours=100)
+            bug_rows.append(bug_row)
         db.query(Bug).filter(Bug.id == bugs[3]["id"]).update({"verify_result": "failed"})
         db.query(Bug).filter(Bug.id == bugs[4]["id"]).update({"reopen_count": 2})
 
-        db.add(_operation("requirement", requirement["id"], "pending_assignment", now - timedelta(hours=24)))
-        db.add(_operation("task", task["id"], "in_processing", now - timedelta(hours=24)))
+        db.add(_operation(
+            "requirement",
+            requirement_row.id,
+            requirement_row.workflow_definition_id,
+            requirement_row.current_state_id,
+            now - timedelta(hours=24),
+        ))
+        db.add(_operation(
+            "task",
+            task_row.id,
+            task_row.workflow_definition_id,
+            task_row.current_state_id,
+            now - timedelta(hours=24),
+        ))
         for index in range(6):
-            db.add(_operation("bug", bugs[index]["id"], bug_payloads[index][1], now - timedelta(hours=24)))
-        db.add(_operation("bug", bugs[3]["id"], "pending_handling", now - timedelta(hours=1), "verification_failed"))
-        db.add(_operation("bug", bugs[4]["id"], "closed", now - timedelta(hours=1), "activate"))
-        db.add(_operation("bug", bugs[6]["id"], "fixing", now - timedelta(hours=1)))
+            row = bug_rows[index]
+            db.add(_operation("bug", row.id, row.workflow_definition_id, row.current_state_id, now - timedelta(hours=24)))
+        failed_row = bug_rows[3]
+        db.add(_operation(
+            "bug", failed_row.id, failed_row.workflow_definition_id, failed_row.current_state_id,
+            now - timedelta(hours=1), "verification_failed",
+        ))
+        activated_row = bug_rows[4]
+        db.add(_operation(
+            "bug", activated_row.id, activated_row.workflow_definition_id, activated_row.current_state_id,
+            now - timedelta(hours=1), "activate",
+        ))
+        fresh_row = bug_rows[6]
+        db.add(_operation(
+            "bug", fresh_row.id, fresh_row.workflow_definition_id, fresh_row.current_state_id,
+            now - timedelta(hours=1),
+        ))
         db.commit()
 
         refs = list_exception_refs(db, {project["id"]}, now=now)
@@ -171,9 +277,12 @@ def test_completed_requirement_with_active_bug_is_reported_without_reopening(cli
     ).json()
     db = SessionLocal()
     try:
-        db.query(Requirement).filter(Requirement.id == requirement["id"]).update({"status": "completed"})
+        requirement_row = db.query(Requirement).filter(Requirement.id == requirement["id"]).first()
+        requirement_row.current_state_id = _target_state_id(db, requirement_row.workflow_definition_id, "complete")
+        completed_state_id = requirement_row.current_state_id
+        db.commit()
         refs = list_exception_refs(db, {project["id"]}, now=now)
-        stored_status = db.query(Requirement.status).filter(Requirement.id == requirement["id"]).scalar()
+        stored_state_id = db.query(Requirement.current_state_id).filter(Requirement.id == requirement["id"]).scalar()
     finally:
         db.close()
 
@@ -181,5 +290,5 @@ def test_completed_requirement_with_active_bug_is_reported_without_reopening(cli
         item["id"] == requirement["id"] and item["exception_key"] == "completed_requirement_active_bug"
         for item in refs
     )
-    assert stored_status == "completed"
-    assert bug["status"] != "closed"
+    assert stored_state_id == completed_state_id
+    assert bug["current_state_id"] is not None

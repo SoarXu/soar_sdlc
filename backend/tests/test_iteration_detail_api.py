@@ -6,6 +6,7 @@ from app.db.session import SessionLocal
 from app.jobs.iteration_jobs import run_auto_start_due_iterations
 from app.models.requirement import Requirement
 from app.models.task import Task
+from app.models.workflow_definition import WorkflowState
 
 
 def _create_project(client: TestClient, name: str | None = None, parent_id: int | None = None) -> int:
@@ -76,7 +77,14 @@ def _create_bug(client: TestClient, project_id: int, iteration_id: int, title: s
 def _set_requirement_status(requirement_id: int, status: str) -> None:
     db = SessionLocal()
     try:
-        db.query(Requirement).filter(Requirement.id == requirement_id).update({"status": status})
+        requirement = db.query(Requirement).filter(Requirement.id == requirement_id).first()
+        state_id = db.query(WorkflowState.id).filter(
+            WorkflowState.definition_id == requirement.workflow_definition_id,
+            WorkflowState.status_key == status,
+        ).scalar()
+        assert state_id is not None
+        requirement.current_state_id = state_id
+        requirement.status = status
         db.commit()
     finally:
         db.close()
@@ -85,7 +93,34 @@ def _set_requirement_status(requirement_id: int, status: str) -> None:
 def _set_task_status(task_id: int, status: str) -> None:
     db = SessionLocal()
     try:
-        db.query(Task).filter(Task.id == task_id).update({"status": status})
+        task = db.query(Task).filter(Task.id == task_id).first()
+        state_id = db.query(WorkflowState.id).filter(
+            WorkflowState.definition_id == task.workflow_definition_id,
+            WorkflowState.status_key == status,
+        ).scalar()
+        assert state_id is not None
+        task.current_state_id = state_id
+        task.status = status
+        db.commit()
+    finally:
+        db.close()
+
+
+def _set_item_state_category(model, item_id: int, category: str, legacy_status: str) -> None:
+    db = SessionLocal()
+    try:
+        item = db.query(model).filter(model.id == item_id).first()
+        state = WorkflowState(
+            definition_id=item.workflow_definition_id,
+            status_key=f"test_{category}_{uuid4().hex[:8]}",
+            status_name="测试终态" if category == "terminal" else "测试处理中",
+            category=category,
+            enabled=True,
+        )
+        db.add(state)
+        db.flush()
+        item.current_state_id = state.id
+        item.status = legacy_status
         db.commit()
     finally:
         db.close()
@@ -374,6 +409,23 @@ def test_iteration_progress_counts_default_template_terminal_requirements(client
         json={"requirement_ids": [requirement_id]},
     ).status_code == 200
     _set_requirement_status(requirement_id, "completed")
+
+    detail = client.get(f"/api/v1/iterations/{iteration_id}/detail")
+
+    assert detail.status_code == 200
+    assert detail.json()["metrics"]["closed_requirement_total"] == 1
+    assert detail.json()["metrics"]["progress_rate"] == 1.0
+
+
+def test_iteration_progress_uses_current_state_category_when_legacy_status_conflicts(client: TestClient):
+    project_id = _create_project(client)
+    iteration_id = _create_iteration(client, [project_id])
+    requirement_id = _create_requirement(client, project_id, "State category progress requirement")
+    assert client.post(
+        f"/api/v1/iterations/{iteration_id}/requirements",
+        json={"requirement_ids": [requirement_id]},
+    ).status_code == 200
+    _set_item_state_category(Requirement, requirement_id, "terminal", "pending_assignment")
 
     detail = client.get(f"/api/v1/iterations/{iteration_id}/detail")
 

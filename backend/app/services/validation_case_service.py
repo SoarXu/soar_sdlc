@@ -3,11 +3,11 @@ from sqlalchemy.orm import Session
 from app.models.bug import Bug
 from app.models.requirement import Requirement
 from app.models.test_case import TestCase
+from app.services.workflow_state_query_service import non_terminal_state_clause
 
 
 PASSING_RESULTS = {"passed", "ignored"}
 FAILING_RESULTS = {"failed", "blocked"}
-OPEN_BUG_STATUSES = {"pending_handling", "fixing", "pending_verification", "verified"}
 
 
 def requirement_validation_cases(db: Session, requirement_id: int) -> dict:
@@ -73,7 +73,7 @@ def _case_item(db: Session, test_case: TestCase) -> dict:
 def _open_bug_count(db: Session, test_case_id: int) -> int:
     return (
         db.query(Bug)
-        .filter(Bug.test_case_id == test_case_id, Bug.deleted == 0, Bug.status.in_(OPEN_BUG_STATUSES))
+        .filter(Bug.test_case_id == test_case_id, Bug.deleted == 0, non_terminal_state_clause(Bug))
         .count()
     )
 

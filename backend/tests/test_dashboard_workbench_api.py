@@ -9,7 +9,9 @@ from app.models.bug import Bug
 from app.models.object_watch import ObjectWatch
 from app.models.project_member import ProjectMember
 from app.models.role import Role, UserRole
+from app.models.task import Task
 from app.models.user import User
+from app.models.workflow_definition import WorkflowState
 from app.models.work_item_comment import WorkItemComment
 
 
@@ -128,6 +130,35 @@ def test_workbench_returns_default_queue_sections_for_pending_and_unassigned(cli
     assert unassigned_bug["id"] in {item["id"] for item in data["unassigned"]["items"]}
     assert "project_board" not in data
     assert "iterations" not in data
+
+
+def test_workbench_queue_uses_state_category_and_status_name(client: TestClient):
+    developer_id, developer_token = _create_user_with_role(f"state_queue_{uuid4().hex[:6]}", "developer")
+    project_id = _create_project(client, "State identity queue project")
+    task = client.post(
+        "/api/v1/tasks",
+        json={"project_id": project_id, "title": "State identity queue task", "owner_id": developer_id},
+    ).json()
+    _add_project_member(project_id, developer_id, "developer")
+
+    db = SessionLocal()
+    try:
+        stored = db.query(Task).filter(Task.id == task["id"]).first()
+        state = db.query(WorkflowState).filter(WorkflowState.id == stored.current_state_id).first()
+        state.status_name = "等待本人处理"
+        stored.status = "completed"
+        db.commit()
+    finally:
+        db.close()
+
+    response = client.get(
+        "/api/v1/dashboard/workbench",
+        headers={"Authorization": f"Bearer {developer_token}"},
+    )
+
+    assert response.status_code == 200
+    listed = next(item for item in response.json()["pending_handling"]["items"] if item["id"] == task["id"])
+    assert listed["status"] == "等待本人处理"
 
 
 def test_workbench_returns_created_watched_mentioned_and_exception_center(client: TestClient):

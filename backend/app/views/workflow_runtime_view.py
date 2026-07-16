@@ -1,6 +1,6 @@
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class WorkflowTargetStateRead(BaseModel):
@@ -26,12 +26,13 @@ class WorkflowTransitionActionRead(BaseModel):
 
 
 class WorkflowTransitionExecuteRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     action_key: str
     payload: dict[str, Any] = Field(default_factory=dict)
     next_owner_id: int | None = None
     delegate_reason: str | None = None
     selected_values: dict[str, Any] = Field(default_factory=dict)
-    selected_target_status: str | None = None
     selected_target_state_id: int | None = None
     override_reason: str | None = None
 

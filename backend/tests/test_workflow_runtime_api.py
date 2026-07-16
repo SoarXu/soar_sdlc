@@ -604,9 +604,10 @@ def test_runtime_routes_bug_type_to_target_status_and_records_resolution(client:
 
     assert executed.status_code == 200
     assert executed.json()["status_name"] == "修复中"
-    assert executed.json()["resolved_target_status"] == "fixing"
+    assert executed.json()["resolved_target_status"] == "修复中"
     history = client.get(f"/api/v1/bugs/{bug['id']}/status-operations").json()
-    assert history[-1]["resolved_target_status"] == "fixing"
+    assert history[-1]["resolved_target_status"] == "修复中"
+    assert history[-1]["to_state_id"] == executed.json()["resolved_target_state_id"]
     assert history[-1]["selected_values"]["bug_type"] == "code_issue"
 
 
@@ -624,11 +625,19 @@ def test_bug_routing_modes_reject_forged_targets_and_audit_reclassification(clie
         "/api/v1/bugs",
         json={"project_id": project_id, "title": f"Automatic Bug {uuid4().hex[:8]}", "owner_id": handler_id},
     ).json()
+    automatic_actions = client.get(
+        f"/api/v1/workflow-runtime/bug/{automatic_bug['id']}/transitions",
+        headers={"Authorization": f"Bearer {handler_token}"},
+    ).json()
+    automatic_confirm = next(item for item in automatic_actions if item["action_key"] == "confirm_bug_type")
+    pending_verification_id = next(
+        item["id"] for item in automatic_confirm["allowed_target_states"] if item["status_name"] == "待验证"
+    )
     forged_automatic = client.post(
         f"/api/v1/workflow-runtime/bug/{automatic_bug['id']}/transition",
         json={
             "action_key": "confirm_bug_type",
-            "selected_target_status": "pending_verification",
+            "selected_target_state_id": pending_verification_id,
             "payload": {"selected_values": {"bug_type": "code_issue"}},
         },
         headers={"Authorization": f"Bearer {handler_token}"},
@@ -646,12 +655,18 @@ def test_bug_routing_modes_reject_forged_targets_and_audit_reclassification(clie
         headers={"Authorization": f"Bearer {handler_token}"},
     )
     assert confirmed.status_code == 200
+    reclassify_actions = client.get(
+        f"/api/v1/workflow-runtime/bug/{bug['id']}/transitions",
+        headers={"Authorization": f"Bearer {handler_token}"},
+    ).json()
+    reclassify = next(item for item in reclassify_actions if item["action_key"] == "reclassify_bug_type")
+    target_ids = {item["status_name"]: item["id"] for item in reclassify["allowed_target_states"]}
 
     forbidden_override = client.post(
         f"/api/v1/workflow-runtime/bug/{bug['id']}/transition",
         json={
             "action_key": "reclassify_bug_type",
-            "selected_target_status": "pending_verification",
+            "selected_target_state_id": target_ids["待验证"],
             "override_reason": "force verification",
             "payload": {"reason": "classification review", "selected_values": {"bug_type": "configuration_issue"}},
         },
@@ -672,15 +687,16 @@ def test_bug_routing_modes_reject_forged_targets_and_audit_reclassification(clie
         f"/api/v1/workflow-runtime/bug/{bug['id']}/transition",
         json={
             "action_key": "reclassify_bug_type",
-            "selected_target_status": "fixing",
+            "selected_target_state_id": target_ids["修复中"],
             "override_reason": "keep repair active",
             "payload": {"reason": "duplicate evidence needs repair", "selected_values": {"bug_type": "duplicate_issue"}},
         },
         headers={"Authorization": f"Bearer {manager_token}"},
     )
     assert allowed_override.status_code == 200
-    assert allowed_override.json()["default_target_status"] == "pending_verification"
-    assert allowed_override.json()["resolved_target_status"] == "fixing"
+    assert allowed_override.json()["default_target_status"] == "待验证"
+    assert allowed_override.json()["resolved_target_status"] == "修复中"
+    assert allowed_override.json()["resolved_target_state_id"] == target_ids["修复中"]
     history = client.get(f"/api/v1/bugs/{bug['id']}/status-operations").json()
     operation = history[-1]
     assert operation["reason"] == "duplicate evidence needs repair"
@@ -688,8 +704,8 @@ def test_bug_routing_modes_reject_forged_targets_and_audit_reclassification(clie
     assert operation["selected_values"]["old_bug_type"] == "code_issue"
     assert operation["selected_values"]["new_bug_type"] == "duplicate_issue"
     assert operation["selected_values"]["old_status"] == "修复中"
-    assert operation["selected_values"]["default_target_status"] == "pending_verification"
-    assert operation["selected_values"]["resolved_target_status"] == "fixing"
+    assert operation["selected_values"]["default_target_status"] == "待验证"
+    assert operation["selected_values"]["resolved_target_status"] == "修复中"
 
 
 def test_manual_routing_mode_requires_an_allowed_target_status(client: TestClient):

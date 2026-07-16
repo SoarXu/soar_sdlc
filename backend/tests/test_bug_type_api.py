@@ -99,7 +99,7 @@ def test_confirm_bug_type_action_uses_dictionary_options_and_records_metadata(cl
     assert executed.status_code == 200
     history = client.get(f"/api/v1/bugs/{bug['id']}/status-operations").json()
     assert history[-1]["selected_values"]["is_real_bug"] is True
-    assert history[-1]["selected_values"]["dictionary_default_target_status"] == "fixing"
+    assert history[-1]["selected_values"]["dictionary_default_target_state_id"] == executed.json()["default_target_state_id"]
 
 
 def test_disabled_bug_type_is_hidden_and_rejected_by_runtime(client: TestClient):

@@ -141,20 +141,30 @@ def execute_transition(
     delegated_owner = _owner_user(db, getattr(item, "owner_id", None)) if delegated else None
     original_owner_id = getattr(item, "owner_id", None)
     selected_values = _selected_values(request)
-    default_target_status, resolved_target_status = _resolve_target_status(
-        db,
-        object_type,
-        item,
-        transition,
-        request,
-        actor,
-        selected_values,
-    )
     default_target_state = None
     resolved_target_state = None
     if object_type in CORE_ID_OBJECT_TYPES:
-        default_target_state = _state_for_status(db, transition.definition_id, default_target_status)
-        resolved_target_state = _state_for_status(db, transition.definition_id, resolved_target_status)
+        default_target_state, resolved_target_state = _resolve_target_states(
+            db,
+            object_type,
+            item,
+            transition,
+            request,
+            actor,
+            selected_values,
+        )
+        default_target_status = default_target_state.status_name
+        resolved_target_status = resolved_target_state.status_name
+    else:
+        default_target_status, resolved_target_status = _resolve_target_status(
+            db,
+            object_type,
+            item,
+            transition,
+            request,
+            actor,
+            selected_values,
+        )
     if object_type == "bug" and transition.action_key == "reclassify_bug_type":
         if not (request.payload.get("reason") or "").strip():
             raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Reclassification reason is required")
@@ -191,11 +201,11 @@ def execute_transition(
         transition,
         request,
         actor,
-        resolved_target_status,
+        transition.action_key,
     )
     next_owner_id = handler_routing["final_owner_id"]
     if (
-        resolved_target_status == "pending_confirmation"
+        transition.action_key == "submit_confirmation"
         and next_owner_id is None
         and not (transition.handler_rule or {}).get("allow_unassigned_confirmation", False)
     ):
@@ -430,6 +440,8 @@ def _transition_read(db: Session, transition: WorkflowTransition) -> WorkflowTra
     condition_config = transition.condition_config or {}
     routes = condition_config.get("routes") or {}
     allowed_target_state_ids = sorted({int(value) for value in routes.values()}) if routes else []
+    if condition_config.get("route_dictionary") == "bug_type":
+        allowed_target_state_ids = sorted(set(_bug_dictionary_target_state_ids(db, transition.definition_id).values()))
     allowed_target_states = (
         db.query(WorkflowState)
         .filter(WorkflowState.id.in_(allowed_target_state_ids))
@@ -628,6 +640,117 @@ def _normalized_status(object_type: str, item) -> str | None:
     return candidates[0]
 
 
+def _resolve_target_states(
+    db: Session,
+    object_type: str,
+    item,
+    transition: WorkflowTransition,
+    request: WorkflowTransitionExecuteRequest,
+    actor: User | None,
+    selected_values: dict[str, Any],
+) -> tuple[WorkflowState, WorkflowState]:
+    default_target_state_id = transition.to_state_id
+    resolved_target_state_id = transition.to_state_id
+    condition_config = transition.condition_config or {}
+
+    owner_targets = condition_config.get("target_state_id_by_owner") or {}
+    if owner_targets:
+        target_owner_id = request.next_owner_id if request.next_owner_id is not None else getattr(item, "owner_id", None)
+        default_target_state_id = owner_targets.get(
+            "with_owner" if target_owner_id else "without_owner",
+            transition.to_state_id,
+        )
+        resolved_target_state_id = default_target_state_id
+
+    routes = condition_config.get("routes") or {}
+    route_dictionary = condition_config.get("route_dictionary")
+    allowed_target_state_ids = {int(value) for value in routes.values()} if routes else set()
+    if routes or route_dictionary:
+        field_name = condition_config.get("field")
+        selected_value = selected_values.get(field_name) if field_name else None
+        if selected_value is None and field_name:
+            selected_value = request.payload.get(field_name)
+            if selected_value is not None:
+                selected_values[field_name] = selected_value
+        if field_name and selected_value is None:
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=f"{field_name} is required")
+
+        if route_dictionary == "bug_type":
+            dictionary_item = get_enabled_bug_type(db, str(selected_value))
+            dictionary_targets = _bug_dictionary_target_state_ids(db, transition.definition_id)
+            default_target_state_id = dictionary_targets[dictionary_item.is_real_bug]
+            allowed_target_state_ids = set(dictionary_targets.values())
+            selected_values["bug_type_name"] = dictionary_item.display_name
+            selected_values["is_real_bug"] = dictionary_item.is_real_bug
+            selected_values["dictionary_default_target_state_id"] = default_target_state_id
+        else:
+            default_target_state_id = routes.get(selected_value)
+        if default_target_state_id is None:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Workflow routing configuration missing for selected value")
+        resolved_target_state_id = default_target_state_id
+
+        selected_target_state_id = request.selected_target_state_id or request.payload.get("selected_target_state_id")
+        routing_mode = condition_config.get("routing_mode", "automatic")
+        if routing_mode == "automatic" and selected_target_state_id is not None:
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Automatic routing does not allow a selected target state")
+        if routing_mode == "manual_allowed" and selected_target_state_id is None:
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Selected target state is required")
+        if selected_target_state_id is not None:
+            selected_target_state_id = int(selected_target_state_id)
+            if selected_target_state_id not in allowed_target_state_ids:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Selected target state is not allowed")
+            if routing_mode == "automatic_with_override" and selected_target_state_id != default_target_state_id:
+                override_roles = set(condition_config.get("allow_override_roles") or [])
+                identities = _actor_identities(db, object_type, item, actor)
+                if not (override_roles & identities):
+                    raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Target state override is not allowed")
+                override_reason = request.override_reason or request.payload.get("override_reason")
+                if not (override_reason or "").strip():
+                    raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Target state override reason is required")
+            resolved_target_state_id = selected_target_state_id
+
+    return (
+        _state_for_id(db, transition.definition_id, int(default_target_state_id)),
+        _state_for_id(db, transition.definition_id, int(resolved_target_state_id)),
+    )
+
+
+def _state_for_id(db: Session, definition_id: int, state_id: int) -> WorkflowState:
+    state_record = db.query(WorkflowState).filter(
+        WorkflowState.id == state_id,
+        WorkflowState.definition_id == definition_id,
+    ).first()
+    if not state_record:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Workflow target state is missing for definition {definition_id}: {state_id}",
+        )
+    return state_record
+
+
+def _bug_dictionary_target_state_ids(db: Session, definition_id: int) -> dict[bool, int]:
+    action_sources = {
+        action_key: state_id
+        for action_key, state_id in db.query(
+            WorkflowTransition.action_key,
+            WorkflowTransition.from_state_id,
+        ).filter(
+            WorkflowTransition.definition_id == definition_id,
+            WorkflowTransition.action_key.in_(("submit_verification", "verification_passed")),
+            WorkflowTransition.enabled.is_(True),
+        )
+    }
+    if not action_sources.get("submit_verification") or not action_sources.get("verification_passed"):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Bug workflow definition {definition_id} has incomplete dictionary routing actions",
+        )
+    return {
+        True: int(action_sources["submit_verification"]),
+        False: int(action_sources["verification_passed"]),
+    }
+
+
 def _resolve_target_status(
     db: Session,
     object_type: str,
@@ -641,22 +764,11 @@ def _resolve_target_status(
     resolved_target_status = transition.to_status
     condition_config = transition.condition_config or {}
     owner_targets = condition_config.get("target_status_by_owner") or {}
-    owner_state_targets = condition_config.get("target_state_id_by_owner") or {}
-    if owner_state_targets:
-        owner_targets = {
-            key: _status_key_for_state(db, transition.definition_id, state_id)
-            for key, state_id in owner_state_targets.items()
-        }
     if owner_targets:
         target_owner_id = request.next_owner_id if request.next_owner_id is not None else getattr(item, "owner_id", None)
         default_target_status = owner_targets.get("with_owner" if target_owner_id else "without_owner", transition.to_status)
         resolved_target_status = default_target_status
     routes = condition_config.get("routes") or {}
-    if routes and all(isinstance(value, int) for value in routes.values()):
-        routes = {
-            key: _status_key_for_state(db, transition.definition_id, state_id)
-            for key, state_id in routes.items()
-        }
     route_dictionary = condition_config.get("route_dictionary")
     if routes or route_dictionary:
         field_name = condition_config.get("field")
@@ -681,14 +793,7 @@ def _resolve_target_status(
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Workflow routing configuration missing for selected value")
         default_target_status = mapped_status
         resolved_target_status = mapped_status
-        selected_target_status = request.selected_target_status or request.payload.get("selected_target_status")
-        selected_target_state_id = request.selected_target_state_id or request.payload.get("selected_target_state_id")
-        if selected_target_state_id is not None:
-            selected_target_status = _status_key_for_state(
-                db,
-                transition.definition_id,
-                int(selected_target_state_id),
-            )
+        selected_target_status = request.payload.get("selected_target_status")
         routing_mode = condition_config.get("routing_mode", "automatic")
         if routing_mode == "automatic" and selected_target_status:
             raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Automatic routing does not allow a selected target status")
@@ -707,37 +812,6 @@ def _resolve_target_status(
                     raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Target status override reason is required")
             resolved_target_status = selected_target_status
     return default_target_status, resolved_target_status
-
-
-def _status_key_for_state(db: Session, definition_id: int, state_id: int) -> str:
-    state = (
-        db.query(WorkflowState)
-        .filter(WorkflowState.id == state_id, WorkflowState.definition_id == definition_id)
-        .first()
-    )
-    if not state:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Workflow condition references unknown state: {state_id}",
-        )
-    return state.status_key
-
-
-def _state_for_status(db: Session, definition_id: int, status_key: str) -> WorkflowState:
-    state_record = (
-        db.query(WorkflowState)
-        .filter(
-            WorkflowState.definition_id == definition_id,
-            WorkflowState.status_key == status_key,
-        )
-        .first()
-    )
-    if not state_record:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=f"Workflow target state is missing for definition {definition_id}: {status_key}",
-        )
-    return state_record
 
 
 def _apply_domain_payload(
@@ -759,7 +833,6 @@ def _apply_domain_payload(
         dictionary_item = get_enabled_bug_type(db, str(bug_type))
         selected_values["bug_type_name"] = dictionary_item.display_name
         selected_values["is_real_bug"] = dictionary_item.is_real_bug
-        selected_values["dictionary_default_target_status"] = dictionary_item.default_target_status
         item.bug_type = bug_type
     if object_type == "bug" and transition.action_key == "submit_verification":
         item.resolve_time = _parse_effective_time(payload) or datetime.now()
@@ -1010,7 +1083,7 @@ def _next_owner_resolution(
     transition: WorkflowTransition,
     request: WorkflowTransitionExecuteRequest,
     actor: User | None,
-    resolved_target_status: str,
+    transition_action_key: str,
 ) -> dict[str, Any]:
     rule = transition.handler_rule or {}
     original_owner_id = getattr(item, "owner_id", None)
@@ -1024,7 +1097,7 @@ def _next_owner_resolution(
         original_owner_id,
         actor,
         request,
-        resolved_target_status,
+        transition_action_key,
     )
     if default_owner_id is None:
         for fallback in _handler_fallback_chain(rule):
@@ -1037,7 +1110,7 @@ def _next_owner_resolution(
                 original_owner_id,
                 actor,
                 request,
-                resolved_target_status,
+                transition_action_key,
             )
             if default_owner_id is not None:
                 source_rule = f"fallback:{source_rule}"
@@ -1089,7 +1162,7 @@ def _resolve_handler_source(
     original_owner_id: int | None,
     actor: User | None,
     request: WorkflowTransitionExecuteRequest,
-    resolved_target_status: str,
+    transition_action_key: str,
 ) -> tuple[int | None, str]:
     project_id = _project_id_for_item(db, object_type, item)
     if source_type == "keep_current":
@@ -1130,7 +1203,10 @@ def _resolve_handler_source(
     if source_type == "bug_verifier" and object_type == "bug":
         return _bug_verifier_owner(db, item, config)
     if source_type == "bug_verifier_if_pending_verification" and object_type == "bug":
-        if resolved_target_status != "pending_verification":
+        routes_to_verifier = transition_action_key == "submit_verification"
+        if not routes_to_verifier and getattr(item, "bug_type", None):
+            routes_to_verifier = not get_enabled_bug_type(db, str(item.bug_type)).is_real_bug
+        if not routes_to_verifier:
             return original_owner_id, "keep_current"
         return _bug_verifier_owner(db, item, config)
     if source_type == "task_confirmation" and object_type == "task":

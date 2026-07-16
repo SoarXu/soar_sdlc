@@ -35,6 +35,9 @@ def test_core_runtime_never_writes_legacy_status_strings():
     assert '"status": initial_state.status_key' not in workflow_state_source
     assert "item.status = resolved_target_status" not in runtime_source
     assert 'task.status = "pending_assignment"' not in runtime_source
+    assert "current_state.status_key" not in runtime_source
+    assert "def _status_key_for_state" not in runtime_source
+    assert "def _state_for_status" not in runtime_source
 
 
 def test_migration_audit_script_exists_and_checks_cross_definition_references():

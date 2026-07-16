@@ -22,7 +22,11 @@
     </header>
 
     <aside class="sidebar">
-      <el-menu router :default-active="$route.path" class="side-menu">
+      <el-menu
+        router
+        :default-active="activeMenuIndex"
+        class="side-menu"
+      >
         <el-menu-item index="/">
           <el-icon><Grid /></el-icon>
           <span>工作台</span>
@@ -51,18 +55,14 @@
           <el-icon><Connection /></el-icon>
           <span>DevOps</span>
         </el-menu-item>
-        <el-menu-item index="/roles">
-          <el-icon><UserFilled /></el-icon>
-          <span>角色管理</span>
-        </el-menu-item>
-        <el-menu-item index="/workflow">
+        <el-menu-item index="/admin">
           <el-icon><Setting /></el-icon>
-          <span>工作流配置</span>
+          <span>后台管理</span>
         </el-menu-item>
       </el-menu>
     </aside>
 
-    <main class="main" :class="{ 'main-workbench': $route.path === '/' || $route.path === '/dashboard' }">
+    <main class="main" :class="{ 'main-workbench': route.path === '/' || route.path === '/dashboard' }">
       <router-view />
     </main>
   </div>
@@ -70,7 +70,7 @@
 
 <script setup>
 import { computed, onMounted, ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import {
   ArrowDown,
   Connection,
@@ -80,17 +80,20 @@ import {
   Grid,
   Setting,
   Timer,
-  UserFilled,
   Warning
 } from '@element-plus/icons-vue'
-import { useAuthStore } from '../stores/auth'
-import { fetchUsers } from '../api/users'
 
+import { fetchUsers } from '../api/users'
+import { useAuthStore } from '../stores/auth'
+import { activeAdminMenuIndex } from '../utils/adminModules'
+
+const route = useRoute()
 const router = useRouter()
 const authStore = useAuthStore()
 const currentUsername = computed(() => localStorage.getItem('current_username') || '')
 const currentFullName = ref(cachedFullNameForCurrentUser())
 const currentDisplayName = computed(() => currentFullName.value || currentUsername.value || '未登录')
+const activeMenuIndex = computed(() => activeAdminMenuIndex(route.path) || route.path)
 
 function handleUserCommand(command) {
   if (command === 'logout') {

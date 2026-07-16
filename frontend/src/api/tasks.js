@@ -1,4 +1,5 @@
 import { http } from './http'
+import { toWorkItemPatchPayload } from '../utils/workItemPatchPayload'
 
 export function fetchTasks() {
   return http.get('/tasks')
@@ -12,16 +13,12 @@ export function createTask(payload) {
   return http.post('/tasks', payload)
 }
 
+export function createLinkedTask(payload) {
+  return http.post('/tasks/linked', payload)
+}
+
 export function updateTask(id, payload) {
-  return http.patch(`/tasks/${id}`, payload)
-}
-
-export function assignTask(id, payload) {
-  return http.post(`/tasks/${id}/assign`, payload)
-}
-
-export function batchAssignTasks(payload) {
-  return http.post('/tasks/batch-assign', payload)
+  return http.patch(`/tasks/${id}`, toWorkItemPatchPayload(payload))
 }
 
 export function fetchTaskStatusOperations(id) {

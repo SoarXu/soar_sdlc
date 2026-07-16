@@ -3,7 +3,7 @@ from uuid import uuid4
 
 from fastapi.testclient import TestClient
 
-from app.core.security import get_password_hash
+from app.core.security import create_access_token, get_password_hash
 from app.db.session import SessionLocal
 from app.models.bug import Bug
 from app.models.object_watch import ObjectWatch
@@ -13,7 +13,7 @@ from app.models.user import User
 from app.models.work_item_comment import WorkItemComment
 
 
-def _create_user_with_role(username: str, role_key: str) -> int:
+def _create_user_with_role(username: str, role_key: str) -> tuple[int, str]:
     db = SessionLocal()
     try:
         role = db.query(Role).filter(Role.role_key == role_key).first()
@@ -31,7 +31,7 @@ def _create_user_with_role(username: str, role_key: str) -> int:
         db.flush()
         db.add(UserRole(user_id=user.id, role_id=role.id))
         db.commit()
-        return user.id
+        return user.id, create_access_token(user.username)
     finally:
         db.close()
 
@@ -51,13 +51,32 @@ def _create_iteration(client: TestClient, project_id: int, name: str | None = No
     return response.json()["id"]
 
 
+def _add_project_member(project_id: int, user_id: int, project_role: str) -> None:
+    db = SessionLocal()
+    try:
+        db.add(
+            ProjectMember(
+                project_id=project_id,
+                user_id=user_id,
+                project_role=project_role,
+                is_workbench_participant=True,
+            )
+        )
+        db.commit()
+    finally:
+        db.close()
+
+
 def _start_iteration(client: TestClient, iteration_id: int) -> None:
-    response = client.post(f"/api/v1/iterations/{iteration_id}/start", json={"effective_time": "2026-06-24T10:00:00"})
+    response = client.post(
+        f"/api/v1/workflow-runtime/iteration/{iteration_id}/transition",
+        json={"action_key": "start", "payload": {"effective_time": "2026-06-24T10:00:00"}},
+    )
     assert response.status_code == 200
 
 
 def test_workbench_returns_default_queue_sections_for_pending_and_unassigned(client: TestClient):
-    developer_id = _create_user_with_role(f"queue_user_{uuid4().hex[:6]}", "developer")
+    developer_id, developer_token = _create_user_with_role(f"queue_user_{uuid4().hex[:6]}", "developer")
     project_id = _create_project(client, "Queue workbench project")
     iteration_id = _create_iteration(client, project_id, "Queue iteration")
     _start_iteration(client, iteration_id)
@@ -93,7 +112,10 @@ def test_workbench_returns_default_queue_sections_for_pending_and_unassigned(cli
     finally:
         db.close()
 
-    response = client.get(f"/api/v1/dashboard/workbench?user_id={developer_id}")
+    response = client.get(
+        "/api/v1/dashboard/workbench",
+        headers={"Authorization": f"Bearer {developer_token}"},
+    )
 
     assert response.status_code == 200
     data = response.json()
@@ -108,8 +130,8 @@ def test_workbench_returns_default_queue_sections_for_pending_and_unassigned(cli
     assert "iterations" not in data
 
 
-def test_workbench_returns_created_watched_mentioned_and_exception_center_without_project_board(client: TestClient):
-    developer_id = _create_user_with_role(f"follow_user_{uuid4().hex[:6]}", "developer")
+def test_workbench_returns_created_watched_mentioned_and_exception_center(client: TestClient):
+    developer_id, developer_token = _create_user_with_role(f"follow_user_{uuid4().hex[:6]}", "developer")
     project_id = _create_project(client, "Follow project")
     iteration_id = _create_iteration(client, project_id, "Follow iteration")
     _start_iteration(client, iteration_id)
@@ -167,7 +189,13 @@ def test_workbench_returns_created_watched_mentioned_and_exception_center_withou
                 is_workbench_participant=True,
             )
         )
-        db.query(Bug).filter(Bug.id == verified_bug["id"]).update({"status": "verified", "creator_id": developer_id})
+        db.query(Bug).filter(Bug.id == verified_bug["id"]).update(
+            {
+                "status": "verified",
+                "creator_id": developer_id,
+                "create_time": datetime.now() - timedelta(hours=30),
+            }
+        )
         db.query(Bug).filter(Bug.id == mentioned_bug["id"]).update({"creator_id": developer_id})
         db.query(Bug).filter(Bug.id == overdue_bug["id"]).update(
             {"creator_id": developer_id, "create_time": datetime.now() - timedelta(hours=30)}
@@ -199,7 +227,10 @@ def test_workbench_returns_created_watched_mentioned_and_exception_center_withou
     finally:
         db.close()
 
-    response = client.get(f"/api/v1/dashboard/workbench?user_id={developer_id}")
+    response = client.get(
+        "/api/v1/dashboard/workbench",
+        headers={"Authorization": f"Bearer {developer_token}"},
+    )
 
     assert response.status_code == 200
     data = response.json()
@@ -215,6 +246,55 @@ def test_workbench_returns_created_watched_mentioned_and_exception_center_withou
     exception_ids = {(item["object_type"], item["id"]) for item in data["exception_center"]["items"]}
     assert ("bug", verified_bug["id"]) in exception_ids
     assert ("bug", overdue_bug["id"]) in exception_ids
+    exception_item = next(
+        item for item in data["exception_center"]["items"]
+        if item["object_type"] == "bug" and item["id"] == verified_bug["id"]
+    )
+    assert exception_item["entered_at"]
+    assert exception_item["threshold_hours"] == 24
+    assert exception_item["threshold_count"] is None
+    assert exception_item["overdue_hours"] >= 0
+
+
+def test_authenticated_creates_immediately_appear_in_created_by_me(client: TestClient):
+    user_id, token = _create_user_with_role(f"creator_user_{uuid4().hex[:6]}", "tester")
+    project_id = _create_project(client, "Creator tracking project")
+    _add_project_member(project_id, user_id, "tester")
+    headers = {"Authorization": f"Bearer {token}"}
+
+    requirement = client.post(
+        "/api/v1/requirements",
+        json={"project_id": project_id, "title": f"Created requirement {uuid4().hex[:8]}"},
+        headers=headers,
+    )
+    task = client.post(
+        "/api/v1/tasks",
+        json={"project_id": project_id, "title": f"Created task {uuid4().hex[:8]}"},
+        headers=headers,
+    )
+    bug = client.post(
+        "/api/v1/bugs",
+        json={"project_id": project_id, "title": f"Created bug {uuid4().hex[:8]}"},
+        headers=headers,
+    )
+    test_run = client.post(
+        "/api/v1/test-runs",
+        json={"project_id": project_id, "name": f"Created test run {uuid4().hex[:8]}"},
+        headers=headers,
+    )
+
+    for response in (requirement, task, bug, test_run):
+        assert response.status_code in {200, 201}
+        assert response.json()["creator_id"] == user_id
+
+    workbench = client.get("/api/v1/dashboard/workbench", headers=headers).json()
+    created_refs = {(item["object_type"], item["id"]) for item in workbench["created_by_me"]["items"]}
+    assert {
+        ("requirement", requirement.json()["id"]),
+        ("task", task.json()["id"]),
+        ("bug", bug.json()["id"]),
+        ("test_run", test_run.json()["id"]),
+    } <= created_refs
 
 
 def test_workbench_move_endpoint_is_removed(client: TestClient):
@@ -224,3 +304,12 @@ def test_workbench_move_endpoint_is_removed(client: TestClient):
     )
 
     assert response.status_code == 404
+
+
+def test_workbench_requires_authentication(client: TestClient):
+    response = client.get(
+        "/api/v1/dashboard/workbench",
+        headers={"X-Test-No-Auth": "1"},
+    )
+
+    assert response.status_code == 401

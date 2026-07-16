@@ -17,10 +17,9 @@ from app.services.bug_service import (
     list_bugs,
     update_bug,
 )
-from app.services.assignment_service import assign_bug_owner, batch_assign_bug_owner
 from app.services.validation_case_service import bug_validation_context
 from app.views.bug_view import BugCreate, BugRead, BugUpdate
-from app.views.status_operation_view import AssignOwnerRequest, BatchAssignOwnerRead, BatchAssignOwnerRequest, StatusOperationRead
+from app.views.status_operation_view import StatusOperationRead
 from app.views.test_case_view import BugValidationContextRead
 
 
@@ -39,16 +38,7 @@ def post_bug(
     current_user: User | None = Depends(get_optional_current_user),
 ):
     ensure_work_item_create_permission(db, payload.project_id, current_user)
-    return create_bug(db, payload)
-
-
-@router.post("/batch-assign", response_model=BatchAssignOwnerRead)
-def batch_assign_bugs(
-    payload: BatchAssignOwnerRequest,
-    db: Session = Depends(get_db),
-    current_user: User | None = Depends(get_optional_current_user),
-):
-    return batch_assign_bug_owner(db, payload, actor=current_user)
+    return create_bug(db, payload, actor_id=current_user.id if current_user else None)
 
 
 @router.get("/{bug_id}", response_model=BugRead)
@@ -69,16 +59,6 @@ def patch_bug(
     current_user: User | None = Depends(get_optional_current_user),
 ):
     return update_bug(db, bug_id, payload, actor_id=current_user.id if current_user else None)
-
-
-@router.post("/{bug_id}/assign", response_model=BugRead)
-def assign_bug(
-    bug_id: int,
-    payload: AssignOwnerRequest,
-    db: Session = Depends(get_db),
-    current_user: User | None = Depends(get_optional_current_user),
-):
-    return assign_bug_owner(db, bug_id, payload, actor=current_user)
 
 
 @router.get("/{bug_id}/status-operations", response_model=list[StatusOperationRead])

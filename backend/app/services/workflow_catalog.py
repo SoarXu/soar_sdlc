@@ -3,10 +3,15 @@ STATUS_OPTIONS = [
     {"label": "进行中", "value": "active"},
     {"label": "已挂起", "value": "paused"},
     {"label": "已关闭", "value": "closed"},
-    {"label": "草稿", "value": "draft"},
-    {"label": "待办", "value": "todo"},
+    {"label": "待分派", "value": "pending_assignment"},
+    {"label": "处理中", "value": "in_processing"},
+    {"label": "待确认", "value": "pending_confirmation"},
+    {"label": "已完成", "value": "completed"},
+    {"label": "已取消", "value": "canceled"},
+    {"label": "待处理", "value": "pending_handling"},
     {"label": "修复中", "value": "fixing"},
-    {"label": "待验证", "value": "verifying"},
+    {"label": "待验证", "value": "pending_verification"},
+    {"label": "已验证", "value": "verified"},
 ]
 
 

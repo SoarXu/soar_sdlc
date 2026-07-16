@@ -26,7 +26,7 @@ class Bug(Base):
     reproduce_steps: Mapped[str | None] = mapped_column(Text().with_variant(MEDIUMTEXT, "mysql"), nullable=True)
     expected_result: Mapped[str | None] = mapped_column(Text, nullable=True)
     actual_result: Mapped[str | None] = mapped_column(Text, nullable=True)
-    status: Mapped[str] = mapped_column(String(32), default="open")
+    status: Mapped[str] = mapped_column(String(32), default="pending_handling")
     lifecycle_phase: Mapped[str] = mapped_column(String(32), default="development")
     resolution: Mapped[str | None] = mapped_column(String(64), nullable=True)
     resolve_time: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)

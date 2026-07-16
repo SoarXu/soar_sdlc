@@ -24,7 +24,7 @@ const projects = [
 const iterations = [
   { id: 10, name: 'Parent Active', status: 'active', project_ids: [1] },
   { id: 11, name: 'Child Planning', status: 'planning', project_ids: [2] },
-  { id: 12, name: 'Parent Finished', status: 'finished', project_ids: [1] },
+  { id: 12, name: 'Parent Completed', status: 'completed', project_ids: [1] },
   { id: 13, name: 'Sibling Active', status: 'active', project_ids: [3] }
 ]
 
@@ -39,7 +39,7 @@ run('bug iteration options include own and parent unfinished iterations', () => 
   )
 })
 
-run('bug iteration options exclude finished and sibling iterations', () => {
+run('bug iteration options exclude completed and sibling iterations', () => {
   const optionIds = bugIterationOptions(iterations, projects, 2).map((item) => item.id)
 
   assert.equal(optionIds.includes(12), false)
@@ -51,6 +51,6 @@ run('selected iteration outside options is kept disabled so its name is displaye
   const displayOptions = includeSelectedIterationOption(options, iterations, 12)
 
   assert.equal(displayOptions.at(-1).id, 12)
-  assert.equal(displayOptions.at(-1).name, 'Parent Finished')
+  assert.equal(displayOptions.at(-1).name, 'Parent Completed')
   assert.equal(displayOptions.at(-1).disabled, true)
 })

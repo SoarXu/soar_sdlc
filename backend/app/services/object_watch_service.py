@@ -9,6 +9,7 @@ from app.models.project import Project
 from app.models.requirement import Requirement
 from app.models.task import Task
 from app.models.test_case import TestCase
+from app.models.test_run import TestRun
 from app.models.user import User
 from app.services.project_permission_service import ensure_audit_view_permission, ensure_authenticated
 from app.views.object_watch_view import ObjectWatchRead, ObjectWatcherRead
@@ -19,6 +20,7 @@ MODEL_BY_TYPE = {
     "task": Task,
     "bug": Bug,
     "test_case": TestCase,
+    "test_run": TestRun,
 }
 
 

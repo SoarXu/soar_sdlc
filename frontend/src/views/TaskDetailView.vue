@@ -12,9 +12,9 @@
         :object-id="taskId"
         mode="detail"
         :users="users"
+        @command="handleWorkflowCommand"
         @executed="loadData"
       />
-      <el-button v-if="!editing" type="primary" @click="startEdit">编辑</el-button>
       <template v-else>
         <el-button @click="cancelEdit">取消</el-button>
         <el-button type="primary" :loading="saving" @click="saveTask">保存</el-button>
@@ -25,8 +25,8 @@
       <el-form v-if="editing" label-position="top">
         <el-form-item label="任务标题" required><el-input v-model="taskForm.title" /></el-form-item>
         <div class="form-grid">
-          <el-form-item label="关联需求"><el-select v-model="taskForm.requirement_id" clearable filterable><el-option v-for="requirement in requirements" :key="requirement.id" :label="requirement.title" :value="requirement.id" /></el-select></el-form-item>
-          <el-form-item label="负责人"><el-select v-model="taskForm.owner_id" clearable filterable><el-option v-for="user in users" :key="user.id" :label="user.full_name" :value="user.id" /></el-select></el-form-item>
+          <el-form-item label="关联需求"><el-select v-model="taskForm.requirement_id" clearable filterable @change="onRequirementChange"><el-option v-for="requirement in requirements" :key="requirement.id" :label="requirement.title" :value="requirement.id" /></el-select></el-form-item>
+          <el-form-item label="任务分支"><el-select v-model="taskForm.task_type" :disabled="Boolean(taskForm.requirement_id)"><el-option v-for="option in TASK_BRANCH_OPTIONS" :key="option.value" :label="option.label" :value="option.value" /></el-select></el-form-item>
           <el-form-item label="优先级"><el-select v-model="taskForm.priority"><el-option label="高" value="high" /><el-option label="中" value="medium" /><el-option label="低" value="low" /></el-select></el-form-item>
           <el-form-item label="截止日期"><el-date-picker v-model="taskForm.due_date" value-format="YYYY-MM-DD" type="date" /></el-form-item>
         </div>
@@ -40,7 +40,19 @@
           <router-link v-if="task.requirement_id" class="table-link" :to="`/requirements/${task.requirement_id}`">{{ labelById(requirements, task.requirement_id, 'title') }}</router-link>
           <span v-else>-</span>
         </el-descriptions-item>
+        <el-descriptions-item label="任务来源">
+          <template v-if="task.source_relations?.length">
+            <router-link
+              v-for="source in task.source_relations"
+              :key="`${source.source_type}:${source.source_id}`"
+              class="table-link task-source-link"
+              :to="sourceRoute(source)"
+            >{{ sourceLabel(source) }}</router-link>
+          </template>
+          <span v-else>-</span>
+        </el-descriptions-item>
         <el-descriptions-item label="负责人">{{ userLabel(users, task.owner_id) }}</el-descriptions-item>
+        <el-descriptions-item label="任务分支">{{ taskBranchLabel(task.task_type) }}</el-descriptions-item>
         <el-descriptions-item label="优先级">{{ task.priority || '-' }}</el-descriptions-item>
         <el-descriptions-item label="状态">{{ task.status || '-' }}</el-descriptions-item>
         <el-descriptions-item label="截止日期">{{ task.due_date || '-' }}</el-descriptions-item>
@@ -64,7 +76,7 @@
 
     <CommitRecordsPanel object-type="task" :object-id="taskId" />
 
-<el-card shadow="never" class="detail-panel requirement-history-card">
+<el-card id="history" shadow="never" class="detail-panel requirement-history-card">
       <template #header>历史记录</template>
       <div class="project-history requirement-history">
         <el-empty v-if="!taskHistory.length" description="暂无历史记录" />
@@ -116,6 +128,7 @@ import WorkItemCommentPanel from '../components/WorkItemCommentPanel.vue'
 import WorkflowActionButtons from '../components/WorkflowActionButtons.vue'
 import { labelById, userLabel } from '../utils/referenceLabels'
 import { formatAuditValue } from '../utils/auditHistoryLabels'
+import { deriveTaskBranch, TASK_BRANCH_OPTIONS, taskBranchLabel } from '../utils/taskBranchRules'
 
 const route = useRoute()
 const router = useRouter()
@@ -130,12 +143,13 @@ const users = ref([])
 const statusOperations = ref([])
 const auditLogs = ref([])
 const expandedHistory = reactive({})
-const taskForm = reactive({ requirement_id: null, title: '', priority: 'medium', owner_id: null, due_date: null, description: '' })
+const taskForm = reactive({ requirement_id: null, title: '', task_type: 'standalone_operation', priority: 'medium', owner_id: null, due_date: null, description: '' })
 const taskStatusOptions = [
-  { label: '待办', value: 'todo' },
-  { label: '进行中', value: 'doing' },
-  { label: '完成', value: 'done' },
-  { label: '关闭', value: 'closed' }
+  { label: '待分派', value: 'pending_assignment' },
+  { label: '处理中', value: 'in_processing' },
+  { label: '待确认', value: 'pending_confirmation' },
+  { label: '已完成', value: 'completed' },
+  { label: '已取消', value: 'canceled' }
 ]
 const taskHistory = computed(() => {
   const statusItems = statusOperations.value.map((item) => ({
@@ -210,6 +224,7 @@ function fillTaskForm() {
   Object.assign(taskForm, {
     requirement_id: task.value.requirement_id || null,
     title: task.value.title || '',
+    task_type: deriveTaskBranch({ requirementId: task.value.requirement_id, currentType: task.value.task_type }),
     priority: task.value.priority || 'medium',
     owner_id: task.value.owner_id || null,
     due_date: task.value.due_date || null,
@@ -217,9 +232,33 @@ function fillTaskForm() {
   })
 }
 
+function sourceRoute(source) {
+  const prefixes = {
+    requirement: '/requirements',
+    bug: '/bugs',
+    test_case: '/test-cases'
+  }
+  const prefix = prefixes[source.source_type]
+  return prefix ? `${prefix}/${source.source_id}` : '/tests'
+}
+
+function sourceLabel(source) {
+  const labels = { requirement: '需求', bug: 'Bug', test_case: '测试用例', test_run: '测试单' }
+  return `${labels[source.source_type] || source.source_type} #${source.source_id}`
+}
+
+function onRequirementChange(requirementId) {
+  taskForm.task_type = deriveTaskBranch({ requirementId, currentType: requirementId ? null : taskForm.task_type })
+}
+
 function startEdit() {
   fillTaskForm()
   editing.value = true
+}
+
+function handleWorkflowCommand({ commandType }) {
+  if (commandType === 'edit') startEdit()
+  if (commandType === 'view_history') document.getElementById('history')?.scrollIntoView({ behavior: 'smooth' })
 }
 
 function cancelEdit() {
@@ -235,6 +274,7 @@ async function saveTask() {
       ...taskForm,
       project_id: task.value.project_id,
       requirement_id: taskForm.requirement_id || null,
+      task_type: deriveTaskBranch({ requirementId: taskForm.requirement_id, currentType: taskForm.task_type }),
       owner_id: taskForm.owner_id || null
     })
     editing.value = false

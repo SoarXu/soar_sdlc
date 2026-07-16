@@ -6,7 +6,7 @@ from app.core.security import create_access_token, get_password_hash
 from app.db.session import SessionLocal
 from app.models.project_member import ProjectMember
 from app.models.role import Role, UserRole
-from app.models.test_case import TestCase
+from app.models.test_case import TestCase as CaseModel
 from app.models.user import User
 
 
@@ -137,16 +137,121 @@ def test_generated_task_inherits_requirement_current_handler_by_default(client: 
     assert requirement.status_code == 200
 
     generated = client.post(
-        f"/api/v1/requirements/{requirement.json()['id']}/generate-task",
-        json={"title": "实现需求生成任务", "task_type": "requirement_implementation"},
+        "/api/v1/tasks/linked",
+        json={
+            "source_type": "requirement",
+            "source_id": requirement.json()["id"],
+            "title": "实现需求生成任务",
+            "task_type": "requirement_implementation",
+        },
     )
-    assert generated.status_code == 200
+    assert generated.status_code == 201
     data = generated.json()
     assert data["requirement_id"] == requirement.json()["id"]
     assert data["project_id"] == project_id
     assert data["owner_id"] == owner_id
     assert data["status"] == "in_processing"
     assert data["source_requirement_review_status"] == "not_required"
+
+
+def test_task_branch_is_derived_from_source_or_defaults_to_standalone(client: TestClient):
+    project_id = _create_project(client)
+
+    requirement = client.post(
+        "/api/v1/requirements",
+        json={"project_id": project_id, "title": f"Branch source {uuid4().hex[:8]}"},
+    ).json()
+    requirement_task = client.post(
+        "/api/v1/tasks",
+        json={
+            "project_id": project_id,
+            "requirement_id": requirement["id"],
+            "title": f"Derived requirement task {uuid4().hex[:8]}",
+        },
+    )
+    standalone_task = client.post(
+        "/api/v1/tasks",
+        json={"project_id": project_id, "title": f"Derived standalone task {uuid4().hex[:8]}"},
+    )
+
+    assert requirement_task.status_code == 200
+    assert requirement_task.json()["task_type"] == "requirement_implementation"
+    assert standalone_task.status_code == 200
+    assert standalone_task.json()["task_type"] == "standalone_operation"
+
+
+def test_generate_task_derives_requirement_branch_and_records_creator(client: TestClient):
+    project_id = _create_project(client)
+    token, actor_id = _create_actor_token("Linked Task Creator")
+    _add_project_member(project_id, actor_id, "developer")
+    requirement = client.post(
+        "/api/v1/requirements",
+        json={"project_id": project_id, "title": f"Generated source {uuid4().hex[:8]}", "owner_id": actor_id},
+    ).json()
+
+    generated = client.post(
+        "/api/v1/tasks/linked",
+        json={
+            "source_type": "requirement",
+            "source_id": requirement["id"],
+            "title": f"Generated task {uuid4().hex[:8]}",
+        },
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert generated.status_code == 201
+    assert generated.json()["task_type"] == "requirement_implementation"
+    assert generated.json()["creator_id"] == actor_id
+
+
+def test_requirement_generate_task_legacy_route_is_removed(client: TestClient):
+    schema = client.get("/openapi.json").json()
+
+    assert "/api/v1/requirements/{requirement_id}/generate-task" not in schema["paths"]
+
+
+def test_task_create_rejects_unknown_or_source_conflicting_branch(client: TestClient):
+    project_id = _create_project(client)
+    requirement = client.post(
+        "/api/v1/requirements",
+        json={"project_id": project_id, "title": f"Task branch validation {uuid4().hex[:8]}"},
+    ).json()
+
+    unknown = client.post(
+        "/api/v1/tasks",
+        json={"project_id": project_id, "title": "Unknown branch", "task_type": "other"},
+    )
+    conflicting = client.post(
+        "/api/v1/tasks",
+        json={
+            "project_id": project_id,
+            "requirement_id": requirement["id"],
+            "title": "Conflicting branch",
+            "task_type": "bug_fix",
+        },
+    )
+
+    assert unknown.status_code == 422
+    assert conflicting.status_code == 422
+
+
+def test_derived_task_branch_always_exposes_a_completion_action(client: TestClient):
+    project_id = _create_project(client)
+    token, actor_id = _create_actor_token("Derived Task Handler")
+    _add_project_member(project_id, actor_id, "developer")
+    standalone = client.post(
+        "/api/v1/tasks",
+        json={"project_id": project_id, "title": f"Completable standalone {uuid4().hex[:8]}", "owner_id": actor_id},
+        headers={"Authorization": f"Bearer {token}"},
+    ).json()
+
+    actions = client.get(
+        f"/api/v1/workflow-runtime/task/{standalone['id']}/transitions",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert actions.status_code == 200
+    assert "complete" in {item["action_key"] for item in actions.json()}
 
 
 def test_requirement_update_records_only_changed_fields(client: TestClient):
@@ -291,7 +396,8 @@ def test_requirement_complete_goes_directly_to_completed_and_blocks_on_open_task
 
 def test_task_claim_and_cancel_follow_default_statuses(client: TestClient):
     project_id = _create_project(client)
-    token, _ = _create_actor_token("Task Claimer")
+    token, user_id = _create_actor_token("Task Claimer")
+    _add_project_member(project_id, user_id, "developer")
     task = client.post(
         "/api/v1/tasks",
         json={"project_id": project_id, "title": f"Task status flow {uuid4().hex[:8]}"},
@@ -359,11 +465,32 @@ def test_project_close_is_blocked_by_open_requirement_and_task(client: TestClien
     assert client.get(f"/api/v1/projects/{project_id}").json()["status"] == "active"
 
 
+def test_project_close_is_blocked_by_open_test_run(client: TestClient):
+    project_id = _create_project(client)
+    client.post(f"/api/v1/projects/{project_id}/start", json={"effective_time": "2026-06-01T09:00:00"})
+    test_run = client.post(
+        "/api/v1/test-runs",
+        json={"project_id": project_id, "name": "Open project test run", "status": "running"},
+    )
+    assert test_run.status_code == 200
+
+    closed_project = client.post(
+        f"/api/v1/projects/{project_id}/close",
+        json={"effective_time": "2026-06-10T18:00:00"},
+    )
+
+    assert closed_project.status_code == 400
+    assert client.get(f"/api/v1/projects/{project_id}").json()["status"] == "active"
 def test_requirement_status_cannot_be_changed_by_form_save(client: TestClient):
     project_id = _create_project(client)
-    requirement = client.post(
+    rejected = client.post(
         "/api/v1/requirements",
         json={"project_id": project_id, "title": f"表单状态保护-{uuid4().hex[:8]}", "status": "active"},
+    )
+    assert rejected.status_code == 422
+    requirement = client.post(
+        "/api/v1/requirements",
+        json={"project_id": project_id, "title": f"表单状态保护-{uuid4().hex[:8]}"},
     )
     assert requirement.status_code == 200
     assert requirement.json()["status"] == "pending_assignment"
@@ -372,9 +499,28 @@ def test_requirement_status_cannot_be_changed_by_form_save(client: TestClient):
         f"/api/v1/requirements/{requirement.json()['id']}",
         json={"title": "表单更新标题", "status": "closed"},
     )
-    assert updated.status_code == 200
-    assert updated.json()["title"] == "表单更新标题"
-    assert updated.json()["status"] == "pending_assignment"
+    assert updated.status_code == 422
+    unchanged = client.get(f"/api/v1/requirements/{requirement.json()['id']}").json()
+    assert unchanged["title"] == requirement.json()["title"]
+    assert unchanged["status"] == "pending_assignment"
+
+
+def test_task_status_cannot_be_changed_by_form_save(client: TestClient):
+    project_id = _create_project(client)
+    task = client.post(
+        "/api/v1/tasks",
+        json={"project_id": project_id, "title": f"任务表单状态保护-{uuid4().hex[:8]}"},
+    ).json()
+
+    updated = client.patch(
+        f"/api/v1/tasks/{task['id']}",
+        json={"title": "任务表单更新标题", "status": "completed"},
+    )
+
+    assert updated.status_code == 422
+    unchanged = client.get(f"/api/v1/tasks/{task['id']}").json()
+    assert unchanged["title"] == task["title"]
+    assert unchanged["status"] == "pending_assignment"
 
 
 def test_requirement_update_rejects_iteration_outside_project_scope(client: TestClient):
@@ -420,8 +566,27 @@ def test_deleting_requirement_unbinds_linked_test_cases(client: TestClient):
     assert deleted.status_code == 204
     db = SessionLocal()
     try:
-        persisted_case = db.query(TestCase).filter(TestCase.id == test_case["id"]).first()
+        persisted_case = db.query(CaseModel).filter(CaseModel.id == test_case["id"]).first()
         assert persisted_case is not None
         assert persisted_case.requirement_id is None
     finally:
         db.close()
+def test_requirement_task_and_bug_create_reject_legacy_status_aliases(client: TestClient):
+    project = client.post("/api/v1/projects", json={"name": f"Canonical Status {uuid4().hex[:8]}"}).json()
+
+    requirement = client.post(
+        "/api/v1/requirements",
+        json={"project_id": project["id"], "title": "Legacy requirement", "status": "draft"},
+    )
+    task = client.post(
+        "/api/v1/tasks",
+        json={"project_id": project["id"], "title": "Legacy task", "status": "todo"},
+    )
+    bug = client.post(
+        "/api/v1/bugs",
+        json={"project_id": project["id"], "title": "Legacy bug", "status": "open"},
+    )
+
+    assert requirement.status_code == 422
+    assert task.status_code == 422
+    assert bug.status_code == 422

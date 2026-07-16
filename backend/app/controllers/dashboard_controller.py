@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
-from app.core.auth_dependencies import get_optional_current_user
+from app.core.auth_dependencies import get_current_user
 from app.db.session import get_db
 from app.models.user import User
 from app.services.dashboard_service import get_dashboard_summary, get_workbench
@@ -18,8 +18,7 @@ def summary(db: Session = Depends(get_db)):
 
 @router.get("/workbench", response_model=WorkbenchResponse)
 def workbench(
-    user_id: int | None = None,
     db: Session = Depends(get_db),
-    current_user: User | None = Depends(get_optional_current_user),
+    current_user: User = Depends(get_current_user),
 ):
-    return get_workbench(db, user_id=user_id or (current_user.id if current_user else None))
+    return get_workbench(db, user_id=current_user.id)

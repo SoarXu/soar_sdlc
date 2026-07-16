@@ -18,27 +18,6 @@ class StatusOperationCreate(BaseModel):
     blocker_messages: list[str] | None = None
 
 
-class AssignOwnerRequest(BaseModel):
-    owner_id: int
-    remark: str | None = None
-
-
-class BatchAssignOwnerRequest(BaseModel):
-    ids: list[int]
-    owner_id: int
-    remark: str | None = None
-
-
-class BatchAssignFailure(BaseModel):
-    id: int
-    reason: str
-
-
-class BatchAssignOwnerRead(BaseModel):
-    success_ids: list[int]
-    failures: list[BatchAssignFailure]
-
-
 class StatusOperationRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

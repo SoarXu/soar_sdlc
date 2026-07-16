@@ -102,9 +102,13 @@ def test_iteration_crud_persists_to_database(client: TestClient):
     iteration_id = created.json()["id"]
     assert created.json()["project_id"] == project_id
 
-    updated = client.patch(f"/api/v1/iterations/{iteration_id}", json={"status": "active"})
+    updated = client.patch(
+        f"/api/v1/iterations/{iteration_id}",
+        json={"status": "active", "goal": "Updated goal"},
+    )
     assert updated.status_code == 200
-    assert updated.json()["status"] == "active"
+    assert updated.json()["status"] == "planning"
+    assert updated.json()["goal"] == "Updated goal"
 
     deleted = client.delete(f"/api/v1/iterations/{iteration_id}")
     assert deleted.status_code == 204
@@ -197,8 +201,8 @@ def test_iteration_start_keeps_child_work_items_on_their_own_workflows(client: T
     ).status_code == 200
 
     started = client.post(
-        f"/api/v1/iterations/{iteration_id}/start",
-        json={"effective_time": "2026-06-12T09:30:00", "remark": "iteration kickoff"},
+        f"/api/v1/workflow-runtime/iteration/{iteration_id}/transition",
+        json={"action_key": "start", "payload": {"effective_time": "2026-06-12T09:30:00", "remark": "iteration kickoff"}},
     )
 
     assert started.status_code == 200
@@ -219,12 +223,99 @@ def test_iteration_finish_is_blocked_by_unfinished_direct_items(client: TestClie
     assert client.post(f"/api/v1/iterations/{iteration_id}/tasks", json={"task_ids": [task_id]}).status_code == 200
 
     finished = client.post(
-        f"/api/v1/iterations/{iteration_id}/finish",
-        json={"effective_time": "2026-06-10T18:00:00"},
+        f"/api/v1/workflow-runtime/iteration/{iteration_id}/transition",
+        json={"action_key": "complete", "payload": {"effective_time": "2026-06-10T18:00:00"}},
     )
 
     assert finished.status_code == 400
     assert client.get(f"/api/v1/iterations/{iteration_id}/detail").json()["iteration"]["status"] == "active"
+
+
+def test_iteration_cancel_uses_runtime_and_complete_gate(client: TestClient):
+    project_id = _create_project(client)
+    iteration_id = _create_iteration(client, [project_id], status="active")
+    requirement_id = _create_requirement(client, project_id, "Cancel blocker")
+    assert client.post(
+        f"/api/v1/iterations/{iteration_id}/requirements",
+        json={"requirement_ids": [requirement_id]},
+    ).status_code == 200
+
+    blocked = client.post(
+        f"/api/v1/workflow-runtime/iteration/{iteration_id}/transition",
+        json={"action_key": "cancel", "payload": {"remark": "cancel blocked"}},
+    )
+    assert blocked.status_code == 400
+    assert client.get(f"/api/v1/iterations/{iteration_id}/detail").json()["iteration"]["status"] == "active"
+
+    _set_requirement_status(requirement_id, "completed")
+    canceled = client.post(
+        f"/api/v1/workflow-runtime/iteration/{iteration_id}/transition",
+        json={"action_key": "cancel", "payload": {"remark": "cancel approved"}},
+    )
+
+    assert canceled.status_code == 200
+    assert canceled.json()["status"] == "canceled"
+
+
+def test_iteration_finish_is_blocked_by_open_bug_without_other_work_items(client: TestClient):
+    project_id = _create_project(client)
+    iteration_id = _create_iteration(client, [project_id], status="active")
+    _create_bug(client, project_id, iteration_id, "Only open bug")
+
+    finished = client.post(
+        f"/api/v1/workflow-runtime/iteration/{iteration_id}/transition",
+        json={"action_key": "complete", "payload": {"effective_time": "2026-06-10T18:00:00"}},
+    )
+
+    assert finished.status_code == 400
+    assert client.get(f"/api/v1/iterations/{iteration_id}/detail").json()["iteration"]["status"] == "active"
+
+
+def test_iteration_finish_is_blocked_by_open_test_run(client: TestClient):
+    project_id = _create_project(client)
+    iteration_id = _create_iteration(client, [project_id], status="active")
+    test_run = client.post(
+        "/api/v1/test-runs",
+        json={
+            "project_id": project_id,
+            "iteration_id": iteration_id,
+            "name": "Open iteration test run",
+            "status": "running",
+        },
+    )
+    assert test_run.status_code == 200
+
+    finished = client.post(
+        f"/api/v1/workflow-runtime/iteration/{iteration_id}/transition",
+        json={"action_key": "complete", "payload": {"effective_time": "2026-06-10T18:00:00"}},
+    )
+
+    assert finished.status_code == 400
+
+
+def test_iteration_finish_checks_only_directly_included_tasks(client: TestClient):
+    project_id = _create_project(client)
+    iteration_id = _create_iteration(client, [project_id], status="active")
+    requirement_id = _create_requirement(client, project_id, "Completed direct requirement")
+    linked_task_id = _create_task(
+        client,
+        project_id,
+        "Open task linked only through requirement",
+        requirement_id=requirement_id,
+    )
+    assert client.post(
+        f"/api/v1/iterations/{iteration_id}/requirements",
+        json={"requirement_ids": [requirement_id]},
+    ).status_code == 200
+    _set_requirement_status(requirement_id, "completed")
+
+    finished = client.post(
+        f"/api/v1/workflow-runtime/iteration/{iteration_id}/transition",
+        json={"action_key": "complete", "payload": {"effective_time": "2026-06-10T18:00:00"}},
+    )
+
+    assert finished.status_code == 200
+    assert client.get(f"/api/v1/tasks/{linked_task_id}").json()["status"] == "pending_assignment"
 
 
 def test_iteration_defer_moves_selected_unfinished_items(client: TestClient):
@@ -247,3 +338,45 @@ def test_iteration_defer_moves_selected_unfinished_items(client: TestClient):
     assert deferred.json()["moved_requirement_ids"] == [requirement_id]
     assert deferred.json()["moved_task_ids"] == [task_id]
     assert client.get(f"/api/v1/iterations/{target_iteration_id}/detail").status_code == 200
+
+
+def test_iteration_defer_rejects_completed_and_canceled_items(client: TestClient):
+    project_id = _create_project(client)
+    current_iteration_id = _create_iteration(client, [project_id], "Current terminal iteration", status="active")
+    target_iteration_id = _create_iteration(client, [project_id], "Target terminal iteration", status="planning")
+    requirement_id = _create_requirement(client, project_id, "Completed requirement")
+    task_id = _create_task(client, project_id, "Canceled task")
+    assert client.post(
+        f"/api/v1/iterations/{current_iteration_id}/requirements",
+        json={"requirement_ids": [requirement_id]},
+    ).status_code == 200
+    assert client.post(
+        f"/api/v1/iterations/{current_iteration_id}/tasks",
+        json={"task_ids": [task_id]},
+    ).status_code == 200
+    _set_requirement_status(requirement_id, "completed")
+    _set_task_status(task_id, "canceled")
+
+    deferred = client.post(
+        f"/api/v1/iterations/{current_iteration_id}/defer-work-items",
+        json={"target_iteration_id": target_iteration_id, "requirement_ids": [requirement_id], "task_ids": [task_id]},
+    )
+
+    assert deferred.status_code == 400
+
+
+def test_iteration_progress_counts_default_template_terminal_requirements(client: TestClient):
+    project_id = _create_project(client)
+    iteration_id = _create_iteration(client, [project_id])
+    requirement_id = _create_requirement(client, project_id, "Completed progress requirement")
+    assert client.post(
+        f"/api/v1/iterations/{iteration_id}/requirements",
+        json={"requirement_ids": [requirement_id]},
+    ).status_code == 200
+    _set_requirement_status(requirement_id, "completed")
+
+    detail = client.get(f"/api/v1/iterations/{iteration_id}/detail")
+
+    assert detail.status_code == 200
+    assert detail.json()["metrics"]["closed_requirement_total"] == 1
+    assert detail.json()["metrics"]["progress_rate"] == 1.0

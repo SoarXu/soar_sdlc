@@ -5,6 +5,7 @@ from fastapi.testclient import TestClient
 from app.core.security import create_access_token, get_password_hash
 from app.db.session import SessionLocal
 from app.models.project_member import ProjectMember
+from app.models.object_watch import ObjectWatch
 from app.models.role import Role, UserRole
 from app.models.user import User
 
@@ -90,3 +91,56 @@ def test_manual_watch_and_unwatch_supported_work_item(client: TestClient):
     assert after.status_code == 200
     assert after.json()["watched"] is False
     assert after.json()["watcher_count"] == 0
+
+
+def test_test_run_watch_deduplicates_manual_and_mention_sources(client: TestClient):
+    user_id, token = _create_user("Test Run Watcher", "tester")
+    author_id, author_token = _create_user("Test Run Mention Author", "tester")
+    project = client.post("/api/v1/projects", json={"name": f"Test Run Watch Project {uuid4().hex[:8]}"}).json()
+    _add_project_member(project["id"], user_id, "tester")
+    _add_project_member(project["id"], author_id, "tester")
+    test_run = client.post(
+        "/api/v1/test-runs",
+        json={"project_id": project["id"], "name": f"Watched Test Run {uuid4().hex[:8]}"},
+        headers={"Authorization": f"Bearer {token}"},
+    ).json()
+    headers = {"Authorization": f"Bearer {token}"}
+
+    manual = client.post(
+        "/api/v1/object-watches",
+        json={"object_type": "test_run", "object_id": test_run["id"]},
+        headers=headers,
+    )
+    mentioned = client.post(
+        "/api/v1/work-item-comments",
+        json={
+            "object_type": "test_run",
+            "object_id": test_run["id"],
+            "body": "mention source",
+            "mentioned_user_ids": [user_id],
+        },
+        headers={"Authorization": f"Bearer {author_token}"},
+    )
+    state = client.get(
+        f"/api/v1/object-watches?object_type=test_run&object_id={test_run['id']}",
+        headers=headers,
+    )
+
+    assert manual.status_code == 200
+    assert mentioned.status_code == 201
+    assert state.status_code == 200
+    assert state.json()["watched"] is True
+    assert state.json()["watcher_count"] == 1
+    db = SessionLocal()
+    try:
+        sources = {
+            row.source
+            for row in db.query(ObjectWatch).filter(
+                ObjectWatch.object_type == "test_run",
+                ObjectWatch.object_id == test_run["id"],
+                ObjectWatch.user_id == user_id,
+            )
+        }
+        assert sources == {"manual", "mention"}
+    finally:
+        db.close()

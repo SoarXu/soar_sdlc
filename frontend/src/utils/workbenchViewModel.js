@@ -15,16 +15,9 @@ const TYPE_LABELS = {
   requirement: '需求',
   task: '任务',
   test_case: '测试用例',
+  test_run: '测试单',
   bug: '缺陷',
   code_review: '代码评审'
-}
-
-const TYPE_SHORT_LABELS = {
-  requirement: '需',
-  task: '任',
-  test_case: '测',
-  bug: '缺',
-  code_review: 'CR'
 }
 
 const STATUS_LABELS = {
@@ -33,32 +26,28 @@ const STATUS_LABELS = {
     in_processing: '处理中',
     pending_confirmation: '待确认',
     completed: '已完成',
-    canceled: '已取消',
-    draft: '草稿',
-    active: '进行中',
-    done: '已完成',
-    closed: '已关闭'
+    canceled: '已取消'
   },
   task: {
     pending_assignment: '待分派',
     in_processing: '处理中',
     pending_confirmation: '待确认',
     completed: '已完成',
-    canceled: '已取消',
-    todo: '待办',
-    doing: '进行中',
-    done: '已完成',
-    closed: '已关闭'
+    canceled: '已取消'
   },
   bug: {
     pending_handling: '待处理',
     fixing: '修复中',
     pending_verification: '待验证',
     verified: '已验证',
-    closed: '已关闭',
-    open: '打开',
-    reopened: '重新打开',
-    suspended: '已挂起'
+    closed: '已关闭'
+  },
+  test_run: {
+    planning: '规划中',
+    active: '进行中',
+    completed: '已完成',
+    canceled: '已取消',
+    finished: '已结束'
   }
 }
 
@@ -85,6 +74,22 @@ function filterMatch(item, filters = {}) {
   if (selectedTypes.size && !selectedTypes.has(item.object_type)) {
     return false
   }
+  const scalarFilters = [
+    ['projectIds', item.project_id],
+    ['iterationKeys', item.iteration_group_key || (item.iteration_id ? String(item.iteration_id) : 'uniterated')],
+    ['priorities', item.priority || item.severity],
+    ['statuses', item.status],
+    ['ownerIds', item.owner_id],
+    ['handlerIds', item.handler_id]
+  ]
+  for (const [filterKey, value] of scalarFilters) {
+    const selected = new Set(filters[filterKey] || [])
+    if (selected.size && !selected.has(value)) return false
+  }
+  const minOverdueHours = Number(filters.minOverdueHours)
+  if (Number.isFinite(minOverdueHours) && minOverdueHours > 0 && Number(item.overdue_hours || 0) < minOverdueHours) {
+    return false
+  }
   const keyword = String(filters.keyword || '').trim().toLowerCase()
   if (!keyword) {
     return true
@@ -104,7 +109,6 @@ export function buildWorkbenchViewModel(payload = {}) {
   const exceptionCenter = normalizeSection('exception_center', payload.exception_center, '异常中心', ENTRY_TABS[2].description)
   const trackingTabs = TRACKING_TABS.map((tab) => normalizeSection(tab.key, payload[tab.key], tab.label, tab.description))
   const trackingTotal = trackingTabs.reduce((sum, tab) => sum + tab.total, 0)
-
   return {
     entryTabs: ENTRY_TABS,
     queueSections: [pending, unassigned, exceptionCenter],
@@ -132,8 +136,8 @@ export function filterWorkbenchItems(items = [], filters = {}) {
 }
 
 export function isTerminalWorkItem(item = {}) {
-  if (item.object_type === 'requirement') return ['completed', 'canceled', 'done', 'closed'].includes(item.status)
-  if (item.object_type === 'task') return ['completed', 'canceled', 'done', 'closed'].includes(item.status)
+  if (item.object_type === 'requirement') return ['completed', 'canceled'].includes(item.status)
+  if (item.object_type === 'task') return ['completed', 'canceled'].includes(item.status)
   if (item.object_type === 'bug') return item.status === 'closed'
   return false
 }
@@ -144,10 +148,6 @@ export function shouldShowWorkbenchWorkflowActions(sectionKey, item = {}) {
 
 export function typeLabel(type) {
   return TYPE_LABELS[type] || type || '-'
-}
-
-export function typeShortLabel(type) {
-  return TYPE_SHORT_LABELS[type] || typeLabel(type)
 }
 
 export function typeTag(type) {
@@ -176,7 +176,7 @@ export function itemStatusTag(item = {}) {
     return item.status === 'closed' || item.status === 'canceled' ? 'info' : 'success'
   }
   if (item.object_type === 'bug') {
-    return ['pending_handling', 'open', 'reopened'].includes(item.status) ? 'danger' : 'warning'
+    return item.status === 'pending_handling' ? 'danger' : 'warning'
   }
   if (item.object_type === 'test_case') {
     if (item.last_execute_result === 'passed') return 'success'
@@ -184,11 +184,14 @@ export function itemStatusTag(item = {}) {
     if (item.last_execute_result === 'blocked') return 'warning'
     return 'info'
   }
-  return ['in_processing', 'active', 'doing', 'pending_confirmation'].includes(item.status) ? 'primary' : 'info'
+  return ['in_processing', 'active', 'pending_confirmation'].includes(item.status) ? 'primary' : 'info'
 }
 
 export function workbenchMetaText(sectionKey, item = {}) {
   if (sectionKey === 'exception_center') {
+    if (Number(item.overdue_hours) > 0) {
+      return `${item.exception_label || 'Exception'} - overdue ${item.overdue_hours}h`
+    }
     return item.exception_label || '异常项'
   }
   if (sectionKey === 'watched_by_me') {
@@ -208,13 +211,6 @@ export function workbenchItemActionGroup(sectionKey, item = {}) {
     return {
       primary: { key: 'execute_case', label: '执行', type: 'success' },
       secondary
-    }
-  }
-
-  if (sectionKey === 'unassigned' && ['requirement', 'task', 'bug'].includes(item.object_type)) {
-    return {
-      primary: null,
-      secondary: [{ key: 'auto_assign_item', label: '自动分配', type: 'warning' }]
     }
   }
 

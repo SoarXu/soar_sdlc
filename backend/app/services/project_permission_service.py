@@ -73,12 +73,6 @@ def can_delete_project(db: Session, actor: User | None) -> bool:
     return is_system_admin(db, actor.id)
 
 
-def can_assign_work_item(db: Session, project_id: int | None, actor: User | None) -> bool:
-    if actor is None:
-        return True
-    return is_system_admin(db, actor.id) or is_project_owner(db, project_id, actor.id)
-
-
 def can_create_work_item(db: Session, project_id: int | None, actor: User | None) -> bool:
     if actor is None:
         return False
@@ -125,6 +119,10 @@ def can_view_audit(db: Session, project_id: int | None, actor: User | None) -> b
     )
 
 
+def can_view_project_work_items(db: Session, project_id: int | None, actor: User | None) -> bool:
+    return can_view_audit(db, project_id, actor)
+
+
 def can_admin_action(db: Session, project_id: int | None, actor_id: int | None) -> bool:
     if actor_id is None:
         return True
@@ -143,12 +141,6 @@ def ensure_project_delete_permission(db: Session, actor: User | None) -> None:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="只有系统管理员可以删除项目")
 
 
-def ensure_work_item_assign_permission(db: Session, project_id: int | None, actor: User | None) -> None:
-    ensure_authenticated(actor)
-    if not can_assign_work_item(db, project_id, actor):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="无权指派当前处理人")
-
-
 def ensure_work_item_action_permission(db: Session, item, actor_id: int | None, object_label: str) -> None:
     if actor_id is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
@@ -163,6 +155,15 @@ def ensure_work_item_action_permission(db: Session, item, actor_id: int | None, 
 def ensure_authenticated(actor: User | None) -> None:
     if actor is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
+
+
+def ensure_workflow_fields_not_updated(fields: set[str]) -> None:
+    protected = fields & {"owner_id", "status"}
+    if protected:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Workflow-owned fields cannot be updated directly: {', '.join(sorted(protected))}",
+        )
 
 
 def ensure_work_item_create_permission(db: Session, project_id: int | None, actor: User | None) -> None:
@@ -201,14 +202,6 @@ def ensure_audit_view_permission(db: Session, project_id: int | None, actor: Use
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="无权查看审计历史")
 
 
-def ensure_project_member(db: Session, project_id: int | None, user_id: int) -> None:
-    if not project_id:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="对象缺少所属项目")
-    if is_project_member(db, project_id, user_id):
-        return
-    raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="处理人不是对象所属项目成员")
-
-
 def _has_role(db: Session, user_id: int, role_keys: set[str]) -> bool:
     return bool(
         db.query(Role)
@@ -230,3 +223,26 @@ def _has_project_role(db: Session, project_id: int | None, user_id: int, project
         )
         .first()
     )
+
+
+def actor_role_keys(db: Session, project_id: int | None, user_id: int | None) -> set[str]:
+    if user_id is None:
+        return set()
+    role_keys = {
+        row.role_key
+        for row in (
+            db.query(Role)
+            .join(UserRole, UserRole.role_id == Role.id)
+            .filter(UserRole.user_id == user_id, Role.enabled.is_(True))
+            .all()
+        )
+    }
+    if project_id:
+        role_keys.update(
+            row.project_role
+            for row in db.query(ProjectMember).filter(
+                ProjectMember.project_id == project_id,
+                ProjectMember.user_id == user_id,
+            )
+        )
+    return role_keys

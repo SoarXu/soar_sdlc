@@ -110,7 +110,8 @@ def test_project_member_can_claim_unassigned_work_item(client: TestClient):
     ).json()
 
     claimed = client.post(
-        f"/api/v1/work-items/task/{task['id']}/claim",
+        f"/api/v1/workflow-runtime/task/{task['id']}/transition",
+        json={"action_key": "claim"},
         headers={"Authorization": f"Bearer {token}"},
     )
 
@@ -121,7 +122,7 @@ def test_project_member_can_claim_unassigned_work_item(client: TestClient):
     }
 
 
-def test_manager_can_assign_and_batch_assign_work_items(client: TestClient):
+def test_manager_can_assign_unassigned_work_items_through_runtime(client: TestClient):
     _, project_id = _create_project(client)
     manager_id, manager_token = _create_user("Assign Manager", "project_owner")
     developer_id, _ = _create_user("Assigned Developer", "developer")
@@ -141,62 +142,64 @@ def test_manager_can_assign_and_batch_assign_work_items(client: TestClient):
     ).json()
 
     assigned = client.post(
-        f"/api/v1/work-items/requirement/{requirement['id']}/assign",
-        json={"owner_id": developer_id, "remark": "route to dev"},
+        f"/api/v1/workflow-runtime/requirement/{requirement['id']}/transition",
+        json={"action_key": "assign", "next_owner_id": developer_id, "payload": {"reason": "route to dev"}},
         headers={"Authorization": f"Bearer {manager_token}"},
     )
-    batch = client.post(
-        "/api/v1/work-items/batch-assign",
-        json={
-            "items": [
-                {"object_type": "task", "id": task["id"]},
-                {"object_type": "bug", "id": bug["id"]},
-            ],
-            "owner_id": developer_id,
-        },
+    task_assigned = client.post(
+        f"/api/v1/workflow-runtime/task/{task['id']}/transition",
+        json={"action_key": "assign", "next_owner_id": developer_id},
+        headers={"Authorization": f"Bearer {manager_token}"},
+    )
+    bug_assigned = client.post(
+        f"/api/v1/workflow-runtime/bug/{bug['id']}/transition",
+        json={"action_key": "assign", "next_owner_id": developer_id},
         headers={"Authorization": f"Bearer {manager_token}"},
     )
 
     assert assigned.status_code == 200
     assert assigned.json()["owner_id"] == developer_id
-    assert batch.status_code == 200
-    assert {(item["object_type"], item["id"]) for item in batch.json()["success_items"]} == {
-        ("task", task["id"]),
-        ("bug", bug["id"]),
-    }
-    assert batch.json()["failures"] == []
+    assert task_assigned.status_code == 200
+    assert task_assigned.json()["owner_id"] == developer_id
+    assert bug_assigned.status_code == 200
+    assert bug_assigned.json()["owner_id"] == developer_id
 
 
-def test_auto_assign_unassigned_items_uses_handler_transition_rule(client: TestClient):
-    config_id, project_id = _create_project(client)
-    manager_id, manager_token = _create_user("Auto Assign Manager", "project_owner")
-    developer_id, _ = _create_user("Auto Developer", "developer")
-    _add_project_member(project_id, manager_id, "project_owner")
-    _add_project_member(project_id, developer_id, "developer")
-    rule = client.post(
-        "/api/v1/handler-transition-rules",
+def test_unassigned_list_is_scoped_to_project_members_and_system_admin(client: TestClient):
+    project_id, _ = _create_project(client)
+    member_id, member_token = _create_user("Unassigned Queue Member", "developer")
+    _, outsider_token = _create_user("Unassigned Queue Outsider", "developer")
+    _, admin_token = _create_user("Unassigned Queue Admin", "system_admin")
+    _add_project_member(project_id, member_id, "developer")
+    task = client.post(
+        "/api/v1/tasks",
         json={
-            "config_id": config_id,
-            "object_type": "bug",
-            "action": "auto_assign",
-            "from_status": "pending_handling",
-            "target_type": "project_role",
-            "target_roles": "developer",
-            "fallback_type": "none",
+            "project_id": project_id,
+            "title": f"Scoped Unassigned Task {uuid4().hex[:8]}",
+            "task_type": "standalone_operation",
+            "owner_id": None,
         },
-    )
-    assert rule.status_code == 201
-    bug = client.post(
-        "/api/v1/bugs",
-        json={"project_id": project_id, "title": f"Auto Assign Bug {uuid4().hex[:8]}", "owner_id": None},
     ).json()
 
-    result = client.post(
-        "/api/v1/work-items/unassigned/auto-assign",
-        json={"items": [{"object_type": "bug", "id": bug["id"]}]},
-        headers={"Authorization": f"Bearer {manager_token}"},
+    member_items = client.get(
+        "/api/v1/work-items/unassigned",
+        headers={"Authorization": f"Bearer {member_token}"},
+    ).json()["items"]
+    outsider_items = client.get(
+        "/api/v1/work-items/unassigned",
+        headers={"Authorization": f"Bearer {outsider_token}"},
+    ).json()["items"]
+    admin_items = client.get(
+        "/api/v1/work-items/unassigned",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    ).json()["items"]
+    unauthenticated = client.get(
+        "/api/v1/work-items/unassigned",
+        headers={"X-Test-No-Auth": "1"},
     )
+    task_ref = ("task", task["id"])
 
-    assert result.status_code == 200
-    assert result.json()["success_items"] == [{"object_type": "bug", "id": bug["id"], "owner_id": developer_id}]
-    assert result.json()["failures"] == []
+    assert task_ref in {(item["object_type"], item["id"]) for item in member_items}
+    assert task_ref not in {(item["object_type"], item["id"]) for item in outsider_items}
+    assert task_ref in {(item["object_type"], item["id"]) for item in admin_items}
+    assert unauthenticated.status_code == 401

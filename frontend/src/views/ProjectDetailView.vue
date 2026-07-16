@@ -95,7 +95,7 @@
           <el-table-column prop="actual_end_date" label="实际结束" width="130" />
           <el-table-column label="状态" width="120"><template #default="{ row }">{{ iterationStatusLabel(row.status) }}</template></el-table-column>
           <el-table-column label="操作" width="250" fixed="right">
-            <template #default="{ row }"><el-button v-if="canManageCurrentProject && row.status === 'planning'" link type="success" @click="openIterationStart(row)">开始</el-button><el-button v-if="canManageCurrentProject && row.status === 'active'" link type="warning" @click="openIterationFinish(row)">结束</el-button><el-button v-if="canManageCurrentProject" link type="primary" @click="openIterationEdit(row)">编辑</el-button><el-popconfirm v-if="canManageCurrentProject" title="确认删除该迭代？" @confirm="removeIteration(row.id)"><template #reference><el-button link type="danger">删除</el-button></template></el-popconfirm></template>
+            <template #default="{ row }"><WorkflowActionButtons v-if="canManageCurrentProject" object-type="iteration" :object-id="row.id" mode="list" :transitions="projectWorkflowTransitionsFor('iteration', row.id)" :auto-load="false" :users="users" @executed="refreshAfterMutation" /><el-button v-if="canManageCurrentProject && row.status === 'active'" link type="warning" @click="openDeferWorkItems(row)">延期工作项</el-button><el-button v-if="canManageCurrentProject" link type="primary" @click="openIterationEdit(row)">编辑</el-button><el-popconfirm v-if="canManageCurrentProject" title="确认删除该迭代？" @confirm="removeIteration(row.id)"><template #reference><el-button link type="danger">删除</el-button></template></el-popconfirm></template>
           </el-table-column>
         </el-table>
         <div class="table-pagination">
@@ -177,6 +177,7 @@
             <template #default="{ row }"><router-link class="table-link" :to="`/tasks/${row.id}`">{{ row.title }}</router-link></template>
           </el-table-column>
           <el-table-column label="需求" width="180"><template #default="{ row }">{{ labelById(projectRequirementOptions, row.requirement_id, 'title') }}</template></el-table-column>
+          <el-table-column label="任务分支" width="120"><template #default="{ row }">{{ taskBranchLabel(row.task_type) }}</template></el-table-column>
           <el-table-column label="当前处理人" width="150"><template #default="{ row }">{{ userLabel(users, row.owner_id) }}</template></el-table-column>
           <el-table-column prop="due_date" label="截止日期" width="130" />
           <el-table-column label="状态" width="110">
@@ -404,26 +405,12 @@
     <el-dialog v-model="iterationDialogVisible" :title="editingIterationId ? '编辑迭代' : '新增迭代'" width="560px">
       <el-form label-position="top">
         <el-form-item label="迭代名称" required><el-input v-model="iterationForm.name" /></el-form-item>
-        <div class="form-grid"><el-form-item label="负责人"><el-select v-model="iterationForm.owner_id" clearable filterable><el-option v-for="user in users" :key="user.id" :label="user.full_name" :value="user.id" /></el-select></el-form-item><el-form-item label="状态"><el-select v-model="iterationForm.status"><el-option label="规划中" value="planning" /><el-option label="进行中" value="active" /><el-option label="已完成" value="finished" /><el-option label="已关闭" value="closed" /></el-select></el-form-item><el-form-item label="开始日期"><el-date-picker v-model="iterationForm.start_date" value-format="YYYY-MM-DD" type="date" /></el-form-item><el-form-item label="结束日期"><el-date-picker v-model="iterationForm.end_date" value-format="YYYY-MM-DD" type="date" /></el-form-item></div>
+        <div class="form-grid"><el-form-item label="负责人"><el-select v-model="iterationForm.owner_id" clearable filterable><el-option v-for="user in users" :key="user.id" :label="user.full_name" :value="user.id" /></el-select></el-form-item><el-form-item label="开始日期"><el-date-picker v-model="iterationForm.start_date" value-format="YYYY-MM-DD" type="date" /></el-form-item><el-form-item label="结束日期"><el-date-picker v-model="iterationForm.end_date" value-format="YYYY-MM-DD" type="date" /></el-form-item></div>
         <el-form-item label="目标"><el-input v-model="iterationForm.goal" type="textarea" :rows="3" /></el-form-item>
       </el-form>
       <template #footer><el-button @click="iterationDialogVisible = false">取消</el-button><el-button type="primary" :loading="saving" @click="submitIteration">保存</el-button></template>
     </el-dialog>
 
-    <el-dialog v-model="iterationStartVisible" title="开始迭代" width="480px">
-      <el-form label-position="top">
-        <el-form-item label="实际开始日期" required><el-date-picker v-model="iterationStartForm.effective_time" type="datetime" value-format="YYYY-MM-DDTHH:mm:ss" /></el-form-item>
-        <el-form-item label="备注"><el-input v-model="iterationStartForm.remark" type="textarea" :rows="3" /></el-form-item>
-      </el-form>
-      <template #footer><el-button @click="iterationStartVisible = false">取消</el-button><el-button type="primary" :loading="saving" @click="submitIterationStart">确认开始</el-button></template>
-    </el-dialog>
-    <el-dialog v-model="iterationFinishVisible" title="结束迭代" width="480px">
-      <el-form label-position="top">
-        <el-form-item label="实际结束日期" required><el-date-picker v-model="iterationFinishForm.effective_time" type="datetime" value-format="YYYY-MM-DDTHH:mm:ss" /></el-form-item>
-        <el-form-item label="备注"><el-input v-model="iterationFinishForm.remark" type="textarea" :rows="3" /></el-form-item>
-      </el-form>
-      <template #footer><el-button @click="iterationFinishVisible = false">取消</el-button><el-button type="primary" :loading="saving" @click="submitIterationFinish">确认结束</el-button></template>
-    </el-dialog>
 
     <el-dialog v-model="deferWorkItemsVisible" title="处理未完成项" width="720px">
       <el-alert
@@ -474,7 +461,7 @@
     <el-dialog v-model="requirementDialogVisible" :title="editingRequirementId ? '编辑需求' : '新增需求'" width="640px">
       <el-form label-position="top">
         <el-form-item label="需求标题" required><el-input v-model="requirementForm.title" /></el-form-item>
-        <div class="form-grid"><el-form-item label="迭代"><el-select v-model="requirementForm.iteration_id" clearable filterable><el-option v-for="iteration in requirementIterationOptions" :key="iteration.id" :label="iteration.name" :value="iteration.id" /></el-select></el-form-item><el-form-item label="当前处理人"><el-select v-model="requirementForm.owner_id" clearable filterable><el-option v-for="user in users" :key="user.id" :label="user.full_name" :value="user.id" /></el-select></el-form-item><el-form-item label="提出人"><el-select v-model="requirementForm.proposer_id" clearable filterable><el-option v-for="user in users" :key="user.id" :label="user.full_name" :value="user.id" /></el-select></el-form-item><el-form-item label="类型"><el-select v-model="requirementForm.requirement_type"><el-option v-for="option in requirementTypeOptions" :key="option" :label="option" :value="option" /></el-select></el-form-item><el-form-item label="优先级"><el-select v-model="requirementForm.priority" class="priority-select"><template #prefix><RequirementPriorityBadge :value="requirementForm.priority" /></template><el-option v-for="option in requirementPriorityOptions" :key="option.value" :label="option.label" :value="option.value"><RequirementPriorityBadge :value="option.value" /></el-option></el-select></el-form-item></div>
+        <div class="form-grid"><el-form-item label="迭代"><el-select v-model="requirementForm.iteration_id" clearable filterable><el-option v-for="iteration in requirementIterationOptions" :key="iteration.id" :label="iteration.name" :value="iteration.id" /></el-select></el-form-item><el-form-item v-if="!editingRequirementId" label="当前处理人"><el-select v-model="requirementForm.owner_id" clearable filterable><el-option v-for="user in users" :key="user.id" :label="user.full_name" :value="user.id" /></el-select></el-form-item><el-form-item label="提出人"><el-select v-model="requirementForm.proposer_id" clearable filterable><el-option v-for="user in users" :key="user.id" :label="user.full_name" :value="user.id" /></el-select></el-form-item><el-form-item label="类型"><el-select v-model="requirementForm.requirement_type"><el-option v-for="option in requirementTypeOptions" :key="option" :label="option" :value="option" /></el-select></el-form-item><el-form-item label="优先级"><el-select v-model="requirementForm.priority" class="priority-select"><template #prefix><RequirementPriorityBadge :value="requirementForm.priority" /></template><el-option v-for="option in requirementPriorityOptions" :key="option.value" :label="option.label" :value="option.value"><RequirementPriorityBadge :value="option.value" /></el-option></el-select></el-form-item></div>
         <el-form-item label="需求描述"><el-input v-model="requirementForm.description" type="textarea" :rows="3" /></el-form-item>
         <el-form-item label="验收标准"><el-input v-model="requirementForm.acceptance_criteria" type="textarea" :rows="3" /></el-form-item>
       </el-form>
@@ -486,7 +473,7 @@
     <el-dialog v-model="taskDialogVisible" :title="editingTaskId ? '编辑任务' : '新增任务'" width="620px">
       <el-form label-position="top">
         <el-form-item label="任务标题" required><el-input v-model="taskForm.title" /></el-form-item>
-        <div class="form-grid"><el-form-item label="需求"><el-select v-model="taskForm.requirement_id" clearable filterable @change="onTaskRequirementChange"><el-option v-for="requirement in projectRequirementOptions" :key="requirement.id" :label="requirement.title" :value="requirement.id" /></el-select></el-form-item><el-form-item label="当前处理人"><el-select v-model="taskForm.owner_id" clearable filterable><el-option v-for="user in users" :key="user.id" :label="user.full_name" :value="user.id" /></el-select></el-form-item><el-form-item label="优先级"><el-select v-model="taskForm.priority"><el-option label="高" value="high" /><el-option label="中" value="medium" /><el-option label="低" value="low" /></el-select></el-form-item><el-form-item label="截止日期"><el-date-picker v-model="taskForm.due_date" value-format="YYYY-MM-DD" type="date" /></el-form-item><el-form-item label="状态"><el-select v-model="taskForm.status"><el-option label="待办" value="todo" /><el-option label="进行中" value="doing" /><el-option label="完成" value="done" /><el-option label="关闭" value="closed" /></el-select></el-form-item></div>
+        <div class="form-grid"><el-form-item label="需求"><el-select v-model="taskForm.requirement_id" clearable filterable @change="onTaskRequirementChange"><el-option v-for="requirement in projectRequirementOptions" :key="requirement.id" :label="requirement.title" :value="requirement.id" /></el-select></el-form-item><el-form-item label="任务分支"><el-select v-model="taskForm.task_type" :disabled="Boolean(taskForm.requirement_id)"><el-option v-for="option in TASK_BRANCH_OPTIONS" :key="option.value" :label="option.label" :value="option.value" /></el-select></el-form-item><el-form-item v-if="!editingTaskId" label="当前处理人"><el-select v-model="taskForm.owner_id" clearable filterable><el-option v-for="user in users" :key="user.id" :label="user.full_name" :value="user.id" /></el-select></el-form-item><el-form-item label="优先级"><el-select v-model="taskForm.priority"><el-option label="高" value="high" /><el-option label="中" value="medium" /><el-option label="低" value="low" /></el-select></el-form-item><el-form-item label="截止日期"><el-date-picker v-model="taskForm.due_date" value-format="YYYY-MM-DD" type="date" /></el-form-item></div>
         <el-form-item label="描述"><el-input v-model="taskForm.description" type="textarea" :rows="3" /></el-form-item>
       </el-form>
       <template #footer><el-button @click="taskDialogVisible = false">取消</el-button><el-button type="primary" :loading="saving" @click="submitTask">保存</el-button></template>
@@ -550,7 +537,7 @@
       <el-form label-position="top">
         <el-form-item label="Bug 标题" required><el-input v-model="caseBugForm.title" /></el-form-item>
         <div class="form-grid">
-          <el-form-item label="Bug 类型"><el-select v-model="caseBugForm.bug_type"><el-option v-for="option in bugTypeOptions" :key="option" :label="option" :value="option" /></el-select></el-form-item>
+          <el-form-item label="Bug 类型"><el-select v-model="caseBugForm.bug_type"><el-option v-for="option in bugTypeOptions" :key="option.value" :label="option.label" :value="option.value" /></el-select></el-form-item>
           <el-form-item label="严重程度"><el-select v-model="caseBugForm.severity"><el-option v-for="option in priorityLevelOptions" :key="option.value" :label="option.label" :value="option.value"><RequirementPriorityBadge :value="option.value" /></el-option></el-select></el-form-item>
           <el-form-item label="优先级"><el-select v-model="caseBugForm.priority"><el-option v-for="option in priorityLevelOptions" :key="option.value" :label="option.label" :value="option.value"><RequirementPriorityBadge :value="option.value" /></el-option></el-select></el-form-item>
         </div>
@@ -566,7 +553,7 @@
     </el-dialog>
 
     <el-dialog v-model="bugDialogVisible" :title="editingBugId ? '编辑 Bug' : '新增 Bug'" width="700px">
-      <el-form label-position="top"><el-form-item label="Bug 标题" required><el-input v-model="bugForm.title" /></el-form-item><div class="form-grid"><el-form-item label="需求"><el-select v-model="bugForm.requirement_id" clearable filterable><el-option v-for="requirement in projectRequirementOptions" :key="requirement.id" :label="requirement.title" :value="requirement.id" /></el-select></el-form-item><el-form-item label="任务"><el-select v-model="bugForm.task_id" clearable filterable><el-option v-for="task in projectTaskOptions" :key="task.id" :label="task.title" :value="task.id" /></el-select></el-form-item><el-form-item label="来源用例"><el-select v-model="bugForm.test_case_id" clearable filterable><el-option v-for="item in projectTestCaseOptions" :key="item.id" :label="item.title" :value="item.id" /></el-select></el-form-item><el-form-item label="来源测试单"><el-select v-model="bugForm.test_run_id" clearable filterable><el-option v-for="run in projectTestRunOptions" :key="run.id" :label="run.name" :value="run.id" /></el-select></el-form-item><el-form-item label="所属迭代"><el-select v-model="bugForm.iteration_id" clearable filterable><el-option v-for="iteration in bugEditableIterationDisplayOptions" :key="iteration.id" :label="iteration.name" :value="iteration.id" :disabled="iteration.disabled" /></el-select></el-form-item><el-form-item label="Bug 类型"><el-select v-model="bugForm.bug_type"><el-option v-for="option in bugTypeOptions" :key="option" :label="option" :value="option" /></el-select></el-form-item><el-form-item label="当前处理人"><el-select v-model="bugForm.owner_id" clearable filterable><el-option v-for="user in users" :key="user.id" :label="user.full_name" :value="user.id" /></el-select></el-form-item><el-form-item label="提出人"><el-select v-model="bugForm.reporter_id" clearable filterable><el-option v-for="user in users" :key="user.id" :label="user.full_name" :value="user.id" /></el-select></el-form-item><el-form-item label="严重程度"><el-select v-model="bugForm.severity"><el-option v-for="option in priorityLevelOptions" :key="option.value" :label="option.label" :value="option.value"><RequirementPriorityBadge :value="option.value" /></el-option></el-select></el-form-item><el-form-item label="优先级"><el-select v-model="bugForm.priority"><el-option v-for="option in priorityLevelOptions" :key="option.value" :label="option.label" :value="option.value"><RequirementPriorityBadge :value="option.value" /></el-option></el-select></el-form-item></div><el-form-item label="复现步骤"><RichTextPasteEditor v-model="bugForm.reproduce_steps" /></el-form-item><el-form-item label="期望结果"><el-input v-model="bugForm.expected_result" type="textarea" :rows="2" /></el-form-item><el-form-item label="实际结果"><el-input v-model="bugForm.actual_result" type="textarea" :rows="2" /></el-form-item></el-form>
+      <el-form label-position="top"><el-form-item label="Bug 标题" required><el-input v-model="bugForm.title" /></el-form-item><div class="form-grid"><el-form-item label="需求"><el-select v-model="bugForm.requirement_id" clearable filterable><el-option v-for="requirement in projectRequirementOptions" :key="requirement.id" :label="requirement.title" :value="requirement.id" /></el-select></el-form-item><el-form-item label="任务"><el-select v-model="bugForm.task_id" clearable filterable><el-option v-for="task in projectTaskOptions" :key="task.id" :label="task.title" :value="task.id" /></el-select></el-form-item><el-form-item label="来源用例"><el-select v-model="bugForm.test_case_id" clearable filterable><el-option v-for="item in projectTestCaseOptions" :key="item.id" :label="item.title" :value="item.id" /></el-select></el-form-item><el-form-item label="来源测试单"><el-select v-model="bugForm.test_run_id" clearable filterable><el-option v-for="run in projectTestRunOptions" :key="run.id" :label="run.name" :value="run.id" /></el-select></el-form-item><el-form-item label="所属迭代"><el-select v-model="bugForm.iteration_id" clearable filterable><el-option v-for="iteration in bugEditableIterationDisplayOptions" :key="iteration.id" :label="iteration.name" :value="iteration.id" :disabled="iteration.disabled" /></el-select></el-form-item><el-form-item label="Bug 类型"><el-select v-model="bugForm.bug_type"><el-option v-for="option in bugTypeOptions" :key="option.value" :label="option.label" :value="option.value" /></el-select></el-form-item><el-form-item label="当前处理人"><el-select v-model="bugForm.owner_id" clearable filterable><el-option v-for="user in users" :key="user.id" :label="user.full_name" :value="user.id" /></el-select></el-form-item><el-form-item label="提出人"><el-select v-model="bugForm.reporter_id" clearable filterable><el-option v-for="user in users" :key="user.id" :label="user.full_name" :value="user.id" /></el-select></el-form-item><el-form-item label="严重程度"><el-select v-model="bugForm.severity"><el-option v-for="option in priorityLevelOptions" :key="option.value" :label="option.label" :value="option.value"><RequirementPriorityBadge :value="option.value" /></el-option></el-select></el-form-item><el-form-item label="优先级"><el-select v-model="bugForm.priority"><el-option v-for="option in priorityLevelOptions" :key="option.value" :label="option.label" :value="option.value"><RequirementPriorityBadge :value="option.value" /></el-option></el-select></el-form-item></div><el-form-item label="复现步骤"><RichTextPasteEditor v-model="bugForm.reproduce_steps" /></el-form-item><el-form-item label="期望结果"><el-input v-model="bugForm.expected_result" type="textarea" :rows="2" /></el-form-item><el-form-item label="实际结果"><el-input v-model="bugForm.actual_result" type="textarea" :rows="2" /></el-form-item></el-form>
       <template #footer><el-button @click="bugDialogVisible = false">取消</el-button><el-button type="primary" :loading="saving" @click="submitBug">保存</el-button></template>
     </el-dialog>
 
@@ -636,7 +623,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 
 import { createBug, deleteBug, updateBug } from '../api/bugs'
-import { createIteration, deferIterationWorkItems, deleteIteration, fetchIterations, finishIteration, startIteration, updateIteration } from '../api/iterations'
+import { createIteration, deferIterationWorkItems, deleteIteration, fetchIterations, updateIteration } from '../api/iterations'
 import { fetchPrograms } from '../api/programs'
 import {
   fetchProject,
@@ -678,6 +665,9 @@ import { labelById, userLabel } from '../utils/referenceLabels'
 import { formatAuditValue } from '../utils/auditHistoryLabels'
 import { bugIterationOptions, includeSelectedIterationOption } from '../utils/bugIterations'
 import { canCreateWorkItem, canDeleteWorkItem, canExecuteWorkItem, canManageProject, canManageTestCase, currentUserFromStorage } from '../utils/permissions'
+import { deriveTaskBranch, TASK_BRANCH_OPTIONS, taskBranchLabel } from '../utils/taskBranchRules'
+import { DEFAULT_BUG_TYPE_KEY } from '../utils/bugTypeOptions'
+import { useBugTypes } from '../utils/useBugTypes'
 
 const route = useRoute()
 const router = useRouter()
@@ -737,8 +727,6 @@ const projectListPagination = reactive({
 })
 
 const iterationDialogVisible = ref(false)
-const iterationStartVisible = ref(false)
-const iterationFinishVisible = ref(false)
 const deferWorkItemsVisible = ref(false)
 const requirementDialogVisible = ref(false)
 const taskDialogVisible = ref(false)
@@ -775,16 +763,15 @@ const projectStatusOptions = [
 const iterationStatusOptions = [
   { label: '规划中', value: 'planning' },
   { label: '进行中', value: 'active' },
-  { label: '已完成', value: 'finished' },
-  { label: '已关闭', value: 'closed' }
+  { label: '已完成', value: 'completed' },
+  { label: '已取消', value: 'canceled' }
 ]
 const requirementStatusOptions = [
-  { label: '草稿', value: 'draft' },
-  { label: '激活', value: 'active' },
-  { label: '待验证', value: 'pending_validation' },
-  { label: '验证未通过', value: 'validation_failed' },
-  { label: '完成', value: 'done' },
-  { label: '关闭', value: 'closed' }
+  { label: '待分派', value: 'pending_assignment' },
+  { label: '处理中', value: 'in_processing' },
+  { label: '待确认', value: 'pending_confirmation' },
+  { label: '已完成', value: 'completed' },
+  { label: '已取消', value: 'canceled' }
 ]
 const requirementPriorityOptions = [
   { label: '1', value: '1' },
@@ -796,10 +783,11 @@ const requirementPriorityOptions = [
 const requirementTypeOptions = ['功能', '接口', '性能', '安全', '体验', '改进', '其他']
 const legacyRequirementPriorityValues = { high: '1', medium: '3', low: '5' }
 const taskStatusOptions = [
-  { label: '待办', value: 'todo' },
-  { label: '进行中', value: 'doing' },
-  { label: '完成', value: 'done' },
-  { label: '关闭', value: 'closed' }
+  { label: '待分派', value: 'pending_assignment' },
+  { label: '处理中', value: 'in_processing' },
+  { label: '待确认', value: 'pending_confirmation' },
+  { label: '已完成', value: 'completed' },
+  { label: '已取消', value: 'canceled' }
 ]
 const caseTypeOptions = [
   { label: '接口测试', value: 'api' },
@@ -824,7 +812,7 @@ const executionResultOptions = [
   { label: '失败', value: 'failed' },
   { label: '阻塞', value: 'blocked' }
 ]
-const bugTypeOptions = ['代码错误', '配置相关', '安装部署', '安全相关', '性能问题', '标准规范', '测试脚本', '设计缺陷', '其他']
+const { bugTypeOptions } = useBugTypes()
 const priorityLevelOptions = [
   { label: '① 最高', value: '1' },
   { label: '② 高', value: '2' },
@@ -847,12 +835,11 @@ const projectMemberRoleOptions = [
   { label: '观察者', value: 'viewer' }
 ]
 const bugStatusOptions = [
-  { label: '待确认', value: 'open' },
+  { label: '待处理', value: 'pending_handling' },
   { label: '修复中', value: 'fixing' },
-  { label: '待验证', value: 'verifying' },
-  { label: '已关闭', value: 'closed' },
-  { label: '重新打开', value: 'reopened' },
-  { label: '已挂起', value: 'suspended' }
+  { label: '待验证', value: 'pending_verification' },
+  { label: '已验证', value: 'verified' },
+  { label: '已关闭', value: 'closed' }
 ]
 
 const projectIterations = computed(() => projectIterationRows.value)
@@ -888,21 +875,21 @@ const requirementIterationDisplayOptions = computed(() => iterations.value.filte
   const optionProjectIds = item.project_ids || []
   return optionProjectIds.some((id) => requirementProjectScopeIds.value.includes(id))
 }))
-const requirementIterationOptions = computed(() => requirementIterationDisplayOptions.value.filter((item) => !['finished', 'closed'].includes(item.status)))
+const requirementIterationOptions = computed(() => requirementIterationDisplayOptions.value.filter((item) => !['completed', 'canceled'].includes(item.status)))
 const projectRequirementOptions = computed(() => requirements.value.filter((item) => item.project_id === projectId.value))
 const projectTaskOptions = computed(() => tasks.value.filter((item) => item.project_id === projectId.value))
 const projectTestCaseOptions = computed(() => projectTestCaseRows.value)
 const projectTestRunOptions = computed(() => projectTestRunRows.value)
 const bugEditableIterationOptions = computed(() => bugIterationOptions(iterations.value, projects.value, bugForm.project_id || projectId.value))
 const bugEditableIterationDisplayOptions = computed(() => includeSelectedIterationOption(bugEditableIterationOptions.value, iterations.value, bugForm.iteration_id))
-const deferTargetIterations = computed(() => projectIterationOptions.value.filter((item) => item.id !== startingIterationId.value && !['finished', 'closed'].includes(item.status)))
-const unfinishedIterationRequirements = computed(() => requirements.value.filter((item) => item.iteration_id === startingIterationId.value && !['done', 'closed'].includes(item.status)))
-const directUnfinishedIterationTasks = computed(() => tasks.value.filter((item) => item.iteration_id === startingIterationId.value && !['done', 'closed'].includes(item.status)))
+const deferTargetIterations = computed(() => projectIterationOptions.value.filter((item) => item.id !== startingIterationId.value && !['completed', 'canceled'].includes(item.status)))
+const unfinishedIterationRequirements = computed(() => requirements.value.filter((item) => item.iteration_id === startingIterationId.value && !['completed', 'canceled'].includes(item.status)))
+const directUnfinishedIterationTasks = computed(() => tasks.value.filter((item) => item.iteration_id === startingIterationId.value && !['completed', 'canceled'].includes(item.status)))
 const unfinishedIterationTasks = computed(() => {
   const requirementIds = new Set(unfinishedIterationRequirements.value.map((item) => item.id))
   const taskById = new Map()
   tasks.value
-    .filter((item) => !['done', 'closed'].includes(item.status) && (item.iteration_id === startingIterationId.value || requirementIds.has(item.requirement_id)))
+    .filter((item) => !['completed', 'canceled'].includes(item.status) && (item.iteration_id === startingIterationId.value || requirementIds.has(item.requirement_id)))
     .forEach((item) => taskById.set(item.id, item))
   return Array.from(taskById.values())
 })
@@ -940,19 +927,17 @@ const projectHistory = computed(() => {
 })
 
 const failedExecutionCount = computed(() => caseExecutionHistory.value.filter((item) => item.result === 'failed').length)
-const iterationForm = reactive({ project_ids: [], name: '', owner_id: null, start_date: null, end_date: null, status: 'planning', goal: '' })
-const iterationStartForm = reactive({ effective_time: '', remark: '' })
-const iterationFinishForm = reactive({ effective_time: '', remark: '' })
-const requirementForm = reactive({ project_id: null, iteration_id: null, title: '', requirement_type: '功能', priority: '3', owner_id: null, proposer_id: null, status: 'draft', description: '', acceptance_criteria: '' })
+const iterationForm = reactive({ project_ids: [], name: '', owner_id: null, start_date: null, end_date: null, goal: '' })
+const requirementForm = reactive({ project_id: null, iteration_id: null, title: '', requirement_type: '功能', priority: '3', owner_id: null, proposer_id: null, description: '', acceptance_criteria: '' })
 const importFile = ref(null)
 const importPreview = ref(null)
 const duplicateStrategy = ref('')
-const taskForm = reactive({ project_id: null, requirement_id: null, title: '', priority: 'medium', owner_id: null, due_date: null, status: 'todo', description: '' })
+const taskForm = reactive({ project_id: null, requirement_id: null, title: '', task_type: 'standalone_operation', priority: 'medium', owner_id: null, due_date: null, description: '' })
 const caseForm = reactive({ project_id: null, requirement_id: null, title: '', case_type: 'functional', test_scope: 'functional_test', default_tester_id: null, precondition: '', steps_json: [{ step: '', expected: '' }], expected_result: '' })
 const caseExecutionForm = reactive({ execute_time: '', steps_result_json: [] })
 const runForm = reactive({ project_id: null, iteration_id: null, name: '', test_owner_id: null, status: 'planning', remark: '' })
-const bugForm = reactive({ project_id: null, iteration_id: null, requirement_id: null, task_id: null, test_case_id: null, test_run_id: null, title: '', bug_type: '代码错误', severity: '3', priority: '3', owner_id: null, reporter_id: null, reproduce_steps: '', expected_result: '', actual_result: '', status: 'open' })
-const caseBugForm = reactive({ title: '', bug_type: '代码错误', severity: '3', priority: '3', reproduce_steps: '', actual_result: '' })
+const bugForm = reactive({ project_id: null, iteration_id: null, requirement_id: null, task_id: null, test_case_id: null, test_run_id: null, title: '', bug_type: DEFAULT_BUG_TYPE_KEY, severity: '3', priority: '3', owner_id: null, reporter_id: null, reproduce_steps: '', expected_result: '', actual_result: '' })
+const caseBugForm = reactive({ title: '', bug_type: DEFAULT_BUG_TYPE_KEY, severity: '3', priority: '3', reproduce_steps: '', actual_result: '' })
 
 function optionLabel(options, value) { return options.find((option) => option.value === value)?.label || value || '-' }
 function normalizeProjectTab(value) {
@@ -997,6 +982,7 @@ function applyProjectPage(key, response, targetRef) {
 }
 async function loadProjectIterationsPage() {
   if (applyProjectPage('iterations', await fetchProjectIterations(projectId.value, projectListParams('iterations')), projectIterationRows)) await loadProjectIterationsPage()
+  await loadProjectWorkflowTransitions('iteration', projectIterations.value)
 }
 async function loadProjectRequirementsPage() {
   if (applyProjectPage('requirements', await fetchProjectRequirements(projectId.value, projectListParams('requirements')), projectRequirementRows)) return loadProjectRequirementsPage()
@@ -1052,10 +1038,6 @@ function taskStatusLabel(value) { return optionLabel(taskStatusOptions, value) }
 function testRunStatusLabel(value) { return optionLabel(testRunStatusOptions, value) }
 function bugStatusLabel(value) { return optionLabel(bugStatusOptions, value) }
 function operationActionLabel(value) { return optionLabel([{ label: '启动', value: 'start' }, { label: '挂起', value: 'suspend' }, { label: '关闭', value: 'close' }, { label: '激活', value: 'activate' }], value) }
-function canActivateRequirement(row) { return ['draft', 'closed'].includes(row.status) }
-function canActivateTask(row) { return ['todo', 'closed'].includes(row.status) }
-function canCompleteTask(row) { return row.status === 'doing' }
-function canCloseTask(row) { return !['done', 'closed'].includes(row.status) }
 function projectWorkflowTransitionKey(objectType, id) { return `${objectType}:${id}` }
 function projectWorkflowTransitionsFor(objectType, id) { return projectWorkflowTransitions.value[projectWorkflowTransitionKey(objectType, id)] || [] }
 async function loadProjectWorkflowTransitions(objectType, rows) {
@@ -1202,25 +1184,23 @@ async function submitProjectMembers() {
     saving.value = false
   }
 }
-function resetIterationForm() { Object.assign(iterationForm, { project_ids: [projectId.value], name: '', owner_id: null, start_date: null, end_date: null, status: 'planning', goal: '' }) }
-function resetRequirementForm() { Object.assign(requirementForm, { project_id: projectId.value, iteration_id: null, title: '', requirement_type: '功能', priority: '3', owner_id: null, proposer_id: currentUserId(users.value), status: 'draft', description: '', acceptance_criteria: '' }) }
-function resetTaskForm() { Object.assign(taskForm, { project_id: projectId.value, requirement_id: null, title: '', priority: 'medium', owner_id: null, due_date: null, status: 'todo', description: '' }) }
+function resetIterationForm() { Object.assign(iterationForm, { project_ids: [projectId.value], name: '', owner_id: null, start_date: null, end_date: null, goal: '' }); delete iterationForm.status }
+function resetRequirementForm() { Object.assign(requirementForm, { project_id: projectId.value, iteration_id: null, title: '', requirement_type: '功能', priority: '3', owner_id: null, proposer_id: currentUserId(users.value), description: '', acceptance_criteria: '' }) }
+function resetTaskForm() { Object.assign(taskForm, { project_id: projectId.value, requirement_id: null, title: '', task_type: 'standalone_operation', priority: 'medium', owner_id: null, due_date: null, description: '' }) }
 function resetCaseForm() { Object.assign(caseForm, { project_id: projectId.value, requirement_id: null, title: '', case_type: 'functional', test_scope: 'functional_test', default_tester_id: defaultTesterByRule('test_case_tester_roles', ['tester', 'test_lead']), precondition: '', steps_json: [{ step: '', expected: '' }], expected_result: '' }) }
 function resetRunForm() { Object.assign(runForm, { project_id: projectId.value, iteration_id: null, name: '', test_owner_id: defaultTesterByRule('test_run_owner_roles', ['tester', 'test_lead']), status: 'planning', remark: '' }) }
-function resetBugForm() { Object.assign(bugForm, { project_id: projectId.value, iteration_id: null, requirement_id: null, task_id: null, test_case_id: null, test_run_id: null, title: '', bug_type: '代码错误', severity: '3', priority: '3', owner_id: null, reporter_id: null, reproduce_steps: '', expected_result: '', actual_result: '', status: 'open' }) }
+function resetBugForm() { Object.assign(bugForm, { project_id: projectId.value, iteration_id: null, requirement_id: null, task_id: null, test_case_id: null, test_run_id: null, title: '', bug_type: DEFAULT_BUG_TYPE_KEY, severity: '3', priority: '3', owner_id: null, reporter_id: null, reproduce_steps: '', expected_result: '', actual_result: '' }) }
 
 function openIterationCreate() { editingIterationId.value = null; resetIterationForm(); iterationDialogVisible.value = true }
 function openIterationEdit(row) { editingIterationId.value = row.id; Object.assign(iterationForm, { ...row, project_ids: row.project_ids || [], goal: row.goal || '' }); iterationDialogVisible.value = true }
-function openIterationStart(row) { startingIterationId.value = row.id; Object.assign(iterationStartForm, { effective_time: currentDateTimeValue(), remark: '' }); iterationStartVisible.value = true }
-function openIterationFinish(row) {
+function openDeferWorkItems(row) {
   startingIterationId.value = row.id
-  Object.assign(iterationFinishForm, { effective_time: currentDateTimeValue(), remark: '' })
   Object.assign(deferWorkItemsForm, { target_iteration_id: null, remark: '' })
-  iterationFinishVisible.value = true
+  deferWorkItemsVisible.value = true
 }
 function openRequirementCreate() { editingRequirementId.value = null; resetRequirementForm(); requirementDialogVisible.value = true }
 function openRequirementEdit(row) { editingRequirementId.value = row.id; Object.assign(requirementForm, { ...row, priority: normalizeRequirementPriority(row.priority), requirement_type: row.requirement_type || '', description: row.description || '', acceptance_criteria: row.acceptance_criteria || '' }); requirementDialogVisible.value = true }
-function openGenerate(row) { editingTaskId.value = null; resetTaskForm(); Object.assign(taskForm, { requirement_id: row.id, title: row.title, owner_id: null }); taskDialogVisible.value = true }
+function openGenerate(row) { editingTaskId.value = null; resetTaskForm(); Object.assign(taskForm, { requirement_id: row.id, title: row.title, task_type: 'requirement_implementation', owner_id: null }); taskDialogVisible.value = true }
 
 async function downloadImportTemplate() {
   const response = await downloadRequirementImportTemplate(projectId.value)
@@ -1254,10 +1234,10 @@ function openTaskEdit(row) {
     project_id: row.project_id || projectId.value,
     requirement_id: row.requirement_id || null,
     title: row.title || '',
+    task_type: deriveTaskBranch({ requirementId: row.requirement_id, currentType: row.task_type }),
     priority: row.priority || 'medium',
     owner_id: row.owner_id || null,
     due_date: row.due_date || null,
-    status: row.status || 'todo',
     description: row.description || ''
   })
   taskDialogVisible.value = true
@@ -1265,6 +1245,7 @@ function openTaskEdit(row) {
 
 function taskOwnerForRequirement() { return null }
 function onTaskRequirementChange(requirementId) {
+  taskForm.task_type = deriveTaskBranch({ requirementId, currentType: requirementId ? null : taskForm.task_type })
   taskForm.owner_id = taskOwnerForRequirement()
 }
 function openCaseCreate() { editingCaseId.value = null; resetCaseForm(); caseDialogVisible.value = true }
@@ -1286,7 +1267,7 @@ async function openCaseBug(row) {
   const latest = history[0]
   Object.assign(caseBugForm, {
     title: row.title,
-    bug_type: '代码错误',
+    bug_type: DEFAULT_BUG_TYPE_KEY,
     severity: '3',
     priority: '3',
     reproduce_steps: buildReproduceText(latest, row),
@@ -1369,6 +1350,7 @@ async function loadData() {
     closeReasonByRequirement.value = await loadCloseReasonMap(projectRequirements.value, fetchRequirementStatusOperations)
     closeReasonByTask.value = await loadCloseReasonMap(projectTasks.value, fetchTaskStatusOperations)
     await Promise.all([
+      loadProjectWorkflowTransitions('iteration', projectIterations.value),
       loadProjectWorkflowTransitions('requirement', projectRequirements.value),
       loadProjectWorkflowTransitions('task', projectTasks.value),
       loadProjectWorkflowTransitions('bug', projectBugs.value)
@@ -1400,31 +1382,14 @@ async function submitIteration() {
   if (!iterationForm.name.trim()) return ElMessage.warning('请填写迭代名称')
   saving.value = true
   try {
-    const payload = { ...iterationForm, project_ids: iterationForm.project_ids.length ? iterationForm.project_ids : [projectId.value], owner_id: iterationForm.owner_id || null }
+    const { status: _status, ...iterationData } = iterationForm
+    const payload = { ...iterationData, project_ids: iterationForm.project_ids.length ? iterationForm.project_ids : [projectId.value], owner_id: iterationForm.owner_id || null }
     if (editingIterationId.value) await updateIteration(editingIterationId.value, payload)
     else await createIteration(payload)
     iterationDialogVisible.value = false
     await refreshAfterMutation()
   } catch (error) {
     showActionError(error, editingIterationId.value ? '迭代保存失败' : '迭代创建失败')
-  } finally {
-    saving.value = false
-  }
-}
-async function submitIterationStart() { if (!iterationStartForm.effective_time) return ElMessage.warning('请选择实际开始日期'); saving.value = true; try { await startIteration(startingIterationId.value, { ...iterationStartForm }); iterationStartVisible.value = false; await refreshAfterMutation(); ElMessage.success('迭代已开始') } catch (error) { showActionError(error, '迭代开始失败') } finally { saving.value = false } }
-async function submitIterationFinish() {
-  if (!iterationFinishForm.effective_time) return ElMessage.warning('请选择实际结束日期')
-  saving.value = true
-  try {
-    await finishIteration(startingIterationId.value, { ...iterationFinishForm })
-    iterationFinishVisible.value = false
-    await refreshAfterMutation()
-    ElMessage.success('迭代已结束')
-  } catch (error) {
-    showActionError(error, '迭代结束失败')
-    if (unfinishedIterationRequirements.value.length || unfinishedIterationTasks.value.length) {
-      deferWorkItemsVisible.value = true
-    }
   } finally {
     saving.value = false
   }
@@ -1497,7 +1462,7 @@ async function submitTask() {
   if (!taskForm.title.trim()) return ElMessage.warning('请填写任务标题')
   saving.value = true
   try {
-    const payload = { ...taskForm, project_id: projectId.value, requirement_id: taskForm.requirement_id || null, owner_id: taskForm.owner_id || null }
+    const payload = { ...taskForm, project_id: projectId.value, requirement_id: taskForm.requirement_id || null, task_type: deriveTaskBranch({ requirementId: taskForm.requirement_id, currentType: taskForm.task_type }), owner_id: taskForm.owner_id || null }
     if (editingTaskId.value) await updateTask(editingTaskId.value, payload)
     else await createTask(payload)
     taskDialogVisible.value = false

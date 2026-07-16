@@ -1,6 +1,10 @@
 from datetime import date, datetime
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict
+
+
+IterationStatus = Literal["planning", "active", "completed", "canceled"]
 
 
 class IterationBase(BaseModel):
@@ -12,7 +16,7 @@ class IterationBase(BaseModel):
     end_date: date | None = None
     actual_start_date: date | None = None
     actual_end_date: date | None = None
-    status: str = "planning"
+    status: IterationStatus = "planning"
     lifecycle_phase: str | None = None
     goal: str | None = None
 
@@ -30,7 +34,7 @@ class IterationUpdate(BaseModel):
     end_date: date | None = None
     actual_start_date: date | None = None
     actual_end_date: date | None = None
-    status: str | None = None
+    status: IterationStatus | None = None
     lifecycle_phase: str | None = None
     goal: str | None = None
     updater_id: int | None = None
@@ -48,7 +52,7 @@ class IterationRead(BaseModel):
     end_date: date | None = None
     actual_start_date: date | None = None
     actual_end_date: date | None = None
-    status: str = "planning"
+    status: IterationStatus = "planning"
     lifecycle_phase: str | None = None
     goal: str | None = None
     creator_id: int | None = None

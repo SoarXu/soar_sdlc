@@ -3,7 +3,7 @@
     <div class="page-head">
       <div>
         <h1>工作台</h1>
-        <p>围绕默认工作流展示待处理、未分派、异常项以及我发起/关注的工作项。</p>
+        <p>今日工作与项目进度</p>
       </div>
       <div class="page-actions">
         <div class="workbench-action-filters">
@@ -53,6 +53,29 @@
           :name="tab.key"
         />
       </el-tabs>
+    </div>
+
+    <div v-if="activeView === 'exception_center'" class="exception-filter-toolbar">
+      <el-select v-model="exceptionProjectFilter" multiple collapse-tags clearable placeholder="项目">
+        <el-option v-for="option in exceptionProjectOptions" :key="option.value" :label="option.label" :value="option.value" />
+      </el-select>
+      <el-select v-model="typeFilter" multiple collapse-tags clearable placeholder="对象类型">
+        <el-option v-for="type in itemTypes" :key="type.value" :label="type.label" :value="type.value" />
+      </el-select>
+      <el-select v-model="exceptionPriorityFilter" multiple collapse-tags clearable placeholder="优先级">
+        <el-option v-for="option in exceptionPriorityOptions" :key="option.value" :label="option.label" :value="option.value" />
+      </el-select>
+      <el-select v-model="exceptionStatusFilter" multiple collapse-tags clearable placeholder="状态">
+        <el-option v-for="option in exceptionStatusOptions" :key="option.value" :label="option.label" :value="option.value" />
+      </el-select>
+      <el-select v-model="exceptionOwnerFilter" multiple collapse-tags clearable placeholder="负责人">
+        <el-option v-for="option in ownerOptions" :key="option.value" :label="option.label" :value="option.value" />
+      </el-select>
+      <el-select v-model="exceptionHandlerFilter" multiple collapse-tags clearable placeholder="当前处理人">
+        <el-option v-for="option in ownerOptions" :key="option.value" :label="option.label" :value="option.value" />
+      </el-select>
+      <el-input-number v-model="exceptionMinOverdueHours" :min="0" :step="1" controls-position="right" />
+      <span class="exception-filter-unit">最少逾期小时</span>
     </div>
 
     <div v-loading="loading" class="workbench-list">
@@ -174,7 +197,7 @@
         <div class="form-grid">
           <el-form-item label="Bug 类型">
             <el-select v-model="caseBugForm.bug_type">
-              <el-option v-for="option in bugTypeOptions" :key="option" :label="option" :value="option" />
+              <el-option v-for="option in bugTypeOptions" :key="option.value" :label="option.label" :value="option.value" />
             </el-select>
           </el-form-item>
           <el-form-item label="严重程度">
@@ -203,7 +226,6 @@ import { fetchWorkbench } from '../api/dashboard'
 import { createBugFromTestCase, executeTestCase } from '../api/testCases'
 import { fetchUsers } from '../api/users'
 import { fetchWorkflowTransitionsBatch } from '../api/workflowRuntime'
-import { autoAssignWorkItems } from '../api/workItems'
 import RequirementPriorityBadge from '../components/RequirementPriorityBadge.vue'
 import RichTextPasteEditor from '../components/RichTextPasteEditor.vue'
 import WorkflowActionButtons from '../components/WorkflowActionButtons.vue'
@@ -222,6 +244,8 @@ import {
   workbenchInlineActions,
   workbenchMetaText
 } from '../utils/workbenchViewModel'
+import { DEFAULT_BUG_TYPE_KEY } from '../utils/bugTypeOptions'
+import { useBugTypes } from '../utils/useBugTypes'
 
 const router = useRouter()
 const loading = ref(false)
@@ -233,16 +257,23 @@ const activeView = ref('pending_handling')
 const activeTrackingTab = ref('created_by_me')
 const keywordFilter = ref('')
 const typeFilter = ref([])
+const exceptionProjectFilter = ref([])
+const exceptionPriorityFilter = ref([])
+const exceptionStatusFilter = ref([])
+const exceptionOwnerFilter = ref([])
+const exceptionHandlerFilter = ref([])
+const exceptionMinOverdueHours = ref(0)
 const selectedCase = ref(null)
 const caseExecutionVisible = ref(false)
 const caseBugVisible = ref(false)
 const caseExecutionForm = reactive({ execute_time: '', steps_result_json: [] })
-const caseBugForm = reactive({ title: '', bug_type: '代码错误', severity: '3', priority: '3', reproduce_steps: '', actual_result: '' })
+const caseBugForm = reactive({ title: '', bug_type: DEFAULT_BUG_TYPE_KEY, severity: '3', priority: '3', reproduce_steps: '', actual_result: '' })
 
 const itemTypes = [
   { label: '需求', value: 'requirement' },
   { label: '任务', value: 'task' },
   { label: '测试用例', value: 'test_case' },
+  { label: '测试单', value: 'test_run' },
   { label: 'Bug', value: 'bug' }
 ]
 
@@ -253,7 +284,7 @@ const executionResultOptions = [
   { label: '阻塞', value: 'blocked' }
 ]
 
-const bugTypeOptions = ['代码错误', '配置相关', '安装部署', '安全相关', '性能问题', '标准规范', '测试脚本', '设计缺陷', '其他']
+const { bugTypeOptions } = useBugTypes()
 const priorityLevelOptions = [
   { label: '1级', value: '1' },
   { label: '2级', value: '2' },
@@ -271,8 +302,31 @@ const activeListSection = computed(() => (
 const filteredListItems = computed(() => filterWorkbenchItems(activeListSection.value?.items || [], activeFilters.value))
 const activeFilters = computed(() => ({
   keyword: keywordFilter.value,
-  types: typeFilter.value
+  types: typeFilter.value,
+  ...(activeView.value === 'exception_center' ? {
+    projectIds: exceptionProjectFilter.value,
+    priorities: exceptionPriorityFilter.value,
+    statuses: exceptionStatusFilter.value,
+    ownerIds: exceptionOwnerFilter.value,
+    handlerIds: exceptionHandlerFilter.value,
+    minOverdueHours: exceptionMinOverdueHours.value
+  } : {})
 }))
+const ownerOptions = computed(() => viewModel.value.owners.map((item) => ({ label: item.full_name, value: item.id })))
+const exceptionItems = computed(() => viewModel.value.queueSectionsByKey.exception_center?.items || [])
+const exceptionProjectOptions = computed(() => uniqueOptions(exceptionItems.value, 'project_id', 'project_name'))
+const exceptionPriorityOptions = computed(() => uniqueOptions(
+  exceptionItems.value.map((item) => ({ ...item, normalized_priority: item.priority || item.severity })),
+  'normalized_priority',
+  'normalized_priority'
+))
+const exceptionStatusOptions = computed(() => {
+  const seen = new Map()
+  for (const item of exceptionItems.value) {
+    if (item.status && !seen.has(item.status)) seen.set(item.status, itemStatusLabel(item))
+  }
+  return [...seen].map(([value, label]) => ({ value, label }))
+})
 const extraInfoLabel = computed(() => {
   if (activeListSection.value?.key === 'exception_center') return '异常说明'
   if (['watched_by_me', 'mentioned_me'].includes(activeListSection.value?.key)) return '来源'
@@ -320,7 +374,18 @@ function detailLink(item) {
   if (item.object_type === 'requirement') return { name: 'requirement-detail', params: { id: item.id }, query: { from: 'dashboard' } }
   if (item.object_type === 'task') return { name: 'task-detail', params: { id: item.id }, query: { from: 'dashboard' } }
   if (item.object_type === 'test_case') return { name: 'test-case-detail', params: { id: item.id }, query: { from: 'dashboard' } }
+  if (item.object_type === 'test_run') return { name: 'tests', query: { run_id: item.id, from: 'dashboard' } }
   return { name: 'bug-detail', params: { id: item.id }, query: { from: 'dashboard' } }
+}
+
+function uniqueOptions(items, valueKey, labelKey, fallbackLabel) {
+  const seen = new Map()
+  for (const item of items) {
+    const value = item[valueKey]
+    if (value === null || value === undefined || value === '') continue
+    if (!seen.has(value)) seen.set(value, item[labelKey] || fallbackLabel || String(value))
+  }
+  return [...seen].map(([value, label]) => ({ value, label }))
 }
 
 function defaultExecutionTime() {
@@ -339,27 +404,9 @@ function runItemAction(item, action) {
   if (!action) return
   const handlers = {
     execute_case: openCaseExecution,
-    auto_assign_item: autoAssignItemRow,
     create_case_bug: openCaseBug
   }
   handlers[action.key]?.(item)
-}
-
-async function autoAssignItemRow(item) {
-  saving.value = true
-  try {
-    const { data } = await autoAssignWorkItems({ items: [{ object_type: item.object_type, id: item.id }] })
-    await loadWorkbench()
-    if (data.failures?.length) {
-      ElMessage.warning(data.failures[0].reason || '自动分配失败')
-    } else {
-      ElMessage.success('已自动分配')
-    }
-  } catch (error) {
-    showActionError(error, '自动分配失败')
-  } finally {
-    saving.value = false
-  }
 }
 
 function openCaseExecution(item) {
@@ -376,7 +423,7 @@ function openCaseBug(item) {
   selectedCase.value = item
   Object.assign(caseBugForm, {
     title: item.title || '',
-    bug_type: '代码错误',
+    bug_type: DEFAULT_BUG_TYPE_KEY,
     severity: '3',
     priority: '3',
     reproduce_steps: buildCaseReproduceText(item),
@@ -483,3 +530,18 @@ async function loadWorkbench() {
 
 onMounted(loadWorkbench)
 </script>
+
+<style scoped>
+.exception-filter-toolbar {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(140px, 1fr)) 150px auto;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.exception-filter-unit {
+  color: #5f6b7a;
+  white-space: nowrap;
+}
+</style>

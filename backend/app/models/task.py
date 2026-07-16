@@ -22,7 +22,7 @@ class Task(Base):
     estimated_hours: Mapped[Decimal | None] = mapped_column(DECIMAL(10, 2), nullable=True)
     actual_hours: Mapped[Decimal | None] = mapped_column(DECIMAL(10, 2), nullable=True)
     due_date: Mapped[date | None] = mapped_column(Date, nullable=True)
-    status: Mapped[str] = mapped_column(String(32), default="todo")
+    status: Mapped[str] = mapped_column(String(32), default="pending_assignment")
     lifecycle_phase: Mapped[str] = mapped_column(String(32), default="development")
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     source_requirement_review_status: Mapped[str | None] = mapped_column(String(32), nullable=True)

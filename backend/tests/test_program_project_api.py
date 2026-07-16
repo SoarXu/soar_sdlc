@@ -235,8 +235,12 @@ def test_project_without_assignee_rule_leaves_default_assignees_empty(client: Te
     assert bug["owner_id"] is None
 
     generated_task = client.post(
-        f"/api/v1/requirements/{requirement['id']}/generate-task",
-        json={"title": "Generated task has no default owner"},
+        "/api/v1/tasks/linked",
+        json={
+            "source_type": "requirement",
+            "source_id": requirement["id"],
+            "title": "Generated task has no default owner",
+        },
     ).json()
     assert generated_task["owner_id"] is None
 
@@ -330,8 +334,12 @@ def test_project_workflow_scheme_does_not_drive_work_item_current_handlers(clien
     assert bug_from_case["owner_id"] is None
 
     generated_task = client.post(
-        f"/api/v1/requirements/{requirement['id']}/generate-task",
-        json={"title": "Generated task has no current handler from scheme"},
+        "/api/v1/tasks/linked",
+        json={
+            "source_type": "requirement",
+            "source_id": requirement["id"],
+            "title": "Generated task has no current handler from scheme",
+        },
     ).json()
     assert generated_task["owner_id"] is None
 

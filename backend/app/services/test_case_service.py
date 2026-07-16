@@ -9,16 +9,21 @@ from app.models.test_case import TestCase
 from app.models.test_case_execution import TestCaseExecutionLog
 from app.services.lifecycle_service import project_lifecycle_phase, requirement_lifecycle_phase
 from app.services.project_team_service import default_tester_id
-from app.services.requirement_validation_service import apply_test_execution_result
+from app.services.task_service import linked_task_summaries
 from app.views.test_case_view import BugFromTestCaseRequest, TestCaseCreate, TestCaseExecutionCreate, TestCaseUpdate
 
 
 def list_test_cases(db: Session) -> list[TestCase]:
-    return db.query(TestCase).filter(TestCase.deleted == 0).order_by(TestCase.id.desc()).all()
+    test_cases = db.query(TestCase).filter(TestCase.deleted == 0).order_by(TestCase.id.desc()).all()
+    for test_case in test_cases:
+        test_case.linked_tasks = linked_task_summaries(db, "test_case", test_case.id)
+    return test_cases
 
 
 def get_test_case(db: Session, test_case_id: int) -> TestCase:
-    return _get_active_test_case(db, test_case_id)
+    test_case = _get_active_test_case(db, test_case_id)
+    test_case.linked_tasks = linked_task_summaries(db, "test_case", test_case.id)
+    return test_case
 
 
 def create_test_case(db: Session, payload: TestCaseCreate) -> TestCase:
@@ -67,7 +72,6 @@ def create_test_case_execution(db: Session, test_case_id: int, payload: TestCase
     test_case.last_execute_time = execute_time
     test_case.last_execute_result = result
     db.add(execution)
-    apply_test_execution_result(db, test_case, result, actor_id=payload.executor_id)
     db.commit()
     db.refresh(execution)
     return execution
@@ -83,7 +87,12 @@ def list_test_case_executions(db: Session, test_case_id: int) -> list[TestCaseEx
     )
 
 
-def create_bug_from_test_case(db: Session, test_case_id: int, payload: BugFromTestCaseRequest) -> Bug:
+def create_bug_from_test_case(
+    db: Session,
+    test_case_id: int,
+    payload: BugFromTestCaseRequest,
+    actor_id: int | None = None,
+) -> Bug:
     test_case = _get_active_test_case(db, test_case_id)
     latest_execution = (
         db.query(TestCaseExecutionLog)
@@ -112,13 +121,14 @@ def create_bug_from_test_case(db: Session, test_case_id: int, payload: BugFromTe
         bug_type=payload.bug_type,
         severity=payload.severity,
         priority=payload.priority,
-        owner_id=None,
+        owner_id=requirement.owner_id if requirement else None,
         reporter_id=payload.reporter_id or latest_execution.executor_id,
         reproduce_steps=payload.reproduce_steps or _build_reproduce_steps(test_case, latest_execution),
         expected_result=payload.expected_result or test_case.expected_result,
         actual_result=payload.actual_result or _build_actual_result(latest_execution),
-        status="open",
+        status="pending_handling",
         lifecycle_phase=test_case.lifecycle_phase,
+        creator_id=actor_id,
     )
     db.add(bug)
     db.commit()

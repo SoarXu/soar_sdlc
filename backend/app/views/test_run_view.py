@@ -1,6 +1,8 @@
 from datetime import date, datetime
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
+
+from app.views.task_view import LinkedTaskSummary
 
 
 class TestRunBase(BaseModel):
@@ -41,6 +43,7 @@ class TestRunRead(TestRunBase):
     create_time: datetime | None = None
     update_time: datetime | None = None
     delete_time: datetime | None = None
+    linked_tasks: list[LinkedTaskSummary] = Field(default_factory=list)
 
 
 class SelectTestCasesRequest(BaseModel):

@@ -6,6 +6,7 @@ from app.models.project_member import ProjectMember
 from app.models.requirement import Requirement
 from app.models.task import Task
 from app.models.test_case import TestCase
+from app.models.test_run import TestRun
 from app.models.user import User
 from app.models.work_item_comment import WorkItemComment
 from app.services.notification_service import create_mention_notifications
@@ -19,6 +20,7 @@ MODEL_BY_TYPE = {
     "task": Task,
     "bug": Bug,
     "test_case": TestCase,
+    "test_run": TestRun,
 }
 
 

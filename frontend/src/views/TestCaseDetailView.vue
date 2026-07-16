@@ -68,6 +68,30 @@
       </template>
     </el-card>
 
+    <el-card shadow="never" class="detail-panel">
+      <template #header>
+        <div class="detail-card-header">
+          <span>关联任务</span>
+          <LinkedTaskCreateButton
+            v-if="testCase.id"
+            source-type="test_case"
+            :source-id="testCaseId"
+            :source-title="testCase.title"
+            :users="users"
+            @created="loadData"
+          />
+        </div>
+      </template>
+      <el-table :data="testCase.linked_tasks || []" stripe>
+        <el-table-column prop="id" label="ID" width="80" />
+        <el-table-column label="任务标题" min-width="220">
+          <template #default="{ row }"><router-link class="table-link" :to="`/tasks/${row.id}`">{{ row.title }}</router-link></template>
+        </el-table-column>
+        <el-table-column label="处理人" width="140"><template #default="{ row }">{{ userLabel(users, row.owner_id) }}</template></el-table-column>
+        <el-table-column prop="status" label="状态" width="130" />
+      </el-table>
+    </el-card>
+
     <el-card shadow="never" class="detail-panel requirement-history-card">
       <template #header>历史记录</template>
       <div class="project-history requirement-history">
@@ -102,6 +126,7 @@ import { fetchProjects } from '../api/projects'
 import { fetchRequirements } from '../api/requirements'
 import { fetchTestCase, fetchTestCaseExecutions, updateTestCase } from '../api/testCases'
 import { fetchUsers } from '../api/users'
+import LinkedTaskCreateButton from '../components/LinkedTaskCreateButton.vue'
 import { labelById, userLabel } from '../utils/referenceLabels'
 
 const route = useRoute()

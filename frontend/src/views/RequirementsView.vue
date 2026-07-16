@@ -28,10 +28,10 @@
             <span v-else>{{ requirementStatusLabel(row.status) }}</span>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="280" fixed="right">
+        <el-table-column label="操作" width="370" fixed="right">
           <template #default="{ row }">
-            <el-button v-if="canEditRequirement(row)" link type="primary" @click="openEdit(row)">编辑</el-button>
-            <WorkflowActionButtons object-type="requirement" :object-id="row.id" mode="list" :transitions="workflowTransitionsFor(row)" :auto-load="false" :users="users" @executed="loadData" /><el-button v-if="canGenerateTask(row)" link type="success" @click="openGenerate(row)">生成任务</el-button>
+            <WatchToggleButton object-type="requirement" :object-id="row.id" />
+            <WorkflowActionButtons object-type="requirement" :object-id="row.id" mode="list" :transitions="workflowTransitionsFor(row)" :auto-load="false" :users="users" @command="handleWorkflowCommand(row, $event)" @executed="loadData" /><el-button v-if="canGenerateTask(row)" link type="success" @click="openGenerate(row)">生成任务</el-button>
             <el-popconfirm v-if="canDeleteRequirement(row)" title="确认删除该需求？" @confirm="removeRequirement(row.id)">
               <template #reference><el-button link type="danger">删除</el-button></template>
             </el-popconfirm>
@@ -68,7 +68,7 @@
               <el-option v-for="iteration in iterations" :key="iteration.id" :label="iteration.name" :value="iteration.id" />
             </el-select>
           </el-form-item>
-          <el-form-item label="当前处理人">
+          <el-form-item v-if="!editingId" label="当前处理人">
             <el-select v-model="form.owner_id" clearable filterable placeholder="请选择当前处理人" @change="onOwnerChange">
               <el-option v-for="user in users" :key="user.id" :label="user.full_name" :value="user.id" />
             </el-select>
@@ -101,6 +101,7 @@
     <el-dialog v-model="generateVisible" title="从需求生成任务" width="480px">
       <el-form label-position="top">
         <el-form-item label="任务标题" required><el-input v-model="generateForm.title" /></el-form-item>
+        <el-form-item label="任务分支"><el-select v-model="generateForm.task_type" disabled><el-option v-for="option in TASK_BRANCH_OPTIONS" :key="option.value" :label="option.label" :value="option.value" /></el-select></el-form-item>
         <el-form-item label="描述"><el-input v-model="generateForm.description" type="textarea" :rows="3" /></el-form-item>
       </el-form>
       <template #footer><el-button @click="generateVisible = false">取消</el-button><el-button type="primary" :loading="saving" @click="submitGenerateTask">生成</el-button></template>
@@ -168,6 +169,7 @@
 
 <script setup>
 import { computed, onMounted, reactive, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { fetchIterations } from '../api/iterations'
 import { fetchProjectMembers, fetchProjects } from '../api/projects'
@@ -178,13 +180,14 @@ import {
   downloadRequirementImportTemplate,
   fetchRequirements,
   fetchRequirementStatusOperations,
-  generateTask,
   previewRequirementImport,
   updateRequirement
 } from '../api/requirements'
+import { createLinkedTask } from '../api/tasks'
 import { fetchUsers } from '../api/users'
 import { fetchWorkflowTransitionsBatch } from '../api/workflowRuntime'
 import RequirementPriorityBadge from '../components/RequirementPriorityBadge.vue'
+import WatchToggleButton from '../components/WatchToggleButton.vue'
 import WorkflowActionButtons from '../components/WorkflowActionButtons.vue'
 import { showActionError } from '../utils/actionFeedback'
 import { currentUserId } from '../utils/currentUser'
@@ -192,7 +195,9 @@ import { loadCloseReasonMap } from '../utils/closeReasonTooltip'
 import { canCreateWorkItem, canDeleteWorkItem, canExecuteWorkItem, currentUserFromStorage } from '../utils/permissions'
 import { labelById, userLabel } from '../utils/referenceLabels'
 import { usePagination } from '../utils/usePagination'
+import { TASK_BRANCH_OPTIONS } from '../utils/taskBranchRules'
 
+const router = useRouter()
 const loading = ref(false)
 const saving = ref(false)
 const dialogVisible = ref(false)
@@ -216,9 +221,9 @@ const {
   total: requirementTotal,
   pagedItems: pagedRequirements
 } = usePagination(requirements)
-const form = reactive({ project_id: null, source_project_id: null, iteration_id: null, title: '', requirement_type: '??', priority: '3', owner_id: null, proposer_id: null, status: 'draft', description: '', acceptance_criteria: '' })
+const form = reactive({ project_id: null, source_project_id: null, iteration_id: null, title: '', requirement_type: '功能', priority: '3', owner_id: null, proposer_id: null, description: '', acceptance_criteria: '' })
 const ownerManuallySet = ref(false)
-const generateForm = reactive({ title: '', description: '' })
+const generateForm = reactive({ title: '', task_type: 'requirement_implementation', description: '' })
 const importFile = ref(null)
 const importPreview = ref(null)
 const duplicateStrategy = ref('')
@@ -229,15 +234,14 @@ const requirementPriorityOptions = [
   { label: '4', value: '4' },
   { label: '5', value: '5' }
 ]
-const requirementTypeOptions = ['??', '??', '??', '??', '??', '??', '??']
+const requirementTypeOptions = ['功能', '接口', '性能', '安全', '体验', '改进', '其他']
 const legacyRequirementPriorityValues = { high: '1', medium: '3', low: '5' }
 const requirementStatusOptions = [
-  { label: '??', value: 'draft' },
-  { label: '??', value: 'active' },
-  { label: '???', value: 'pending_validation' },
-  { label: '?????', value: 'validation_failed' },
-  { label: '??', value: 'done' },
-  { label: '??', value: 'closed' }
+  { label: '待分派', value: 'pending_assignment' },
+  { label: '处理中', value: 'in_processing' },
+  { label: '待确认', value: 'pending_confirmation' },
+  { label: '已完成', value: 'completed' },
+  { label: '已取消', value: 'canceled' }
 ]
 
 function normalizeRequirementPriority(value) { return legacyRequirementPriorityValues[value] || value || '3' }
@@ -246,24 +250,24 @@ function isRequirementProjectClosed(row) { return projects.value.find((item) => 
 function workflowTransitionsFor(row) { return workflowTransitions.value[`requirement:${row.id}`] || [] }
 function projectForRequirement(row) { return projects.value.find((item) => item.id === row.project_id) || null }
 function membersForProject(projectId) { return projectMembersById.value[projectId] || [] }
-function canEditRequirement(row) {
-  const project = projectForRequirement(row)
-  return !isRequirementProjectClosed(row) && canExecuteWorkItem(row, currentUser.value, project, membersForProject(project?.id))
-}
 function canGenerateTask(row) {
   const project = projectForRequirement(row)
-  return !isRequirementProjectClosed(row) && canCreateWorkItem(project, currentUser.value, membersForProject(project?.id))
+  return !isRequirementProjectClosed(row) && canExecuteWorkItem(row, currentUser.value, project, membersForProject(project?.id))
 }
 function canDeleteRequirement(row) {
   const project = projectForRequirement(row)
   return !isRequirementProjectClosed(row) && canDeleteWorkItem(project, currentUser.value, membersForProject(project?.id))
 }
-function resetForm() { Object.assign(form, { project_id: null, source_project_id: null, iteration_id: null, title: '', requirement_type: '??', priority: '3', owner_id: null, proposer_id: currentUserId(users.value), status: 'draft', description: '', acceptance_criteria: '' }); ownerManuallySet.value = false }
+function resetForm() { Object.assign(form, { project_id: null, source_project_id: null, iteration_id: null, title: '', requirement_type: '功能', priority: '3', owner_id: null, proposer_id: currentUserId(users.value), description: '', acceptance_criteria: '' }); ownerManuallySet.value = false }
 function openCreate() { editingId.value = null; resetForm(); dialogVisible.value = true }
 function onSourceProjectChange() {}
 function onOwnerChange() { ownerManuallySet.value = true }
 function openEdit(row) { editingId.value = row.id; ownerManuallySet.value = true; Object.assign(form, { ...row, priority: normalizeRequirementPriority(row.priority), requirement_type: row.requirement_type || '', description: row.description || '', acceptance_criteria: row.acceptance_criteria || '' }); dialogVisible.value = true }
-function openGenerate(row) { generatingRequirementId.value = row.id; generateForm.title = row.title; generateForm.description = ''; generateVisible.value = true }
+function handleWorkflowCommand(row, { commandType }) {
+  if (commandType === 'edit') openEdit(row)
+  if (commandType === 'view_history') router.push(`/requirements/${row.id}#history`)
+}
+function openGenerate(row) { generatingRequirementId.value = row.id; generateForm.title = row.title; generateForm.task_type = 'requirement_implementation'; generateForm.description = ''; generateVisible.value = true }
 
 async function downloadImportTemplate() {
   const response = await downloadRequirementImportTemplate()
@@ -353,7 +357,11 @@ async function submitGenerateTask() {
   if (!generateForm.title.trim()) return ElMessage.warning('???????')
   saving.value = true
   try {
-    await generateTask(generatingRequirementId.value, { ...generateForm })
+    await createLinkedTask({
+      source_type: 'requirement',
+      source_id: generatingRequirementId.value,
+      ...generateForm
+    })
     generateVisible.value = false
     ElMessage.success('?????')
     await loadData()

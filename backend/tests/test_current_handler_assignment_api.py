@@ -134,7 +134,7 @@ def test_create_work_items_do_not_use_default_owner_roles(client: TestClient):
     assert bug.json()["owner_id"] is None
 
 
-def test_requirement_assign_updates_current_handler_and_records_history(client: TestClient):
+def test_requirement_change_handler_updates_current_handler_and_records_history(client: TestClient):
     owner_id, _ = _create_user("Original Handler", "developer")
     target_id, _ = _create_user("Target Handler", "developer")
     manager_id, manager_token = _create_user("Project Manager", "project_owner")
@@ -147,20 +147,25 @@ def test_requirement_assign_updates_current_handler_and_records_history(client: 
     ).json()
 
     assigned = client.post(
-        f"/api/v1/requirements/{requirement['id']}/assign",
-        json={"owner_id": target_id, "remark": "转给目标处理"},
+        f"/api/v1/workflow-runtime/requirement/{requirement['id']}/transition",
+        json={
+            "action_key": "change_handler",
+            "next_owner_id": target_id,
+            "delegate_reason": "管理调整",
+            "payload": {"reason": "转给目标处理"},
+        },
         headers={"Authorization": f"Bearer {manager_token}"},
     )
 
     assert assigned.status_code == 200
     assert assigned.json()["owner_id"] == target_id
     history = client.get(f"/api/v1/requirements/{requirement['id']}/status-operations").json()
-    assert history[-1]["action"] == "assign"
+    assert history[-1]["action"] == "change_handler"
     assert history[-1]["from_status"] == requirement["status"]
     assert history[-1]["to_status"] == requirement["status"]
     assert history[-1]["actor_id"] == manager_id
     assert f"{owner_id} -> {target_id}" in history[-1]["remark"]
-    assert "转给目标处理" in history[-1]["remark"]
+    assert history[-1]["reason"] == "转给目标处理"
 
 
 def test_project_owner_is_not_implicit_current_handler_assignee(client: TestClient):
@@ -172,16 +177,16 @@ def test_project_owner_is_not_implicit_current_handler_assignee(client: TestClie
     ).json()
 
     assigned = client.post(
-        f"/api/v1/requirements/{requirement['id']}/assign",
-        json={"owner_id": owner_id, "remark": "try assign to project owner"},
+        f"/api/v1/workflow-runtime/requirement/{requirement['id']}/transition",
+        json={"action_key": "assign", "next_owner_id": owner_id, "payload": {"reason": "try assign to project owner"}},
         headers={"Authorization": f"Bearer {owner_token}"},
     )
 
     assert assigned.status_code == 400
-    assert "不是对象所属项目成员" in assigned.json()["detail"]
+    assert "not a project member" in assigned.json()["detail"].lower()
 
 
-def test_batch_assign_returns_success_and_failure_items(client: TestClient):
+def test_runtime_change_handler_rejects_terminal_items_independently(client: TestClient):
     owner_id, _ = _create_user("Batch Owner", "developer")
     target_id, _ = _create_user("Batch Target", "developer")
     manager_id, manager_token = _create_user("Batch Manager", "project_owner")
@@ -198,17 +203,29 @@ def test_batch_assign_returns_success_and_failure_items(client: TestClient):
     ).json()
     _set_requirement_status(closed_requirement["id"], "canceled")
 
-    response = client.post(
-        "/api/v1/requirements/batch-assign",
-        json={"ids": [active_requirement["id"], closed_requirement["id"]], "owner_id": target_id, "remark": "批量转派"},
+    active_response = client.post(
+        f"/api/v1/workflow-runtime/requirement/{active_requirement['id']}/transition",
+        json={
+            "action_key": "change_handler",
+            "next_owner_id": target_id,
+            "delegate_reason": "管理调整",
+            "payload": {"reason": "转派"},
+        },
+        headers={"Authorization": f"Bearer {manager_token}"},
+    )
+    terminal_response = client.post(
+        f"/api/v1/workflow-runtime/requirement/{closed_requirement['id']}/transition",
+        json={
+            "action_key": "change_handler",
+            "next_owner_id": target_id,
+            "delegate_reason": "管理调整",
+            "payload": {"reason": "不应转派"},
+        },
         headers={"Authorization": f"Bearer {manager_token}"},
     )
 
-    assert response.status_code == 200
-    data = response.json()
-    assert data["success_ids"] == [active_requirement["id"]]
-    assert data["failures"][0]["id"] == closed_requirement["id"]
-    assert "已完成或已关闭" in data["failures"][0]["reason"]
+    assert active_response.status_code == 200
+    assert terminal_response.status_code == 400
     assert client.get(f"/api/v1/requirements/{active_requirement['id']}").json()["owner_id"] == target_id
 
 
@@ -242,7 +259,7 @@ def test_non_current_handler_cannot_update_or_transition_task(client: TestClient
 
 
 def test_workbench_defaults_to_current_users_non_terminal_items(client: TestClient):
-    user_id, _ = _create_user("Workbench Current", "developer")
+    user_id, user_token = _create_user("Workbench Current", "developer")
     other_id, _ = _create_user("Workbench Other", "developer")
     project_id = _create_project(client)
     iteration_id = _create_iteration(client, project_id)
@@ -268,7 +285,10 @@ def test_workbench_defaults_to_current_users_non_terminal_items(client: TestClie
     ).json()
     _set_task_status(done_task["id"], "completed")
 
-    response = client.get(f"/api/v1/dashboard/workbench?user_id={user_id}")
+    response = client.get(
+        "/api/v1/dashboard/workbench",
+        headers={"Authorization": f"Bearer {user_token}"},
+    )
 
     assert response.status_code == 200
     pending_items = response.json()["pending_handling"]["items"]
@@ -279,8 +299,8 @@ def test_workbench_defaults_to_current_users_non_terminal_items(client: TestClie
 
 
 def test_workbench_my_queue_uses_owner_not_project_membership(client: TestClient):
-    user_id, _ = _create_user("Owner Without Membership", "developer")
-    teammate_id, _ = _create_user("Project Teammate", "developer")
+    user_id, user_token = _create_user("Owner Without Membership", "developer")
+    teammate_id, teammate_token = _create_user("Project Teammate", "developer")
     project_id = _create_project(client)
     iteration_id = _create_iteration(client, project_id)
     _add_project_member(project_id, teammate_id)
@@ -293,8 +313,14 @@ def test_workbench_my_queue_uses_owner_not_project_membership(client: TestClient
         json={"project_id": project_id, "iteration_id": iteration_id, "title": "Assigned to project member", "owner_id": teammate_id},
     ).json()
 
-    owner_response = client.get(f"/api/v1/dashboard/workbench?user_id={user_id}")
-    teammate_response = client.get(f"/api/v1/dashboard/workbench?user_id={teammate_id}")
+    owner_response = client.get(
+        "/api/v1/dashboard/workbench",
+        headers={"Authorization": f"Bearer {user_token}"},
+    )
+    teammate_response = client.get(
+        "/api/v1/dashboard/workbench",
+        headers={"Authorization": f"Bearer {teammate_token}"},
+    )
 
     assert owner_response.status_code == 200
     owner_refs = {(item["object_type"], item["id"]) for item in owner_response.json()["pending_handling"]["items"]}
@@ -305,3 +331,21 @@ def test_workbench_my_queue_uses_owner_not_project_membership(client: TestClient
     teammate_refs = {(item["object_type"], item["id"]) for item in teammate_response.json()["pending_handling"]["items"]}
     assert ("task", teammate_task["id"]) in teammate_refs
     assert ("bug", my_bug["id"]) not in teammate_refs
+
+
+def test_legacy_owner_mutation_routes_are_removed_from_openapi(client: TestClient):
+    paths = set(client.get("/openapi.json").json()["paths"])
+    legacy_paths = {
+        "/api/v1/requirements/batch-assign",
+        "/api/v1/requirements/{requirement_id}/assign",
+        "/api/v1/tasks/batch-assign",
+        "/api/v1/tasks/{task_id}/assign",
+        "/api/v1/bugs/batch-assign",
+        "/api/v1/bugs/{bug_id}/assign",
+        "/api/v1/work-items/{object_type}/{object_id}/claim",
+        "/api/v1/work-items/{object_type}/{object_id}/assign",
+        "/api/v1/work-items/batch-assign",
+        "/api/v1/work-items/unassigned/auto-assign",
+    }
+
+    assert paths.isdisjoint(legacy_paths)

@@ -1,4 +1,4 @@
-const TERMINAL_ITERATION_STATUSES = new Set(['finished', 'closed'])
+const TERMINAL_ITERATION_STATUSES = new Set(['completed', 'canceled'])
 
 export function projectAncestorIds(projects, projectId) {
   const ids = []

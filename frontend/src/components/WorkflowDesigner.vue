@@ -6,7 +6,12 @@
         <p>拖拽状态节点，按住空白画布移动视角，点击节点或连线进行配置。</p>
       </div>
       <div class="workflow-designer-actions">
-        <el-select v-model="activeObjectType" size="small" class="workflow-object-select" @change="loadDefinition">
+        <el-select
+          :model-value="activeObjectType"
+          size="small"
+          class="workflow-object-select"
+          @update:model-value="changeObjectType"
+        >
           <el-option v-for="item in objectTypes" :key="item.value" :label="item.label" :value="item.value" />
         </el-select>
         <el-button size="small" @click="addState">新增状态</el-button>
@@ -115,44 +120,30 @@
                 />
               </el-select>
             </el-form-item>
-            <el-form-item label="允许角色">
-              <el-select v-model="selectedTransition.allowed_role_list" multiple filterable>
-                <el-option v-for="role in roleOptions" :key="role.value" :label="role.label" :value="role.value" />
-              </el-select>
-            </el-form-item>
-            <el-form-item label="下一处理人">
-              <el-select v-model="selectedTransition.handler_rule.target_type">
-                <el-option v-for="item in targetTypes" :key="item.value" :label="item.label" :value="item.value" />
-              </el-select>
-            </el-form-item>
-            <el-form-item label="目标角色">
-              <el-select
-                v-model="selectedTransition.handler_target_roles"
-                multiple
-                filterable
-                :disabled="selectedTransition.handler_rule.target_type !== 'project_role'"
-              >
-                <el-option v-for="role in roleOptions" :key="role.value" :label="role.label" :value="role.value" />
-              </el-select>
-            </el-form-item>
-            <el-form-item label="兜底策略">
-              <el-select v-model="selectedTransition.handler_rule.fallback_type">
-                <el-option label="保持当前处理人" value="keep_current" />
-                <el-option label="按项目角色" value="project_role" />
-                <el-option label="置为空" value="none" />
-              </el-select>
-            </el-form-item>
-            <el-form-item label="兜底角色">
-              <el-select
-                v-model="selectedTransition.handler_fallback_roles"
-                multiple
-                filterable
-                :disabled="selectedTransition.handler_rule.fallback_type !== 'project_role'"
-              >
-                <el-option v-for="role in roleOptions" :key="role.value" :label="role.label" :value="role.value" />
-              </el-select>
-            </el-form-item>
+            <div class="workflow-readonly-summary">
+              <div><span>允许角色</span><strong>{{ roleSummary(selectedTransition.allowed_role_list) }}</strong></div>
+              <div><span>处理人</span><strong>{{ handlerSummary(selectedTransition) }}</strong></div>
+            </div>
             <el-form-item label="启用"><el-switch v-model="selectedTransition.enabled" /></el-form-item>
+            <el-alert
+              v-if="selectedUnsupportedSections.length"
+              class="workflow-advanced-warning"
+              type="warning"
+              :closable="false"
+              title="该流转包含未支持的历史配置，迁移前不能覆盖保存。"
+              description="高级配置已禁用，以免覆盖历史配置。"
+            />
+            <div class="workflow-advanced-entry">
+              <el-button
+                type="primary"
+                plain
+                :disabled="selectedUnsupportedSections.length > 0"
+                @click="openAdvancedDrawer"
+              >
+                高级配置
+              </el-button>
+              <span>已配置 {{ configuredAdvancedSectionCount(selectedTransition, states) }} 项</span>
+            </div>
             <el-button type="danger" plain @click="removeSelectedTransition">删除流转</el-button>
           </el-form>
         </template>
@@ -160,13 +151,24 @@
         <el-empty v-else description="选择状态或流转进行配置" />
       </aside>
     </div>
+    <WorkflowAdvancedConfigDrawer
+      ref="advancedDrawer"
+      v-model="advancedDrawerVisible"
+      :transition="selectedTransition"
+      :states="states"
+      :role-options="roleOptions"
+      :target-types="targetTypes"
+      @apply="applyAdvancedDraft"
+    />
   </div>
 </template>
 
 <script setup>
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
+import { onBeforeRouteLeave } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 
+import WorkflowAdvancedConfigDrawer from './WorkflowAdvancedConfigDrawer.vue'
 import {
   applyWorkflowDefinitionTemplate,
   createWorkflowDefinition,
@@ -175,6 +177,15 @@ import {
   saveWorkflowDefinitionGraph
 } from '../api/workflowDefinitions'
 import { buildWorkflowEdgeView } from '../utils/workflowEdgePath'
+import {
+  normalizeWorkflowTransition as normalizeTransition,
+  serializeWorkflowTransition as serializeTransition,
+  unsupportedWorkflowConfigSections
+} from '../utils/workflowTransitionConfig'
+import {
+  applyAdvancedConfigDraft,
+  configuredAdvancedSectionCount
+} from '../utils/workflowAdvancedConfig'
 import {
   applyPanDelta,
   clampViewport,
@@ -193,6 +204,18 @@ const objectTypes = [
   { label: '缺陷', value: 'bug' }
 ]
 const targetTypes = [
+  { label: '当前操作人', value: 'actor' },
+  { label: '手动指定', value: 'explicit_owner' },
+  { label: '创建人', value: 'creator' },
+  { label: '上一处理人', value: 'previous_handler' },
+  { label: '项目负责人', value: 'project_owner' },
+  { label: '需求负责人', value: 'requirement_owner' },
+  { label: '来源负责人', value: 'source_owner' },
+  { label: '任务确认人', value: 'task_confirmation' },
+  { label: 'Bug 验证人', value: 'bug_verifier' },
+  { label: '待验证时的 Bug 验证人', value: 'bug_verifier_if_pending_verification' },
+  { label: '测试执行人', value: 'test_executor' },
+  { label: '测试用例默认测试人', value: 'test_case_default_tester' },
   { label: '项目角色', value: 'project_role' },
   { label: '保持当前处理人', value: 'keep_current' },
   { label: '需求提出人', value: 'proposer' },
@@ -210,6 +233,8 @@ const selectedKind = ref('')
 const selectedKey = ref('')
 const loading = ref(false)
 const saving = ref(false)
+const advancedDrawer = ref(null)
+const advancedDrawerVisible = ref(false)
 const viewportOffset = reactive({ x: 0, y: 0 })
 const dragging = reactive({ state: null, startX: 0, startY: 0, originX: 0, originY: 0 })
 const viewportDrag = reactive({ active: false, startX: 0, startY: 0, originX: 0, originY: 0 })
@@ -223,6 +248,9 @@ const selectedTransition = computed(() => (
   selectedKind.value === 'transition'
     ? transitions.value.find((item) => transitionKey(item) === selectedKey.value)
     : null
+))
+const selectedUnsupportedSections = computed(() => (
+  selectedTransition.value ? unsupportedWorkflowConfigSections(selectedTransition.value) : []
 ))
 const canvasGridStyle = computed(() => ({
   backgroundPosition: `${viewportOffset.x}px ${viewportOffset.y}px`
@@ -238,11 +266,14 @@ const transitionViews = computed(() => transitions.value
 
 watch(() => props.configId, () => loadDefinition())
 
+onBeforeRouteLeave(async () => confirmDiscardAdvancedDraft())
+
 onMounted(() => {
   window.addEventListener('mousemove', onDrag)
   window.addEventListener('mouseup', stopDrag)
   window.addEventListener('mousemove', onViewportDrag)
   window.addEventListener('mouseup', stopViewportDrag)
+  window.addEventListener('beforeunload', onBeforeUnload)
   loadDefinition()
 })
 
@@ -251,10 +282,12 @@ onBeforeUnmount(() => {
   window.removeEventListener('mouseup', stopDrag)
   window.removeEventListener('mousemove', onViewportDrag)
   window.removeEventListener('mouseup', stopViewportDrag)
+  window.removeEventListener('beforeunload', onBeforeUnload)
 })
 
-async function loadDefinition() {
+async function loadDefinition({ discardPendingDraft = true } = {}) {
   if (!props.configId) return
+  if (discardPendingDraft && !await confirmDiscardAdvancedDraft()) return
   loading.value = true
   try {
     const list = await fetchWorkflowDefinitions({
@@ -294,6 +327,7 @@ function applyGraph(graph) {
 async function applyTemplate() {
   if (!definition.value?.id) return
   await ElMessageBox.confirm('套用模板会覆盖当前流程图，确认继续？', '套用模板', { type: 'warning' })
+  if (!await confirmDiscardAdvancedDraft()) return
   loading.value = true
   try {
     const graph = await applyWorkflowDefinitionTemplate(definition.value.id)
@@ -304,8 +338,19 @@ async function applyTemplate() {
   }
 }
 
+async function changeObjectType(nextObjectType) {
+  if (nextObjectType === activeObjectType.value) return
+  if (!await confirmDiscardAdvancedDraft()) return
+  activeObjectType.value = nextObjectType
+  await loadDefinition({ discardPendingDraft: false })
+}
+
 async function saveGraph() {
   if (!definition.value?.id) return
+  if (transitions.value.some((item) => unsupportedWorkflowConfigSections(item).length)) {
+    ElMessage.error('存在未支持的历史配置，请先完成迁移后再保存。')
+    return
+  }
   saving.value = true
   try {
     const payload = {
@@ -396,6 +441,47 @@ function removeSelectedTransition() {
   clearSelection()
 }
 
+function openAdvancedDrawer() {
+  if (selectedUnsupportedSections.value.length) return
+  advancedDrawerVisible.value = true
+  advancedDrawer.value?.open?.()
+}
+
+function applyAdvancedDraft(draft) {
+  if (!selectedTransition.value || selectedUnsupportedSections.value.length) return
+  applyAdvancedConfigDraft(selectedTransition.value, draft)
+}
+
+async function confirmDiscardAdvancedDraft() {
+  if (!advancedDrawer.value?.hasPendingChanges?.()) return true
+  return advancedDrawer.value.confirmDiscardPendingChanges()
+}
+
+function onBeforeUnload(event) {
+  if (!advancedDrawer.value?.hasPendingChanges?.()) return
+  event.preventDefault()
+  event.returnValue = ''
+}
+
+function roleSummary(roles) {
+  if (!Array.isArray(roles) || !roles.length) return '未限制'
+  return roles
+    .map((value) => props.roleOptions.find((role) => role.value === value)?.label || value)
+    .join('、')
+}
+
+function handlerSummary(transition) {
+  const rule = transition.handler_rule || {}
+  const target = handlerTypeSummary(rule.target_type, transition.handler_target_roles)
+  const fallback = handlerTypeSummary(rule.fallback_type, transition.handler_fallback_roles)
+  return `${target}；兜底 ${fallback}`
+}
+
+function handlerTypeSummary(type, roles) {
+  const label = targetTypes.find((item) => item.value === type)?.label || '未设置'
+  return type === 'project_role' ? `${label}（${roleSummary(roles)}）` : label
+}
+
 function startDrag(state, event) {
   dragging.state = state
   dragging.startX = event.clientX
@@ -462,51 +548,11 @@ function transitionKey(transition) {
   return `${transition.action_key}:${transition.from_status}:${transition.to_status}`
 }
 
-function normalizeTransition(item) {
-  const handlerRule = item.handler_rule || {
-    target_type: 'keep_current',
-    target_roles: '',
-    fallback_type: 'keep_current',
-    fallback_roles: ''
-  }
-  return {
-    ...item,
-    handler_rule: {
-      target_type: handlerRule.target_type || 'keep_current',
-      target_roles: roleArray(handlerRule.target_roles).join(','),
-      fallback_type: handlerRule.fallback_type || 'keep_current',
-      fallback_roles: roleArray(handlerRule.fallback_roles).join(',')
-    },
-    allowed_role_list: roleArray(item.allowed_roles),
-    handler_target_roles: roleArray(handlerRule.target_roles),
-    handler_fallback_roles: roleArray(handlerRule.fallback_roles)
-  }
-}
-
-function serializeTransition(item) {
-  const { id, definition_id, allowed_role_list, handler_target_roles, handler_fallback_roles, ...rest } = item
-  return {
-    ...rest,
-    allowed_roles: allowed_role_list.join(','),
-    handler_rule: {
-      ...rest.handler_rule,
-      target_roles: handler_target_roles.join(','),
-      fallback_roles: handler_fallback_roles.join(',')
-    }
-  }
-}
-
-function roleArray(value) {
-  if (Array.isArray(value)) return value
-  return String(value || '')
-    .split(',')
-    .map((item) => item.trim())
-    .filter(Boolean)
-}
 </script>
 
 <style scoped>
 .workflow-designer {
+  position: relative;
   border: 1px solid #d8dee8;
   border-radius: 8px;
   overflow: hidden;
@@ -643,6 +689,50 @@ function roleArray(value) {
   margin: 0 0 14px;
   font-size: 16px;
   color: #0f172a;
+}
+
+.workflow-readonly-summary {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 16px;
+  padding: 10px 12px;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  background: #f8fafc;
+}
+
+.workflow-readonly-summary div {
+  display: grid;
+  grid-template-columns: 72px minmax(0, 1fr);
+  gap: 8px;
+  font-size: 12px;
+}
+
+.workflow-readonly-summary span {
+  color: #64748b;
+}
+
+.workflow-readonly-summary strong {
+  min-width: 0;
+  color: #334155;
+  overflow-wrap: anywhere;
+}
+
+.workflow-advanced-warning {
+  margin-bottom: 12px;
+}
+
+.workflow-advanced-entry {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.workflow-advanced-entry span {
+  color: #64748b;
+  font-size: 12px;
 }
 
 @media (max-width: 1100px) {

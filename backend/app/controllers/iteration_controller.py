@@ -13,18 +13,16 @@ from app.services.iteration_service import (
     create_iteration,
     delete_iteration,
     defer_work_items,
-    finish_iteration,
     get_iteration_detail,
     link_requirements,
     link_tasks,
     list_iteration_status_operations,
     list_iterations,
-    start_iteration,
     unlink_requirement,
     unlink_task,
     update_iteration,
 )
-from app.views.status_operation_view import StatusOperationCreate, StatusOperationRead
+from app.views.status_operation_view import StatusOperationRead
 from app.views.iteration_view import (
     DeferIterationWorkItemsRequest,
     DeferIterationWorkItemsResult,
@@ -81,28 +79,6 @@ def get_iteration_status_operations(
 ):
     _ensure_can_view_iteration_audit(db, iteration_id, current_user)
     return list_iteration_status_operations(db, iteration_id)
-
-
-@router.post("/{iteration_id}/start", response_model=IterationRead)
-def start_iteration_status(
-    iteration_id: int,
-    payload: StatusOperationCreate | None = None,
-    db: Session = Depends(get_db),
-    current_user: User | None = Depends(get_optional_current_user),
-):
-    _ensure_can_manage_iteration(db, iteration_id, current_user)
-    return start_iteration(db, iteration_id, payload, actor_id=current_user.id if current_user else None)
-
-
-@router.post("/{iteration_id}/finish", response_model=IterationRead)
-def finish_iteration_status(
-    iteration_id: int,
-    payload: StatusOperationCreate | None = None,
-    db: Session = Depends(get_db),
-    current_user: User | None = Depends(get_optional_current_user),
-):
-    _ensure_can_manage_iteration(db, iteration_id, current_user)
-    return finish_iteration(db, iteration_id, payload, actor_id=current_user.id if current_user else None)
 
 
 @router.post("/{iteration_id}/defer-work-items", response_model=DeferIterationWorkItemsResult)

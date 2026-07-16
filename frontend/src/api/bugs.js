@@ -1,4 +1,5 @@
 import { http } from './http'
+import { toWorkItemPatchPayload } from '../utils/workItemPatchPayload'
 
 export function fetchBugs() {
   return http.get('/bugs')
@@ -21,15 +22,7 @@ export function createBug(payload) {
 }
 
 export function updateBug(id, payload) {
-  return http.patch(`/bugs/${id}`, payload)
-}
-
-export function assignBug(id, payload) {
-  return http.post(`/bugs/${id}/assign`, payload)
-}
-
-export function batchAssignBugs(payload) {
-  return http.post('/bugs/batch-assign', payload)
+  return http.patch(`/bugs/${id}`, toWorkItemPatchPayload(payload))
 }
 
 export function deleteBug(id) {

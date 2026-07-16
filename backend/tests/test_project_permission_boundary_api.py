@@ -277,3 +277,59 @@ def test_project_owner_can_admin_edit_non_current_handler_work_item(client: Test
     assert rejected.status_code == 403
     assert owner_edit.status_code == 200
     assert handler_edit.status_code == 200
+
+
+def test_generic_patch_rejects_owner_and_status_changes(client: TestClient):
+    project_owner_id, _ = _create_user("Protected Patch Project Owner")
+    handler_id, handler_token = _create_user("Protected Patch Handler")
+    target_id, _ = _create_user("Protected Patch Target")
+    project = client.post(
+        "/api/v1/projects",
+        json={"name": f"Protected Patch Project {uuid4().hex[:8]}", "owner_id": project_owner_id},
+    ).json()
+    _add_project_member(project["id"], handler_id, "developer")
+    _add_project_member(project["id"], target_id, "developer")
+
+    objects = [
+        (
+            "requirements",
+            client.post(
+                "/api/v1/requirements",
+                json={"project_id": project["id"], "title": f"Protected Requirement {uuid4().hex[:8]}", "owner_id": handler_id},
+            ).json(),
+            "completed",
+        ),
+        (
+            "tasks",
+            client.post(
+                "/api/v1/tasks",
+                json={
+                    "project_id": project["id"],
+                    "title": f"Protected Task {uuid4().hex[:8]}",
+                    "task_type": "standalone_operation",
+                    "owner_id": handler_id,
+                },
+            ).json(),
+            "completed",
+        ),
+        (
+            "bugs",
+            client.post(
+                "/api/v1/bugs",
+                json={"project_id": project["id"], "title": f"Protected Bug {uuid4().hex[:8]}", "owner_id": handler_id},
+            ).json(),
+            "closed",
+        ),
+    ]
+
+    for endpoint, item, target_status in objects:
+        response = client.patch(
+            f"/api/v1/{endpoint}/{item['id']}",
+            json={"owner_id": target_id, "status": target_status},
+            headers=_auth(handler_token),
+        )
+        unchanged = client.get(f"/api/v1/{endpoint}/{item['id']}").json()
+
+        assert response.status_code == 422
+        assert unchanged["owner_id"] == handler_id
+        assert unchanged["status"] == item["status"]

@@ -1,4 +1,5 @@
 import { http } from './http'
+import { toWorkItemPatchPayload } from '../utils/workItemPatchPayload'
 
 export function fetchRequirements() {
   return http.get('/requirements')
@@ -43,15 +44,7 @@ export function createRequirement(payload) {
 }
 
 export function updateRequirement(id, payload) {
-  return http.patch(`/requirements/${id}`, payload)
-}
-
-export function assignRequirement(id, payload) {
-  return http.post(`/requirements/${id}/assign`, payload)
-}
-
-export function batchAssignRequirements(payload) {
-  return http.post('/requirements/batch-assign', payload)
+  return http.patch(`/requirements/${id}`, toWorkItemPatchPayload(payload))
 }
 
 export function fetchRequirementStatusOperations(id) {
@@ -64,8 +57,4 @@ export function fetchRequirementAuditLogs(id) {
 
 export function deleteRequirement(id) {
   return http.delete(`/requirements/${id}`)
-}
-
-export function generateTask(requirementId, payload) {
-  return http.post(`/requirements/${requirementId}/generate-task`, payload)
 }

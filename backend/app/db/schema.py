@@ -14,6 +14,16 @@ def _ensure_column(engine: Engine, table: str, col: str, ddl: str, index_ddl: st
                 conn.execute(text(index_ddl))
 
 
+def _ensure_varchar_length(engine: Engine, table: str, col: str, minimum_length: int, ddl: str) -> None:
+    inspector = inspect(engine)
+    if table not in inspector.get_table_names():
+        return
+    column = next((item for item in inspector.get_columns(table) if item["name"] == col), None)
+    if column and getattr(column["type"], "length", None) and column["type"].length < minimum_length:
+        with engine.begin() as conn:
+            conn.execute(text(ddl))
+
+
 def ensure_runtime_schema(engine: Engine) -> None:
     inspector0 = inspect(engine)
     if "workflow_component_registry" not in inspector0.get_table_names():
@@ -49,9 +59,9 @@ def ensure_runtime_schema(engine: Engine) -> None:
                 "action VARCHAR(64) NOT NULL COMMENT 'workflow action',"
                 "from_status VARCHAR(32) NULL COMMENT 'from status',"
                 "to_status VARCHAR(32) NULL COMMENT 'to status',"
-                "target_type VARCHAR(32) NOT NULL DEFAULT 'keep_current' COMMENT 'target type',"
+                "target_type VARCHAR(64) NOT NULL DEFAULT 'keep_current' COMMENT 'target type',"
                 "target_roles VARCHAR(255) NOT NULL DEFAULT '' COMMENT 'project roles',"
-                "fallback_type VARCHAR(32) NOT NULL DEFAULT 'keep_current' COMMENT 'fallback type',"
+                "fallback_type VARCHAR(64) NOT NULL DEFAULT 'keep_current' COMMENT 'fallback type',"
                 "fallback_roles VARCHAR(255) NOT NULL DEFAULT '' COMMENT 'fallback roles',"
                 "enabled TINYINT(1) NOT NULL DEFAULT 1 COMMENT 'enabled',"
                 "create_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT 'create time',"
@@ -65,6 +75,20 @@ def ensure_runtime_schema(engine: Engine) -> None:
                    "CREATE INDEX idx_htr_rule_type ON handler_transition_rules (config_id, rule_type, object_type, enabled)")
     _ensure_column(engine, "handler_transition_rules", "fallback_roles",
                    "ALTER TABLE handler_transition_rules ADD COLUMN fallback_roles VARCHAR(255) NOT NULL DEFAULT '' COMMENT 'fallback roles' AFTER fallback_type")
+    _ensure_varchar_length(
+        engine,
+        "handler_transition_rules",
+        "target_type",
+        64,
+        "ALTER TABLE handler_transition_rules MODIFY COLUMN target_type VARCHAR(64) NOT NULL DEFAULT 'keep_current' COMMENT 'target type'",
+    )
+    _ensure_varchar_length(
+        engine,
+        "handler_transition_rules",
+        "fallback_type",
+        64,
+        "ALTER TABLE handler_transition_rules MODIFY COLUMN fallback_type VARCHAR(64) NOT NULL DEFAULT 'keep_current' COMMENT 'fallback type'",
+    )
     _ensure_column(engine, "status_operation_log", "actor_name",
                    "ALTER TABLE status_operation_log ADD COLUMN actor_name VARCHAR(100) NULL COMMENT 'actor name snapshot' AFTER actor_id")
     _ensure_column(engine, "status_operation_log", "is_delegated",

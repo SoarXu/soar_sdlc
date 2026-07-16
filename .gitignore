@@ -6,8 +6,11 @@ venv/
 .env
 *.db
 server.*.log
+server-*.log
 .*.log
 logs/
+.superpowers/
+pytest-*.log
 
 node_modules/
 dist/

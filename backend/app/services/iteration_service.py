@@ -15,6 +15,9 @@ from app.views.iteration_view import DeferIterationWorkItemsRequest, IterationCr
 from app.views.status_operation_view import StatusOperationCreate
 
 
+WORK_ITEM_TERMINAL_STATUSES = {"completed", "canceled"}
+
+
 def list_iterations(db: Session, project_id: int | None = None) -> list[dict]:
     query = db.query(Iteration).filter(Iteration.deleted == 0)
     if project_id:
@@ -90,6 +93,7 @@ def create_iteration(db: Session, payload: IterationCreate) -> dict:
 def update_iteration(db: Session, iteration_id: int, payload: IterationUpdate) -> dict:
     iteration = _get_active_iteration(db, iteration_id)
     data = payload.model_dump(exclude_unset=True)
+    data.pop("status", None)
     project_id = data.pop("project_id", None)
     project_ids = data.pop("project_ids", None)
     if project_id and project_ids is None:
@@ -137,56 +141,6 @@ def delete_iteration(db: Session, iteration_id: int) -> None:
     iteration.deleted = 1
     iteration.delete_time = datetime.now()
     db.commit()
-
-
-def start_iteration(db: Session, iteration_id: int, payload: StatusOperationCreate | None = None, actor_id: int | None = None) -> dict:
-    iteration = _get_active_iteration(db, iteration_id)
-    if iteration.status != "planning":
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="只有规划中的迭代可以开始")
-    if not payload or not payload.effective_time:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="请选择实际开始日期")
-    from_status = iteration.status
-    iteration.status = "active"
-    iteration.actual_start_date = payload.effective_time.date()
-    create_status_operation(
-        db,
-        object_type="iteration",
-        object_id=iteration.id,
-        action="start",
-        from_status=from_status,
-        to_status=iteration.status,
-        payload=payload,
-        actor_id=actor_id,
-    )
-    _activate_iteration_work_items(db, iteration.id, actor_id=actor_id)
-    db.commit()
-    db.refresh(iteration)
-    return _iteration_to_dict(iteration, _iteration_project_ids(db, iteration.id))
-
-
-def finish_iteration(db: Session, iteration_id: int, payload: StatusOperationCreate | None = None, actor_id: int | None = None) -> dict:
-    iteration = _get_active_iteration(db, iteration_id)
-    if iteration.status != "active":
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="只有进行中的迭代可以结束")
-    if not payload or not payload.effective_time:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="请选择实际结束日期")
-    _ensure_iteration_work_items_finished(db, iteration_id)
-    from_status = iteration.status
-    iteration.status = "finished"
-    iteration.actual_end_date = payload.effective_time.date()
-    create_status_operation(
-        db,
-        object_type="iteration",
-        object_id=iteration.id,
-        action="finish",
-        from_status=from_status,
-        to_status=iteration.status,
-        payload=payload,
-        actor_id=actor_id,
-    )
-    db.commit()
-    db.refresh(iteration)
-    return _iteration_to_dict(iteration, _iteration_project_ids(db, iteration.id))
 
 
 def defer_work_items(db: Session, iteration_id: int, payload: DeferIterationWorkItemsRequest) -> dict:
@@ -249,7 +203,7 @@ def get_iteration_detail(db: Session, iteration_id: int) -> dict:
     )
     covered_requirement_ids = {case.requirement_id for case in test_cases if case.requirement_id}
     requirement_total = len(requirements)
-    closed_requirement_total = len([item for item in requirements if item.status == "closed"])
+    closed_requirement_total = len([item for item in requirements if item.status in WORK_ITEM_TERMINAL_STATUSES])
     detail_project_ids = _merge_detail_project_ids(project_ids, requirements, tasks_by_id.values(), test_cases, bugs)
     return {
         "iteration": _iteration_to_dict(iteration, project_ids),
@@ -465,7 +419,7 @@ def _unfinished_requirements_for_defer(
     query = db.query(Requirement).filter(
         Requirement.deleted == 0,
         Requirement.iteration_id == iteration_id,
-        Requirement.status.notin_(["done", "closed"]),
+        Requirement.status.notin_(WORK_ITEM_TERMINAL_STATUSES),
     )
     if requirement_ids is not None:
         if not requirement_ids:
@@ -485,7 +439,7 @@ def _unfinished_direct_tasks_for_defer(
     query = db.query(Task).filter(
         Task.deleted == 0,
         Task.iteration_id == iteration_id,
-        Task.status.notin_(["done", "closed"]),
+        Task.status.notin_(WORK_ITEM_TERMINAL_STATUSES),
     )
     if task_ids is not None:
         if not task_ids:
@@ -495,63 +449,6 @@ def _unfinished_direct_tasks_for_defer(
     if task_ids is not None and len(tasks) != len(set(task_ids)):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="存在任务不属于当前迭代或已完成")
     return tasks
-
-
-def _ensure_iteration_work_items_finished(db: Session, iteration_id: int) -> None:
-    requirements = _linked_requirements(db, iteration_id)
-    requirement_ids = [item.id for item in requirements]
-    unfinished_requirements = [item for item in requirements if item.status not in {"done", "closed"}]
-    unfinished_tasks = [item for item in _linked_tasks(db, iteration_id, requirement_ids) if item.status not in {"done", "closed"}]
-    if not unfinished_requirements and not unfinished_tasks:
-        return
-    messages = []
-    if unfinished_requirements:
-        messages.append(
-            f"存在未完成需求 {len(unfinished_requirements)} 个：{_sample_titles(unfinished_requirements)}"
-        )
-    if unfinished_tasks:
-        messages.append(f"存在未完成任务 {len(unfinished_tasks)} 个：{_sample_titles(unfinished_tasks)}")
-    raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="；".join(messages))
-
-
-def _sample_titles(items) -> str:
-    titles = [item.title for item in items[:5]]
-    suffix = "等" if len(items) > 5 else ""
-    return "、".join(titles) + suffix
-
-
-def _activate_iteration_work_items(db: Session, iteration_id: int, actor_id: int | None = None) -> None:
-    payload = StatusOperationCreate(remark="迭代开始自动激活")
-    requirements = _linked_requirements(db, iteration_id)
-    requirement_ids = [item.id for item in requirements]
-    for requirement in requirements:
-        if requirement.status == "draft":
-            from_status = requirement.status
-            requirement.status = "active"
-            create_status_operation(
-                db,
-                object_type="requirement",
-                object_id=requirement.id,
-                action="activate",
-                from_status=from_status,
-                to_status=requirement.status,
-                payload=payload,
-                actor_id=actor_id,
-            )
-    for task in _linked_tasks(db, iteration_id, requirement_ids):
-        if task.status == "todo":
-            from_status = task.status
-            task.status = "doing"
-            create_status_operation(
-                db,
-                object_type="task",
-                object_id=task.id,
-                action="activate",
-                from_status=from_status,
-                to_status=task.status,
-                payload=payload,
-                actor_id=actor_id,
-            )
 
 
 def _start_iteration_record(
@@ -575,9 +472,6 @@ def _start_iteration_record(
         payload=payload,
         actor_id=actor_id,
     )
-    _activate_iteration_work_items(db, iteration.id, actor_id=actor_id)
-
-
 def _projects_to_tree(db: Session, root_project_ids: list[int]) -> list[dict]:
     roots = db.query(Project).filter(Project.deleted == 0, Project.id.in_(root_project_ids)).order_by(Project.id.asc()).all()
     return [_project_node(db, project) for project in roots]

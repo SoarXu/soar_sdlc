@@ -40,14 +40,6 @@ export function updateIteration(id, payload) {
   return http.patch(`/iterations/${id}`, payload)
 }
 
-export function startIteration(id, payload = {}) {
-  return http.post(`/iterations/${id}/start`, payload)
-}
-
-export function finishIteration(id, payload = {}) {
-  return http.post(`/iterations/${id}/finish`, payload)
-}
-
 export function deferIterationWorkItems(id, payload) {
   return http.post(`/iterations/${id}/defer-work-items`, payload)
 }

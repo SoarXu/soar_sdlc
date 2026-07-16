@@ -1,6 +1,8 @@
 from app.models.audit_log import AuditLog
 from app.models.assignee_rule_config import AssigneeRuleConfig
 from app.models.bug import Attachment, Bug, ObjectTag, Tag
+from app.models.bug_type import BugType
+from app.models.exception_rule import ExceptionRule
 from app.models.field_registry import CustomFieldValue, FormFieldRegistry, FormLayoutConfig
 from app.models.handler_transition_rule import HandlerTransitionRule
 from app.models.integration_mapping import ExternalIntegrationMapping
@@ -28,7 +30,9 @@ __all__ = [
     "AssigneeRuleConfig",
     "AuditLog",
     "Bug",
+    "BugType",
     "CustomFieldValue",
+    "ExceptionRule",
     "ExternalIntegrationMapping",
     "FormFieldRegistry",
     "FormLayoutConfig",

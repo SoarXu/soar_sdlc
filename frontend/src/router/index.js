@@ -1,10 +1,12 @@
 import { createRouter, createWebHistory } from 'vue-router'
 
 import MainLayout from '../layout/MainLayout.vue'
+import AdminView from '../views/AdminView.vue'
 import BugDetailView from '../views/BugDetailView.vue'
 import BugsView from '../views/BugsView.vue'
 import ChangePasswordView from '../views/ChangePasswordView.vue'
 import DashboardView from '../views/DashboardView.vue'
+import ExceptionRulesView from '../views/ExceptionRulesView.vue'
 import DevopsView from '../views/DevopsView.vue'
 import IterationsView from '../views/IterationsView.vue'
 import IterationDetailView from '../views/IterationDetailView.vue'
@@ -29,6 +31,7 @@ const routes = [
     component: MainLayout,
     children: [
       { path: '', name: 'dashboard', component: DashboardView },
+      { path: 'admin', name: 'admin', component: AdminView },
       { path: 'programs', name: 'programs', component: ProgramsView },
       { path: 'projects', name: 'projects', component: ProjectsView },
       { path: 'projects/:id', name: 'project-detail', component: ProjectDetailView },
@@ -44,7 +47,8 @@ const routes = [
       { path: 'bugs', name: 'bugs', component: BugsView },
       { path: 'devops', name: 'devops', component: DevopsView },
       { path: 'roles', name: 'roles', component: RolesView },
-      { path: 'workflow', name: 'workflow', component: WorkflowView }
+      { path: 'workflow', name: 'workflow', component: WorkflowView },
+      { path: 'exception-rules', name: 'exception-rules', component: ExceptionRulesView }
     ]
   }
 ]

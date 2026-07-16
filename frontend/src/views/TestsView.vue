@@ -45,8 +45,8 @@
             <el-table-column label="迭代" width="160"><template #default="{ row }">{{ labelById(iterations, row.iteration_id) }}</template></el-table-column>
             <el-table-column label="负责人" width="140"><template #default="{ row }">{{ userLabel(users, row.test_owner_id) }}</template></el-table-column>
             <el-table-column prop="status" label="状态" width="110" />
-            <el-table-column label="操作" width="260" fixed="right">
-              <template #default="{ row }"><el-button v-if="canManageRunRow(row)" link type="primary" @click="openRunEdit(row)">编辑</el-button><el-button v-if="canManageRunRow(row)" link type="success" @click="openSelectCases(row)">选用例</el-button><el-button v-if="canManageRunRow(row)" link type="warning" @click="openExecution">记录结果</el-button><el-popconfirm v-if="canManageRunRow(row)" title="确认删除该测试单？" @confirm="removeRun(row.id)"><template #reference><el-button link type="danger">删除</el-button></template></el-popconfirm></template>
+            <el-table-column label="操作" width="350" fixed="right">
+              <template #default="{ row }"><WatchToggleButton object-type="test_run" :object-id="row.id" /><el-button v-if="canManageRunRow(row)" link type="primary" @click="openRunEdit(row)">编辑</el-button><el-button v-if="canManageRunRow(row)" link type="success" @click="openSelectCases(row)">选用例</el-button><el-button v-if="canManageRunRow(row)" link type="warning" @click="openExecution">记录结果</el-button><el-popconfirm v-if="canManageRunRow(row)" title="确认删除该测试单？" @confirm="removeRun(row.id)"><template #reference><el-button link type="danger">删除</el-button></template></el-popconfirm></template>
             </el-table-column>
           </el-table>
           <div class="table-pagination">
@@ -119,7 +119,7 @@
       <el-form label-position="top">
         <el-form-item label="Bug 标题" required><el-input v-model="caseBugForm.title" /></el-form-item>
         <div class="form-grid">
-          <el-form-item label="Bug 类型"><el-select v-model="caseBugForm.bug_type"><el-option v-for="option in bugTypeOptions" :key="option" :label="option" :value="option" /></el-select></el-form-item>
+          <el-form-item label="Bug 类型"><el-select v-model="caseBugForm.bug_type"><el-option v-for="option in bugTypeOptions" :key="option.value" :label="option.label" :value="option.value" /></el-select></el-form-item>
           <el-form-item label="严重程度"><el-select v-model="caseBugForm.severity"><el-option v-for="option in priorityLevelOptions" :key="option.value" :label="option.label" :value="option.value" /></el-select></el-form-item>
           <el-form-item label="优先级"><el-select v-model="caseBugForm.priority"><el-option v-for="option in priorityLevelOptions" :key="option.value" :label="option.label" :value="option.value" /></el-select></el-form-item>
         </div>
@@ -175,9 +175,12 @@ import { createBugFromTestCase, createTestCase, deleteTestCase, executeTestCase,
 import { createBugFromTestRunCase, createTestRun, deleteTestRun, fetchTestRunCases, fetchTestRuns, selectTestCases, updateTestRun, updateTestRunCase } from '../api/testRuns'
 import { fetchUsers } from '../api/users'
 import { showActionError } from '../utils/actionFeedback'
+import WatchToggleButton from '../components/WatchToggleButton.vue'
 import { canManageTestCase, currentUserFromStorage } from '../utils/permissions'
 import { labelById, userLabel } from '../utils/referenceLabels'
 import { usePagination } from '../utils/usePagination'
+import { DEFAULT_BUG_TYPE_KEY } from '../utils/bugTypeOptions'
+import { useBugTypes } from '../utils/useBugTypes'
 
 const activeTab = ref('cases'), saving = ref(false), loading = ref(false)
 const testCases = ref([]), testRuns = ref([]), testRunCases = ref([]), projects = ref([]), requirements = ref([]), iterations = ref([]), users = ref([])
@@ -224,7 +227,7 @@ const executionResultOptions = [
   { label: '失败', value: 'failed' },
   { label: '阻塞', value: 'blocked' }
 ]
-const bugTypeOptions = ['代码错误', '配置相关', '安装部署', '安全相关', '性能问题', '标准规范', '测试脚本', '设计缺陷', '其他']
+const { bugTypeOptions } = useBugTypes()
 const priorityLevelOptions = [
   { label: '① 最高', value: '1' },
   { label: '② 高', value: '2' },
@@ -234,7 +237,7 @@ const priorityLevelOptions = [
 ]
 const caseForm = reactive({ project_id: null, requirement_id: null, title: '', case_type: 'functional', test_scope: 'functional_test', default_tester_id: null, precondition: '', steps_json: [{ step: '', expected: '' }], expected_result: '' })
 const caseExecutionForm = reactive({ execute_time: '', steps_result_json: [] })
-const caseBugForm = reactive({ title: '', bug_type: '代码错误', severity: '3', priority: '3', reproduce_steps: '', actual_result: '' })
+const caseBugForm = reactive({ title: '', bug_type: DEFAULT_BUG_TYPE_KEY, severity: '3', priority: '3', reproduce_steps: '', actual_result: '' })
 const runForm = reactive({ project_id: null, iteration_id: null, name: '', test_owner_id: null, status: 'planning', remark: '' })
 const selectForm = reactive({ test_case_ids: [], tester_id: null })
 const executionForm = reactive({ run_case_id: null, result: 'passed', remark: '', bug_title: '' })
@@ -282,7 +285,7 @@ async function openCaseBug(row) {
   const latest = history[0]
   Object.assign(caseBugForm, {
     title: row.title,
-    bug_type: '代码错误',
+    bug_type: DEFAULT_BUG_TYPE_KEY,
     severity: '3',
     priority: '3',
     reproduce_steps: buildReproduceText(latest, row),

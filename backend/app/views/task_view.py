@@ -1,7 +1,11 @@
 from datetime import date, datetime
 from decimal import Decimal
+from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, field_serializer
+from pydantic import BaseModel, ConfigDict, Field, field_serializer
+
+
+TaskStatus = Literal["pending_assignment", "in_processing", "pending_confirmation", "completed", "canceled"]
 
 
 class TaskBase(BaseModel):
@@ -16,14 +20,50 @@ class TaskBase(BaseModel):
     estimated_hours: Decimal | None = None
     actual_hours: Decimal | None = None
     due_date: date | None = None
-    status: str = "todo"
+    status: TaskStatus = "pending_assignment"
     lifecycle_phase: str | None = None
     description: str | None = None
     source_requirement_review_status: str | None = None
 
 
 class TaskCreate(TaskBase):
-    pass
+    task_type: Literal[
+        "requirement_implementation",
+        "bug_fix",
+        "test_support",
+        "standalone_operation",
+    ] | None = None
+
+
+class LinkedTaskCreate(BaseModel):
+    source_type: Literal["requirement", "bug", "test_case", "test_run"]
+    source_id: int
+    title: str
+    task_type: Literal[
+        "requirement_implementation",
+        "bug_fix",
+        "test_support",
+        "standalone_operation",
+    ] | None = None
+    priority: str = "medium"
+    owner_id: int | None = None
+    due_date: date | None = None
+    description: str | None = None
+    override_reason: str | None = None
+
+
+class TaskSourceRead(BaseModel):
+    source_type: str
+    source_id: int
+    relation_type: str = "linked_task"
+
+
+class LinkedTaskSummary(BaseModel):
+    id: int
+    title: str
+    task_type: str | None = None
+    status: str
+    owner_id: int | None = None
 
 
 class TaskUpdate(BaseModel):
@@ -32,13 +72,18 @@ class TaskUpdate(BaseModel):
     iteration_id: int | None = None
     requirement_id: int | None = None
     title: str | None = None
-    task_type: str | None = None
+    task_type: Literal[
+        "requirement_implementation",
+        "bug_fix",
+        "test_support",
+        "standalone_operation",
+    ] | None = None
     priority: str | None = None
     owner_id: int | None = None
     estimated_hours: Decimal | None = None
     actual_hours: Decimal | None = None
     due_date: date | None = None
-    status: str | None = None
+    status: TaskStatus | None = None
     lifecycle_phase: str | None = None
     description: str | None = None
     source_requirement_review_status: str | None = None
@@ -54,6 +99,7 @@ class TaskRead(TaskBase):
     create_time: datetime | None = None
     update_time: datetime | None = None
     delete_time: datetime | None = None
+    source_relations: list[TaskSourceRead] = Field(default_factory=list)
 
     @field_serializer("estimated_hours", "actual_hours")
     def serialize_decimal(self, value: Decimal | None):

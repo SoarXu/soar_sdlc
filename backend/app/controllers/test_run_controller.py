@@ -45,7 +45,7 @@ def post_test_run(
     current_user: User | None = Depends(get_optional_current_user),
 ):
     ensure_test_case_manage_permission(db, payload.project_id, current_user)
-    return create_test_run(db, payload)
+    return create_test_run(db, payload, actor_id=current_user.id if current_user else None)
 
 
 @router.patch("/test-runs/{test_run_id}", response_model=TestRunRead)
@@ -116,7 +116,12 @@ def post_bug_from_test_run_case(
     ensure_test_case_execute_permission(db, test_run.project_id, current_user)
     if current_user and payload.reporter_id is None:
         payload.reporter_id = current_user.id
-    return create_bug_from_test_run_case(db, run_case_id, payload)
+    return create_bug_from_test_run_case(
+        db,
+        run_case_id,
+        payload,
+        actor_id=current_user.id if current_user else None,
+    )
 
 
 def _get_test_run(db: Session, test_run_id: int) -> TestRun:

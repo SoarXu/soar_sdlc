@@ -12,9 +12,9 @@
         :object-id="requirementId"
         mode="detail"
         :users="users"
+        @command="handleWorkflowCommand"
         @executed="loadData"
       />
-      <el-button v-if="!editing" type="primary" @click="startEdit">编辑</el-button>
       <template v-else>
         <el-button @click="cancelEdit">取消</el-button>
         <el-button type="primary" :loading="saving" @click="saveRequirement">保存</el-button>
@@ -26,7 +26,6 @@
         <el-form-item label="需求标题" required><el-input v-model="requirementForm.title" /></el-form-item>
         <div class="form-grid">
           <el-form-item label="迭代"><el-select v-model="requirementForm.iteration_id" clearable filterable><el-option v-for="iteration in iterations" :key="iteration.id" :label="iteration.name" :value="iteration.id" /></el-select></el-form-item>
-          <el-form-item label="负责人"><el-select v-model="requirementForm.owner_id" clearable filterable><el-option v-for="user in users" :key="user.id" :label="user.full_name" :value="user.id" /></el-select></el-form-item>
           <el-form-item label="提出人"><el-select v-model="requirementForm.proposer_id" clearable filterable><el-option v-for="user in users" :key="user.id" :label="user.full_name" :value="user.id" /></el-select></el-form-item>
           <el-form-item label="类型"><el-select v-model="requirementForm.requirement_type"><el-option v-for="option in requirementTypeOptions" :key="option" :label="option" :value="option" /></el-select></el-form-item>
           <el-form-item label="优先级"><el-select v-model="requirementForm.priority"><el-option v-for="option in requirementPriorityOptions" :key="option.value" :label="option.label" :value="option.value"><RequirementPriorityBadge :value="option.value" /></el-option></el-select></el-form-item>
@@ -61,12 +60,25 @@
     </el-card>
 
     <el-card shadow="never" class="detail-panel">
-      <template #header>关联任务</template>
+      <template #header>
+        <div class="detail-card-header">
+          <span>关联任务</span>
+          <LinkedTaskCreateButton
+            v-if="requirement.id"
+            source-type="requirement"
+            :source-id="requirementId"
+            :source-title="requirement.title"
+            :users="users"
+            @created="loadData"
+          />
+        </div>
+      </template>
       <el-table :data="relatedTasks" stripe>
         <el-table-column prop="id" label="ID" width="80" />
         <el-table-column label="任务标题" min-width="220">
           <template #default="{ row }"><router-link class="table-link" :to="`/tasks/${row.id}`">{{ row.title }}</router-link></template>
         </el-table-column>
+        <el-table-column label="任务分支" width="120"><template #default="{ row }">{{ taskBranchLabel(row.task_type) }}</template></el-table-column>
         <el-table-column label="负责人" width="140"><template #default="{ row }">{{ userLabel(users, row.owner_id) }}</template></el-table-column>
         <el-table-column prop="status" label="状态" width="120" />
       </el-table>
@@ -157,7 +169,7 @@
       <el-form label-position="top">
         <el-form-item label="Bug 标题" required><el-input v-model="caseBugForm.title" /></el-form-item>
         <div class="form-grid">
-          <el-form-item label="Bug 类型"><el-select v-model="caseBugForm.bug_type"><el-option v-for="option in bugTypeOptions" :key="option" :label="option" :value="option" /></el-select></el-form-item>
+          <el-form-item label="Bug 类型"><el-select v-model="caseBugForm.bug_type"><el-option v-for="option in bugTypeOptions" :key="option.value" :label="option.label" :value="option.value" /></el-select></el-form-item>
           <el-form-item label="严重程度"><el-select v-model="caseBugForm.severity"><el-option v-for="option in priorityLevelOptions" :key="option.value" :label="option.label" :value="option.value"><RequirementPriorityBadge :value="option.value" /></el-option></el-select></el-form-item>
           <el-form-item label="优先级"><el-select v-model="caseBugForm.priority"><el-option v-for="option in priorityLevelOptions" :key="option.value" :label="option.label" :value="option.value"><RequirementPriorityBadge :value="option.value" /></el-option></el-select></el-form-item>
         </div>
@@ -176,7 +188,7 @@
 
     <CommitRecordsPanel object-type="requirement" :object-id="requirementId" />
 
-<el-card shadow="never" class="detail-panel requirement-history-card">
+<el-card id="history" shadow="never" class="detail-panel requirement-history-card">
       <template #header>历史记录</template>
       <div class="project-history requirement-history">
         <el-empty v-if="!requirementHistory.length" description="暂无历史记录" />
@@ -225,6 +237,7 @@ import { createBugFromTestCase, createTestCase, executeTestCase, fetchTestCase, 
 import { fetchTasks } from '../api/tasks'
 import { fetchUsers } from '../api/users'
 import CommitRecordsPanel from '../components/CommitRecordsPanel.vue'
+import LinkedTaskCreateButton from '../components/LinkedTaskCreateButton.vue'
 import RequirementPriorityBadge from '../components/RequirementPriorityBadge.vue'
 import RichTextPasteEditor from '../components/RichTextPasteEditor.vue'
 import WatchToggleButton from '../components/WatchToggleButton.vue'
@@ -232,6 +245,9 @@ import WorkItemCommentPanel from '../components/WorkItemCommentPanel.vue'
 import WorkflowActionButtons from '../components/WorkflowActionButtons.vue'
 import { labelById, userLabel } from '../utils/referenceLabels'
 import { formatAuditValue } from '../utils/auditHistoryLabels'
+import { taskBranchLabel } from '../utils/taskBranchRules'
+import { DEFAULT_BUG_TYPE_KEY } from '../utils/bugTypeOptions'
+import { useBugTypes } from '../utils/useBugTypes'
 
 const route = useRoute()
 const router = useRouter()
@@ -255,10 +271,14 @@ const selectedCase = ref(null)
 const bugSourceCase = ref(null)
 const caseExecutionForm = ref({ execute_time: '', steps_result_json: [] })
 const caseForm = reactive({ project_id: null, requirement_id: null, title: '', case_type: 'functional', test_scope: 'functional_test', default_tester_id: null, precondition: '', steps_json: [{ step: '', expected: '' }], expected_result: '' })
-const caseBugForm = reactive({ title: '', bug_type: '代码错误', severity: '3', priority: '3', reproduce_steps: '', actual_result: '' })
+const caseBugForm = reactive({ title: '', bug_type: DEFAULT_BUG_TYPE_KEY, severity: '3', priority: '3', reproduce_steps: '', actual_result: '' })
 const expandedHistory = reactive({})
 const requirementForm = reactive({ iteration_id: null, title: '', requirement_type: '功能', priority: '3', owner_id: null, proposer_id: null, description: '', acceptance_criteria: '' })
-const relatedTasks = computed(() => tasks.value.filter((item) => item.requirement_id === requirementId.value))
+const relatedTasks = computed(() => (
+  requirement.value.linked_tasks?.length
+    ? requirement.value.linked_tasks
+    : tasks.value.filter((item) => item.requirement_id === requirementId.value)
+))
 const requirementHistory = computed(() => {
   const statusItems = statusOperations.value.map((item) => ({
     key: `status-${item.id}`,
@@ -286,19 +306,21 @@ const requirementHistory = computed(() => {
   return [...statusItems, ...auditItems].sort((a, b) => new Date(a.time) - new Date(b.time))
 })
 const requirementStatusOptions = [
-  { label: '草稿', value: 'draft' },
-  { label: '激活', value: 'active' },
-  { label: '待验证', value: 'pending_validation' },
-  { label: '验证未通过', value: 'validation_failed' },
-  { label: '完成', value: 'done' },
-  { label: '关闭', value: 'closed' }
+  { label: '待分派', value: 'pending_assignment' },
+  { label: '处理中', value: 'in_processing' },
+  { label: '待确认', value: 'pending_confirmation' },
+  { label: '已完成', value: 'completed' },
+  { label: '已取消', value: 'canceled' }
 ]
 const operationActionOptions = [
-  { label: '激活', value: 'activate' },
-  { label: '提交验证', value: 'submit_validation' },
-  { label: '验证未通过', value: 'validation_failed' },
-  { label: '验证通过', value: 'validation_passed' },
-  { label: '关闭', value: 'close' }
+  { label: '认领', value: 'claim' },
+  { label: '指派', value: 'assign' },
+  { label: '转交', value: 'transfer' },
+  { label: '完成', value: 'complete' },
+  { label: '提交确认', value: 'submit_confirmation' },
+  { label: '确认完成', value: 'confirm' },
+  { label: '取消', value: 'cancel' },
+  { label: '重新激活', value: 'reactivate' }
 ]
 const requirementTypeOptions = ['功能', '接口', '性能', '安全', '体验', '改进', '其他']
 const requirementPriorityOptions = [
@@ -331,7 +353,7 @@ const testScopeOptions = [
   { label: '冒烟测试环节', value: 'smoke_test' },
   { label: '版本验证环节', value: 'release_verification' }
 ]
-const bugTypeOptions = ['代码错误', '配置相关', '安装部署', '安全相关', '性能问题', '标准规范', '测试脚本', '设计缺陷', '其他']
+const { bugTypeOptions } = useBugTypes()
 const priorityLevelOptions = [
   { label: '1级', value: '1' },
   { label: '2级', value: '2' },
@@ -470,7 +492,7 @@ async function openCaseBug(row) {
   const latest = historyRes.data[0]
   Object.assign(caseBugForm, {
     title: bugSourceCase.value.title,
-    bug_type: '代码错误',
+    bug_type: DEFAULT_BUG_TYPE_KEY,
     severity: '3',
     priority: '3',
     reproduce_steps: buildReproduceText(latest, bugSourceCase.value),
@@ -512,6 +534,11 @@ function buildActualText(execution) {
 function startEdit() {
   fillRequirementForm()
   editing.value = true
+}
+
+function handleWorkflowCommand({ commandType }) {
+  if (commandType === 'edit') startEdit()
+  if (commandType === 'view_history') document.getElementById('history')?.scrollIntoView({ behavior: 'smooth' })
 }
 
 function cancelEdit() {

@@ -1,5 +1,6 @@
 from uuid import uuid4
 
+import pytest
 from fastapi.testclient import TestClient
 
 
@@ -205,7 +206,10 @@ def test_save_graph_preserves_transition_ui_and_form_config(client: TestClient):
                                 "label": "解决方案",
                                 "type": "select",
                                 "required": True,
-                                "options_source": "bug_resolutions",
+                                "options": [
+                                    {"label": "Fixed", "value": "fixed"},
+                                    {"label": "Rejected", "value": "rejected"},
+                                ],
                             }
                         ],
                     },
@@ -226,6 +230,130 @@ def test_save_graph_preserves_transition_ui_and_form_config(client: TestClient):
     assert transition["form_config"]["title"] == "解决 Bug"
     loaded = client.get(f"/api/v1/workflow-definitions/{definition['id']}")
     assert loaded.json()["transitions"][0]["form_config"]["fields"][0]["field"] == "resolution"
+
+
+def _advanced_definition(client: TestClient) -> dict:
+    config_id = _create_config(client)
+    return client.post(
+        "/api/v1/workflow-definitions",
+        json={
+            "name": f"Advanced workflow {uuid4().hex[:8]}",
+            "object_type": "bug",
+            "scope_type": "assignee_rule_config",
+            "scope_id": config_id,
+        },
+    ).json()
+
+
+def _advanced_graph(transition_overrides: dict | None = None) -> dict:
+    transition = {
+        "action_key": "classify",
+        "action_name": "Classify",
+        "from_status": "pending_handling",
+        "to_status": "fixing",
+        "allowed_roles": "current_handler,system_admin",
+        "handler_rule": {
+            "target_type": "project_role",
+            "target_roles": "developer",
+            "fallback_type": "project_owner",
+        },
+        "condition_config": {
+            "field": "classification",
+            "routes": {"real": "fixing", "invalid": "closed"},
+            "routing_mode": "automatic_with_override",
+            "allow_override_roles": ["system_admin"],
+        },
+        "form_config": {
+            "title": "Classify Bug",
+            "submit_text": "Confirm",
+            "fields": [
+                {
+                    "field": "classification",
+                    "label": "Classification",
+                    "type": "select",
+                    "required": True,
+                    "options": [
+                        {"label": "Real", "value": "real"},
+                        {"label": "Invalid", "value": "invalid"},
+                    ],
+                }
+            ],
+        },
+        "validator_config": {"type": "bug_close_gate"},
+        "ui_config": {
+            "button_type": "warning",
+            "list_display": "primary",
+            "list_priority": 20,
+            "action_category": "management",
+            "visible_in_detail": True,
+            "visible_in_list": True,
+        },
+        "trigger_config": {
+            "type": "notification",
+            "receiver": "actor",
+            "title": "Workflow started",
+        },
+        "post_action_config": {
+            "type": "notification",
+            "receiver": "next_handler",
+            "title": "Work item assigned",
+        },
+    }
+    transition.update(transition_overrides or {})
+    return {
+        "states": [
+            {"status_key": "pending_handling", "status_name": "Pending", "category": "start"},
+            {"status_key": "fixing", "status_name": "Fixing", "category": "normal"},
+            {"status_key": "closed", "status_name": "Closed", "category": "terminal"},
+        ],
+        "transitions": [transition],
+    }
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"condition_config": {"field": "classification", "routes": {"real": "missing"}}},
+        {"condition_config": {"field": "classification", "routes": {}}},
+        {"form_config": {"fields": [{"field": "classification", "label": "Type", "type": "select"}]}},
+        {"validator_config": {"type": "arbitrary_script"}},
+        {"trigger_config": {"type": "webhook_script"}},
+        {"post_action_config": {"type": "shell_command"}},
+        {"allowed_roles": "unknown_workflow_role"},
+        {"handler_rule": {"target_type": "unknown_resolver", "fallback_type": "keep_current"}},
+    ],
+)
+def test_save_graph_rejects_unsupported_runtime_configuration(client: TestClient, overrides: dict):
+    definition = _advanced_definition(client)
+
+    response = client.put(
+        f"/api/v1/workflow-definitions/{definition['id']}/graph",
+        json=_advanced_graph(overrides),
+    )
+
+    assert response.status_code == 422
+
+
+def test_save_graph_round_trips_controlled_runtime_configuration(client: TestClient):
+    definition = _advanced_definition(client)
+    payload = _advanced_graph()
+
+    saved = client.put(f"/api/v1/workflow-definitions/{definition['id']}/graph", json=payload)
+    loaded = client.get(f"/api/v1/workflow-definitions/{definition['id']}")
+
+    assert saved.status_code == 200
+    assert loaded.status_code == 200
+    transition = loaded.json()["transitions"][0]
+    for field in [
+        "condition_config",
+        "form_config",
+        "validator_config",
+        "ui_config",
+        "trigger_config",
+        "post_action_config",
+        "handler_rule",
+    ]:
+        assert transition[field] == payload["transitions"][0][field]
 def test_default_template_definitions_exist_for_core_objects(client: TestClient):
     listed = client.get("/api/v1/workflow-definitions?scope_type=system")
 

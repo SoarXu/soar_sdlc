@@ -22,6 +22,10 @@ export function actionNeedsTargetStatusSelection(action) {
   return ['manual_allowed', 'automatic_with_override'].includes(routingMode) && allowedTargetStatuses.length > 0
 }
 
+export function workflowCommandType(action) {
+  return action?.ui_config?.command_type || ''
+}
+
 export function actionNeedsDialog(action) {
   return Boolean(
     action?.requires_form ||

@@ -11,6 +11,7 @@ from app.models.requirement import Requirement
 from app.models.role import Role, UserRole
 from app.models.task import Task
 from app.models.test_case import TestCase
+from app.models.test_run import TestRun
 from app.models.user import User
 from app.models.work_item_comment import WorkItemComment
 from app.services.exception_center_service import list_exception_refs
@@ -154,6 +155,10 @@ def _created_by_me_items(
         _test_case_item(item, projects, iteration_names)
         for item in db.query(TestCase).filter(TestCase.deleted == 0, TestCase.creator_id == user_id).all()
     )
+    items.extend(
+        _test_run_item(item, projects, iteration_names)
+        for item in db.query(TestRun).filter(TestRun.deleted == 0, TestRun.creator_id == user_id).all()
+    )
     return _dedup_and_sort_workbench_items(items)
 
 
@@ -238,6 +243,9 @@ def _load_workbench_items_by_refs(
     if grouped_ids.get("test_case"):
         for item in db.query(TestCase).filter(TestCase.deleted == 0, TestCase.id.in_(grouped_ids["test_case"])).all():
             items_by_ref[("test_case", item.id)] = _test_case_item(item, projects, iteration_names)
+    if grouped_ids.get("test_run"):
+        for item in db.query(TestRun).filter(TestRun.deleted == 0, TestRun.id.in_(grouped_ids["test_run"])).all():
+            items_by_ref[("test_run", item.id)] = _test_run_item(item, projects, iteration_names)
 
     result: list[WorkbenchItem] = []
     seen: set[tuple[str, int]] = set()
@@ -252,6 +260,10 @@ def _load_workbench_items_by_refs(
                 "mentioned_in_comment_id": metadata_by_ref[key].get("mentioned_in_comment_id"),
                 "exception_key": metadata_by_ref[key].get("exception_key"),
                 "exception_label": metadata_by_ref[key].get("exception_label"),
+                "entered_at": metadata_by_ref[key].get("entered_at"),
+                "threshold_hours": metadata_by_ref[key].get("threshold_hours"),
+                "threshold_count": metadata_by_ref[key].get("threshold_count"),
+                "overdue_hours": metadata_by_ref[key].get("overdue_hours"),
             }
         )
         result.append(item)
@@ -333,6 +345,8 @@ def _requirement_item(item: Requirement, projects: dict[int, Project], iteration
         iteration_name=_iteration_name(iteration_names, item.iteration_id),
         lifecycle_phase=item.lifecycle_phase,
         owner_id=item.owner_id,
+        handler_id=item.owner_id,
+        iteration_group_key=str(item.iteration_id) if item.iteration_id else "uniterated",
         status=item.status,
         priority=item.priority,
         create_time=_datetime_value(item.create_time),
@@ -359,6 +373,8 @@ def _task_item(
         iteration_name=_iteration_name(iteration_names, resolved_iteration_id),
         lifecycle_phase=item.lifecycle_phase,
         owner_id=item.owner_id,
+        handler_id=item.owner_id,
+        iteration_group_key=str(resolved_iteration_id) if resolved_iteration_id else "uniterated",
         status=item.status,
         priority=item.priority,
         due_date=_date_value(item.due_date),
@@ -385,6 +401,8 @@ def _test_case_item(
         iteration_name=_iteration_name(iteration_names, resolved_iteration_id),
         lifecycle_phase=item.lifecycle_phase,
         owner_id=item.default_tester_id,
+        handler_id=item.default_tester_id,
+        iteration_group_key=str(resolved_iteration_id) if resolved_iteration_id else "uniterated",
         status=item.status,
         create_time=_datetime_value(item.create_time),
         creator_id=item.creator_id,
@@ -407,6 +425,8 @@ def _bug_item(item: Bug, projects: dict[int, Project], iteration_names: dict[int
         iteration_name=_iteration_name(iteration_names, item.iteration_id),
         lifecycle_phase=item.lifecycle_phase,
         owner_id=item.owner_id,
+        handler_id=item.owner_id,
+        iteration_group_key=str(item.iteration_id) if item.iteration_id else "uniterated",
         status=item.status,
         priority=item.priority,
         create_time=_datetime_value(item.create_time),
@@ -417,6 +437,25 @@ def _bug_item(item: Bug, projects: dict[int, Project], iteration_names: dict[int
         test_case_id=item.test_case_id,
         bug_type=item.bug_type,
         severity=item.severity,
+    )
+
+
+def _test_run_item(item: TestRun, projects: dict[int, Project], iteration_names: dict[int, str]) -> WorkbenchItem:
+    return WorkbenchItem(
+        id=item.id,
+        object_type="test_run",
+        title=item.name,
+        project_id=item.project_id,
+        project_name=_project_name(projects, item.project_id),
+        iteration_id=item.iteration_id,
+        iteration_name=_iteration_name(iteration_names, item.iteration_id),
+        iteration_group_key=str(item.iteration_id) if item.iteration_id else "uniterated",
+        lifecycle_phase=item.lifecycle_phase,
+        owner_id=item.test_owner_id,
+        handler_id=item.test_owner_id,
+        status=item.status,
+        create_time=_datetime_value(item.create_time),
+        creator_id=item.creator_id,
     )
 
 
@@ -456,9 +495,9 @@ def _dedup_and_sort_workbench_items(items: list[WorkbenchItem]) -> list[Workbenc
 def _is_terminal_status(object_type: str, status_value: str | None) -> bool:
     status_value = status_value or ""
     if object_type == "requirement":
-        return status_value in {"completed", "canceled", "done", "closed"}
+        return status_value in {"completed", "canceled"}
     if object_type == "task":
-        return status_value in {"completed", "canceled", "done", "closed"}
+        return status_value in {"completed", "canceled"}
     if object_type == "bug":
         return status_value == "closed"
     return False

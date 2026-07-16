@@ -10,25 +10,33 @@ from app.models.requirement import Requirement
 from app.models.test_case import TestCase
 from app.models.test_run import TestRun, TestRunCase
 from app.services.current_handler_service import ensure_work_item_action
+from app.services.project_permission_service import ensure_workflow_fields_not_updated
 from app.services.lifecycle_service import (
     project_lifecycle_phase,
     requirement_lifecycle_phase,
     test_case_lifecycle_phase,
 )
 from app.services.status_operation_service import list_status_operations
+from app.services.task_service import linked_task_summaries
 from app.views.bug_view import BugCreate, BugFromTestRunCaseRequest, BugUpdate
 
 
 def list_bugs(db: Session) -> list[Bug]:
-    return db.query(Bug).filter(Bug.deleted == 0).order_by(Bug.id.desc()).all()
+    bugs = db.query(Bug).filter(Bug.deleted == 0).order_by(Bug.id.desc()).all()
+    for bug in bugs:
+        bug.linked_tasks = linked_task_summaries(db, "bug", bug.id)
+    return bugs
 
 
 def get_bug(db: Session, bug_id: int) -> Bug:
-    return _get_active_bug(db, bug_id)
+    bug = _get_active_bug(db, bug_id)
+    bug.linked_tasks = linked_task_summaries(db, "bug", bug.id)
+    return bug
 
 
-def create_bug(db: Session, payload: BugCreate) -> Bug:
+def create_bug(db: Session, payload: BugCreate, actor_id: int | None = None) -> Bug:
     data = payload.model_dump()
+    data["creator_id"] = actor_id
     if data.get("iteration_id"):
         _ensure_iteration_can_accept_bug(db, data["iteration_id"], data.get("project_id"))
     data["lifecycle_phase"] = (
@@ -36,8 +44,7 @@ def create_bug(db: Session, payload: BugCreate) -> Bug:
         or test_case_lifecycle_phase(db, data.get("test_case_id"))
         or project_lifecycle_phase(db, data.get("project_id"))
     )
-    if data.get("status") not in {"pending_handling", "fixing", "pending_verification", "verified", "closed"}:
-        data["status"] = "pending_handling"
+    data["status"] = "pending_handling"
     bug = Bug(**data)
     db.add(bug)
     db.commit()
@@ -45,7 +52,12 @@ def create_bug(db: Session, payload: BugCreate) -> Bug:
     return bug
 
 
-def create_bug_from_test_run_case(db: Session, run_case_id: int, payload: BugFromTestRunCaseRequest) -> Bug:
+def create_bug_from_test_run_case(
+    db: Session,
+    run_case_id: int,
+    payload: BugFromTestRunCaseRequest,
+    actor_id: int | None = None,
+) -> Bug:
     run_case = db.query(TestRunCase).filter(TestRunCase.id == run_case_id).first()
     if not run_case:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Test run case not found")
@@ -77,6 +89,7 @@ def create_bug_from_test_run_case(db: Session, run_case_id: int, payload: BugFro
         actual_result=payload.actual_result,
         status="pending_handling",
         lifecycle_phase=test_case.lifecycle_phase,
+        creator_id=actor_id,
     )
     db.add(bug)
     db.commit()
@@ -87,6 +100,7 @@ def create_bug_from_test_run_case(db: Session, run_case_id: int, payload: BugFro
 def update_bug(db: Session, bug_id: int, payload: BugUpdate, actor_id: int | None = None) -> Bug:
     bug = _get_active_bug(db, bug_id)
     ensure_work_item_action(db, bug, actor_id, "Bug")
+    ensure_workflow_fields_not_updated(payload.model_fields_set)
     data = payload.model_dump(exclude_unset=True)
     data.pop("status", None)
     data.pop("resolution", None)
@@ -124,7 +138,7 @@ def _ensure_iteration_can_accept_bug(db: Session, iteration_id: int, bug_project
     iteration = db.query(Iteration).filter(Iteration.id == iteration_id, Iteration.deleted == 0).first()
     if not iteration:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Iteration not found")
-    if iteration.status in {"finished", "closed", "completed", "canceled"}:
+    if iteration.status in {"completed", "canceled"}:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Closed iteration cannot accept bugs")
     project_ids = {item.project_id for item in db.query(IterationProject).filter(IterationProject.iteration_id == iteration_id).all()}
     scoped_project_ids = set(project_ids)

@@ -7,16 +7,20 @@ from app.models.test_case import TestCase
 from app.models.test_run import TestRun, TestRunCase
 from app.services.lifecycle_service import iteration_lifecycle_phase, project_lifecycle_phase
 from app.services.project_team_service import default_test_run_owner_id
-from app.services.requirement_validation_service import apply_test_execution_result
+from app.services.task_service import linked_task_summaries
 from app.views.test_run_view import SelectTestCasesRequest, TestRunCaseUpdate, TestRunCreate, TestRunUpdate
 
 
 def list_test_runs(db: Session) -> list[TestRun]:
-    return db.query(TestRun).filter(TestRun.deleted == 0).order_by(TestRun.id.desc()).all()
+    test_runs = db.query(TestRun).filter(TestRun.deleted == 0).order_by(TestRun.id.desc()).all()
+    for test_run in test_runs:
+        test_run.linked_tasks = linked_task_summaries(db, "test_run", test_run.id)
+    return test_runs
 
 
-def create_test_run(db: Session, payload: TestRunCreate) -> TestRun:
+def create_test_run(db: Session, payload: TestRunCreate, actor_id: int | None = None) -> TestRun:
     data = payload.model_dump()
+    data["creator_id"] = actor_id
     data["lifecycle_phase"] = (
         iteration_lifecycle_phase(db, data.get("iteration_id"))
         or project_lifecycle_phase(db, data.get("project_id"))
@@ -79,7 +83,6 @@ def update_test_run_case(db: Session, run_case_id: int, payload: TestRunCaseUpda
         if test_case:
             test_case.last_execute_time = run_case.execute_time
             test_case.last_execute_result = run_case.result
-            apply_test_execution_result(db, test_case, run_case.result, actor_id=run_case.tester_id)
     db.commit()
     db.refresh(run_case)
     return run_case

@@ -85,11 +85,43 @@ def _set_requirement_status(requirement_id: int, status: str) -> None:
         db.close()
 
 
+def _set_requirement_owner_and_status(
+    requirement_id: int,
+    owner_id: int | None,
+    status: str,
+    *,
+    creator_id: int | None = None,
+) -> None:
+    db = SessionLocal()
+    try:
+        requirement = db.query(Requirement).filter(Requirement.id == requirement_id).first()
+        assert requirement is not None
+        requirement.owner_id = owner_id
+        requirement.status = status
+        if creator_id is not None:
+            requirement.creator_id = creator_id
+        db.commit()
+    finally:
+        db.close()
+
+
 def _set_task_status(task_id: int, status: str) -> None:
     db = SessionLocal()
     try:
         task = db.query(Task).filter(Task.id == task_id).first()
         assert task is not None
+        task.status = status
+        db.commit()
+    finally:
+        db.close()
+
+
+def _set_task_owner_and_status(task_id: int, owner_id: int | None, status: str) -> None:
+    db = SessionLocal()
+    try:
+        task = db.query(Task).filter(Task.id == task_id).first()
+        assert task is not None
+        task.owner_id = owner_id
         task.status = status
         db.commit()
     finally:
@@ -286,21 +318,26 @@ def test_default_runtime_actions_match_prd_state_matrix(client: TestClient):
     ).json()
 
     requirement_actions = _action_keys(client, "requirement", requirement["id"], developer_token)
-    assert "complete" in requirement_actions
+    assert {"complete", "transfer"} <= requirement_actions
     assert "submit_confirmation" not in requirement_actions
+    assert "change_handler" in _action_keys(client, "requirement", requirement["id"], owner_token)
 
     task_actions = _action_keys(client, "task", task["id"], developer_token)
-    assert "submit_confirmation" in task_actions
+    assert {"submit_confirmation", "transfer"} <= task_actions
     assert "complete" not in task_actions
+    assert "change_handler" in _action_keys(client, "task", task["id"], owner_token)
 
-    assert "confirm_bug_type" in _action_keys(client, "bug", bug["id"], developer_token)
+    assert {"confirm_bug_type", "transfer"} <= _action_keys(client, "bug", bug["id"], developer_token)
+    assert "change_handler" in _action_keys(client, "bug", bug["id"], owner_token)
     _set_bug_owner_and_status(bug["id"], developer_id, "fixing")
     fixing_actions = _action_keys(client, "bug", bug["id"], developer_token)
-    assert {"submit_verification", "reclassify_bug_type"} <= fixing_actions
+    assert {"submit_verification", "reclassify_bug_type", "transfer"} <= fixing_actions
+    assert "change_handler" in _action_keys(client, "bug", bug["id"], owner_token)
 
     _set_bug_owner_and_status(bug["id"], tester_id, "pending_verification")
     verification_actions = _action_keys(client, "bug", bug["id"], tester_token)
-    assert {"verification_passed", "verification_failed"} <= verification_actions
+    assert {"verification_passed", "verification_failed", "transfer_verification"} <= verification_actions
+    assert "assign_verifier" in _action_keys(client, "bug", bug["id"], owner_token)
 
     _set_bug_owner_and_status(bug["id"], tester_id, "verified")
     verified_actions = _action_keys(client, "bug", bug["id"], tester_token)
@@ -309,9 +346,178 @@ def test_default_runtime_actions_match_prd_state_matrix(client: TestClient):
     _set_bug_owner_and_status(bug["id"], tester_id, "closed")
     assert "activate" in _action_keys(client, "bug", bug["id"], tester_token)
 
-    _set_task_status(task["id"], "pending_confirmation")
+    _set_task_owner_and_status(task["id"], owner_id, "pending_confirmation")
     confirmation_actions = _action_keys(client, "task", task["id"], owner_token)
-    assert {"approve_confirmation", "return_rework"} <= confirmation_actions
+    assert {"approve_confirmation", "return_rework", "transfer_confirmation"} <= confirmation_actions
+
+
+def test_default_runtime_actions_enforce_prd_identity_boundaries(client: TestClient):
+    project_id = _create_project_with_config(client)
+    handler_id, handler_token = _create_user("Identity Handler", "developer")
+    creator_id, creator_token = _create_user("Identity Creator", "developer")
+    reporter_id, reporter_token = _create_user("Identity Reporter", "tester")
+    manager_id, manager_token = _create_user("Identity Manager", "project_owner")
+    member_id, member_token = _create_user("Identity Member", "developer")
+    for user_id, role in [
+        (handler_id, "developer"),
+        (creator_id, "developer"),
+        (reporter_id, "tester"),
+        (manager_id, "project_owner"),
+        (member_id, "developer"),
+    ]:
+        _add_project_member(project_id, user_id, role)
+
+    task = client.post(
+        "/api/v1/tasks",
+        json={"project_id": project_id, "title": f"Identity task {uuid4().hex[:8]}"},
+        headers={"Authorization": f"Bearer {creator_token}"},
+    ).json()
+    creator_actions = _action_keys(client, "task", task["id"], creator_token)
+    member_actions = _action_keys(client, "task", task["id"], member_token)
+    manager_actions = _action_keys(client, "task", task["id"], manager_token)
+    assert {"claim", "cancel", "edit", "add_information"} <= creator_actions
+    assert "claim" in member_actions
+    assert {"cancel", "edit"}.isdisjoint(member_actions)
+    assert {"assign", "cancel"} <= manager_actions
+
+    bug = client.post(
+        "/api/v1/bugs",
+        json={"project_id": project_id, "title": f"Identity bug {uuid4().hex[:8]}", "owner_id": handler_id},
+        headers={"Authorization": f"Bearer {reporter_token}"},
+    ).json()
+    handler_actions = _action_keys(client, "bug", bug["id"], handler_token)
+    manager_actions = _action_keys(client, "bug", bug["id"], manager_token)
+    assert {"confirm_bug_type", "transfer"} <= handler_actions
+    assert "void_close" not in handler_actions
+    assert {"change_handler", "void_close"} <= manager_actions
+    assert "confirm_bug_type" not in manager_actions
+
+    _set_bug_owner_and_status(bug["id"], handler_id, "fixing")
+    assert "submit_verification" not in _action_keys(client, "bug", bug["id"], manager_token)
+
+    _set_bug_owner_and_status(bug["id"], handler_id, "verified")
+    assert "return_reopen" in _action_keys(client, "bug", bug["id"], reporter_token)
+    assert "return_reopen" not in _action_keys(client, "bug", bug["id"], member_token)
+
+    _set_bug_owner_and_status(bug["id"], handler_id, "closed")
+    assert "activate" in _action_keys(client, "bug", bug["id"], reporter_token)
+    assert "activate" not in _action_keys(client, "bug", bug["id"], member_token)
+
+
+def test_reactivate_uses_handler_presence_and_completed_requirement_can_reactivate(client: TestClient):
+    project_id = _create_project_with_config(client)
+    creator_id, creator_token = _create_user("Reactivate Creator", "developer")
+    manager_id, manager_token = _create_user("Reactivate Manager", "project_owner")
+    restored_id, _ = _create_user("Reactivate Restored Handler", "developer")
+    for user_id, role in [
+        (creator_id, "developer"),
+        (manager_id, "project_owner"),
+        (restored_id, "developer"),
+    ]:
+        _add_project_member(project_id, user_id, role)
+
+    requirement = client.post(
+        "/api/v1/requirements",
+        json={"project_id": project_id, "title": f"Reactivate requirement {uuid4().hex[:8]}"},
+        headers={"Authorization": f"Bearer {creator_token}"},
+    ).json()
+    _set_requirement_owner_and_status(requirement["id"], None, "canceled", creator_id=creator_id)
+    unassigned = client.post(
+        f"/api/v1/workflow-runtime/requirement/{requirement['id']}/transition",
+        json={"action_key": "reactivate", "payload": {"reason": "resume without handler"}},
+        headers={"Authorization": f"Bearer {creator_token}"},
+    )
+    assert unassigned.status_code == 200, unassigned.text
+    assert unassigned.json()["status"] == "pending_assignment"
+    assert unassigned.json()["owner_id"] is None
+
+    _set_requirement_owner_and_status(requirement["id"], None, "canceled")
+    assigned = client.post(
+        f"/api/v1/workflow-runtime/requirement/{requirement['id']}/transition",
+        json={
+            "action_key": "reactivate",
+            "next_owner_id": restored_id,
+            "payload": {"reason": "resume with selected handler"},
+            "delegate_reason": "management reactivation",
+        },
+        headers={"Authorization": f"Bearer {manager_token}"},
+    )
+    assert assigned.status_code == 200
+    assert assigned.json()["status"] == "in_processing"
+    assert assigned.json()["owner_id"] == restored_id
+
+    _set_requirement_owner_and_status(requirement["id"], restored_id, "completed")
+    completed_actions = _action_keys(client, "requirement", requirement["id"], manager_token)
+    assert "reactivate" in completed_actions
+    reopened = client.post(
+        f"/api/v1/workflow-runtime/requirement/{requirement['id']}/transition",
+        json={"action_key": "reactivate", "payload": {"reason": "new scope"}, "delegate_reason": "management reactivation"},
+        headers={"Authorization": f"Bearer {manager_token}"},
+    )
+    assert reopened.status_code == 200
+    assert reopened.json()["status"] == "in_processing"
+    assert reopened.json()["owner_id"] == restored_id
+
+    task = client.post(
+        "/api/v1/tasks",
+        json={"project_id": project_id, "title": f"Reactivate task {uuid4().hex[:8]}", "owner_id": creator_id},
+        headers={"Authorization": f"Bearer {creator_token}"},
+    ).json()
+    _set_task_owner_and_status(task["id"], creator_id, "canceled")
+    task_reopened = client.post(
+        f"/api/v1/workflow-runtime/task/{task['id']}/transition",
+        json={"action_key": "reactivate", "payload": {"reason": "continue task"}},
+        headers={"Authorization": f"Bearer {creator_token}"},
+    )
+    assert task_reopened.status_code == 200
+    assert task_reopened.json()["status"] == "in_processing"
+    assert task_reopened.json()["owner_id"] == creator_id
+
+
+def test_requirement_and_task_create_status_always_matches_handler_presence(client: TestClient):
+    project_id = _create_project_with_config(client)
+    handler_id, _ = _create_user("Creation Invariant Handler", "developer")
+    _add_project_member(project_id, handler_id, "developer")
+
+    ownerless_requirement = client.post(
+        "/api/v1/requirements",
+        json={
+            "project_id": project_id,
+            "title": f"Forged active requirement {uuid4().hex[:8]}",
+            "status": "in_processing",
+        },
+    )
+    assigned_requirement = client.post(
+        "/api/v1/requirements",
+        json={
+            "project_id": project_id,
+            "title": f"Forged unassigned requirement {uuid4().hex[:8]}",
+            "owner_id": handler_id,
+            "status": "pending_assignment",
+        },
+    )
+    ownerless_task = client.post(
+        "/api/v1/tasks",
+        json={
+            "project_id": project_id,
+            "title": f"Forged active task {uuid4().hex[:8]}",
+            "status": "in_processing",
+        },
+    )
+    assigned_task = client.post(
+        "/api/v1/tasks",
+        json={
+            "project_id": project_id,
+            "title": f"Forged unassigned task {uuid4().hex[:8]}",
+            "owner_id": handler_id,
+            "status": "pending_assignment",
+        },
+    )
+
+    assert ownerless_requirement.json()["status"] == "pending_assignment"
+    assert assigned_requirement.json()["status"] == "in_processing"
+    assert ownerless_task.json()["status"] == "pending_assignment"
+    assert assigned_task.json()["status"] == "in_processing"
 
 
 def test_requirement_complete_and_cancel_block_on_direct_relations(client: TestClient):

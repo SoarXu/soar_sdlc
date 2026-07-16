@@ -205,8 +205,24 @@ def _requirement_graph() -> WorkflowGraphSave:
             _state("canceled", "已取消", "terminal", "#94a3b8", 480, 240),
         ],
         transitions=[
-            _transition("claim", "认领", "pending_assignment", "in_processing", target_type="actor"),
+            _transition(
+                "claim",
+                "认领",
+                "pending_assignment",
+                "in_processing",
+                allowed_roles="project_member",
+                target_type="actor",
+                handler_scope="project_member",
+            ),
             _transition("assign", "指派", "pending_assignment", "in_processing", target_type="explicit_owner"),
+            _command_transition("edit", "编辑", "pending_assignment", allowed_roles="creator", command_type="edit"),
+            _command_transition(
+                "add_information",
+                "补充信息",
+                "pending_assignment",
+                allowed_roles="project_member,creator",
+                command_type="add_information",
+            ),
             _transition(
                 "complete",
                 "完成",
@@ -214,27 +230,88 @@ def _requirement_graph() -> WorkflowGraphSave:
                 "completed",
                 target_type="keep_current",
                 validator_config={"type": "requirement_terminal_gate", "block_on_open_bugs": True, "block_on_open_tasks": True},
-                ui_config={"list_display": "primary", "list_priority": 10},
+                handler_scope="current_handler",
+                ui_config={"list_display": "primary", "list_priority": 10, "requires_owner": True},
+            ),
+            _ownership_transition("transfer", "转派", "in_processing"),
+            _ownership_transition("change_handler", "变更处理人", "in_processing", management=True),
+            _ownership_transition("transfer_confirmation", "转移确认", "pending_confirmation"),
+            _ownership_transition(
+                "change_confirmation_handler",
+                "变更确认处理人",
+                "pending_confirmation",
+                management=True,
+            ),
+            _command_transition(
+                "add_information",
+                "补充信息",
+                "in_processing",
+                allowed_roles="project_member,creator",
+                command_type="add_information",
+            ),
+            _command_transition(
+                "add_information",
+                "补充信息",
+                "pending_confirmation",
+                allowed_roles="project_member,creator",
+                command_type="add_information",
             ),
             _transition(
                 "cancel",
                 "取消",
                 "pending_assignment",
                 "canceled",
+                allowed_roles="creator,project_owner",
                 target_type="keep_current",
                 validator_config={"type": "requirement_terminal_gate", "block_on_open_bugs": True, "block_on_open_tasks": True},
-                ui_config={"list_display": "more", "list_priority": 90},
+                handler_scope="allowed_identity",
+                ui_config={"list_display": "more", "list_priority": 90, "button_type": "danger"},
             ),
             _transition(
                 "cancel",
                 "取消",
                 "in_processing",
                 "canceled",
+                allowed_roles="current_handler,project_owner",
                 target_type="keep_current",
                 validator_config={"type": "requirement_terminal_gate", "block_on_open_bugs": True, "block_on_open_tasks": True},
-                ui_config={"list_display": "more", "list_priority": 90},
+                handler_scope="allowed_identity",
+                ui_config={"list_display": "more", "list_priority": 90, "button_type": "danger", "requires_owner": True},
             ),
-            _transition("reactivate", "重新激活", "canceled", "pending_assignment", target_type="keep_current"),
+            _transition(
+                "cancel",
+                "取消",
+                "pending_confirmation",
+                "canceled",
+                allowed_roles="current_handler,project_owner",
+                target_type="keep_current",
+                validator_config={"type": "requirement_terminal_gate", "block_on_open_bugs": True, "block_on_open_tasks": True},
+                handler_scope="allowed_identity",
+                ui_config={"list_display": "more", "list_priority": 90, "button_type": "danger", "requires_owner": True},
+            ),
+            _reactivate_transition("canceled", allowed_roles="creator,project_owner"),
+            _reactivate_transition("completed", allowed_roles="creator,project_owner"),
+            _command_transition(
+                "view_history",
+                "查看历史",
+                "canceled",
+                allowed_roles="project_member,creator",
+                command_type="view_history",
+            ),
+            _command_transition(
+                "add_information",
+                "补充信息",
+                "canceled",
+                allowed_roles="project_member,creator",
+                command_type="add_information",
+            ),
+            _command_transition(
+                "view_history",
+                "查看历史",
+                "completed",
+                allowed_roles="project_member,creator",
+                command_type="view_history",
+            ),
         ],
     )
 
@@ -249,8 +326,24 @@ def _task_graph() -> WorkflowGraphSave:
             _state("canceled", "已取消", "terminal", "#94a3b8", 480, 260),
         ],
         transitions=[
-            _transition("claim", "认领", "pending_assignment", "in_processing", target_type="actor"),
+            _transition(
+                "claim",
+                "认领",
+                "pending_assignment",
+                "in_processing",
+                allowed_roles="project_member",
+                target_type="actor",
+                handler_scope="project_member",
+            ),
             _transition("assign", "指派", "pending_assignment", "in_processing", target_type="explicit_owner"),
+            _command_transition("edit", "编辑", "pending_assignment", allowed_roles="creator", command_type="edit"),
+            _command_transition(
+                "add_information",
+                "补充信息",
+                "pending_assignment",
+                allowed_roles="project_member,creator",
+                command_type="add_information",
+            ),
             _transition(
                 "complete",
                 "完成",
@@ -258,26 +351,108 @@ def _task_graph() -> WorkflowGraphSave:
                 "completed",
                 target_type="keep_current",
                 condition_config={"task_types": ["requirement_implementation", "standalone_operation"]},
-                ui_config={"list_display": "primary", "list_priority": 10},
+                handler_scope="current_handler",
+                ui_config={"list_display": "primary", "list_priority": 10, "requires_owner": True},
             ),
             _transition(
                 "submit_confirmation",
                 "提交确认",
                 "in_processing",
                 "pending_confirmation",
-                target_type="project_role",
-                target_roles="project_owner",
+                target_type="task_confirmation",
                 fallback_type="project_role",
                 fallback_roles="project_owner",
                 condition_config={"task_types": ["bug_fix", "test_support"]},
-                ui_config={"list_display": "primary", "list_priority": 10},
+                handler_scope="current_handler",
+                ui_config={"list_display": "primary", "list_priority": 10, "requires_owner": True},
             ),
-            _transition("approve_confirmation", "确认通过", "pending_confirmation", "completed", target_type="keep_current"),
-            _transition("return_rework", "退回返工", "pending_confirmation", "in_processing", target_type="previous_handler"),
-            _transition("cancel", "取消", "pending_assignment", "canceled", target_type="keep_current"),
-            _transition("cancel", "取消", "in_processing", "canceled", target_type="keep_current"),
-            _transition("cancel", "取消", "pending_confirmation", "canceled", target_type="keep_current"),
-            _transition("reactivate", "重新激活", "canceled", "pending_assignment", target_type="keep_current"),
+            _ownership_transition("transfer", "转派", "in_processing"),
+            _ownership_transition("change_handler", "变更处理人", "in_processing", management=True),
+            _command_transition(
+                "add_information",
+                "补充信息",
+                "in_processing",
+                allowed_roles="project_member,creator",
+                command_type="add_information",
+            ),
+            _transition(
+                "approve_confirmation",
+                "确认通过",
+                "pending_confirmation",
+                "completed",
+                target_type="keep_current",
+                handler_scope="current_handler",
+                ui_config={"list_display": "primary", "list_priority": 10, "requires_owner": True},
+            ),
+            _transition(
+                "return_rework",
+                "退回返工",
+                "pending_confirmation",
+                "in_processing",
+                target_type="previous_handler",
+                handler_scope="current_handler",
+                form_config={"fields": [{"field": "reason", "label": "退回原因", "type": "textarea", "required": True}]},
+                ui_config={"list_display": "more", "list_priority": 20, "requires_owner": True},
+            ),
+            _ownership_transition("transfer_confirmation", "转移确认", "pending_confirmation"),
+            _ownership_transition(
+                "change_confirmation_handler",
+                "变更确认处理人",
+                "pending_confirmation",
+                management=True,
+            ),
+            _command_transition(
+                "add_information",
+                "补充信息",
+                "pending_confirmation",
+                allowed_roles="project_member,creator",
+                command_type="add_information",
+            ),
+            _transition(
+                "cancel",
+                "取消",
+                "pending_assignment",
+                "canceled",
+                allowed_roles="creator,project_owner",
+                target_type="keep_current",
+                handler_scope="allowed_identity",
+                ui_config={"button_type": "danger", "list_display": "more", "list_priority": 90},
+            ),
+            _transition(
+                "cancel",
+                "取消",
+                "in_processing",
+                "canceled",
+                allowed_roles="current_handler,project_owner",
+                target_type="keep_current",
+                handler_scope="allowed_identity",
+                ui_config={"button_type": "danger", "list_display": "more", "list_priority": 90, "requires_owner": True},
+            ),
+            _transition(
+                "cancel",
+                "取消",
+                "pending_confirmation",
+                "canceled",
+                allowed_roles="project_owner",
+                target_type="keep_current",
+                handler_scope="allowed_identity",
+                ui_config={"button_type": "danger", "list_display": "more", "list_priority": 90, "requires_owner": True},
+            ),
+            _reactivate_transition("canceled", allowed_roles="creator,project_owner"),
+            _command_transition(
+                "view_history",
+                "查看历史",
+                "canceled",
+                allowed_roles="project_member,creator",
+                command_type="view_history",
+            ),
+            _command_transition(
+                "add_information",
+                "补充信息",
+                "canceled",
+                allowed_roles="project_member,creator",
+                command_type="add_information",
+            ),
         ],
     )
 
@@ -297,7 +472,9 @@ def _bug_graph() -> WorkflowGraphSave:
                 "认领",
                 "pending_handling",
                 "pending_handling",
+                allowed_roles="project_member",
                 target_type="actor",
+                handler_scope="project_member",
                 ui_config={"list_display": "primary", "list_priority": 5, "ownerless_only": True},
             ),
             _transition(
@@ -310,29 +487,30 @@ def _bug_graph() -> WorkflowGraphSave:
                 allow_manual_owner=True,
                 ui_config={"list_display": "more", "list_priority": 10, "ownerless_only": True},
             ),
+            _ownership_transition("transfer", "转派", "pending_handling"),
+            _ownership_transition("change_handler", "变更处理人", "pending_handling", management=True),
             _transition(
                 "confirm_bug_type",
                 "确认缺陷类型",
                 "pending_handling",
                 "fixing",
-                target_type="keep_current",
+                target_type="bug_verifier_if_pending_verification",
                 condition_config={
                     "routing_mode": "automatic",
                     "field": "bug_type",
-                    "routes": {
-                        "code_issue": "fixing",
-                        "configuration_issue": "fixing",
-                        "data_issue": "fixing",
-                        "environment_issue": "pending_verification",
-                        "requirement_issue": "pending_verification",
-                        "design_as_intended": "pending_verification",
-                        "duplicate_issue": "pending_verification",
-                        "cannot_reproduce": "pending_verification",
-                        "operation_issue": "pending_verification",
-                    },
+                    "route_dictionary": "bug_type",
                 },
-                form_config={"fields": [{"field": "bug_type", "type": "select", "required": True}]},
-                ui_config={"list_display": "primary", "list_priority": 10},
+                form_config={"fields": [{"field": "bug_type", "label": "Bug 类型", "type": "select", "dictionary": "bug_type", "required": True}]},
+                handler_scope="current_handler",
+                ui_config={"list_display": "primary", "list_priority": 10, "requires_owner": True},
+            ),
+            _bug_void_transition("pending_handling"),
+            _command_transition(
+                "add_information",
+                "补充信息",
+                "pending_handling",
+                allowed_roles="reporter,tester",
+                command_type="add_information",
             ),
             _transition(
                 "reclassify_bug_type",
@@ -343,46 +521,128 @@ def _bug_graph() -> WorkflowGraphSave:
                 condition_config={
                     "routing_mode": "automatic_with_override",
                     "field": "bug_type",
-                    "routes": {
-                        "code_issue": "fixing",
-                        "configuration_issue": "fixing",
-                        "data_issue": "fixing",
-                        "environment_issue": "pending_verification",
-                        "requirement_issue": "pending_verification",
-                        "design_as_intended": "pending_verification",
-                        "duplicate_issue": "pending_verification",
-                        "cannot_reproduce": "pending_verification",
-                        "operation_issue": "pending_verification",
-                    },
+                    "route_dictionary": "bug_type",
                     "allow_override_roles": ["project_owner", "system_admin"],
                 },
-                form_config={"fields": [{"field": "bug_type", "type": "select", "required": True}]},
-                ui_config={"list_display": "more", "list_priority": 40},
+                form_config={
+                    "fields": [
+                        {"field": "bug_type", "label": "Bug 类型", "type": "select", "dictionary": "bug_type", "required": True},
+                        {"field": "reason", "label": "重分类原因", "type": "textarea", "required": True},
+                    ]
+                },
+                handler_scope="current_handler",
+                ui_config={"list_display": "more", "list_priority": 40, "requires_owner": True},
             ),
             _transition(
                 "submit_verification",
                 "提交验证",
                 "fixing",
                 "pending_verification",
-                target_type="project_role",
-                target_roles="tester,project_owner",
+                target_type="bug_verifier",
                 fallback_type="project_role",
                 fallback_roles="project_owner",
-                ui_config={"list_display": "primary", "list_priority": 10},
+                handler_scope="current_handler",
+                ui_config={"list_display": "primary", "list_priority": 10, "requires_owner": True},
             ),
-            _transition("verification_passed", "验证通过", "pending_verification", "verified", ui_config={"list_display": "primary", "list_priority": 10}),
-            _transition("verification_failed", "验证不通过", "pending_verification", "pending_handling", target_type="previous_handler", ui_config={"list_display": "primary", "list_priority": 20}),
-            _transition("return_reopen", "退回打开", "verified", "pending_handling", target_type="previous_handler", ui_config={"list_display": "more", "list_priority": 20}),
+            _ownership_transition("transfer", "转派", "fixing"),
+            _ownership_transition("change_handler", "变更处理人", "fixing", management=True),
+            _bug_void_transition("fixing"),
+            _command_transition(
+                "add_information",
+                "补充信息",
+                "fixing",
+                allowed_roles="reporter,tester",
+                command_type="add_information",
+            ),
+            _transition(
+                "verification_passed",
+                "验证通过",
+                "pending_verification",
+                "verified",
+                handler_scope="current_handler",
+                ui_config={"list_display": "primary", "list_priority": 10, "requires_owner": True},
+            ),
+            _transition(
+                "verification_failed",
+                "验证不通过",
+                "pending_verification",
+                "pending_handling",
+                target_type="previous_handler",
+                handler_scope="current_handler",
+                form_config={"fields": [{"field": "reason", "label": "验证不通过原因", "type": "textarea", "required": True}]},
+                ui_config={"list_display": "primary", "list_priority": 20, "requires_owner": True},
+            ),
+            _ownership_transition("transfer_verification", "转移验证", "pending_verification"),
+            _ownership_transition("assign_verifier", "指派验证人", "pending_verification", management=True),
+            _bug_void_transition("pending_verification"),
+            _command_transition(
+                "add_information",
+                "补充信息",
+                "pending_verification",
+                allowed_roles="reporter,tester",
+                command_type="add_information",
+            ),
+            _transition(
+                "return_reopen",
+                "退回打开",
+                "verified",
+                "pending_handling",
+                allowed_roles="reporter,tester,project_owner",
+                target_type="previous_handler",
+                handler_scope="allowed_identity",
+                form_config={"fields": [{"field": "reason", "label": "退回原因", "type": "textarea", "required": True}]},
+                ui_config={"list_display": "more", "list_priority": 20},
+            ),
             _transition(
                 "close",
                 "关闭",
                 "verified",
                 "closed",
+                allowed_roles="current_handler,project_owner",
                 target_type="keep_current",
                 validator_config={"type": "bug_close_gate", "direct_tasks_terminal_statuses": ["completed", "canceled"]},
+                handler_scope="allowed_identity",
+                ui_config={"list_display": "primary", "list_priority": 10, "requires_owner": True},
+            ),
+            _command_transition(
+                "add_information",
+                "补充信息",
+                "verified",
+                allowed_roles="project_member,reporter,tester",
+                command_type="add_information",
+            ),
+            _command_transition(
+                "view_history",
+                "查看历史",
+                "verified",
+                allowed_roles="project_member,reporter,tester",
+                command_type="view_history",
+            ),
+            _transition(
+                "activate",
+                "激活",
+                "closed",
+                "pending_handling",
+                allowed_roles="reporter,tester,project_owner",
+                target_type="previous_handler",
+                handler_scope="allowed_identity",
+                form_config={"fields": [{"field": "reason", "label": "激活原因", "type": "textarea", "required": True}]},
                 ui_config={"list_display": "primary", "list_priority": 10},
             ),
-            _transition("activate", "激活", "closed", "pending_handling", target_type="previous_handler"),
+            _command_transition(
+                "add_information",
+                "补充信息",
+                "closed",
+                allowed_roles="project_member,reporter,tester",
+                command_type="add_information",
+            ),
+            _command_transition(
+                "view_history",
+                "查看历史",
+                "closed",
+                allowed_roles="project_member,reporter,tester",
+                command_type="view_history",
+            ),
         ],
     )
 
@@ -442,18 +702,26 @@ def _transition(
     validator_config: dict | None = None,
     form_config: dict | None = None,
     ui_config: dict | None = None,
+    handler_scope: str | None = None,
 ) -> WorkflowTransitionBase:
     resolved_allowed_roles = allowed_roles
     resolved_allow_manual_owner = allow_manual_owner
     resolved_ui_config = dict(ui_config or {})
+    resolved_ui_config.setdefault("action_category", "process")
+    if handler_scope:
+        resolved_ui_config["handler_scope"] = handler_scope
     if action_key in {"claim", "assign"} and from_status in {"pending_assignment", "pending_handling"}:
         resolved_ui_config.setdefault("ownerless_only", True)
         if action_key == "claim":
+            resolved_ui_config["handler_scope"] = handler_scope or "project_member"
+            resolved_ui_config["action_category"] = "ownership"
             resolved_ui_config.setdefault("list_display", "primary")
             resolved_ui_config.setdefault("list_priority", 10)
         if action_key == "assign":
             resolved_allowed_roles = resolved_allowed_roles or "project_owner"
             resolved_allow_manual_owner = True
+            resolved_ui_config["handler_scope"] = handler_scope or "allowed_identity"
+            resolved_ui_config["action_category"] = "management"
             resolved_ui_config.setdefault("list_display", "more")
             resolved_ui_config.setdefault("list_priority", 20)
     return WorkflowTransitionBase(
@@ -474,4 +742,106 @@ def _transition(
         validator_config=validator_config,
         form_config=form_config,
         ui_config=resolved_ui_config,
+    )
+
+
+def _ownership_transition(
+    action_key: str,
+    action_name: str,
+    current_status: str,
+    *,
+    management: bool = False,
+) -> WorkflowTransitionBase:
+    return _transition(
+        action_key,
+        action_name,
+        current_status,
+        current_status,
+        allowed_roles="project_owner" if management else "",
+        target_type="explicit_owner",
+        allow_manual_owner=True,
+        form_config={
+            "title": action_name,
+            "fields": [
+                {"field": "reason", "label": "原因", "type": "textarea", "required": False},
+            ],
+        },
+        ui_config={
+            "button_type": "warning" if management else "primary",
+            "list_display": "more",
+            "list_priority": 70 if management else 60,
+            "action_category": "management" if management else "ownership",
+            "handler_scope": "allowed_identity" if management else "current_handler",
+            "requires_owner": True,
+        },
+    )
+
+
+def _command_transition(
+    action_key: str,
+    action_name: str,
+    current_status: str,
+    *,
+    allowed_roles: str,
+    command_type: str,
+) -> WorkflowTransitionBase:
+    fields = []
+    if command_type == "add_information":
+        fields = [{"field": "content", "label": "补充内容", "type": "textarea", "required": True}]
+    return _transition(
+        action_key,
+        action_name,
+        current_status,
+        current_status,
+        allowed_roles=allowed_roles,
+        handler_scope="allowed_identity",
+        form_config={"fields": fields} if fields else None,
+        ui_config={
+            "command_type": command_type,
+            "action_category": "information" if command_type == "add_information" else "navigation",
+            "button_type": "primary",
+            "list_display": "more",
+            "list_priority": 80,
+        },
+    )
+
+
+def _reactivate_transition(from_status: str, *, allowed_roles: str) -> WorkflowTransitionBase:
+    return _transition(
+        "reactivate",
+        "重新激活",
+        from_status,
+        "pending_assignment",
+        allowed_roles=allowed_roles,
+        target_type="keep_current",
+        allow_manual_owner=True,
+        condition_config={
+            "target_status_by_owner": {
+                "with_owner": "in_processing",
+                "without_owner": "pending_assignment",
+            }
+        },
+        handler_scope="allowed_identity",
+        form_config={"fields": [{"field": "reason", "label": "重新激活原因", "type": "textarea", "required": True}]},
+        ui_config={"list_display": "primary", "list_priority": 10},
+    )
+
+
+def _bug_void_transition(from_status: str) -> WorkflowTransitionBase:
+    return _transition(
+        "void_close",
+        "作废/关闭",
+        from_status,
+        "closed",
+        allowed_roles="project_owner",
+        target_type="keep_current",
+        validator_config={"type": "bug_close_gate", "direct_tasks_terminal_statuses": ["completed", "canceled"]},
+        handler_scope="allowed_identity",
+        form_config={"fields": [{"field": "reason", "label": "作废/关闭原因", "type": "textarea", "required": True}]},
+        ui_config={
+            "button_type": "danger",
+            "list_display": "more",
+            "list_priority": 90,
+            "action_category": "management",
+        },
     )

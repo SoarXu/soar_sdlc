@@ -19,6 +19,8 @@ class WorkbenchItem(BaseModel):
     iteration_name: str | None = None
     lifecycle_phase: str | None = None
     owner_id: int | None = None
+    handler_id: int | None = None
+    iteration_group_key: str | None = None
     status: str | None = None
     priority: str | None = None
     due_date: str | None = None
@@ -38,6 +40,10 @@ class WorkbenchItem(BaseModel):
     mentioned_in_comment_id: int | None = None
     exception_key: str | None = None
     exception_label: str | None = None
+    entered_at: str | None = None
+    threshold_hours: int | None = None
+    threshold_count: int | None = None
+    overdue_hours: float | None = None
 
 
 class WorkbenchSection(BaseModel):

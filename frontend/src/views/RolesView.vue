@@ -1,13 +1,14 @@
 <template>
   <section class="page">
-    <div class="page-header">
+    <div class="page-head">
       <div>
         <h1>角色管理</h1>
         <p>维护业务角色，并给用户分配角色。</p>
       </div>
-      <div class="table-actions" v-if="isSystemAdmin">
-        <el-button v-if="activeTab === 'users'" type="primary" @click="openCreateUser">新增用户</el-button>
-        <el-button v-if="activeTab === 'roles'" type="primary" @click="openCreateRole">新增角色</el-button>
+      <div class="page-actions">
+        <el-button @click="backToAdmin">返回后台管理</el-button>
+        <el-button v-if="isSystemAdmin && activeTab === 'users'" type="primary" @click="openCreateUser">新增用户</el-button>
+        <el-button v-if="isSystemAdmin && activeTab === 'roles'" type="primary" @click="openCreateRole">新增角色</el-button>
       </div>
     </div>
 
@@ -143,10 +144,12 @@
 <script setup>
 import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
+import { useRouter } from 'vue-router'
 
 import { createRole, deleteRole, fetchRoles, updateRole } from '../api/roles'
 import { assignUserRoles, createUser, fetchUsers, resetUserPassword } from '../api/users'
 
+const router = useRouter()
 const loading = ref(false)
 const saving = ref(false)
 const activeTab = ref('users')
@@ -163,6 +166,10 @@ const enabledRoles = computed(() => roles.value.filter((role) => role.enabled))
 const currentUserId = computed(() => Number(localStorage.getItem('current_user_id') || 0))
 const currentUser = computed(() => users.value.find((user) => user.id === currentUserId.value))
 const isSystemAdmin = computed(() => currentUser.value?.roles?.some((role) => role.role_key === 'system_admin' && role.enabled))
+
+function backToAdmin() {
+  router.push('/admin')
+}
 
 function openCreateRole() {
   editingRoleId.value = null

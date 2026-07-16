@@ -11,24 +11,31 @@ from app.models.task import Task
 from app.models.test_case import TestCase
 from app.models.user import User
 from app.services.current_handler_service import ensure_work_item_action
+from app.services.project_permission_service import ensure_workflow_fields_not_updated
 from app.services.lifecycle_service import project_lifecycle_phase
 from app.services.status_operation_service import list_status_operations
-from app.views.requirement_view import GenerateTaskRequest, RequirementCreate, RequirementUpdate
+from app.services.task_service import linked_task_summaries
+from app.views.requirement_view import RequirementCreate, RequirementUpdate
 
 
 def list_requirements(db: Session) -> list[Requirement]:
-    return db.query(Requirement).filter(Requirement.deleted == 0).order_by(Requirement.id.desc()).all()
+    requirements = db.query(Requirement).filter(Requirement.deleted == 0).order_by(Requirement.id.desc()).all()
+    for requirement in requirements:
+        requirement.linked_tasks = linked_task_summaries(db, "requirement", requirement.id)
+    return requirements
 
 
 def get_requirement(db: Session, requirement_id: int) -> Requirement:
-    return _get_active_requirement(db, requirement_id)
+    requirement = _get_active_requirement(db, requirement_id)
+    requirement.linked_tasks = linked_task_summaries(db, "requirement", requirement.id)
+    return requirement
 
 
-def create_requirement(db: Session, payload: RequirementCreate) -> Requirement:
+def create_requirement(db: Session, payload: RequirementCreate, actor_id: int | None = None) -> Requirement:
     data = payload.model_dump()
+    data["creator_id"] = actor_id
     _ensure_requirement_iteration_scope(db, data.get("project_id"), data.get("iteration_id"))
-    if data.get("status") not in {"pending_assignment", "in_processing", "pending_confirmation", "completed", "canceled"}:
-        data["status"] = _initial_requirement_status(data.get("owner_id"))
+    data["status"] = _initial_requirement_status(data.get("owner_id"))
     data["lifecycle_phase"] = project_lifecycle_phase(db, data.get("project_id"))
     requirement = Requirement(**data)
     db.add(requirement)
@@ -40,6 +47,7 @@ def create_requirement(db: Session, payload: RequirementCreate) -> Requirement:
 def update_requirement(db: Session, requirement_id: int, payload: RequirementUpdate, actor_id: int | None = None) -> Requirement:
     requirement = _get_active_requirement(db, requirement_id)
     ensure_work_item_action(db, requirement, actor_id, "requirement")
+    ensure_workflow_fields_not_updated(payload.model_fields_set)
     _ensure_project_editable_for_requirement(db, requirement)
     data = payload.model_dump(exclude_unset=True)
     data.pop("status", None)
@@ -113,29 +121,6 @@ def delete_requirement(db: Session, requirement_id: int, actor_id: int | None = 
     requirement.deleted = 1
     requirement.delete_time = datetime.now()
     db.commit()
-
-
-def generate_task_from_requirement(db: Session, requirement_id: int, payload: GenerateTaskRequest) -> Task:
-    requirement = _get_active_requirement(db, requirement_id)
-    owner_id = payload.owner_id if payload.owner_id is not None else requirement.owner_id
-    task = Task(
-        project_id=requirement.project_id,
-        source_project_id=requirement.source_project_id,
-        requirement_id=requirement.id,
-        title=payload.title or requirement.title,
-        task_type=payload.task_type,
-        priority=payload.priority or requirement.priority,
-        owner_id=owner_id,
-        due_date=payload.due_date,
-        status="in_processing" if owner_id else "pending_assignment",
-        lifecycle_phase=requirement.lifecycle_phase,
-        description=payload.description,
-        source_requirement_review_status=requirement.review_status,
-    )
-    db.add(task)
-    db.commit()
-    db.refresh(task)
-    return task
 
 
 def _get_active_requirement(db: Session, requirement_id: int) -> Requirement:

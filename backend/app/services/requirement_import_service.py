@@ -112,7 +112,7 @@ def commit_requirement_import(
             priority=row.priority,
             owner_id=row.owner_id,
             proposer_id=row.proposer_id,
-            status="draft",
+            status="in_processing" if row.owner_id else "pending_assignment",
             review_status=row.review_status,
             lifecycle_phase=project_lifecycle_phase(db, row.project_id),
             description=row.description,

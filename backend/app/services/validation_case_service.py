@@ -7,7 +7,7 @@ from app.models.test_case import TestCase
 
 PASSING_RESULTS = {"passed", "ignored"}
 FAILING_RESULTS = {"failed", "blocked"}
-OPEN_BUG_STATUSES = {"open", "fixing", "reopened", "suspended", "verifying"}
+OPEN_BUG_STATUSES = {"pending_handling", "fixing", "pending_verification", "verified"}
 
 
 def requirement_validation_cases(db: Session, requirement_id: int) -> dict:

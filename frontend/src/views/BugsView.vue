@@ -18,11 +18,11 @@
         <el-table-column label="当前处理人" width="140"><template #default="{ row }">{{ userLabel(users, row.owner_id) }}</template></el-table-column>
         <el-table-column label="严重程度" width="110"><template #default="{ row }"><RequirementPriorityBadge :value="row.severity" /></template></el-table-column>
         <el-table-column label="状态" width="120"><template #default="{ row }">{{ bugStatusLabel(row.status) }}</template></el-table-column>
-        <el-table-column label="操作" width="380" fixed="right">
+        <el-table-column label="操作" width="470" fixed="right">
           <template #default="{ row }">
             <div class="table-actions">
-              <el-button v-if="canEditBug(row)" link type="primary" @click="openEdit(row)">编辑</el-button>
-              <WorkflowActionButtons object-type="bug" :object-id="row.id" mode="list" :transitions="workflowTransitionsFor(row)" :auto-load="false" :users="users" @executed="loadData" /><el-popconfirm v-if="canDeleteBugRow(row)" title="确认删除该 Bug？" @confirm="removeBug(row.id)"><template #reference><el-button link type="danger">删除</el-button></template></el-popconfirm>
+              <WatchToggleButton object-type="bug" :object-id="row.id" />
+              <WorkflowActionButtons object-type="bug" :object-id="row.id" mode="list" :transitions="workflowTransitionsFor(row)" :auto-load="false" :users="users" @command="handleWorkflowCommand(row, $event)" @executed="loadData" /><el-popconfirm v-if="canDeleteBugRow(row)" title="确认删除该 Bug？" @confirm="removeBug(row.id)"><template #reference><el-button link type="danger">删除</el-button></template></el-popconfirm>
             </div>
           </template>
         </el-table-column>
@@ -48,7 +48,7 @@
           <el-form-item label="来源用例"><el-select v-model="form.test_case_id" clearable filterable placeholder="请选择用例"><el-option v-for="item in testCases" :key="item.id" :label="item.title" :value="item.id" /></el-select></el-form-item>
           <el-form-item label="来源测试单"><el-select v-model="form.test_run_id" clearable filterable placeholder="请选择测试单"><el-option v-for="run in testRuns" :key="run.id" :label="run.name" :value="run.id" /></el-select></el-form-item>
           <el-form-item label="所属迭代"><el-select v-model="form.iteration_id" clearable filterable placeholder="请选择迭代"><el-option v-for="iteration in editableIterationDisplayOptions" :key="iteration.id" :label="iteration.name" :value="iteration.id" :disabled="iteration.disabled" /></el-select></el-form-item>
-          <el-form-item label="当前处理人"><el-select v-model="form.owner_id" clearable filterable placeholder="请选择当前处理人"><el-option v-for="user in users" :key="user.id" :label="user.full_name" :value="user.id" /></el-select></el-form-item>
+          <el-form-item v-if="!editingId" label="当前处理人"><el-select v-model="form.owner_id" clearable filterable placeholder="请选择当前处理人"><el-option v-for="user in users" :key="user.id" :label="user.full_name" :value="user.id" /></el-select></el-form-item>
           <el-form-item label="提出人"><el-select v-model="form.reporter_id" clearable filterable placeholder="请选择提出人"><el-option v-for="user in users" :key="user.id" :label="user.full_name" :value="user.id" /></el-select></el-form-item>
         </div>
         <div class="form-grid">
@@ -67,6 +67,7 @@
 
 <script setup>
 import { computed, onMounted, reactive, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { createBug, deleteBug, fetchBugs, updateBug } from '../api/bugs'
 import { fetchProjectMembers, fetchProjects } from '../api/projects'
@@ -80,12 +81,14 @@ import { fetchWorkflowTransitionsBatch } from '../api/workflowRuntime'
 import RequirementPriorityBadge from '../components/RequirementPriorityBadge.vue'
 import RichTextPasteEditor from '../components/RichTextPasteEditor.vue'
 import WorkflowActionButtons from '../components/WorkflowActionButtons.vue'
+import WatchToggleButton from '../components/WatchToggleButton.vue'
 import { showActionError } from '../utils/actionFeedback'
 import { labelById, userLabel } from '../utils/referenceLabels'
 import { bugIterationOptions, includeSelectedIterationOption } from '../utils/bugIterations'
-import { canCreateWorkItem, canDeleteWorkItem, canExecuteWorkItem, currentUserFromStorage } from '../utils/permissions'
+import { canCreateWorkItem, canDeleteWorkItem, currentUserFromStorage } from '../utils/permissions'
 import { usePagination } from '../utils/usePagination'
 
+const router = useRouter()
 const loading = ref(false), saving = ref(false), dialogVisible = ref(false), editingId = ref(null)
 const bugs = ref([]), projects = ref([]), requirements = ref([]), tasks = ref([]), testCases = ref([]), testRuns = ref([]), users = ref([]), iterations = ref([])
 const projectMembersById = ref({})
@@ -105,12 +108,11 @@ const priorityLevelOptions = [
   { label: '⑤ 最低', value: '5' }
 ]
 const bugStatusOptions = [
-  { label: '待确认', value: 'open' },
+  { label: '待处理', value: 'pending_handling' },
   { label: '修复中', value: 'fixing' },
-  { label: '待验证', value: 'verifying' },
-  { label: '已关闭', value: 'closed' },
-  { label: '重新打开', value: 'reopened' },
-  { label: '已挂起', value: 'suspended' }
+  { label: '待验证', value: 'pending_verification' },
+  { label: '已验证', value: 'verified' },
+  { label: '已关闭', value: 'closed' }
 ]
 const form = reactive({ project_id: null, iteration_id: null, requirement_id: null, task_id: null, test_case_id: null, test_run_id: null, title: '', severity: '3', priority: '3', owner_id: null, reporter_id: null, reproduce_steps: '', expected_result: '', actual_result: '' })
 const currentUser = computed(() => currentUserFromStorage(users.value))
@@ -123,10 +125,6 @@ function bugStatusLabel(value) { return optionLabel(bugStatusOptions, value) }
 function workflowTransitionsFor(row) { return workflowTransitions.value[`bug:${row.id}`] || [] }
 function projectForBug(row) { return projects.value.find((item) => item.id === row.project_id) || null }
 function membersForProject(projectId) { return projectMembersById.value[projectId] || [] }
-function canEditBug(row) {
-  const project = projectForBug(row)
-  return canExecuteWorkItem(row, currentUser.value, project, membersForProject(project?.id))
-}
 function canDeleteBugRow(row) {
   const project = projectForBug(row)
   return canDeleteWorkItem(project, currentUser.value, membersForProject(project?.id))
@@ -134,6 +132,10 @@ function canDeleteBugRow(row) {
 function resetForm() { Object.assign(form, { project_id: null, iteration_id: null, requirement_id: null, task_id: null, test_case_id: null, test_run_id: null, title: '', severity: '3', priority: '3', owner_id: null, reporter_id: null, reproduce_steps: '', expected_result: '', actual_result: '' }) }
 function openCreate() { editingId.value = null; resetForm(); dialogVisible.value = true }
 function openEdit(row) { editingId.value = row.id; Object.assign(form, { ...row, reproduce_steps: row.reproduce_steps || '', expected_result: row.expected_result || '', actual_result: row.actual_result || '' }); dialogVisible.value = true }
+function handleWorkflowCommand(row, { commandType }) {
+  if (commandType === 'edit') openEdit(row)
+  if (commandType === 'view_history') router.push({ name: 'bug-detail', params: { id: row.id }, hash: '#history' })
+}
 
 async function loadData() {
   loading.value = true

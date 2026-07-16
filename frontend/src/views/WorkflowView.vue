@@ -5,7 +5,10 @@
         <h1>工作流配置</h1>
         <p>维护工作流方案，点击方案名称进入详情页面编辑需求、任务、Bug 的流转和项目关联。</p>
       </div>
-      <el-button v-if="canEditWorkflow" type="primary" @click="openCreate">新增方案</el-button>
+      <div class="page-actions">
+        <el-button @click="backToAdmin">返回后台管理</el-button>
+        <el-button v-if="canEditWorkflow" type="primary" @click="openCreate">新增方案</el-button>
+      </div>
     </div>
 
     <el-card shadow="never">
@@ -53,6 +56,7 @@
         <p>一个方案内分别维护需求、任务、Bug 的可视化工作流，并绑定到项目后生效。</p>
       </div>
       <div class="page-actions">
+        <el-button @click="backToAdmin">返回后台管理</el-button>
         <el-button @click="backToList">返回列表</el-button>
         <el-button v-if="canEditWorkflow" type="primary" :loading="saving" @click="saveDetail">保存</el-button>
       </div>
@@ -159,6 +163,7 @@
 <script setup>
 import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
+import { useRouter } from 'vue-router'
 
 import {
   createAssigneeRuleConfig,
@@ -173,6 +178,7 @@ import WorkflowDesigner from '../components/WorkflowDesigner.vue'
 import { showActionError } from '../utils/actionFeedback'
 import { canConfigureWorkflow, currentUserFromStorage } from '../utils/permissions'
 
+const router = useRouter()
 const loading = ref(false)
 const saving = ref(false)
 const configs = ref([])
@@ -214,6 +220,9 @@ const transferConfigOptions = computed(() => {
   return configs.value.filter((item) => item.enabled && item.id !== editingId.value)
 })
 
+function backToAdmin() {
+  router.push('/admin')
+}
 
 function resetForm() {
   editingId.value = null

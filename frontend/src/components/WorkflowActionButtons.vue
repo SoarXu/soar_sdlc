@@ -143,6 +143,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 
 import { executeWorkflowTransition, fetchWorkflowTransitions } from '../api/workflowRuntime'
 import { fetchUsers } from '../api/users'
+import { createWorkItemComment } from '../api/workItemComments'
 import { showActionError } from '../utils/actionFeedback'
 import { isDelegateReasonRequiredError } from '../utils/permissions'
 import {
@@ -150,7 +151,8 @@ import {
   actionNeedsTargetStatusSelection,
   sortWorkflowActions,
   splitListActions,
-  visibleDetailActions
+  visibleDetailActions,
+  workflowCommandType
 } from '../utils/workflowRuntimeActions'
 
 const props = defineProps({
@@ -162,7 +164,7 @@ const props = defineProps({
   users: { type: Array, default: () => [] }
 })
 
-const emit = defineEmits(['executed', 'loaded'])
+const emit = defineEmits(['command', 'executed', 'loaded'])
 
 const loadedTransitions = ref([])
 const loading = ref(false)
@@ -253,6 +255,11 @@ async function ensureUsersLoaded() {
 async function openAction(action) {
   activeAction.value = action
   resetForm(action)
+  const commandType = workflowCommandType(action)
+  if (commandType && commandType !== 'add_information') {
+    emit('command', { commandType, action })
+    return
+  }
   await ensureUsersLoaded()
   if (actionNeedsDialog(action)) {
     dialogVisible.value = true
@@ -300,6 +307,18 @@ async function submitActiveAction() {
 async function submitAction(action) {
   submittingAction.value = action.action_key
   try {
+    if (workflowCommandType(action) === 'add_information') {
+      await createWorkItemComment({
+        object_type: props.objectType,
+        object_id: props.objectId,
+        body: String(formPayload.content || '').trim(),
+        mentioned_user_ids: []
+      })
+      dialogVisible.value = false
+      ElMessage.success('补充信息成功')
+      emit('executed', { command_type: 'add_information' })
+      return
+    }
     const payload = {
       action_key: action.action_key,
       payload: { ...formPayload }

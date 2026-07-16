@@ -15,6 +15,7 @@
         <el-table-column label="项目" width="180"><template #default="{ row }">{{ labelById(projects, row.project_id) }}</template></el-table-column>
         <el-table-column label="来源项目" width="180"><template #default="{ row }">{{ labelById(projects, row.source_project_id) }}</template></el-table-column>
         <el-table-column label="需求" width="180"><template #default="{ row }">{{ labelById(requirements, row.requirement_id, 'title') }}</template></el-table-column>
+        <el-table-column label="任务分支" width="120"><template #default="{ row }">{{ taskBranchLabel(row.task_type) }}</template></el-table-column>
         <el-table-column label="当前处理人" width="150"><template #default="{ row }">{{ userLabel(users, row.owner_id) }}</template></el-table-column>
         <el-table-column prop="due_date" label="截止日期" width="130" />
         <el-table-column label="状态" width="110">
@@ -25,10 +26,10 @@
             <span v-else>{{ taskStatusLabel(row.status) }}</span>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="240" fixed="right">
+        <el-table-column label="操作" width="330" fixed="right">
           <template #default="{ row }">
-            <el-button v-if="canEditTask(row)" link type="primary" @click="openEdit(row)">编辑</el-button>
-            <WorkflowActionButtons object-type="task" :object-id="row.id" mode="list" :transitions="workflowTransitionsFor(row)" :auto-load="false" :users="users" @executed="loadData" /><el-popconfirm v-if="canDeleteTaskRow(row)" title="确认删除该任务？" @confirm="removeTask(row.id)">
+            <WatchToggleButton object-type="task" :object-id="row.id" />
+            <WorkflowActionButtons object-type="task" :object-id="row.id" mode="list" :transitions="workflowTransitionsFor(row)" :auto-load="false" :users="users" @command="handleWorkflowCommand(row, $event)" @executed="loadData" /><el-popconfirm v-if="canDeleteTaskRow(row)" title="确认删除该任务？" @confirm="removeTask(row.id)">
               <template #reference><el-button link type="danger">删除</el-button></template>
             </el-popconfirm>
           </template>
@@ -64,17 +65,19 @@
               <el-option v-for="requirement in availableRequirements" :key="requirement.id" :label="requirement.title" :value="requirement.id" />
             </el-select>
           </el-form-item>
-          <el-form-item label="当前处理人">
+          <el-form-item label="任务分支" required>
+            <el-select v-model="form.task_type" :disabled="Boolean(form.requirement_id)">
+              <el-option v-for="option in TASK_BRANCH_OPTIONS" :key="option.value" :label="option.label" :value="option.value" />
+            </el-select>
+          </el-form-item>
+          <el-form-item v-if="!editingId" label="当前处理人">
             <el-select v-model="form.owner_id" clearable filterable placeholder="请选择当前处理人" @change="onOwnerChange">
               <el-option v-for="user in users" :key="user.id" :label="user.full_name" :value="user.id" />
             </el-select>
           </el-form-item>
           <el-form-item label="截止日期"><el-date-picker v-model="form.due_date" value-format="YYYY-MM-DD" type="date" /></el-form-item>
         </div>
-        <div class="form-grid">
-          <el-form-item label="优先级"><el-select v-model="form.priority"><el-option label="高" value="high" /><el-option label="中" value="medium" /><el-option label="低" value="low" /></el-select></el-form-item>
-          <el-form-item label="状态"><el-select v-model="form.status"><el-option label="待办" value="todo" /><el-option label="进行中" value="doing" /><el-option label="完成" value="done" /><el-option label="关闭" value="closed" /></el-select></el-form-item>
-        </div>
+        <el-form-item label="优先级"><el-select v-model="form.priority"><el-option label="高" value="high" /><el-option label="中" value="medium" /><el-option label="低" value="low" /></el-select></el-form-item>
         <el-form-item label="描述"><el-input v-model="form.description" type="textarea" :rows="3" /></el-form-item>
       </el-form>
       <template #footer><el-button @click="dialogVisible = false">取消</el-button><el-button type="primary" :loading="saving" @click="submitTask">保存</el-button></template>
@@ -86,6 +89,7 @@
 
 <script setup>
 import { computed, onMounted, reactive, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { fetchProjectMembers, fetchProjects } from '../api/projects'
 import { fetchRequirements } from '../api/requirements'
@@ -93,12 +97,15 @@ import { createTask, deleteTask, fetchTasks, fetchTaskStatusOperations, updateTa
 import { fetchUsers } from '../api/users'
 import { fetchWorkflowTransitionsBatch } from '../api/workflowRuntime'
 import WorkflowActionButtons from '../components/WorkflowActionButtons.vue'
+import WatchToggleButton from '../components/WatchToggleButton.vue'
 import { showActionError } from '../utils/actionFeedback'
-import { canCreateWorkItem, canDeleteWorkItem, canExecuteWorkItem, currentUserFromStorage } from '../utils/permissions'
+import { canCreateWorkItem, canDeleteWorkItem, currentUserFromStorage } from '../utils/permissions'
 import { labelById, userLabel } from '../utils/referenceLabels'
 import { loadCloseReasonMap } from '../utils/closeReasonTooltip'
 import { usePagination } from '../utils/usePagination'
+import { deriveTaskBranch, TASK_BRANCH_OPTIONS, taskBranchLabel } from '../utils/taskBranchRules'
 
+const router = useRouter()
 const loading = ref(false)
 const saving = ref(false)
 const dialogVisible = ref(false)
@@ -119,17 +126,18 @@ const {
   total: taskTotal,
   pagedItems: pagedTasks
 } = usePagination(tasks)
-const form = reactive({ project_id: null, source_project_id: null, requirement_id: null, title: '', priority: 'medium', owner_id: null, due_date: null, status: 'todo', description: '' })
+const form = reactive({ project_id: null, source_project_id: null, requirement_id: null, title: '', task_type: 'standalone_operation', priority: 'medium', owner_id: null, due_date: null, description: '' })
 const ownerManuallySet = ref(false)
 const availableRequirements = computed(() => {
   if (!form.project_id) return requirements.value
   return requirements.value.filter((item) => item.project_id === form.project_id)
 })
 const taskStatusOptions = [
-  { label: '待办', value: 'todo' },
-  { label: '进行中', value: 'doing' },
-  { label: '完成', value: 'done' },
-  { label: '关闭', value: 'closed' }
+  { label: '待分派', value: 'pending_assignment' },
+  { label: '处理中', value: 'in_processing' },
+  { label: '待确认', value: 'pending_confirmation' },
+  { label: '已完成', value: 'completed' },
+  { label: '已取消', value: 'canceled' }
 ]
 
 function optionLabel(options, value) { return options.find((option) => option.value === value)?.label || value || '-' }
@@ -138,15 +146,11 @@ function isTaskProjectClosed(row) { return projects.value.find((item) => item.id
 function workflowTransitionsFor(row) { return workflowTransitions.value[`task:${row.id}`] || [] }
 function projectForTask(row) { return projects.value.find((item) => item.id === row.project_id) || null }
 function membersForProject(projectId) { return projectMembersById.value[projectId] || [] }
-function canEditTask(row) {
-  const project = projectForTask(row)
-  return !isTaskProjectClosed(row) && canExecuteWorkItem(row, currentUser.value, project, membersForProject(project?.id))
-}
 function canDeleteTaskRow(row) {
   const project = projectForTask(row)
   return !isTaskProjectClosed(row) && canDeleteWorkItem(project, currentUser.value, membersForProject(project?.id))
 }
-function resetForm() { Object.assign(form, { project_id: null, source_project_id: null, requirement_id: null, title: '', priority: 'medium', owner_id: null, due_date: null, status: 'todo', description: '' }); ownerManuallySet.value = false }
+function resetForm() { Object.assign(form, { project_id: null, source_project_id: null, requirement_id: null, title: '', task_type: 'standalone_operation', priority: 'medium', owner_id: null, due_date: null, description: '' }); ownerManuallySet.value = false }
 function openCreate() { editingId.value = null; resetForm(); dialogVisible.value = true }
 function openEdit(row) {
   editingId.value = row.id
@@ -156,13 +160,17 @@ function openEdit(row) {
     source_project_id: row.source_project_id || null,
     requirement_id: row.requirement_id || null,
     title: row.title || '',
+    task_type: deriveTaskBranch({ requirementId: row.requirement_id, currentType: row.task_type }),
     priority: row.priority || 'medium',
     owner_id: row.owner_id || null,
     due_date: row.due_date || null,
-    status: row.status || 'todo',
     description: row.description || ''
   })
   dialogVisible.value = true
+}
+function handleWorkflowCommand(row, { commandType }) {
+  if (commandType === 'edit') openEdit(row)
+  if (commandType === 'view_history') router.push(`/tasks/${row.id}#history`)
 }
 function onSourceProjectChange() {}
 function onProjectChange(projectId) {
@@ -171,6 +179,7 @@ function onProjectChange(projectId) {
   if (!ownerManuallySet.value) form.owner_id = null
 }
 function onRequirementChange(requirementId) {
+  form.task_type = deriveTaskBranch({ requirementId, currentType: requirementId ? null : form.task_type })
   if (ownerManuallySet.value) return
   form.owner_id = null
 }
@@ -211,7 +220,12 @@ async function submitTask() {
   if (!form.project_id || !form.title.trim()) return ElMessage.warning('请选择项目并填写任务标题')
   saving.value = true
   try {
-    const payload = { ...form, requirement_id: form.requirement_id || null, owner_id: form.owner_id || null }
+    const payload = {
+      ...form,
+      requirement_id: form.requirement_id || null,
+      task_type: deriveTaskBranch({ requirementId: form.requirement_id, currentType: form.task_type }),
+      owner_id: form.owner_id || null
+    }
     if (editingId.value) await updateTask(editingId.value, payload); else await createTask(payload)
     dialogVisible.value = false; await loadData()
   } catch (error) {

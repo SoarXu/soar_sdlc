@@ -147,7 +147,7 @@ def test_failed_test_case_execution_creates_bug_with_case_iteration_and_can_edit
     data = bug.json()
     assert data["iteration_id"] == iteration_id
     assert data["test_case_id"] == case_id
-    assert data["owner_id"] is None
+    assert data["owner_id"] == 1
     assert "submit order" in data["reproduce_steps"]
     assert "HTTP 500" in data["reproduce_steps"]
     updated = client.patch(f"/api/v1/bugs/{data['id']}", json={"iteration_id": next_iteration.json()["id"]})

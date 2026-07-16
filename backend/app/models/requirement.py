@@ -18,7 +18,7 @@ class Requirement(Base):
     priority: Mapped[str] = mapped_column(String(32), default="3")
     owner_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     proposer_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
-    status: Mapped[str] = mapped_column(String(32), default="draft")
+    status: Mapped[str] = mapped_column(String(32), default="pending_assignment")
     lifecycle_phase: Mapped[str] = mapped_column(String(32), default="development")
     review_status: Mapped[str] = mapped_column(String(32), default="not_required")
     description: Mapped[str | None] = mapped_column(Text, nullable=True)

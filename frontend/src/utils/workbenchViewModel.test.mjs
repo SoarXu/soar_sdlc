@@ -2,11 +2,48 @@ import assert from 'node:assert/strict'
 
 import {
   buildWorkbenchViewModel,
+  filterWorkbenchItems,
   shouldShowWorkbenchWorkflowActions,
   workbenchInlineActions,
   workbenchItemActionGroup,
   workbenchMetaText
 } from './workbenchViewModel.js'
+
+{
+  const items = [
+    {
+      id: 1,
+      object_type: 'bug',
+      project_id: 10,
+      priority: '1',
+      status: 'fixing',
+      owner_id: 7,
+      handler_id: 8,
+      overdue_hours: 6
+    },
+    {
+      id: 2,
+      object_type: 'task',
+      project_id: 11,
+      priority: '3',
+      status: 'in_processing',
+      owner_id: 9,
+      handler_id: 9,
+      overdue_hours: 2
+    }
+  ]
+
+  assert.deepEqual(filterWorkbenchItems(items, {
+    projectIds: [10],
+    types: ['bug'],
+    priorities: ['1'],
+    statuses: ['fixing'],
+    ownerIds: [7],
+    handlerIds: [8],
+    minOverdueHours: 6
+  }).map((item) => item.id), [1])
+  assert.deepEqual(filterWorkbenchItems(items, { minOverdueHours: 7 }), [])
+}
 
 {
   const viewModel = buildWorkbenchViewModel({
@@ -50,6 +87,13 @@ import {
 }
 
 {
+  assert.equal(
+    workbenchMetaText('exception_center', { exception_label: 'Timed out', overdue_hours: 6 }),
+    'Timed out - overdue 6h'
+  )
+}
+
+{
   const failedCase = workbenchItemActionGroup('pending_handling', {
     object_type: 'test_case',
     last_execute_result: 'failed'
@@ -61,14 +105,13 @@ import {
   assert.equal(failedCase.primary.key, 'execute_case')
   assert.deepEqual(failedCase.secondary.map((item) => item.key), ['create_case_bug'])
   assert.equal(unassignedBug.primary, null)
-  assert.deepEqual(unassignedBug.secondary.map((item) => item.key), ['auto_assign_item'])
+  assert.deepEqual(unassignedBug.secondary, [])
 }
 
 {
   const actions = workbenchInlineActions('unassigned', { object_type: 'bug' })
 
-  assert.deepEqual(actions.map((item) => item.key), ['auto_assign_item'])
-  assert.deepEqual(actions.map((item) => item.label), ['自动分配'])
+  assert.deepEqual(actions, [])
 }
 
 {

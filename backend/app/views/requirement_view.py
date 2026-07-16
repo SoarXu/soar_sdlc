@@ -1,6 +1,11 @@
 from datetime import datetime
+from typing import Literal
+from pydantic import BaseModel, ConfigDict, Field
 
-from pydantic import BaseModel, ConfigDict
+from app.views.task_view import LinkedTaskSummary
+
+
+RequirementStatus = Literal["pending_assignment", "in_processing", "pending_confirmation", "completed", "canceled"]
 
 
 class RequirementBase(BaseModel):
@@ -12,7 +17,7 @@ class RequirementBase(BaseModel):
     priority: str = "3"
     owner_id: int | None = None
     proposer_id: int | None = None
-    status: str = "draft"
+    status: RequirementStatus = "pending_assignment"
     lifecycle_phase: str | None = None
     review_status: str = "not_required"
     description: str | None = None
@@ -33,22 +38,13 @@ class RequirementUpdate(BaseModel):
     priority: str | None = None
     owner_id: int | None = None
     proposer_id: int | None = None
-    status: str | None = None
+    status: RequirementStatus | None = None
     lifecycle_phase: str | None = None
     review_status: str | None = None
     description: str | None = None
     acceptance_criteria: str | None = None
     source_reviewed: bool | None = None
     updater_id: int | None = None
-
-
-class GenerateTaskRequest(BaseModel):
-    title: str | None = None
-    task_type: str | None = None
-    priority: str | None = None
-    owner_id: int | None = None
-    due_date: str | None = None
-    description: str | None = None
 
 
 class RequirementRead(RequirementBase):
@@ -60,6 +56,7 @@ class RequirementRead(RequirementBase):
     create_time: datetime | None = None
     update_time: datetime | None = None
     delete_time: datetime | None = None
+    linked_tasks: list[LinkedTaskSummary] = Field(default_factory=list)
 
 
 class RequirementImportError(BaseModel):

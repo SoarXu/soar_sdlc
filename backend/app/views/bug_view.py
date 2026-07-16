@@ -1,6 +1,12 @@
 from datetime import datetime
+from typing import Literal
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
+
+from app.views.task_view import LinkedTaskSummary
+
+
+BugStatus = Literal["pending_handling", "fixing", "pending_verification", "verified", "closed"]
 
 
 class BugBase(BaseModel):
@@ -19,7 +25,7 @@ class BugBase(BaseModel):
     reproduce_steps: str | None = None
     expected_result: str | None = None
     actual_result: str | None = None
-    status: str = "open"
+    status: BugStatus = "pending_handling"
     lifecycle_phase: str | None = None
     resolution: str | None = None
     resolve_time: datetime | None = None
@@ -51,7 +57,7 @@ class BugUpdate(BaseModel):
     reproduce_steps: str | None = None
     expected_result: str | None = None
     actual_result: str | None = None
-    status: str | None = None
+    status: BugStatus | None = None
     lifecycle_phase: str | None = None
     resolution: str | None = None
     verify_result: str | None = None
@@ -79,3 +85,4 @@ class BugRead(BugBase):
     create_time: datetime | None = None
     update_time: datetime | None = None
     delete_time: datetime | None = None
+    linked_tasks: list[LinkedTaskSummary] = Field(default_factory=list)

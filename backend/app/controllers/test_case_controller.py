@@ -96,7 +96,12 @@ def post_bug_from_test_case(
     ensure_test_case_execute_permission(db, test_case.project_id, current_user)
     if current_user and payload.reporter_id is None:
         payload.reporter_id = current_user.id
-    return create_bug_from_test_case(db, test_case_id, payload)
+    return create_bug_from_test_case(
+        db,
+        test_case_id,
+        payload,
+        actor_id=current_user.id if current_user else None,
+    )
 
 
 @router.delete("/{test_case_id}", status_code=status.HTTP_204_NO_CONTENT)

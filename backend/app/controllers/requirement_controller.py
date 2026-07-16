@@ -7,7 +7,6 @@ from app.models.user import User
 from app.services.project_permission_service import (
     ensure_audit_view_permission,
     ensure_authenticated,
-    ensure_work_item_action_permission,
     ensure_work_item_create_permission,
     ensure_work_item_delete_permission,
 )
@@ -20,17 +19,14 @@ from app.services.requirement_import_service import (
 from app.services.requirement_service import (
     create_requirement,
     delete_requirement,
-    generate_task_from_requirement,
     get_requirement,
     list_requirement_audit_logs,
     list_requirement_status_operations,
     list_requirements,
     update_requirement,
 )
-from app.services.assignment_service import assign_requirement_owner, batch_assign_requirement_owner
 from app.services.validation_case_service import requirement_validation_cases
 from app.views.requirement_view import (
-    GenerateTaskRequest,
     RequirementCreate,
     RequirementImportCommitRead,
     RequirementImportPreviewRead,
@@ -38,8 +34,7 @@ from app.views.requirement_view import (
     RequirementUpdate,
 )
 from app.views.audit_log_view import AuditLogRead
-from app.views.status_operation_view import AssignOwnerRequest, BatchAssignOwnerRead, BatchAssignOwnerRequest, StatusOperationRead
-from app.views.task_view import TaskRead
+from app.views.status_operation_view import StatusOperationRead
 from app.views.test_case_view import RequirementValidationCasesRead
 
 
@@ -107,16 +102,7 @@ def post_requirement(
     current_user: User | None = Depends(get_optional_current_user),
 ):
     ensure_work_item_create_permission(db, payload.project_id, current_user)
-    return create_requirement(db, payload)
-
-
-@router.post("/batch-assign", response_model=BatchAssignOwnerRead)
-def batch_assign_requirements(
-    payload: BatchAssignOwnerRequest,
-    db: Session = Depends(get_db),
-    current_user: User | None = Depends(get_optional_current_user),
-):
-    return batch_assign_requirement_owner(db, payload, actor=current_user)
+    return create_requirement(db, payload, actor_id=current_user.id if current_user else None)
 
 
 @router.patch("/{requirement_id}", response_model=RequirementRead)
@@ -127,16 +113,6 @@ def patch_requirement(
     current_user: User | None = Depends(get_optional_current_user),
 ):
     return update_requirement(db, requirement_id, payload, actor_id=current_user.id if current_user else None)
-
-
-@router.post("/{requirement_id}/assign", response_model=RequirementRead)
-def assign_requirement(
-    requirement_id: int,
-    payload: AssignOwnerRequest,
-    db: Session = Depends(get_db),
-    current_user: User | None = Depends(get_optional_current_user),
-):
-    return assign_requirement_owner(db, requirement_id, payload, actor=current_user)
 
 
 @router.get("/{requirement_id}/status-operations", response_model=list[StatusOperationRead])
@@ -171,15 +147,3 @@ def remove_requirement(
     ensure_work_item_delete_permission(db, requirement.project_id, current_user)
     delete_requirement(db, requirement_id, actor_id=current_user.id if current_user else None)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
-
-
-@router.post("/{requirement_id}/generate-task", response_model=TaskRead)
-def generate_task(
-    requirement_id: int,
-    payload: GenerateTaskRequest,
-    db: Session = Depends(get_db),
-    current_user: User | None = Depends(get_optional_current_user),
-):
-    requirement = get_requirement(db, requirement_id)
-    ensure_work_item_action_permission(db, requirement, current_user.id if current_user else None, "需求")
-    return generate_task_from_requirement(db, requirement_id, payload)

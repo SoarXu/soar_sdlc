@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import {
   actionNeedsDialog,
   actionNeedsTargetStatusSelection,
+  workflowCommandType,
   splitListActions,
   visibleDetailActions
 } from './workflowRuntimeActions.js'
@@ -72,6 +73,11 @@ function action(actionKey, overrides = {}) {
   ])
 
   assert.deepEqual(result.map((item) => item.action_key), ['visible'])
+}
+
+{
+  assert.equal(workflowCommandType(action('edit', { ui_config: { command_type: 'edit' } })), 'edit')
+  assert.equal(workflowCommandType(action('complete')), '')
 }
 
 console.log('workflowRuntimeActions tests passed')

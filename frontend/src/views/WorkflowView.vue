@@ -23,7 +23,11 @@
         </el-table-column>
         <el-table-column prop="description" label="说明" min-width="240" />
         <el-table-column label="状态" width="90">
-          <template #default="{ row }">{{ row.enabled ? '启用' : '停用' }}</template>
+          <template #default="{ row }">
+            <el-tag :type="lifecycleStatusMeta(row.lifecycle_status).type" effect="plain">
+              {{ lifecycleStatusMeta(row.lifecycle_status).label }}
+            </el-tag>
+          </template>
         </el-table-column>
         <el-table-column label="关联项目" min-width="260">
           <template #default="{ row }">
@@ -38,11 +42,25 @@
             </div>
           </template>
         </el-table-column>
-        <el-table-column v-if="canEditWorkflow" label="操作" width="100" fixed="right">
+        <el-table-column v-if="canEditWorkflow" label="操作" width="150" fixed="right">
           <template #default="{ row }">
-            <el-popconfirm title="确认停用该方案？" @confirm="removeConfig(row)">
-              <template #reference><el-button link type="danger">停用</el-button></template>
+            <el-button
+              v-if="row.lifecycle_status === 'draft'"
+              link
+              type="primary"
+              :loading="lifecycleBusyIds.has(row.id)"
+              @click="enableConfig(row)"
+            >启用</el-button>
+            <el-popconfirm
+              v-else-if="row.lifecycle_status === 'enabled'"
+              title="确认停用该方案？"
+              @confirm="disableConfig(row)"
+            >
+              <template #reference>
+                <el-button link type="danger" :loading="lifecycleBusyIds.has(row.id)">停用</el-button>
+              </template>
             </el-popconfirm>
+            <span v-else class="muted-text">仅保留历史</span>
           </template>
         </el-table-column>
       </el-table>
@@ -58,20 +76,75 @@
       <div class="page-actions">
         <el-button @click="backToAdmin">返回后台管理</el-button>
         <el-button @click="backToList">返回列表</el-button>
-        <el-button v-if="canEditWorkflow" type="primary" :loading="saving" @click="saveDetail">保存</el-button>
+        <el-button
+          v-if="editingId && form.lifecycle_status === 'draft' && canEditWorkflow"
+          :loading="lifecycleBusyIds.has(editingId)"
+          @click="enableConfig(currentConfig)"
+        >启用</el-button>
+        <el-popconfirm
+          v-if="editingId && form.lifecycle_status === 'enabled' && canEditWorkflow"
+          title="确认停用该方案？"
+          @confirm="disableConfig(currentConfig)"
+        >
+          <template #reference>
+            <el-button type="danger" plain :loading="lifecycleBusyIds.has(editingId)">停用</el-button>
+          </template>
+        </el-popconfirm>
+        <el-button v-if="canEditWorkflow" type="primary" :loading="saving" @click="saveDetail">
+          {{ editingId ? '保存' : '创建方案' }}
+        </el-button>
       </div>
     </div>
 
     <el-card shadow="never">
       <el-form label-position="top">
+        <template v-if="!editingId">
+          <el-form-item label="创建方式" required>
+            <el-segmented
+              v-model="form.creation_mode"
+              :options="[
+                { label: '创建空白方案', value: 'blank' },
+                { label: '从模板创建', value: 'template' }
+              ]"
+            />
+          </el-form-item>
+          <el-form-item v-if="form.creation_mode === 'template'" label="模板来源" required>
+            <el-select
+              v-model="form.template_source_value"
+              filterable
+              class="workflow-template-select"
+              placeholder="选择系统模板或已有工作流方案"
+            >
+              <el-option-group v-for="group in templateSourceGroups" :key="group.label" :label="group.label">
+                <el-option
+                  v-for="source in group.options"
+                  :key="source.value"
+                  :label="source.name"
+                  :value="source.value"
+                >
+                  <div class="workflow-template-option">
+                    <span class="workflow-template-option__copy">
+                      <strong>{{ source.name }}</strong>
+                      <small>{{ source.description || '暂无说明' }}</small>
+                    </span>
+                    <el-tag size="small" effect="plain">{{ source.source_type_label }}</el-tag>
+                    <span class="muted-text">{{ lifecycleStatusMeta(source.lifecycle_status).label }}</span>
+                  </div>
+                </el-option>
+              </el-option-group>
+            </el-select>
+          </el-form-item>
+        </template>
         <el-form-item label="方案名称" required>
           <el-input v-model="form.name" />
         </el-form-item>
         <el-form-item label="说明">
           <el-input v-model="form.description" type="textarea" :rows="2" />
         </el-form-item>
-        <el-form-item label="状态">
-          <el-switch v-model="form.enabled" active-text="启用" inactive-text="停用" />
+        <el-form-item v-if="editingId" label="方案状态">
+          <el-tag :type="lifecycleStatusMeta(form.lifecycle_status).type" effect="plain">
+            {{ lifecycleStatusMeta(form.lifecycle_status).label }}
+          </el-tag>
         </el-form-item>
       </el-form>
     </el-card>
@@ -136,7 +209,7 @@
       </el-table>
     </el-card>
 
-    <el-card v-if="canEditWorkflow" shadow="never" class="mt-16">
+    <el-card v-if="editingId && form.lifecycle_status === 'enabled' && canEditWorkflow" shadow="never" class="mt-16">
       <template #header>关联未配置工作流方案的项目</template>
       <div class="rule-project-toolbar">
         <span>未配置工作流方案的项目，可勾选后随方案一起保存。</span>
@@ -162,12 +235,14 @@
 
 <script setup>
 import { computed, onMounted, reactive, ref } from 'vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { useRouter } from 'vue-router'
 
 import {
   createAssigneeRuleConfig,
-  deleteAssigneeRuleConfig,
+  disableAssigneeRuleConfig,
+  enableAssigneeRuleConfig,
+  fetchAssigneeRuleConfigTemplateSources,
   fetchAssigneeRuleConfigs,
   updateAssigneeRuleConfig
 } from '../api/assigneeRuleConfigs'
@@ -177,11 +252,18 @@ import { fetchUsers } from '../api/users'
 import WorkflowDesigner from '../components/WorkflowDesigner.vue'
 import { showActionError } from '../utils/actionFeedback'
 import { canConfigureWorkflow, currentUserFromStorage } from '../utils/permissions'
+import {
+  buildWorkflowSchemeCreatePayload,
+  groupWorkflowTemplateSources,
+  lifecycleStatusMeta,
+  workflowSchemeActionErrorMessage
+} from '../utils/workflowSchemeCreation'
 
 const router = useRouter()
 const loading = ref(false)
 const saving = ref(false)
 const configs = ref([])
+const templateSources = ref([])
 const projects = ref([])
 const programs = ref([])
 const users = ref([])
@@ -191,8 +273,11 @@ const selectedProjectIds = ref([])
 const transferTargets = reactive({})
 const projectUpdatingIds = ref(new Set())
 const projectLinkTableRef = ref(null)
+const lifecycleBusyIds = ref(new Set())
 const currentUser = computed(() => currentUserFromStorage(users.value))
 const canEditWorkflow = computed(() => canConfigureWorkflow(currentUser.value))
+const currentConfig = computed(() => configs.value.find((item) => item.id === editingId.value) || null)
+const templateSourceGroups = computed(() => groupWorkflowTemplateSources(templateSources.value))
 const projectMemberRoleOptions = [
   { label: '产品/需求负责人', value: 'product_owner' },
   { label: '产品经理', value: 'product_manager' },
@@ -212,12 +297,14 @@ const form = reactive({
   test_case_tester_roles: '',
   test_run_owner_roles: '',
   bug_owner_roles: '',
-  enabled: true
+  lifecycle_status: 'draft',
+  creation_mode: 'blank',
+  template_source_value: ''
 })
 const unassignedProjects = computed(() => projects.value.filter((item) => !item.assignee_rule_config_id))
 const linkedProjects = computed(() => projectsForConfig(editingId.value))
 const transferConfigOptions = computed(() => {
-  return configs.value.filter((item) => item.enabled && item.id !== editingId.value)
+  return configs.value.filter((item) => item.lifecycle_status === 'enabled' && item.id !== editingId.value)
 })
 
 function backToAdmin() {
@@ -234,7 +321,9 @@ function resetForm() {
     test_case_tester_roles: '',
     test_run_owner_roles: '',
     bug_owner_roles: '',
-    enabled: true
+    lifecycle_status: 'draft',
+    creation_mode: 'blank',
+    template_source_value: ''
   })
   selectedProjectIds.value = []
   clearTransferTargets()
@@ -257,7 +346,9 @@ function openDetail(row) {
     test_case_tester_roles: '',
     test_run_owner_roles: '',
     bug_owner_roles: '',
-    enabled: row.enabled
+    lifecycle_status: row.lifecycle_status,
+    creation_mode: 'blank',
+    template_source_value: ''
   })
   viewMode.value = 'detail'
   setTimeout(syncProjectSelection)
@@ -271,13 +362,15 @@ function backToList() {
 async function loadData() {
   loading.value = true
   try {
-    const [configRes, projectRes, programRes, userRes] = await Promise.all([
+    const [configRes, templateSourceRes, projectRes, programRes, userRes] = await Promise.all([
       fetchAssigneeRuleConfigs(),
+      fetchAssigneeRuleConfigTemplateSources(),
       fetchProjects(),
       fetchPrograms(),
       fetchUsers()
     ])
     configs.value = configRes.data
+    templateSources.value = templateSourceRes.data
     projects.value = projectRes.data
     programs.value = programRes.data
     users.value = userRes.data
@@ -289,23 +382,22 @@ async function loadData() {
 
 async function saveDetail() {
   if (!form.name.trim()) return ElMessage.warning('请填写方案名称')
+  if (form.creation_mode === 'template' && !form.template_source_value) {
+    return ElMessage.warning('请选择模板来源')
+  }
   saving.value = true
   try {
-    const payload = {
-      ...form,
-      requirement_owner_roles: '',
-      task_owner_roles: '',
-      test_case_tester_roles: '',
-      test_run_owner_roles: '',
-      bug_owner_roles: ''
-    }
+    const payload = editingId.value
+      ? { name: form.name.trim(), description: form.description?.trim() || null }
+      : buildWorkflowSchemeCreatePayload(form)
     const response = editingId.value
       ? await updateAssigneeRuleConfig(editingId.value, payload)
       : await createAssigneeRuleConfig(payload)
     const configId = editingId.value || response.data.id
-    await bindSelectedProjects(configId)
+    if (form.lifecycle_status === 'enabled') await bindSelectedProjects(configId)
     await loadData()
     editingId.value = configId
+    form.lifecycle_status = response.data.lifecycle_status || form.lifecycle_status
     ElMessage.success('工作流方案已保存')
   } catch (error) {
     showActionError(error, '工作流方案保存失败')
@@ -314,14 +406,46 @@ async function saveDetail() {
   }
 }
 
-async function removeConfig(row) {
+async function enableConfig(row) {
+  if (!row || lifecycleBusyIds.value.has(row.id)) return
+  setLifecycleBusy(row.id, true)
   try {
-    await deleteAssigneeRuleConfig(row.id)
+    await enableAssigneeRuleConfig(row.id)
+    ElMessage.success('方案已启用')
+    await loadData()
+    if (editingId.value === row.id) form.lifecycle_status = 'enabled'
+  } catch (error) {
+    await ElMessageBox.alert(
+      workflowSchemeActionErrorMessage(error, '方案启用失败'),
+      '提示',
+      { type: 'warning' }
+    )
+  } finally {
+    setLifecycleBusy(row.id, false)
+  }
+}
+
+async function disableConfig(row) {
+  if (!row || lifecycleBusyIds.value.has(row.id)) return
+  setLifecycleBusy(row.id, true)
+  try {
+    await disableAssigneeRuleConfig(row.id)
     ElMessage.success('方案已停用')
     await loadData()
+    if (editingId.value === row.id) form.lifecycle_status = 'disabled'
   } catch (error) {
-    showActionError(error, '方案停用失败')
+    const message = workflowSchemeActionErrorMessage(error, '方案停用失败')
+    await ElMessageBox.alert(message, '提示', { type: 'warning' })
+  } finally {
+    setLifecycleBusy(row.id, false)
   }
+}
+
+function setLifecycleBusy(id, busy) {
+  const next = new Set(lifecycleBusyIds.value)
+  if (busy) next.add(id)
+  else next.delete(id)
+  lifecycleBusyIds.value = next
 }
 
 async function bindSelectedProjects(configId) {

@@ -559,6 +559,37 @@ body {
   gap: 6px;
 }
 
+.workflow-template-select {
+  width: min(100%, 620px);
+}
+
+.workflow-template-option {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 10px;
+  align-items: center;
+  width: 100%;
+}
+
+.workflow-template-option__copy {
+  display: grid;
+  min-width: 0;
+  line-height: 1.35;
+}
+
+.workflow-template-option__copy strong,
+.workflow-template-option__copy small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workflow-template-option__copy small {
+  color: #7a8797;
+  font-size: 12px;
+  font-weight: 400;
+}
+
 .detail-block-title {
   margin-bottom: 10px;
   font-weight: 600;

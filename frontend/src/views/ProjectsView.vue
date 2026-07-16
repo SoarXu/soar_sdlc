@@ -186,7 +186,9 @@ const canCreateProject = computed(() => isSystemAdmin(currentUser.value))
 const canDeleteProjectRow = computed(() => canDeleteProject(currentUser.value))
 const PROJECT_TREE_INDENT = 24
 const projectTree = computed(() => buildProjectTree(projects.value))
-const enabledWorkflowSchemes = computed(() => workflowSchemes.value.filter((item) => item.enabled))
+const enabledWorkflowSchemes = computed(() => (
+  workflowSchemes.value.filter((item) => item.lifecycle_status === 'enabled')
+))
 function collectDescendantIds(projectId) {
   const ids = new Set()
   const walk = (pid) => {

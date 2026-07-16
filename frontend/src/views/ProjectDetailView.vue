@@ -851,7 +851,9 @@ const canManageCurrentProject = computed(() => canManageProject(project.value, c
 const canCreateCurrentWorkItem = computed(() => !projectClosed.value && canCreateWorkItem(project.value, currentUser.value, projectMembers.value))
 const canDeleteCurrentWorkItem = computed(() => !projectClosed.value && canDeleteWorkItem(project.value, currentUser.value, projectMembers.value))
 const canManageCurrentTestCase = computed(() => canManageTestCase(project.value, currentUser.value, projectMembers.value))
-const enabledWorkflowSchemes = computed(() => assigneeRuleConfigs.value.filter((item) => item.enabled))
+const enabledWorkflowSchemes = computed(() => (
+  assigneeRuleConfigs.value.filter((item) => item.lifecycle_status === 'enabled')
+))
 const selectedWorkflowScheme = computed(() => enabledWorkflowSchemes.value.find((item) => item.id === settingsForm.assignee_rule_config_id) || null)
 const activeWorkflowScheme = computed(() => {
   const configId = project.value.assignee_rule_config_id
@@ -1126,7 +1128,9 @@ function defaultProjectMember(roles) {
 function activeAssigneeRuleConfig() {
   const configId = project.value.assignee_rule_config_id
   if (!configId) return null
-  return assigneeRuleConfigs.value.find((item) => item.id === configId && item.enabled) || null
+  return assigneeRuleConfigs.value.find((item) => (
+    item.id === configId && item.lifecycle_status === 'enabled'
+  )) || null
 }
 function resetProjectSettings() {
   settingsForm.assignee_rule_config_id = project.value.assignee_rule_config_id || null

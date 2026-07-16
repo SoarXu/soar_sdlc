@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict
 
@@ -13,8 +14,22 @@ class AssigneeRuleConfigBase(BaseModel):
     bug_owner_roles: str = ""
 
 
+class WorkflowTemplateSourceRef(BaseModel):
+    source_type: Literal["system", "scheme"]
+    source_id: str
+
+
+class WorkflowTemplateSourceRead(WorkflowTemplateSourceRef):
+    name: str
+    description: str | None = None
+    lifecycle_status: str | None = None
+
+
 class AssigneeRuleConfigCreate(AssigneeRuleConfigBase):
     model_config = ConfigDict(extra="forbid")
+
+    creation_mode: Literal["blank", "template"] = "blank"
+    template_source: WorkflowTemplateSourceRef | None = None
 
 
 class AssigneeRuleConfigUpdate(BaseModel):

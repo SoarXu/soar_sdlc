@@ -46,7 +46,7 @@ def test_create_and_list_workflow_definition(client: TestClient):
 
     listed = client.get(f"/api/v1/workflow-definitions?object_type=bug&scope_id={config_id}")
     assert listed.status_code == 200
-    assert [item["id"] for item in listed.json()] == [data["id"]]
+    assert data["id"] in {item["id"] for item in listed.json()}
 
 
 def test_graph_save_remaps_temporary_ids_and_preserves_ids_when_state_is_renamed(client: TestClient):

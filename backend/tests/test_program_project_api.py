@@ -10,19 +10,13 @@ from app.models.user import User
 
 
 def _configure_and_enable_scheme(client: TestClient, config_id: int) -> None:
+    definitions = client.get(
+        f"/api/v1/workflow-definitions?scope_type=assignee_rule_config&scope_id={config_id}"
+    ).json()
+    by_object_type = {item["object_type"]: item for item in definitions}
     for object_type in ("requirement", "task", "bug"):
-        definition = client.post(
-            "/api/v1/workflow-definitions",
-            json={
-                "name": f"{object_type}-scheme-{config_id}",
-                "object_type": object_type,
-                "scope_type": "assignee_rule_config",
-                "scope_id": config_id,
-            },
-        )
-        assert definition.status_code == 201
         assert client.post(
-            f"/api/v1/workflow-definitions/{definition.json()['id']}/apply-template"
+            f"/api/v1/workflow-definitions/{by_object_type[object_type]['id']}/apply-template"
         ).status_code == 200
     enabled = client.post(f"/api/v1/assignee-rule-configs/{config_id}/enable")
     assert enabled.status_code == 200, enabled.text

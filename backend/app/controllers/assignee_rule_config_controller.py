@@ -8,6 +8,7 @@ from app.views.assignee_rule_config_view import (
     AssigneeRuleConfigCreate,
     AssigneeRuleConfigRead,
     AssigneeRuleConfigUpdate,
+    WorkflowTemplateSourceRead,
 )
 
 
@@ -22,6 +23,11 @@ def get_configs(db: Session = Depends(get_db)):
 @router.get("/project-options", response_model=list[AssigneeRuleConfigRead])
 def get_project_options(db: Session = Depends(get_db)):
     return assignee_rule_config_service.list_project_options(db)
+
+
+@router.get("/template-sources", response_model=list[WorkflowTemplateSourceRead])
+def get_template_sources(db: Session = Depends(get_db)):
+    return assignee_rule_config_service.list_template_sources(db)
 
 
 @router.post("", response_model=AssigneeRuleConfigRead, status_code=status.HTTP_201_CREATED)

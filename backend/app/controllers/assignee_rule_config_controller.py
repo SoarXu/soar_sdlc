@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, Response, status
+from fastapi import APIRouter, Depends, status
 from sqlalchemy.orm import Session
 
 from app.core.auth_dependencies import require_system_admin
@@ -17,6 +17,11 @@ router = APIRouter()
 @router.get("", response_model=list[AssigneeRuleConfigRead])
 def get_configs(db: Session = Depends(get_db)):
     return assignee_rule_config_service.list_configs(db)
+
+
+@router.get("/project-options", response_model=list[AssigneeRuleConfigRead])
+def get_project_options(db: Session = Depends(get_db)):
+    return assignee_rule_config_service.list_project_options(db)
 
 
 @router.post("", response_model=AssigneeRuleConfigRead, status_code=status.HTTP_201_CREATED)
@@ -38,11 +43,19 @@ def update_config(
     return assignee_rule_config_service.update_config(db, config_id, payload)
 
 
-@router.delete("/{config_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_config(
+@router.post("/{config_id}/enable", response_model=AssigneeRuleConfigRead)
+def enable_config(
     config_id: int,
     db: Session = Depends(get_db),
     _admin=Depends(require_system_admin),
 ):
-    assignee_rule_config_service.delete_config(db, config_id)
-    return Response(status_code=status.HTTP_204_NO_CONTENT)
+    return assignee_rule_config_service.enable_config(db, config_id)
+
+
+@router.post("/{config_id}/disable", response_model=AssigneeRuleConfigRead)
+def disable_config(
+    config_id: int,
+    db: Session = Depends(get_db),
+    _admin=Depends(require_system_admin),
+):
+    return assignee_rule_config_service.disable_config(db, config_id)

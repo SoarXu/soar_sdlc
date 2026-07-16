@@ -9,6 +9,25 @@ from app.core.security import create_access_token
 from app.models.user import User
 
 
+def _configure_and_enable_scheme(client: TestClient, config_id: int) -> None:
+    for object_type in ("requirement", "task", "bug"):
+        definition = client.post(
+            "/api/v1/workflow-definitions",
+            json={
+                "name": f"{object_type}-scheme-{config_id}",
+                "object_type": object_type,
+                "scope_type": "assignee_rule_config",
+                "scope_id": config_id,
+            },
+        )
+        assert definition.status_code == 201
+        assert client.post(
+            f"/api/v1/workflow-definitions/{definition.json()['id']}/apply-template"
+        ).status_code == 200
+    enabled = client.post(f"/api/v1/assignee-rule-configs/{config_id}/enable")
+    assert enabled.status_code == 200, enabled.text
+
+
 def test_program_crud_persists_to_database(client: TestClient):
     name = f"项目集-{uuid4().hex[:8]}"
 
@@ -275,6 +294,7 @@ def test_project_workflow_scheme_does_not_drive_work_item_current_handlers(clien
             "bug_owner_roles": "product_owner",
         },
     ).json()
+    _configure_and_enable_scheme(client, config["id"])
     project = client.post(
         "/api/v1/projects",
         json={"name": f"Rule Defaults Project-{uuid4().hex[:8]}", "assignee_rule_config_id": config["id"]},

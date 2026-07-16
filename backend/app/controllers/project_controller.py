@@ -51,8 +51,11 @@ router = APIRouter()
 
 
 @router.get("", response_model=list[ProjectRead])
-def get_projects(db: Session = Depends(get_db)):
-    return list_projects(db)
+def get_projects(
+    assignee_rule_config_id: int | None = None,
+    db: Session = Depends(get_db),
+):
+    return list_projects(db, assignee_rule_config_id=assignee_rule_config_id)
 
 
 @router.get("/{project_id}", response_model=ProjectRead)

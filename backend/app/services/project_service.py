@@ -5,6 +5,7 @@ from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from app.models.audit_log import AuditLog
+from app.models.assignee_rule_config import AssigneeRuleConfig
 from app.models.bug import Bug
 from app.models.iteration import Iteration, IterationProject
 from app.models.program import Program
@@ -23,8 +24,11 @@ from app.views.status_operation_view import StatusOperationCreate
 from app.views.workflow_runtime_view import WorkflowTransitionExecuteRequest
 
 
-def list_projects(db: Session) -> list[Project]:
-    return db.query(Project).filter(Project.deleted == 0).order_by(Project.id.asc()).all()
+def list_projects(db: Session, assignee_rule_config_id: int | None = None) -> list[Project]:
+    query = db.query(Project).filter(Project.deleted == 0)
+    if assignee_rule_config_id is not None:
+        query = query.filter(Project.assignee_rule_config_id == assignee_rule_config_id)
+    return query.order_by(Project.id.asc()).all()
 
 
 def list_project_iterations_page(
@@ -172,6 +176,7 @@ def get_project(db: Session, project_id: int) -> Project:
 
 def create_project(db: Session, payload: ProjectCreate) -> Project:
     data = payload.model_dump()
+    _validate_workflow_scheme_binding(db, data.get("assignee_rule_config_id"))
     parent = None
     if data.get("parent_id"):
         parent = _get_active_project(db, data["parent_id"])
@@ -193,6 +198,8 @@ def update_project(db: Session, project_id: int, payload: ProjectUpdate, actor_i
     data.pop("lifecycle_phase", None)
     data.pop("maintenance_start_time", None)
     data.pop("maintenance_remark", None)
+    if "assignee_rule_config_id" in data:
+        _validate_workflow_scheme_binding(db, data["assignee_rule_config_id"])
     if data.get("parent_id") == project_id:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="项目不能选择自身作为上级项目")
     if data.get("parent_id"):
@@ -219,6 +226,19 @@ def update_project(db: Session, project_id: int, payload: ProjectUpdate, actor_i
     db.commit()
     db.refresh(project)
     return project
+
+
+def _validate_workflow_scheme_binding(db: Session, config_id: int | None) -> None:
+    if config_id is None:
+        return
+    config = db.query(AssigneeRuleConfig).filter(AssigneeRuleConfig.id == config_id).first()
+    if not config:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Workflow scheme not found")
+    if config.lifecycle_status != "enabled":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Only enabled workflow schemes can be assigned to projects",
+        )
 
 
 def list_project_audit_logs(db: Session, project_id: int) -> list[dict]:

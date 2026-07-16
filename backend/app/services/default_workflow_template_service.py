@@ -3,7 +3,11 @@ from datetime import datetime
 from sqlalchemy.orm import Session
 
 from app.models.workflow_definition import WorkflowDefinition, WorkflowState, WorkflowTransition
-from app.views.workflow_definition_view import WorkflowGraphSave, WorkflowStateBase, WorkflowTransitionBase
+from app.views.workflow_definition_view import (
+    WorkflowTemplateGraph as WorkflowGraphSave,
+    WorkflowTemplateState as WorkflowStateBase,
+    WorkflowTemplateTransition as WorkflowTransitionBase,
+)
 
 
 def ensure_default_workflow_templates(db: Session) -> list[WorkflowDefinition]:
@@ -32,7 +36,7 @@ def ensure_default_workflow_templates(db: Session) -> list[WorkflowDefinition]:
             )
             db.add(definition)
             db.flush()
-            _replace_graph(db, definition.id, spec["graph"])
+            _reconcile_graph(db, definition, spec["graph"])
         else:
             changed = False
             if definition.name != spec["name"]:
@@ -48,8 +52,7 @@ def ensure_default_workflow_templates(db: Session) -> list[WorkflowDefinition]:
                 definition.scope_type = "system"
                 definition.scope_id = None
                 changed = True
-            if not _graph_matches(db, definition.id, spec["graph"]):
-                _replace_graph(db, definition.id, spec["graph"])
+            if _reconcile_graph(db, definition, spec["graph"]):
                 definition.version = (definition.version or 1) + 1
                 changed = True
             if changed:
@@ -86,73 +89,91 @@ def default_template_summaries() -> list[dict]:
     ]
 
 
-def _graph_matches(db: Session, definition_id: int, graph: WorkflowGraphSave) -> bool:
-    current_states = (
-        db.query(WorkflowState)
-        .filter(WorkflowState.definition_id == definition_id)
-        .order_by(WorkflowState.sort_order.asc(), WorkflowState.id.asc())
-        .all()
-    )
-    current_transitions = (
-        db.query(WorkflowTransition)
-        .filter(WorkflowTransition.definition_id == definition_id)
-        .order_by(WorkflowTransition.sort_order.asc(), WorkflowTransition.id.asc())
-        .all()
-    )
-    if len(current_states) != len(graph.states) or len(current_transitions) != len(graph.transitions):
-        return False
-    state_signature = [
-        (item.status_key, item.status_name, item.category, item.color, item.x, item.y, item.sort_order, item.enabled)
-        for item in current_states
-    ]
-    target_state_signature = [
-        (item.status_key, item.status_name, item.category, item.color, item.x, item.y, item.sort_order, item.enabled)
-        for item in graph.states
-    ]
-    transition_signature = [
-        (
-            item.action_key,
-            item.action_name,
-            item.from_status,
-            item.to_status,
-            item.allowed_roles,
-            item.handler_rule,
-            item.condition_config,
-            item.validator_config,
-            item.ui_config,
-            item.form_config,
-            item.enabled,
-            item.sort_order,
+def _reconcile_graph(db: Session, definition: WorkflowDefinition, graph: WorkflowGraphSave) -> bool:
+    changed = False
+    existing_states = {
+        item.status_key: item
+        for item in db.query(WorkflowState).filter(WorkflowState.definition_id == definition.id).all()
+    }
+    state_by_key: dict[str, WorkflowState] = {}
+    for item in graph.states:
+        state = existing_states.get(item.status_key)
+        data = item.model_dump(exclude={"status_key"})
+        if not state:
+            state = WorkflowState(definition_id=definition.id, status_key=item.status_key, **data)
+            db.add(state)
+            db.flush()
+            changed = True
+        else:
+            for field, value in data.items():
+                if getattr(state, field) != value:
+                    setattr(state, field, value)
+                    changed = True
+        state_by_key[item.status_key] = state
+
+    for status_key, state in existing_states.items():
+        if status_key not in state_by_key and state.enabled:
+            state.enabled = False
+            changed = True
+
+    existing_transitions = {
+        (item.action_key, item.from_status, item.to_status): item
+        for item in db.query(WorkflowTransition).filter(WorkflowTransition.definition_id == definition.id).all()
+    }
+    kept_transition_ids: set[int] = set()
+    for item in graph.transitions:
+        key = (item.action_key, item.from_status, item.to_status)
+        transition = existing_transitions.get(key)
+        condition_config = _template_condition_config(item.condition_config, state_by_key)
+        data = item.model_dump(exclude={"from_status", "to_status", "condition_config"})
+        data.update(
+            {
+                "from_status": item.from_status,
+                "to_status": item.to_status,
+                "from_state_id": state_by_key[item.from_status].id,
+                "to_state_id": state_by_key[item.to_status].id,
+                "condition_config": condition_config,
+            }
         )
-        for item in current_transitions
-    ]
-    target_transition_signature = [
-        (
-            item.action_key,
-            item.action_name,
-            item.from_status,
-            item.to_status,
-            item.allowed_roles,
-            item.handler_rule,
-            item.condition_config,
-            item.validator_config,
-            item.ui_config,
-            item.form_config,
-            item.enabled,
-            item.sort_order,
+        if not transition:
+            transition = WorkflowTransition(definition_id=definition.id, **data)
+            db.add(transition)
+            db.flush()
+            changed = True
+        else:
+            for field, value in data.items():
+                if getattr(transition, field) != value:
+                    setattr(transition, field, value)
+                    changed = True
+        kept_transition_ids.add(transition.id)
+
+    omitted_transition_ids = set(item.id for item in existing_transitions.values()) - kept_transition_ids
+    if omitted_transition_ids:
+        db.query(WorkflowTransition).filter(WorkflowTransition.id.in_(omitted_transition_ids)).delete(
+            synchronize_session=False
         )
-        for item in graph.transitions
-    ]
-    return state_signature == target_state_signature and transition_signature == target_transition_signature
+        changed = True
+
+    initial = next((item for item in graph.states if item.category == "start" and item.enabled), None)
+    initial_state_id = state_by_key[initial.status_key].id if initial else None
+    if definition.initial_state_id != initial_state_id:
+        definition.initial_state_id = initial_state_id
+        changed = True
+    return changed
 
 
-def _replace_graph(db: Session, definition_id: int, graph: WorkflowGraphSave) -> None:
-    db.query(WorkflowTransition).filter(WorkflowTransition.definition_id == definition_id).delete(synchronize_session=False)
-    db.query(WorkflowState).filter(WorkflowState.definition_id == definition_id).delete(synchronize_session=False)
-    for state in graph.states:
-        db.add(WorkflowState(definition_id=definition_id, **state.model_dump()))
-    for transition in graph.transitions:
-        db.add(WorkflowTransition(definition_id=definition_id, **transition.model_dump()))
+def _template_condition_config(config: dict | list | None, state_by_key: dict[str, WorkflowState]):
+    if not config or not isinstance(config, dict):
+        return config
+    result = dict(config)
+    if isinstance(result.get("routes"), dict):
+        result["routes"] = {key: state_by_key[value].id for key, value in result["routes"].items()}
+    owner_targets = result.pop("target_status_by_owner", None)
+    if owner_targets is not None:
+        result["target_state_id_by_owner"] = {
+            key: state_by_key[value].id for key, value in owner_targets.items()
+        }
+    return result
 
 
 def _default_template_specs() -> list[dict]:

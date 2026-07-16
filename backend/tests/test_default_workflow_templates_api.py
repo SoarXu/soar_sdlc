@@ -74,6 +74,21 @@ def _create_project_with_config(client: TestClient) -> int:
     return project.json()["id"]
 
 
+def test_default_template_reconciliation_preserves_state_and_transition_ids(client: TestClient):
+    first_list = client.get("/api/v1/workflow-definitions?object_type=requirement&scope_type=system").json()
+    definition = next(item for item in first_list if item["is_default_template"] is True)
+    first_graph = client.get(f"/api/v1/workflow-definitions/{definition['id']}").json()
+
+    client.get("/api/v1/workflow-definitions?object_type=requirement&scope_type=system")
+    second_graph = client.get(f"/api/v1/workflow-definitions/{definition['id']}").json()
+
+    assert [item["id"] for item in second_graph["states"]] == [item["id"] for item in first_graph["states"]]
+    assert [item["id"] for item in second_graph["transitions"]] == [
+        item["id"] for item in first_graph["transitions"]
+    ]
+    assert second_graph["definition"]["initial_state_id"] == first_graph["definition"]["initial_state_id"]
+
+
 def _set_requirement_status(requirement_id: int, status: str) -> None:
     db = SessionLocal()
     try:

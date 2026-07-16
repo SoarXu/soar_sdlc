@@ -1,18 +1,23 @@
+from copy import deepcopy
 from datetime import datetime
+from uuid import uuid4
 
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 
 from app.models.assignee_rule_config import AssigneeRuleConfig
+from app.models.bug import Bug
 from app.models.handler_transition_rule import HandlerTransitionRule
+from app.models.requirement import Requirement
 from app.models.role import Role
+from app.models.status_operation import StatusOperationLog
+from app.models.task import Task
 from app.models.workflow_definition import WorkflowDefinition, WorkflowState, WorkflowTransition
 from app.services.default_workflow_template_service import ensure_default_workflow_templates, graph_for_object_type
 from app.views.workflow_definition_view import (
     WorkflowDefinitionCreate,
     WorkflowDefinitionUpdate,
     WorkflowGraphSave,
-    WorkflowTransitionBase,
 )
 
 
@@ -41,7 +46,7 @@ UI_CONFIG_KEYS = {
 }
 CONDITION_CONFIG_KEYS = {
     "task_types", "field", "routes", "route_dictionary", "routing_mode", "allow_override_roles",
-    "target_status_by_owner",
+    "target_state_id_by_owner", "target_status_by_owner",
 }
 FORM_CONFIG_KEYS = {"title", "submit_text", "fields", "allow_manual_owner"}
 FORM_FIELD_KEYS = {
@@ -120,19 +125,34 @@ def get_graph(db: Session, definition_id: int) -> dict:
 
 def save_graph(db: Session, definition_id: int, payload: WorkflowGraphSave) -> dict:
     definition = _get_definition(db, definition_id)
-    _validate_graph(db, definition.object_type, payload)
-    _replace_graph(db, definition, payload)
-    _sync_handler_rules(db, definition, payload.transitions)
+    _save_graph(db, definition, payload)
+    return _graph_response(db, definition)
+
+
+def _save_graph(
+    db: Session,
+    definition: WorkflowDefinition,
+    payload: WorkflowGraphSave,
+    internal_keys: dict[int, str] | None = None,
+) -> None:
+    _validate_graph(db, definition, payload)
+    persisted_transitions = _persist_graph(db, definition, payload, internal_keys or {})
+    _sync_handler_rules(db, definition, persisted_transitions)
     definition.version = (definition.version or 1) + 1
     definition.update_time = datetime.now()
     db.commit()
     db.refresh(definition)
-    return _graph_response(db, definition)
 
 
 def apply_template(db: Session, definition_id: int) -> dict:
     definition = _get_definition(db, definition_id)
-    return save_graph(db, definition_id, graph_for_object_type(definition.object_type))
+    payload, internal_keys = _template_graph_payload(
+        db,
+        definition,
+        graph_for_object_type(definition.object_type),
+    )
+    _save_graph(db, definition, payload, internal_keys)
+    return _graph_response(db, definition)
 
 
 def _get_definition(db: Session, definition_id: int) -> WorkflowDefinition:
@@ -155,27 +175,39 @@ def _validate_definition_payload(db: Session, data: dict) -> None:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Assignee rule config not found")
 
 
-def _validate_graph(db: Session, object_type: str, payload: WorkflowGraphSave) -> None:
-    if object_type not in OBJECT_TYPES:
+def _validate_graph(db: Session, definition: WorkflowDefinition, payload: WorkflowGraphSave) -> None:
+    if definition.object_type not in OBJECT_TYPES:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Unknown workflow object type")
-    status_keys: set[str] = set()
+    state_ids: set[int] = set()
     for state in payload.states:
         if state.category not in STATE_CATEGORIES:
             raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Unknown state category")
-        if state.status_key in status_keys:
-            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Duplicate status key")
-        status_keys.add(state.status_key)
-    transition_keys: set[tuple[str, str, str]] = set()
+        if state.id in state_ids:
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Duplicate state id")
+        state_ids.add(state.id)
+    if payload.states and payload.initial_state_id is None:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Initial state is required")
+    if payload.initial_state_id is not None and payload.initial_state_id not in state_ids:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Initial state is not in this graph")
+    initial = next((item for item in payload.states if item.id == payload.initial_state_id), None)
+    if initial and not initial.enabled:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Initial state must be enabled")
+    transition_ids: set[int] = set()
+    transition_keys: set[tuple[str, int, int]] = set()
     for transition in payload.transitions:
-        if transition.from_status not in status_keys or transition.to_status not in status_keys:
+        if transition.id is not None and transition.id > 0:
+            if transition.id in transition_ids:
+                raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Duplicate transition id")
+            transition_ids.add(transition.id)
+        if transition.from_state_id not in state_ids or transition.to_state_id not in state_ids:
             raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Transition references unknown state")
-        key = (transition.action_key, transition.from_status, transition.to_status)
+        key = (transition.action_key, transition.from_state_id, transition.to_state_id)
         if key in transition_keys:
             raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Duplicate transition")
         transition_keys.add(key)
         _validate_roles(db, transition.allowed_roles)
         _validate_handler_rule(db, transition.handler_rule)
-        _validate_condition_config(db, transition.condition_config, status_keys)
+        _validate_condition_config(db, transition.condition_config, state_ids)
         _validate_form_config(transition.form_config)
         _validate_typed_config(transition.validator_config, VALIDATOR_TYPES, "validator")
         _validate_ui_config(transition.ui_config)
@@ -214,7 +246,7 @@ def _validate_roles(db: Session, value) -> None:
         )
 
 
-def _validate_condition_config(db: Session, config: dict | list | None, status_keys: set[str]) -> None:
+def _validate_condition_config(db: Session, config: dict | list | None, state_ids: set[int]) -> None:
     if not config:
         return
     if not isinstance(config, dict) or set(config) - CONDITION_CONFIG_KEYS:
@@ -228,10 +260,10 @@ def _validate_condition_config(db: Session, config: dict | list | None, status_k
     if "routes" in config:
         if not isinstance(routes, dict) or not routes or not config.get("field"):
             raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Condition routes and field are required")
-        if set(routes.values()) - status_keys:
+        if set(routes.values()) - state_ids:
             raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Condition route references unknown state")
-    owner_targets = config.get("target_status_by_owner") or {}
-    if not isinstance(owner_targets, dict) or set(owner_targets.values()) - status_keys:
+    owner_targets = config.get("target_state_id_by_owner") or config.get("target_status_by_owner") or {}
+    if not isinstance(owner_targets, dict) or set(owner_targets.values()) - state_ids:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Owner route references unknown state")
     if config.get("routing_mode") and config["routing_mode"] not in ROUTING_MODES:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Unknown routing mode")
@@ -285,16 +317,194 @@ def _validate_automation_config(config: dict | list | None, label: str) -> None:
             raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=f"Invalid {label} notification")
 
 
-def _replace_graph(db: Session, definition: WorkflowDefinition, payload: WorkflowGraphSave) -> None:
-    db.query(WorkflowTransition).filter(WorkflowTransition.definition_id == definition.id).delete(synchronize_session=False)
-    db.query(WorkflowState).filter(WorkflowState.definition_id == definition.id).delete(synchronize_session=False)
-    for state in payload.states:
-        db.add(WorkflowState(definition_id=definition.id, **state.model_dump()))
-    for transition in payload.transitions:
-        db.add(WorkflowTransition(definition_id=definition.id, **transition.model_dump()))
+def _persist_graph(
+    db: Session,
+    definition: WorkflowDefinition,
+    payload: WorkflowGraphSave,
+    internal_keys: dict[int, str],
+) -> list[WorkflowTransition]:
+    existing_states = {
+        item.id: item
+        for item in db.query(WorkflowState).filter(WorkflowState.definition_id == definition.id).all()
+    }
+    submitted_positive_state_ids = {item.id for item in payload.states if item.id > 0}
+    unknown_state_ids = submitted_positive_state_ids - set(existing_states)
+    if unknown_state_ids:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"State does not belong to this definition: {min(unknown_state_ids)}",
+        )
+
+    state_id_map: dict[int, int] = {}
+    persisted_states: dict[int, WorkflowState] = {}
+    for item in payload.states:
+        data = item.model_dump(exclude={"id"})
+        if item.id > 0:
+            state = existing_states[item.id]
+            for field, value in data.items():
+                setattr(state, field, value)
+        else:
+            state = WorkflowState(
+                definition_id=definition.id,
+                status_key=f"pending_{uuid4().hex}",
+                **data,
+            )
+            db.add(state)
+            db.flush()
+            state.status_key = internal_keys.get(item.id) or f"state_{state.id}"
+        state_id_map[item.id] = state.id
+        persisted_states[state.id] = state
+    db.flush()
+
+    initial_state_id = (
+        state_id_map[payload.initial_state_id]
+        if payload.initial_state_id is not None
+        else None
+    )
+    if initial_state_id is not None and not persisted_states[initial_state_id].enabled:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Initial state must be enabled")
+
+    existing_transitions = {
+        item.id: item
+        for item in db.query(WorkflowTransition).filter(WorkflowTransition.definition_id == definition.id).all()
+    }
+    submitted_transition_ids: set[int] = set()
+    persisted_transitions: list[WorkflowTransition] = []
+    for item in payload.transitions:
+        from_state_id = state_id_map[item.from_state_id]
+        to_state_id = state_id_map[item.to_state_id]
+        data = item.model_dump(exclude={"id", "from_state_id", "to_state_id"})
+        data["condition_config"] = _remap_condition_state_ids(data.get("condition_config"), state_id_map)
+        if item.id is not None and item.id > 0:
+            transition = existing_transitions.get(item.id)
+            if not transition:
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    detail=f"Transition does not belong to this definition: {item.id}",
+                )
+            submitted_transition_ids.add(item.id)
+            for field, value in data.items():
+                setattr(transition, field, value)
+        else:
+            transition = WorkflowTransition(definition_id=definition.id, **data)
+            db.add(transition)
+        transition.from_state_id = from_state_id
+        transition.to_state_id = to_state_id
+        transition.from_status = persisted_states[from_state_id].status_key
+        transition.to_status = persisted_states[to_state_id].status_key
+        persisted_transitions.append(transition)
+    db.flush()
+
+    omitted_transition_ids = set(existing_transitions) - submitted_transition_ids
+    if omitted_transition_ids:
+        db.query(WorkflowTransition).filter(WorkflowTransition.id.in_(omitted_transition_ids)).delete(
+            synchronize_session=False
+        )
+
+    definition.initial_state_id = initial_state_id
+    db.flush()
+    for state_id in set(existing_states) - submitted_positive_state_ids:
+        state = existing_states[state_id]
+        if _state_is_referenced(db, state_id):
+            state.enabled = False
+        else:
+            db.delete(state)
+    db.flush()
+    return persisted_transitions
 
 
-def _sync_handler_rules(db: Session, definition: WorkflowDefinition, transitions: list[WorkflowTransitionBase]) -> None:
+def _state_is_referenced(db: Session, state_id: int) -> bool:
+    reference_queries = (
+        db.query(Requirement.id).filter(Requirement.current_state_id == state_id),
+        db.query(Task.id).filter(Task.current_state_id == state_id),
+        db.query(Bug.id).filter(Bug.current_state_id == state_id),
+        db.query(StatusOperationLog.id).filter(
+            (StatusOperationLog.from_state_id == state_id) | (StatusOperationLog.to_state_id == state_id)
+        ),
+        db.query(WorkflowDefinition.id).filter(WorkflowDefinition.initial_state_id == state_id),
+        db.query(WorkflowTransition.id).filter(
+            (WorkflowTransition.from_state_id == state_id) | (WorkflowTransition.to_state_id == state_id)
+        ),
+    )
+    return any(query.first() is not None for query in reference_queries)
+
+
+def _remap_condition_state_ids(config: dict | list | None, state_id_map: dict[int, int]):
+    if not config or not isinstance(config, dict):
+        return config
+    remapped = deepcopy(config)
+    if isinstance(remapped.get("routes"), dict):
+        remapped["routes"] = {
+            key: state_id_map.get(value, value)
+            for key, value in remapped["routes"].items()
+        }
+    owner_targets = remapped.pop("target_status_by_owner", None)
+    if owner_targets is not None:
+        remapped["target_state_id_by_owner"] = owner_targets
+    if isinstance(remapped.get("target_state_id_by_owner"), dict):
+        remapped["target_state_id_by_owner"] = {
+            key: state_id_map.get(value, value)
+            for key, value in remapped["target_state_id_by_owner"].items()
+        }
+    return remapped
+
+
+def _template_graph_payload(db: Session, definition: WorkflowDefinition, template) -> tuple[WorkflowGraphSave, dict[int, str]]:
+    existing_states = {
+        item.status_key: item
+        for item in db.query(WorkflowState).filter(WorkflowState.definition_id == definition.id).all()
+    }
+    key_to_input_id: dict[str, int] = {}
+    internal_keys: dict[int, str] = {}
+    states = []
+    next_temp_id = -1
+    for item in template.states:
+        existing = existing_states.get(item.status_key)
+        input_id = existing.id if existing else next_temp_id
+        if not existing:
+            next_temp_id -= 1
+            internal_keys[input_id] = item.status_key
+        key_to_input_id[item.status_key] = input_id
+        states.append({"id": input_id, **item.model_dump(exclude={"status_key"})})
+
+    existing_transitions = {
+        (item.action_key, item.from_status, item.to_status): item
+        for item in db.query(WorkflowTransition).filter(WorkflowTransition.definition_id == definition.id).all()
+    }
+    transitions = []
+    for item in template.transitions:
+        existing = existing_transitions.get((item.action_key, item.from_status, item.to_status))
+        data = item.model_dump(exclude={"from_status", "to_status"})
+        data["id"] = existing.id if existing else None
+        data["from_state_id"] = key_to_input_id[item.from_status]
+        data["to_state_id"] = key_to_input_id[item.to_status]
+        condition = deepcopy(data.get("condition_config"))
+        if isinstance(condition, dict):
+            if isinstance(condition.get("routes"), dict):
+                condition["routes"] = {
+                    key: key_to_input_id[value]
+                    for key, value in condition["routes"].items()
+                }
+            owner_targets = condition.pop("target_status_by_owner", None)
+            if owner_targets is not None:
+                condition["target_state_id_by_owner"] = {
+                    key: key_to_input_id[value]
+                    for key, value in owner_targets.items()
+                }
+        data["condition_config"] = condition
+        transitions.append(data)
+    initial = next((item for item in template.states if item.category == "start"), None)
+    return (
+        WorkflowGraphSave(
+            initial_state_id=key_to_input_id[initial.status_key] if initial else None,
+            states=states,
+            transitions=transitions,
+        ),
+        internal_keys,
+    )
+
+
+def _sync_handler_rules(db: Session, definition: WorkflowDefinition, transitions: list[WorkflowTransition]) -> None:
     if definition.scope_type != "assignee_rule_config" or not definition.scope_id:
         return
     for transition in transitions:

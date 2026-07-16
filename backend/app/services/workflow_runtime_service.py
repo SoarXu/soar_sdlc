@@ -19,7 +19,7 @@ from app.models.test_case import TestCase
 from app.models.test_case_execution import TestCaseExecutionLog
 from app.models.test_run import TestRun, TestRunCase
 from app.models.user import User
-from app.models.workflow_definition import WorkflowDefinition, WorkflowTransition
+from app.models.workflow_definition import WorkflowDefinition, WorkflowState, WorkflowTransition
 from app.services.default_workflow_template_service import ensure_default_workflow_templates
 from app.services.bug_type_service import bug_type_options, get_enabled_bug_type
 from app.services.handler_transition_rule_service import _last_bug_resolver_id, _split_csv
@@ -549,11 +549,22 @@ def _resolve_target_status(
     resolved_target_status = transition.to_status
     condition_config = transition.condition_config or {}
     owner_targets = condition_config.get("target_status_by_owner") or {}
+    owner_state_targets = condition_config.get("target_state_id_by_owner") or {}
+    if owner_state_targets:
+        owner_targets = {
+            key: _status_key_for_state(db, transition.definition_id, state_id)
+            for key, state_id in owner_state_targets.items()
+        }
     if owner_targets:
         target_owner_id = request.next_owner_id if request.next_owner_id is not None else getattr(item, "owner_id", None)
         default_target_status = owner_targets.get("with_owner" if target_owner_id else "without_owner", transition.to_status)
         resolved_target_status = default_target_status
     routes = condition_config.get("routes") or {}
+    if routes and all(isinstance(value, int) for value in routes.values()):
+        routes = {
+            key: _status_key_for_state(db, transition.definition_id, state_id)
+            for key, state_id in routes.items()
+        }
     route_dictionary = condition_config.get("route_dictionary")
     if routes or route_dictionary:
         field_name = condition_config.get("field")
@@ -597,6 +608,20 @@ def _resolve_target_status(
                     raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Target status override reason is required")
             resolved_target_status = selected_target_status
     return default_target_status, resolved_target_status
+
+
+def _status_key_for_state(db: Session, definition_id: int, state_id: int) -> str:
+    state = (
+        db.query(WorkflowState)
+        .filter(WorkflowState.id == state_id, WorkflowState.definition_id == definition_id)
+        .first()
+    )
+    if not state:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Workflow condition references unknown state: {state_id}",
+        )
+    return state.status_key
 
 
 def _apply_domain_payload(

@@ -93,6 +93,22 @@ def _snapshot_table_ids() -> dict[str, set[int]]:
 def _cleanup_created_rows(before: dict[str, set[int]]) -> None:
     db = SessionLocal()
     try:
+        created_definition_ids = _created_ids(db, before, "workflow_definitions")
+        if created_definition_ids:
+            db.execute(
+                text("update workflow_definitions set initial_state_id = null where id in :ids"),
+                {"ids": tuple(created_definition_ids)},
+            )
+        for table in ("requirements", "tasks", "bugs"):
+            created_ids = _created_ids(db, before, table)
+            if created_ids:
+                db.execute(
+                    text(
+                        f"update {table} set workflow_definition_id = null, current_state_id = null "
+                        "where id in :ids"
+                    ),
+                    {"ids": tuple(created_ids)},
+                )
         for table in TRACKED_TABLES:
             if table not in before or not _table_exists(db, table):
                 continue
@@ -103,6 +119,12 @@ def _cleanup_created_rows(before: dict[str, set[int]]) -> None:
         db.commit()
     finally:
         db.close()
+
+
+def _created_ids(db, before: dict[str, set[int]], table: str) -> list[int]:
+    if table not in before or not _table_exists(db, table):
+        return []
+    return [row.id for row in db.execute(text(f"select id from {table}")).all() if row.id not in before[table]]
 
 
 def _table_exists(db, table: str) -> bool:

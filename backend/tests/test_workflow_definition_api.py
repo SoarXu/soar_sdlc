@@ -1,7 +1,11 @@
+from datetime import datetime
 from uuid import uuid4
 
 import pytest
 from fastapi.testclient import TestClient
+
+from app.db.session import SessionLocal
+from app.models.status_operation import StatusOperationLog
 
 
 def _create_config(client: TestClient) -> int:
@@ -45,6 +49,168 @@ def test_create_and_list_workflow_definition(client: TestClient):
     assert [item["id"] for item in listed.json()] == [data["id"]]
 
 
+def test_graph_save_remaps_temporary_ids_and_preserves_ids_when_state_is_renamed(client: TestClient):
+    config_id = _create_config(client)
+    definition = client.post(
+        "/api/v1/workflow-definitions",
+        json={
+            "name": f"ID graph workflow {uuid4().hex[:8]}",
+            "object_type": "requirement",
+            "scope_type": "assignee_rule_config",
+            "scope_id": config_id,
+        },
+    ).json()
+    first_payload = {
+        "initial_state_id": -1,
+        "states": [
+            {"id": -1, "status_name": "待处理", "category": "start", "x": 100, "y": 80},
+            {"id": -2, "status_name": "处理中", "category": "normal", "x": 320, "y": 80},
+        ],
+        "transitions": [
+            {
+                "action_key": "start",
+                "action_name": "开始处理",
+                "from_state_id": -1,
+                "to_state_id": -2,
+            }
+        ],
+    }
+
+    first = client.put(f"/api/v1/workflow-definitions/{definition['id']}/graph", json=first_payload)
+
+    assert first.status_code == 200
+    first_graph = first.json()
+    first_states = {item["status_name"]: item for item in first_graph["states"]}
+    start_id = first_states["待处理"]["id"]
+    active_id = first_states["处理中"]["id"]
+    transition_id = first_graph["transitions"][0]["id"]
+    assert start_id > 0 and active_id > 0
+    assert first_graph["definition"]["initial_state_id"] == start_id
+    assert first_graph["transitions"][0]["from_state_id"] == start_id
+    assert first_graph["transitions"][0]["to_state_id"] == active_id
+    assert "status_key" not in first_states["待处理"]
+    assert "from_status" not in first_graph["transitions"][0]
+    assert "to_status" not in first_graph["transitions"][0]
+
+    second_payload = {
+        "initial_state_id": start_id,
+        "states": [
+            {**first_states["待处理"], "status_name": "待受理"},
+            first_states["处理中"],
+        ],
+        "transitions": first_graph["transitions"],
+    }
+    second = client.put(f"/api/v1/workflow-definitions/{definition['id']}/graph", json=second_payload)
+
+    assert second.status_code == 200
+    second_graph = second.json()
+    assert {item["id"] for item in second_graph["states"]} == {start_id, active_id}
+    assert next(item for item in second_graph["states"] if item["id"] == start_id)["status_name"] == "待受理"
+    assert second_graph["transitions"][0]["id"] == transition_id
+
+
+def test_graph_save_deletes_unreferenced_states_and_disables_referenced_states(client: TestClient):
+    config_id = _create_config(client)
+    definition = client.post(
+        "/api/v1/workflow-definitions",
+        json={
+            "name": f"Referenced state workflow {uuid4().hex[:8]}",
+            "object_type": "requirement",
+            "scope_type": "assignee_rule_config",
+            "scope_id": config_id,
+        },
+    ).json()
+    created = client.put(
+        f"/api/v1/workflow-definitions/{definition['id']}/graph",
+        json={
+            "initial_state_id": -1,
+            "states": [
+                {"id": -1, "status_name": "开始", "category": "start"},
+                {"id": -2, "status_name": "有历史引用", "category": "normal"},
+                {"id": -3, "status_name": "无引用", "category": "normal"},
+            ],
+            "transitions": [],
+        },
+    ).json()
+    states = {item["status_name"]: item for item in created["states"]}
+    with SessionLocal() as db:
+        db.add(
+            StatusOperationLog(
+                object_type="requirement",
+                object_id=999999,
+                action="migration-test",
+                workflow_definition_id=definition["id"],
+                from_state_id=states["有历史引用"]["id"],
+                to_state_id=states["有历史引用"]["id"],
+                from_state_name="有历史引用",
+                to_state_name="有历史引用",
+                from_status="legacy",
+                to_status="legacy",
+                effective_time=datetime.now(),
+            )
+        )
+        db.commit()
+
+    saved = client.put(
+        f"/api/v1/workflow-definitions/{definition['id']}/graph",
+        json={
+            "initial_state_id": states["开始"]["id"],
+            "states": [states["开始"]],
+            "transitions": [],
+        },
+    )
+
+    assert saved.status_code == 200, saved.text
+    by_name = {item["status_name"]: item for item in saved.json()["states"]}
+    assert "无引用" not in by_name
+    assert by_name["有历史引用"]["enabled"] is False
+
+
+def test_graph_save_rejects_cross_definition_and_disabled_initial_state_ids(client: TestClient):
+    config_id = _create_config(client)
+    definitions = [
+        client.post(
+            "/api/v1/workflow-definitions",
+            json={
+                "name": f"Cross definition {index}-{uuid4().hex[:8]}",
+                "object_type": "task",
+                "scope_type": "assignee_rule_config",
+                "scope_id": config_id,
+            },
+        ).json()
+        for index in range(2)
+    ]
+    first = client.put(
+        f"/api/v1/workflow-definitions/{definitions[0]['id']}/graph",
+        json={
+            "initial_state_id": -1,
+            "states": [{"id": -1, "status_name": "第一张图", "category": "start"}],
+            "transitions": [],
+        },
+    ).json()
+    foreign_state = first["states"][0]
+
+    cross_definition = client.put(
+        f"/api/v1/workflow-definitions/{definitions[1]['id']}/graph",
+        json={
+            "initial_state_id": foreign_state["id"],
+            "states": [foreign_state],
+            "transitions": [],
+        },
+    )
+    disabled_initial = client.put(
+        f"/api/v1/workflow-definitions/{definitions[1]['id']}/graph",
+        json={
+            "initial_state_id": -1,
+            "states": [{"id": -1, "status_name": "停用开始", "category": "start", "enabled": False}],
+            "transitions": [],
+        },
+    )
+
+    assert cross_definition.status_code == 422
+    assert disabled_initial.status_code == 422
+
+
 def test_apply_template_creates_graph_nodes_and_transitions(client: TestClient):
     config_id = _create_config(client)
     definition = client.post(
@@ -61,16 +227,17 @@ def test_apply_template_creates_graph_nodes_and_transitions(client: TestClient):
 
     assert applied.status_code == 200
     graph = applied.json()
-    assert {node["status_key"] for node in graph["states"]} == {
-        "pending_handling",
-        "fixing",
-        "pending_verification",
-        "verified",
-        "closed",
+    assert {node["status_name"] for node in graph["states"]} == {
+        "待处理",
+        "修复中",
+        "待验证",
+        "已验证",
+        "已关闭",
     }
-    assert any(edge["action_key"] == "submit_verification" and edge["to_status"] == "pending_verification" for edge in graph["transitions"])
-    assert any(edge["action_key"] == "verification_passed" and edge["to_status"] == "verified" for edge in graph["transitions"])
-    assert any(edge["action_key"] == "close" and edge["to_status"] == "closed" for edge in graph["transitions"])
+    names_by_id = {node["id"]: node["status_name"] for node in graph["states"]}
+    assert any(edge["action_key"] == "submit_verification" and names_by_id[edge["to_state_id"]] == "待验证" for edge in graph["transitions"])
+    assert any(edge["action_key"] == "verification_passed" and names_by_id[edge["to_state_id"]] == "已验证" for edge in graph["transitions"])
+    assert any(edge["action_key"] == "close" and names_by_id[edge["to_state_id"]] == "已关闭" for edge in graph["transitions"])
 
 
 def test_save_graph_preserves_layout_and_validates_duplicates(client: TestClient):
@@ -85,38 +252,39 @@ def test_save_graph_preserves_layout_and_validates_duplicates(client: TestClient
         },
     ).json()
     payload = {
+        "initial_state_id": -1,
         "states": [
-            {"status_key": "draft", "status_name": "Draft", "category": "start", "color": "#475569", "x": 120, "y": 80},
-            {"status_key": "active", "status_name": "Active", "category": "normal", "color": "#2563eb", "x": 320, "y": 80},
+            {"id": -1, "status_name": "Draft", "category": "start", "color": "#475569", "x": 120, "y": 80},
+            {"id": -2, "status_name": "Active", "category": "normal", "color": "#2563eb", "x": 320, "y": 80},
         ],
         "transitions": [
             {
                 "action_key": "activate",
                 "action_name": "Activate",
-                "from_status": "draft",
-                "to_status": "active",
-                "handler_rule": {"target_type": "project_role", "target_roles": "developer", "fallback_type": "keep_current"},
+                "from_state_id": -1,
+                "to_state_id": -2,
+                "handler_rule": {"target_type": "project_role", "target_roles": "project_member", "fallback_type": "keep_current"},
             }
         ],
     }
 
     saved = client.put(f"/api/v1/workflow-definitions/{definition['id']}/graph", json=payload)
 
-    assert saved.status_code == 200
-    states = {node["status_key"]: node for node in saved.json()["states"]}
-    assert states["active"]["x"] == 320
-    assert states["active"]["y"] == 80
+    assert saved.status_code == 200, saved.text
+    states = {node["status_name"]: node for node in saved.json()["states"]}
+    assert states["Active"]["x"] == 320
+    assert states["Active"]["y"] == 80
     loaded = client.get(f"/api/v1/workflow-definitions/{definition['id']}")
     assert loaded.status_code == 200
-    loaded_states = {node["status_key"]: node for node in loaded.json()["states"]}
-    assert loaded_states["draft"]["x"] == 120
-    assert loaded_states["draft"]["y"] == 80
-    assert loaded_states["active"]["x"] == 320
-    assert loaded_states["active"]["y"] == 80
+    loaded_states = {node["status_name"]: node for node in loaded.json()["states"]}
+    assert loaded_states["Draft"]["x"] == 120
+    assert loaded_states["Draft"]["y"] == 80
+    assert loaded_states["Active"]["x"] == 320
+    assert loaded_states["Active"]["y"] == 80
 
     duplicate = dict(payload)
     duplicate["states"] = payload["states"] + [
-        {"status_key": "active", "status_name": "Duplicate", "category": "normal", "x": 400, "y": 80}
+        {"id": -2, "status_name": "Duplicate", "category": "normal", "x": 400, "y": 80}
     ]
     failed = client.put(f"/api/v1/workflow-definitions/{definition['id']}/graph", json=duplicate)
     assert failed.status_code == 422
@@ -137,20 +305,21 @@ def test_transition_handler_rule_syncs_to_handler_transition_rules(client: TestC
     saved = client.put(
         f"/api/v1/workflow-definitions/{definition['id']}/graph",
         json={
+            "initial_state_id": -1,
             "states": [
-                {"status_key": "todo", "status_name": "Todo", "category": "start", "x": 100, "y": 100},
-                {"status_key": "doing", "status_name": "Doing", "category": "normal", "x": 280, "y": 100},
+                {"id": -1, "status_name": "Todo", "category": "start", "x": 100, "y": 100},
+                {"id": -2, "status_name": "Doing", "category": "normal", "x": 280, "y": 100},
             ],
             "transitions": [
                 {
                     "action_key": "activate",
                     "action_name": "Activate",
-                    "from_status": "todo",
-                    "to_status": "doing",
-                    "allowed_roles": "developer",
+                    "from_state_id": -1,
+                    "to_state_id": -2,
+                    "allowed_roles": "project_member",
                     "handler_rule": {
                         "target_type": "project_role",
-                        "target_roles": "developer",
+                        "target_roles": "project_member",
                         "fallback_type": "keep_current",
                     },
                 }
@@ -158,13 +327,14 @@ def test_transition_handler_rule_syncs_to_handler_transition_rules(client: TestC
         },
     )
 
-    assert saved.status_code == 200
+    assert saved.status_code == 200, saved.text
+    state_ids = {item["status_name"]: item["id"] for item in saved.json()["states"]}
     rules = client.get(f"/api/v1/handler-transition-rules?config_id={config_id}").json()
     rule = next(item for item in rules if item["object_type"] == "task" and item["action"] == "activate")
     assert rule["rule_type"] == "advanced"
-    assert rule["from_status"] == "todo"
-    assert rule["to_status"] == "doing"
-    assert rule["target_roles"] == "developer"
+    assert rule["from_status"] == f"state_{state_ids['Todo']}"
+    assert rule["to_status"] == f"state_{state_ids['Doing']}"
+    assert rule["target_roles"] == "project_member"
 
 
 def test_save_graph_preserves_transition_ui_and_form_config(client: TestClient):
@@ -182,16 +352,17 @@ def test_save_graph_preserves_transition_ui_and_form_config(client: TestClient):
     saved = client.put(
         f"/api/v1/workflow-definitions/{definition['id']}/graph",
         json={
+            "initial_state_id": -1,
             "states": [
-                {"status_key": "fixing", "status_name": "Fixing", "category": "normal", "x": 100, "y": 100},
-                {"status_key": "verifying", "status_name": "Verifying", "category": "normal", "x": 300, "y": 100},
+                {"id": -1, "status_name": "Fixing", "category": "start", "x": 100, "y": 100},
+                {"id": -2, "status_name": "Verifying", "category": "normal", "x": 300, "y": 100},
             ],
             "transitions": [
                 {
                     "action_key": "resolve",
                     "action_name": "确认解决",
-                    "from_status": "fixing",
-                    "to_status": "verifying",
+                    "from_state_id": -1,
+                    "to_state_id": -2,
                     "ui_config": {
                         "button_type": "success",
                         "list_display": "primary",
@@ -223,7 +394,7 @@ def test_save_graph_preserves_transition_ui_and_form_config(client: TestClient):
         },
     )
 
-    assert saved.status_code == 200
+    assert saved.status_code == 200, saved.text
     transition = saved.json()["transitions"][0]
     assert transition["ui_config"]["button_type"] == "success"
     assert transition["ui_config"]["list_display"] == "primary"
@@ -249,17 +420,17 @@ def _advanced_graph(transition_overrides: dict | None = None) -> dict:
     transition = {
         "action_key": "classify",
         "action_name": "Classify",
-        "from_status": "pending_handling",
-        "to_status": "fixing",
+        "from_state_id": -1,
+        "to_state_id": -2,
         "allowed_roles": "current_handler,system_admin",
         "handler_rule": {
             "target_type": "project_role",
-            "target_roles": "developer",
+            "target_roles": "project_member",
             "fallback_type": "project_owner",
         },
         "condition_config": {
             "field": "classification",
-            "routes": {"real": "fixing", "invalid": "closed"},
+            "routes": {"real": -2, "invalid": -3},
             "routing_mode": "automatic_with_override",
             "allow_override_roles": ["system_admin"],
         },
@@ -301,10 +472,11 @@ def _advanced_graph(transition_overrides: dict | None = None) -> dict:
     }
     transition.update(transition_overrides or {})
     return {
+        "initial_state_id": -1,
         "states": [
-            {"status_key": "pending_handling", "status_name": "Pending", "category": "start"},
-            {"status_key": "fixing", "status_name": "Fixing", "category": "normal"},
-            {"status_key": "closed", "status_name": "Closed", "category": "terminal"},
+            {"id": -1, "status_name": "Pending", "category": "start"},
+            {"id": -2, "status_name": "Fixing", "category": "normal"},
+            {"id": -3, "status_name": "Closed", "category": "terminal"},
         ],
         "transitions": [transition],
     }
@@ -313,7 +485,7 @@ def _advanced_graph(transition_overrides: dict | None = None) -> dict:
 @pytest.mark.parametrize(
     "overrides",
     [
-        {"condition_config": {"field": "classification", "routes": {"real": "missing"}}},
+        {"condition_config": {"field": "classification", "routes": {"real": -99}}},
         {"condition_config": {"field": "classification", "routes": {}}},
         {"form_config": {"fields": [{"field": "classification", "label": "Type", "type": "select"}]}},
         {"validator_config": {"type": "arbitrary_script"}},
@@ -341,11 +513,10 @@ def test_save_graph_round_trips_controlled_runtime_configuration(client: TestCli
     saved = client.put(f"/api/v1/workflow-definitions/{definition['id']}/graph", json=payload)
     loaded = client.get(f"/api/v1/workflow-definitions/{definition['id']}")
 
-    assert saved.status_code == 200
+    assert saved.status_code == 200, saved.text
     assert loaded.status_code == 200
     transition = loaded.json()["transitions"][0]
     for field in [
-        "condition_config",
         "form_config",
         "validator_config",
         "ui_config",
@@ -354,6 +525,11 @@ def test_save_graph_round_trips_controlled_runtime_configuration(client: TestCli
         "handler_rule",
     ]:
         assert transition[field] == payload["transitions"][0][field]
+    state_ids = {item["status_name"]: item["id"] for item in loaded.json()["states"]}
+    assert transition["condition_config"] == {
+        **payload["transitions"][0]["condition_config"],
+        "routes": {"real": state_ids["Fixing"], "invalid": state_ids["Closed"]},
+    }
 def test_default_template_definitions_exist_for_core_objects(client: TestClient):
     listed = client.get("/api/v1/workflow-definitions?scope_type=system")
 
@@ -377,8 +553,8 @@ def test_bug_default_template_matches_prd_baseline(client: TestClient):
     graph = client.get(f"/api/v1/workflow-definitions/{definition['id']}")
 
     assert graph.status_code == 200
-    states = {node["status_key"] for node in graph.json()["states"]}
-    assert states == {"pending_handling", "fixing", "pending_verification", "verified", "closed"}
+    states = {node["status_name"] for node in graph.json()["states"]}
+    assert states == {"待处理", "修复中", "待验证", "已验证", "已关闭"}
     transitions = {item["action_key"] for item in graph.json()["transitions"]}
     assert {
         "confirm_bug_type",
@@ -389,14 +565,7 @@ def test_bug_default_template_matches_prd_baseline(client: TestClient):
         "activate",
         "reclassify_bug_type",
     } <= transitions
-    state_names = {node["status_key"]: node["status_name"] for node in graph.json()["states"]}
-    assert state_names == {
-        "pending_handling": "待处理",
-        "fixing": "修复中",
-        "pending_verification": "待验证",
-        "verified": "已验证",
-        "closed": "已关闭",
-    }
+    assert all("status_key" not in node for node in graph.json()["states"])
     action_names = {item["action_key"]: item["action_name"] for item in graph.json()["transitions"]}
     assert action_names["confirm_bug_type"] == "确认缺陷类型"
     assert action_names["reclassify_bug_type"] == "重新判定缺陷类型"
@@ -423,14 +592,8 @@ def test_requirement_and_project_default_templates_expose_default_metadata(clien
 
     requirement_graph = client.get(f"/api/v1/workflow-definitions/{requirement_definition['id']}")
     assert requirement_graph.status_code == 200
-    requirement_state_names = {node["status_key"]: node["status_name"] for node in requirement_graph.json()["states"]}
-    assert requirement_state_names == {
-        "pending_assignment": "待分派",
-        "in_processing": "处理中",
-        "pending_confirmation": "待确认",
-        "completed": "已完成",
-        "canceled": "已取消",
-    }
+    requirement_state_names = {node["status_name"] for node in requirement_graph.json()["states"]}
+    assert requirement_state_names == {"待分派", "处理中", "待确认", "已完成", "已取消"}
     requirement_action_names = {
         item["action_key"]: item["action_name"] for item in requirement_graph.json()["transitions"]
     }

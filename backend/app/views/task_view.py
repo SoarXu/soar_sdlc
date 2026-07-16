@@ -5,9 +5,6 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, field_serializer
 
 
-TaskStatus = Literal["pending_assignment", "in_processing", "pending_confirmation", "completed", "canceled"]
-
-
 class TaskBase(BaseModel):
     project_id: int
     source_project_id: int | None = None
@@ -20,13 +17,14 @@ class TaskBase(BaseModel):
     estimated_hours: Decimal | None = None
     actual_hours: Decimal | None = None
     due_date: date | None = None
-    status: TaskStatus = "pending_assignment"
     lifecycle_phase: str | None = None
     description: str | None = None
     source_requirement_review_status: str | None = None
 
 
 class TaskCreate(TaskBase):
+    model_config = ConfigDict(extra="forbid")
+
     task_type: Literal[
         "requirement_implementation",
         "bug_fix",
@@ -62,11 +60,13 @@ class LinkedTaskSummary(BaseModel):
     id: int
     title: str
     task_type: str | None = None
-    status: str
+    status_name: str
     owner_id: int | None = None
 
 
 class TaskUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     project_id: int | None = None
     source_project_id: int | None = None
     iteration_id: int | None = None
@@ -83,7 +83,6 @@ class TaskUpdate(BaseModel):
     estimated_hours: Decimal | None = None
     actual_hours: Decimal | None = None
     due_date: date | None = None
-    status: TaskStatus | None = None
     lifecycle_phase: str | None = None
     description: str | None = None
     source_requirement_review_status: str | None = None
@@ -94,7 +93,6 @@ class TaskRead(TaskBase):
     model_config = ConfigDict(from_attributes=True)
 
     id: int
-    status: str
     workflow_definition_id: int
     current_state_id: int
     status_name: str

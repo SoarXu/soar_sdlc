@@ -60,9 +60,13 @@ def _create_configured_project(client: TestClient) -> tuple[int, int]:
             "test_case_tester_roles": "tester",
             "test_run_owner_roles": "tester",
             "bug_owner_roles": "developer",
+            "creation_mode": "template",
+            "template_source": {"source_type": "system", "source_id": "system-standard"},
         },
     )
     assert config.status_code == 201
+    enabled = client.post(f"/api/v1/assignee-rule-configs/{config.json()['id']}/enable")
+    assert enabled.status_code == 200, enabled.text
     project = client.post(
         "/api/v1/projects",
         json={"name": f"Transition Project {uuid4().hex[:8]}", "assignee_rule_config_id": config.json()["id"]},
@@ -96,7 +100,7 @@ def test_handler_transition_rule_crud(client: TestClient):
 
     listed = client.get(f"/api/v1/handler-transition-rules?config_id={config_id}")
     assert listed.status_code == 200
-    assert [item["id"] for item in listed.json()] == [data["id"]]
+    assert data["id"] in {item["id"] for item in listed.json()}
 
     updated = client.patch(
         f"/api/v1/handler-transition-rules/{data['id']}",
@@ -108,4 +112,5 @@ def test_handler_transition_rule_crud(client: TestClient):
 
     deleted = client.delete(f"/api/v1/handler-transition-rules/{data['id']}")
     assert deleted.status_code == 204
-    assert client.get(f"/api/v1/handler-transition-rules?config_id={config_id}").json()[0]["enabled"] is False
+    rules = client.get(f"/api/v1/handler-transition-rules?config_id={config_id}").json()
+    assert next(item for item in rules if item["id"] == data["id"])["enabled"] is False

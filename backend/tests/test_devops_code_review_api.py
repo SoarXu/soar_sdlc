@@ -6,6 +6,7 @@ from app.models.requirement import Requirement
 from app.models.role import Role, UserRole
 from app.models.task import Task
 from app.models.user import User
+from app.services.workflow_state_service import initial_workflow_values
 from app.core.security import get_password_hash
 
 
@@ -15,12 +16,27 @@ def test_commit_ingest_links_objects_and_creates_review_task(client):
         project = Project(name="DevOps 链接验证项目", status="active")
         db.add(project)
         db.flush()
-        requirement = Requirement(project_id=project.id, title="REQ DevOps 需求", owner_id=None)
+        requirement = Requirement(
+            project_id=project.id,
+            title="REQ DevOps 需求",
+            owner_id=None,
+            **initial_workflow_values(db, "requirement", project.id),
+        )
         db.add(requirement)
         db.flush()
-        task = Task(project_id=project.id, title="TASK DevOps 任务", requirement_id=requirement.id)
+        task = Task(
+            project_id=project.id,
+            title="TASK DevOps 任务",
+            requirement_id=requirement.id,
+            **initial_workflow_values(db, "task", project.id),
+        )
         db.add(task)
-        bug = Bug(project_id=project.id, title="BUG DevOps 缺陷", requirement_id=requirement.id)
+        bug = Bug(
+            project_id=project.id,
+            title="BUG DevOps 缺陷",
+            requirement_id=requirement.id,
+            **initial_workflow_values(db, "bug", project.id),
+        )
         db.add(bug)
         db.commit()
 
@@ -166,7 +182,12 @@ def test_development_lead_commit_is_assigned_to_another_reviewer(client):
         project = Project(name="Lead Self Review Project", status="active")
         db.add(project)
         db.flush()
-        task = Task(project_id=project.id, title="Lead authored task", owner_id=author.id)
+        task = Task(
+            project_id=project.id,
+            title="Lead authored task",
+            owner_id=author.id,
+            **initial_workflow_values(db, "task", project.id),
+        )
         db.add(task)
         db.flush()
         db.add(ProjectMember(project_id=project.id, user_id=reviewer.id, project_role="tech_lead", is_default_assignee=True))

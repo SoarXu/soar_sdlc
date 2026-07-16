@@ -92,4 +92,4 @@ def test_failed_test_result_can_create_bug_with_requirement_owner(client: TestCl
     assert data["test_case_id"] == case.json()["id"]
     assert data["test_run_id"] == run.json()["id"]
     assert data["owner_id"] == 1
-    assert data["status"] == "pending_handling"
+    assert data["status_name"] == "待处理"

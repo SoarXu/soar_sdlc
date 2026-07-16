@@ -55,9 +55,6 @@ TRACKED_TABLES = [
     "custom_field_value",
     "form_layout_config",
     "workflow_component_registry",
-    "workflow_transitions",
-    "workflow_states",
-    "workflow_definitions",
     "work_item_comments",
     "object_watch",
     "notifications",
@@ -66,6 +63,9 @@ TRACKED_TABLES = [
     "test_cases",
     "tasks",
     "requirements",
+    "workflow_transitions",
+    "workflow_states",
+    "workflow_definitions",
     "iterations",
     "project_members",
     "projects",
@@ -93,22 +93,12 @@ def _snapshot_table_ids() -> dict[str, set[int]]:
 def _cleanup_created_rows(before: dict[str, set[int]]) -> None:
     db = SessionLocal()
     try:
-        created_definition_ids = _created_ids(db, before, "workflow_definitions")
-        if created_definition_ids:
+        created_state_ids = _created_ids(db, before, "workflow_states")
+        if created_state_ids:
             db.execute(
-                text("update workflow_definitions set initial_state_id = null where id in :ids"),
-                {"ids": tuple(created_definition_ids)},
+                text("update workflow_definitions set initial_state_id = null where initial_state_id in :ids"),
+                {"ids": tuple(created_state_ids)},
             )
-        for table in ("requirements", "tasks", "bugs"):
-            created_ids = _created_ids(db, before, table)
-            if created_ids:
-                db.execute(
-                    text(
-                        f"update {table} set workflow_definition_id = null, current_state_id = null "
-                        "where id in :ids"
-                    ),
-                    {"ids": tuple(created_ids)},
-                )
         for table in TRACKED_TABLES:
             if table not in before or not _table_exists(db, table):
                 continue

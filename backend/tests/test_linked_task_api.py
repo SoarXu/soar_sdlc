@@ -10,6 +10,7 @@ from app.models.relation import ObjectRelation
 from app.models.role import Role, UserRole
 from app.models.task import Task
 from app.models.user import User
+from app.models.workflow_definition import WorkflowState
 
 
 def _create_user(full_name: str, role_key: str | None = None) -> tuple[int, str]:
@@ -54,6 +55,16 @@ def _add_member(project_id: int, user_id: int, project_role: str) -> None:
 
 def _auth(token: str) -> dict[str, str]:
     return {"Authorization": f"Bearer {token}"}
+
+
+def _set_task_status(db, task_id: int, status: str) -> None:
+    task = db.query(Task).filter(Task.id == task_id).one()
+    state_id = db.query(WorkflowState.id).filter(
+        WorkflowState.definition_id == task.workflow_definition_id,
+        WorkflowState.status_key == status,
+    ).scalar()
+    assert state_id is not None
+    task.current_state_id = state_id
 
 
 def test_linked_task_creation_supports_all_sources_and_records_relation_and_audit(client: TestClient):
@@ -104,7 +115,7 @@ def test_linked_task_creation_supports_all_sources_and_records_relation_and_audi
         data = response.json()
         assert data["task_type"] == expected_type
         assert data["owner_id"] == handler_id
-        assert data["status"] == "in_processing"
+        assert data["status_name"] == "待分派"
         assert data["creator_id"] == handler_id
         assert data["source_relations"] == [
             {"source_type": source_type, "source_id": source_id, "relation_type": "linked_task"}
@@ -220,8 +231,8 @@ def test_bug_close_checks_every_linked_task_without_mutating_blockers(client: Te
     ).json()
     db = SessionLocal()
     try:
-        db.query(Task).filter(Task.id == first["id"]).update({"status": "completed"})
-        db.query(Task).filter(Task.id == second["id"]).update({"status": "in_processing"})
+        _set_task_status(db, first["id"], "completed")
+        _set_task_status(db, second["id"], "in_processing")
         db.query(Task).filter(Task.id == first["id"]).update({"owner_id": handler_id})
         db.commit()
     finally:
@@ -232,7 +243,7 @@ def test_bug_close_checks_every_linked_task_without_mutating_blockers(client: Te
         headers=_auth(handler_token),
     )
     assert classified.status_code == 200
-    assert classified.json()["status"] == "pending_verification"
+    assert classified.json()["status_name"] == "待验证"
     verified = client.post(
         f"/api/v1/workflow-runtime/bug/{bug['id']}/transition",
         json={"action_key": "verification_passed"},
@@ -248,12 +259,12 @@ def test_bug_close_checks_every_linked_task_without_mutating_blockers(client: Te
     assert blocked.status_code == 400
     assert "1 unfinished linked task" in blocked.json()["detail"].lower()
     assert "unfinished linked task" in blocked.json()["detail"]
-    assert client.get(f"/api/v1/bugs/{bug['id']}").json()["status"] == "verified"
-    assert client.get(f"/api/v1/tasks/{second['id']}").json()["status"] == "in_processing"
+    assert client.get(f"/api/v1/bugs/{bug['id']}").json()["status_name"] == "已验证"
+    assert client.get(f"/api/v1/tasks/{second['id']}").json()["status_name"] == "处理中"
 
     db = SessionLocal()
     try:
-        db.query(Task).filter(Task.id == second["id"]).update({"status": "canceled"})
+        _set_task_status(db, second["id"], "canceled")
         db.commit()
     finally:
         db.close()

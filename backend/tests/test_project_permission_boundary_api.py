@@ -332,4 +332,4 @@ def test_generic_patch_rejects_owner_and_status_changes(client: TestClient):
 
         assert response.status_code == 422
         assert unchanged["owner_id"] == handler_id
-        assert unchanged["status"] == item["status"]
+        assert unchanged["current_state_id"] == item["current_state_id"]

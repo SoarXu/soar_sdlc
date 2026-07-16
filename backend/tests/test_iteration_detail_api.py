@@ -84,7 +84,6 @@ def _set_requirement_status(requirement_id: int, status: str) -> None:
         ).scalar()
         assert state_id is not None
         requirement.current_state_id = state_id
-        requirement.status = status
         db.commit()
     finally:
         db.close()
@@ -100,7 +99,6 @@ def _set_task_status(task_id: int, status: str) -> None:
         ).scalar()
         assert state_id is not None
         task.current_state_id = state_id
-        task.status = status
         db.commit()
     finally:
         db.close()
@@ -120,7 +118,6 @@ def _set_item_state_category(model, item_id: int, category: str, legacy_status: 
         db.add(state)
         db.flush()
         item.current_state_id = state.id
-        item.status = legacy_status
         db.commit()
     finally:
         db.close()
@@ -210,8 +207,8 @@ def test_iteration_job_auto_starts_without_changing_child_item_statuses(client: 
     assert detail.status_code == 200
     assert detail.json()["iteration"]["status"] == "active"
     assert detail.json()["iteration"]["actual_start_date"] == "2026-06-01"
-    assert client.get(f"/api/v1/requirements/{requirement_id}").json()["status"] == "pending_assignment"
-    assert client.get(f"/api/v1/tasks/{task_id}").json()["status"] == "pending_assignment"
+    assert client.get(f"/api/v1/requirements/{requirement_id}").json()["status_name"] == "待分派"
+    assert client.get(f"/api/v1/tasks/{task_id}").json()["status_name"] == "待分派"
 
 
 def test_iteration_start_keeps_child_work_items_on_their_own_workflows(client: TestClient):
@@ -241,11 +238,11 @@ def test_iteration_start_keeps_child_work_items_on_their_own_workflows(client: T
     )
 
     assert started.status_code == 200
-    assert client.get(f"/api/v1/requirements/{requirement_id}").json()["status"] == "pending_assignment"
-    assert client.get(f"/api/v1/requirements/{canceled_requirement_id}").json()["status"] == "canceled"
-    assert client.get(f"/api/v1/tasks/{requirement_task_id}").json()["status"] == "pending_assignment"
-    assert client.get(f"/api/v1/tasks/{standalone_task_id}").json()["status"] == "pending_assignment"
-    assert client.get(f"/api/v1/tasks/{canceled_task_id}").json()["status"] == "canceled"
+    assert client.get(f"/api/v1/requirements/{requirement_id}").json()["status_name"] == "待分派"
+    assert client.get(f"/api/v1/requirements/{canceled_requirement_id}").json()["status_name"] == "已取消"
+    assert client.get(f"/api/v1/tasks/{requirement_task_id}").json()["status_name"] == "待分派"
+    assert client.get(f"/api/v1/tasks/{standalone_task_id}").json()["status_name"] == "待分派"
+    assert client.get(f"/api/v1/tasks/{canceled_task_id}").json()["status_name"] == "已取消"
 
 
 def test_iteration_finish_is_blocked_by_unfinished_direct_items(client: TestClient):
@@ -350,7 +347,7 @@ def test_iteration_finish_checks_only_directly_included_tasks(client: TestClient
     )
 
     assert finished.status_code == 200
-    assert client.get(f"/api/v1/tasks/{linked_task_id}").json()["status"] == "pending_assignment"
+    assert client.get(f"/api/v1/tasks/{linked_task_id}").json()["status_name"] == "待分派"
 
 
 def test_iteration_defer_moves_selected_unfinished_items(client: TestClient):

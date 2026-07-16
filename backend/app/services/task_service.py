@@ -172,7 +172,7 @@ def linked_task_summaries(db: Session, source_type: str, source_id: int) -> list
             "id": task.id,
             "title": task.title,
             "task_type": task.task_type,
-            "status": task.status,
+            "status_name": task.status_name,
             "owner_id": task.owner_id,
         }
         for task in tasks

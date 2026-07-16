@@ -15,7 +15,6 @@ def initial_workflow_values(db: Session, object_type: str, project_id: int | Non
     return {
         "workflow_definition_id": definition.id,
         "current_state_id": initial_state.id,
-        "status": initial_state.status_key,
     }
 
 

@@ -1,12 +1,7 @@
 from datetime import datetime
-from typing import Literal
-
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.views.task_view import LinkedTaskSummary
-
-
-BugStatus = Literal["pending_handling", "fixing", "pending_verification", "verified", "closed"]
 
 
 class BugBase(BaseModel):
@@ -25,7 +20,6 @@ class BugBase(BaseModel):
     reproduce_steps: str | None = None
     expected_result: str | None = None
     actual_result: str | None = None
-    status: BugStatus = "pending_handling"
     lifecycle_phase: str | None = None
     resolution: str | None = None
     resolve_time: datetime | None = None
@@ -38,10 +32,12 @@ class BugBase(BaseModel):
 
 
 class BugCreate(BugBase):
-    pass
+    model_config = ConfigDict(extra="forbid")
 
 
 class BugUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     project_id: int | None = None
     iteration_id: int | None = None
     requirement_id: int | None = None
@@ -57,7 +53,6 @@ class BugUpdate(BaseModel):
     reproduce_steps: str | None = None
     expected_result: str | None = None
     actual_result: str | None = None
-    status: BugStatus | None = None
     lifecycle_phase: str | None = None
     resolution: str | None = None
     verify_result: str | None = None
@@ -80,7 +75,6 @@ class BugRead(BugBase):
     model_config = ConfigDict(from_attributes=True)
 
     id: int
-    status: str
     workflow_definition_id: int
     current_state_id: int
     status_name: str

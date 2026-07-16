@@ -386,7 +386,7 @@ def test_runtime_rejects_unsupported_historical_component_without_mutation(clien
     )
 
     assert executed.status_code == 422
-    assert client.get(f"/api/v1/bugs/{bug['id']}").json()["status"] == bug["status"]
+    assert client.get(f"/api/v1/bugs/{bug['id']}").json()["current_state_id"] == bug["current_state_id"]
 
 
 def test_runtime_executes_transition_and_assigns_next_handler(client: TestClient):
@@ -603,7 +603,7 @@ def test_runtime_routes_bug_type_to_target_status_and_records_resolution(client:
     )
 
     assert executed.status_code == 200
-    assert executed.json()["status"] == "fixing"
+    assert executed.json()["status_name"] == "修复中"
     assert executed.json()["resolved_target_status"] == "fixing"
     history = client.get(f"/api/v1/bugs/{bug['id']}/status-operations").json()
     assert history[-1]["resolved_target_status"] == "fixing"
@@ -634,7 +634,7 @@ def test_bug_routing_modes_reject_forged_targets_and_audit_reclassification(clie
         headers={"Authorization": f"Bearer {handler_token}"},
     )
     assert forged_automatic.status_code == 422
-    assert client.get(f"/api/v1/bugs/{automatic_bug['id']}").json()["status"] == "pending_handling"
+    assert client.get(f"/api/v1/bugs/{automatic_bug['id']}").json()["status_name"] == "待处理"
 
     bug = client.post(
         "/api/v1/bugs",
@@ -663,7 +663,6 @@ def test_bug_routing_modes_reject_forged_targets_and_audit_reclassification(clie
     try:
         stored = db.query(Bug).filter(Bug.id == bug["id"]).one()
         stored.owner_id = manager_id
-        stored.status = "fixing"
         stored.bug_type = "code_issue"
         db.commit()
     finally:
@@ -688,7 +687,7 @@ def test_bug_routing_modes_reject_forged_targets_and_audit_reclassification(clie
     assert operation["override_reason"] == "keep repair active"
     assert operation["selected_values"]["old_bug_type"] == "code_issue"
     assert operation["selected_values"]["new_bug_type"] == "duplicate_issue"
-    assert operation["selected_values"]["old_status"] == "fixing"
+    assert operation["selected_values"]["old_status"] == "修复中"
     assert operation["selected_values"]["default_target_status"] == "pending_verification"
     assert operation["selected_values"]["resolved_target_status"] == "fixing"
 
@@ -823,7 +822,7 @@ def test_runtime_submit_confirmation_moves_bug_fix_task_to_confirmation_handler(
     )
 
     assert executed.status_code == 200
-    assert executed.json()["status"] == "pending_confirmation"
+    assert executed.json()["status_name"] == "待确认"
     assert executed.json()["owner_id"] == confirmer_id
     returned = client.post(
         f"/api/v1/workflow-runtime/task/{task['id']}/transition",
@@ -831,7 +830,7 @@ def test_runtime_submit_confirmation_moves_bug_fix_task_to_confirmation_handler(
         headers={"Authorization": f"Bearer {confirmer_token}"},
     )
     assert returned.status_code == 200
-    assert returned.json()["status"] == "in_processing"
+    assert returned.json()["status_name"] == "处理中"
     assert returned.json()["owner_id"] == developer_id
     history = client.get(f"/api/v1/tasks/{task['id']}/status-operations").json()
     submit_operation = next(item for item in history if item["action"] == "submit_confirmation")
@@ -909,7 +908,7 @@ def test_ownerless_runtime_actions_require_project_membership_and_allow_system_a
     assert "assign" in {item["action_key"] for item in admin_actions.json()}
     assert admin_assign.status_code == 200
     assert admin_assign.json()["owner_id"] == member_id
-    assert admin_assign.json()["status"] == "in_processing"
+    assert admin_assign.json()["status_name"] == "处理中"
 
 
 def test_scoped_workflow_does_not_fallback_to_system_action(client: TestClient):
@@ -1015,15 +1014,15 @@ def test_runtime_owner_transfer_and_admin_change_handler_are_atomic_and_audited(
     )
 
     assert transferred.status_code == 200
-    assert transferred.json()["status"] == "in_processing"
+    assert transferred.json()["status_name"] == "处理中"
     assert transferred.json()["owner_id"] == target_id
     assert changed.status_code == 200
-    assert changed.json()["status"] == "in_processing"
+    assert changed.json()["status_name"] == "处理中"
     assert changed.json()["owner_id"] == handler_id
     history = client.get(f"/api/v1/tasks/{task['id']}/status-operations").json()
     transfer_operation = next(item for item in history if item["action"] == "transfer")
     change_operation = next(item for item in history if item["action"] == "change_handler")
-    assert transfer_operation["from_status"] == transfer_operation["to_status"] == "in_processing"
+    assert transfer_operation["from_state_name"] == transfer_operation["to_state_name"] == "处理中"
     assert transfer_operation["actor_id"] == handler_id
     assert transfer_operation["reason"] == "handoff for implementation"
     assert transfer_operation["next_owner_id"] == target_id
@@ -1097,10 +1096,10 @@ def test_bug_from_test_execution_routes_repair_and_verification_handlers_separat
 
     assert classified.status_code == 200
     assert submitted.status_code == 200
-    assert submitted.json()["status"] == "pending_verification"
+    assert submitted.json()["status_name"] == "待验证"
     assert submitted.json()["owner_id"] == executor_id
     assert failed.status_code == 200
-    assert failed.json()["status"] == "pending_handling"
+    assert failed.json()["status_name"] == "待处理"
     assert failed.json()["owner_id"] == repair_id
     history = client.get(f"/api/v1/bugs/{bug.json()['id']}/status-operations").json()
     submit_operation = next(item for item in history if item["action"] == "submit_verification")
@@ -1141,7 +1140,7 @@ def test_submit_confirmation_blocks_when_no_confirmation_handler_resolves(client
 
     assert response.status_code == 422
     unchanged = client.get(f"/api/v1/tasks/{task['id']}").json()
-    assert unchanged["status"] == "in_processing"
+    assert unchanged["status_name"] == "处理中"
     assert unchanged["owner_id"] == developer_id
 
 

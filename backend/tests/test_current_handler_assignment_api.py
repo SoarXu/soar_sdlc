@@ -9,6 +9,7 @@ from app.models.requirement import Requirement
 from app.models.role import Role, UserRole
 from app.models.task import Task
 from app.models.user import User
+from app.models.workflow_definition import WorkflowState
 
 
 def _create_user(full_name: str, role_key: str | None = None) -> tuple[int, str]:
@@ -65,7 +66,8 @@ def _add_project_member(project_id: int, user_id: int, project_role: str = "deve
 def _set_requirement_status(requirement_id: int, status: str) -> None:
     db = SessionLocal()
     try:
-        db.query(Requirement).filter(Requirement.id == requirement_id).update({"status": status})
+        requirement = db.query(Requirement).filter(Requirement.id == requirement_id).one()
+        requirement.current_state_id = _state_id(db, requirement.workflow_definition_id, status)
         db.commit()
     finally:
         db.close()
@@ -74,10 +76,20 @@ def _set_requirement_status(requirement_id: int, status: str) -> None:
 def _set_task_status(task_id: int, status: str) -> None:
     db = SessionLocal()
     try:
-        db.query(Task).filter(Task.id == task_id).update({"status": status})
+        task = db.query(Task).filter(Task.id == task_id).one()
+        task.current_state_id = _state_id(db, task.workflow_definition_id, status)
         db.commit()
     finally:
         db.close()
+
+
+def _state_id(db, definition_id: int, status: str) -> int:
+    state_id = db.query(WorkflowState.id).filter(
+        WorkflowState.definition_id == definition_id,
+        WorkflowState.status_key == status,
+    ).scalar()
+    assert state_id is not None
+    return state_id
 
 
 def _runtime_transition(
@@ -104,9 +116,13 @@ def test_create_work_items_do_not_use_default_owner_roles(client: TestClient):
             "requirement_owner_roles": "developer",
             "task_owner_roles": "developer",
             "bug_owner_roles": "developer",
+            "creation_mode": "template",
+            "template_source": {"source_type": "system", "source_id": "system-standard"},
         },
     )
     assert config.status_code == 201
+    enabled = client.post(f"/api/v1/assignee-rule-configs/{config.json()['id']}/enable")
+    assert enabled.status_code == 200, enabled.text
     project = client.post(
         "/api/v1/projects",
         json={"name": f"Ownerless Project-{uuid4().hex[:8]}", "assignee_rule_config_id": config.json()["id"]},
@@ -135,7 +151,7 @@ def test_create_work_items_do_not_use_default_owner_roles(client: TestClient):
 
 
 def test_requirement_change_handler_updates_current_handler_and_records_history(client: TestClient):
-    owner_id, _ = _create_user("Original Handler", "developer")
+    owner_id, owner_token = _create_user("Original Handler", "developer")
     target_id, _ = _create_user("Target Handler", "developer")
     manager_id, manager_token = _create_user("Project Manager", "project_owner")
     project_id = _create_project(client, owner_id=manager_id)
@@ -145,6 +161,8 @@ def test_requirement_change_handler_updates_current_handler_and_records_history(
         "/api/v1/requirements",
         json={"project_id": project_id, "title": f"Assignable requirement-{uuid4().hex[:8]}", "owner_id": owner_id},
     ).json()
+    claimed = _runtime_transition(client, "requirement", requirement["id"], "claim", owner_token)
+    assert claimed.status_code == 200, claimed.text
 
     assigned = client.post(
         f"/api/v1/workflow-runtime/requirement/{requirement['id']}/transition",
@@ -161,8 +179,8 @@ def test_requirement_change_handler_updates_current_handler_and_records_history(
     assert assigned.json()["owner_id"] == target_id
     history = client.get(f"/api/v1/requirements/{requirement['id']}/status-operations").json()
     assert history[-1]["action"] == "change_handler"
-    assert history[-1]["from_status"] == requirement["status"]
-    assert history[-1]["to_status"] == requirement["status"]
+    assert history[-1]["from_state_name"] == "处理中"
+    assert history[-1]["to_state_name"] == "处理中"
     assert history[-1]["actor_id"] == manager_id
     assert f"{owner_id} -> {target_id}" in history[-1]["remark"]
     assert history[-1]["reason"] == "转给目标处理"
@@ -187,7 +205,7 @@ def test_project_owner_is_not_implicit_current_handler_assignee(client: TestClie
 
 
 def test_runtime_change_handler_rejects_terminal_items_independently(client: TestClient):
-    owner_id, _ = _create_user("Batch Owner", "developer")
+    owner_id, owner_token = _create_user("Batch Owner", "developer")
     target_id, _ = _create_user("Batch Target", "developer")
     manager_id, manager_token = _create_user("Batch Manager", "project_owner")
     project_id = _create_project(client, owner_id=manager_id)
@@ -201,6 +219,8 @@ def test_runtime_change_handler_rejects_terminal_items_independently(client: Tes
         "/api/v1/requirements",
         json={"project_id": project_id, "title": f"Batch closed-{uuid4().hex[:8]}", "owner_id": owner_id},
     ).json()
+    claimed = _runtime_transition(client, "requirement", active_requirement["id"], "claim", owner_token)
+    assert claimed.status_code == 200, claimed.text
     _set_requirement_status(closed_requirement["id"], "canceled")
 
     active_response = client.post(
@@ -244,6 +264,8 @@ def test_non_current_handler_cannot_update_or_transition_task(client: TestClient
             "owner_id": owner_id,
         },
     ).json()
+    claimed = _runtime_transition(client, "task", task["id"], "claim", owner_token)
+    assert claimed.status_code == 200, claimed.text
 
     rejected_update = client.patch(
         f"/api/v1/tasks/{task['id']}",

@@ -22,7 +22,9 @@ from app.models.task import Task  # noqa: E402
 from app.models.test_case import TestCase  # noqa: E402
 from app.models.test_case_execution import TestCaseExecutionLog  # noqa: E402
 from app.models.user import User  # noqa: E402
+from app.models.workflow_definition import WorkflowState  # noqa: E402
 from app.services.user_service import seed_default_users  # noqa: E402
+from app.services.workflow_state_service import resolve_effective_workflow  # noqa: E402
 
 
 BATCH_PREFIX = "演示验证-"
@@ -36,6 +38,15 @@ ASCII_MARKERS = [
     "档案检索MVP",
     "线索看板联调",
 ]
+
+
+def _workflow_values(db, object_type: str, project_id: int, state_key: str) -> dict[str, int]:
+    definition, _ = resolve_effective_workflow(db, object_type, project_id)
+    state = db.query(WorkflowState).filter(
+        WorkflowState.definition_id == definition.id,
+        WorkflowState.status_key == state_key,
+    ).one()
+    return {"workflow_definition_id": definition.id, "current_state_id": state.id}
 
 
 def main() -> None:
@@ -55,7 +66,7 @@ def main() -> None:
             owner_id=owner_pm.id,
             planned_start_date=date(2026, 6, 1),
             planned_end_date=date(2026, 12, 31),
-            status="active",
+            **_workflow_values(db, "requirement", project_archive.id, "in_processing"),
             description="用于验证项目集、项目、迭代和工作台联动的演示项目集。",
         )
         program_lab = Program(
@@ -153,7 +164,7 @@ def main() -> None:
             priority="2",
             owner_id=owner_qa.id,
             proposer_id=owner_po.id,
-            status="draft",
+            **_workflow_values(db, "requirement", project_archive.id, "pending_assignment"),
             review_status="pending",
             lifecycle_phase="development",
             description="下载稳定性报告时记录下载人、时间、IP 和下载原因。",
@@ -167,7 +178,7 @@ def main() -> None:
             priority="3",
             owner_id=owner_dev.id,
             proposer_id=owner_pm.id,
-            status="active",
+            **_workflow_values(db, "requirement", project_bd.id, "in_processing"),
             review_status="approved",
             lifecycle_phase="development",
             description="当线索来自重点客户且预计金额超过阈值时自动标记为高价值。",
@@ -186,7 +197,7 @@ def main() -> None:
             owner_id=owner_dev.id,
             estimated_hours=Decimal("16.0"),
             due_date=date(2026, 6, 28),
-            status="doing",
+            **_workflow_values(db, "task", project_archive.id, "in_processing"),
             lifecycle_phase="development",
             description="实现批号、项目编号和报告类型的组合索引查询接口。",
         )
@@ -200,7 +211,7 @@ def main() -> None:
             owner_id=owner_dev.id,
             estimated_hours=Decimal("10.0"),
             due_date=date(2026, 7, 5),
-            status="todo",
+            **_workflow_values(db, "task", project_archive.id, "pending_assignment"),
             lifecycle_phase="development",
             description="在报告下载接口写入审计日志并暴露查询条件。",
         )
@@ -214,7 +225,7 @@ def main() -> None:
             owner_id=owner_dev.id,
             estimated_hours=Decimal("8.0"),
             due_date=date(2026, 7, 12),
-            status="todo",
+            **_workflow_values(db, "task", project_bd.id, "pending_assignment"),
             lifecycle_phase="development",
             description="在 BD 看板列表中展示高价值线索角标和筛选入口。",
         )
@@ -317,7 +328,7 @@ def main() -> None:
             reproduce_steps="1. 登录质控账号\n2. 输入批号 BATCH-2026-A17 查询\n3. 观察报告列表\n实际只返回稳定性报告，缺少复核报告。",
             expected_result="稳定性报告和复核报告都应出现在结果列表。",
             actual_result="复核报告未返回，导致质控人员无法完成复核链路检查。",
-            status="fixing",
+            **_workflow_values(db, "bug", project_archive.id, "fixing"),
             lifecycle_phase="development",
         )
         bug_download_blocked = Bug(
@@ -335,7 +346,7 @@ def main() -> None:
             reproduce_steps="1. 使用具备下载权限的账号打开敏感报告\n2. 填写下载原因\n3. 查看下载按钮状态\n按钮仍为灰显。",
             expected_result="具备权限且填写原因后允许下载，并生成审计记录。",
             actual_result="下载按钮不可点击，阻塞审计留痕验证。",
-            status="open",
+            **_workflow_values(db, "bug", project_archive.id, "pending_handling"),
             lifecycle_phase="development",
         )
         db.add_all([bug_missing_review, bug_download_blocked])

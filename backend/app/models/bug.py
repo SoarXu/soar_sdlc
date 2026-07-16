@@ -23,22 +23,21 @@ class Bug(Base):
     priority: Mapped[str] = mapped_column(String(32), default="3")
     owner_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     reporter_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
-    workflow_definition_id: Mapped[int | None] = mapped_column(
+    workflow_definition_id: Mapped[int] = mapped_column(
         BigInteger,
         ForeignKey("workflow_definitions.id", ondelete="RESTRICT"),
-        nullable=True,
+        nullable=False,
         index=True,
     )
-    current_state_id: Mapped[int | None] = mapped_column(
+    current_state_id: Mapped[int] = mapped_column(
         BigInteger,
         ForeignKey("workflow_states.id", ondelete="RESTRICT"),
-        nullable=True,
+        nullable=False,
         index=True,
     )
     reproduce_steps: Mapped[str | None] = mapped_column(Text().with_variant(MEDIUMTEXT, "mysql"), nullable=True)
     expected_result: Mapped[str | None] = mapped_column(Text, nullable=True)
     actual_result: Mapped[str | None] = mapped_column(Text, nullable=True)
-    status: Mapped[str] = mapped_column(String(32), default="pending_handling")
     lifecycle_phase: Mapped[str] = mapped_column(String(32), default="development")
     resolution: Mapped[str | None] = mapped_column(String(64), nullable=True)
     resolve_time: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)

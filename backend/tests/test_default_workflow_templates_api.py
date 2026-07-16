@@ -12,6 +12,7 @@ from app.models.requirement import Requirement
 from app.models.role import Role, UserRole
 from app.models.task import Task
 from app.models.user import User
+from app.models.workflow_definition import WorkflowState
 
 
 def _create_user(full_name: str, role_key: str) -> tuple[int, str]:
@@ -53,6 +54,15 @@ def _add_project_member(project_id: int, user_id: int, project_role: str) -> Non
         db.close()
 
 
+def _state_id_for_status(db, item, status: str) -> int:
+    state_id = db.query(WorkflowState.id).filter(
+        WorkflowState.definition_id == item.workflow_definition_id,
+        WorkflowState.status_key == status,
+    ).scalar()
+    assert state_id is not None
+    return state_id
+
+
 def _create_project_with_config(client: TestClient) -> int:
     config = client.post(
         "/api/v1/assignee-rule-configs",
@@ -63,9 +73,13 @@ def _create_project_with_config(client: TestClient) -> int:
             "test_case_tester_roles": "tester",
             "test_run_owner_roles": "tester",
             "bug_owner_roles": "developer",
+            "creation_mode": "template",
+            "template_source": {"source_type": "system", "source_id": "system-standard"},
         },
     )
     assert config.status_code == 201
+    enabled = client.post(f"/api/v1/assignee-rule-configs/{config.json()['id']}/enable")
+    assert enabled.status_code == 200, enabled.text
     project = client.post(
         "/api/v1/projects",
         json={"name": f"Default Template Project {uuid4().hex[:8]}", "assignee_rule_config_id": config.json()["id"]},
@@ -94,7 +108,7 @@ def _set_requirement_status(requirement_id: int, status: str) -> None:
     try:
         requirement = db.query(Requirement).filter(Requirement.id == requirement_id).first()
         assert requirement is not None
-        requirement.status = status
+        requirement.current_state_id = _state_id_for_status(db, requirement, status)
         db.commit()
     finally:
         db.close()
@@ -112,7 +126,7 @@ def _set_requirement_owner_and_status(
         requirement = db.query(Requirement).filter(Requirement.id == requirement_id).first()
         assert requirement is not None
         requirement.owner_id = owner_id
-        requirement.status = status
+        requirement.current_state_id = _state_id_for_status(db, requirement, status)
         if creator_id is not None:
             requirement.creator_id = creator_id
         db.commit()
@@ -125,7 +139,7 @@ def _set_task_status(task_id: int, status: str) -> None:
     try:
         task = db.query(Task).filter(Task.id == task_id).first()
         assert task is not None
-        task.status = status
+        task.current_state_id = _state_id_for_status(db, task, status)
         db.commit()
     finally:
         db.close()
@@ -137,7 +151,7 @@ def _set_task_owner_and_status(task_id: int, owner_id: int | None, status: str) 
         task = db.query(Task).filter(Task.id == task_id).first()
         assert task is not None
         task.owner_id = owner_id
-        task.status = status
+        task.current_state_id = _state_id_for_status(db, task, status)
         db.commit()
     finally:
         db.close()
@@ -148,7 +162,7 @@ def _set_bug_status(bug_id: int, status: str) -> None:
     try:
         bug = db.query(Bug).filter(Bug.id == bug_id).first()
         assert bug is not None
-        bug.status = status
+        bug.current_state_id = _state_id_for_status(db, bug, status)
         db.commit()
     finally:
         db.close()
@@ -160,7 +174,7 @@ def _set_bug_owner_and_status(bug_id: int, owner_id: int | None, status: str) ->
         bug = db.query(Bug).filter(Bug.id == bug_id).first()
         assert bug is not None
         bug.owner_id = owner_id
-        bug.status = status
+        bug.current_state_id = _state_id_for_status(db, bug, status)
         db.commit()
     finally:
         db.close()
@@ -207,7 +221,7 @@ def test_bug_defaults_to_pending_handling_and_close_blocks_on_direct_task(client
     )
 
     assert bug.status_code == 200
-    assert bug.json()["status"] == "pending_handling"
+    assert bug.json()["status_name"] == "待处理"
 
     _set_bug_status(bug.json()["id"], "verified")
     close = client.post(
@@ -253,11 +267,19 @@ def test_task_branch_defaults_follow_confirmation_template(client: TestClient):
     )
 
     assert bug_fix_task.status_code == 200
-    assert bug_fix_task.json()["status"] == "in_processing"
+    assert bug_fix_task.json()["status_name"] == "待分派"
     assert requirement_task.status_code == 200
-    assert requirement_task.json()["status"] == "in_processing"
+    assert requirement_task.json()["status_name"] == "待分派"
     assert unassigned_task.status_code == 200
-    assert unassigned_task.json()["status"] == "pending_assignment"
+    assert unassigned_task.json()["status_name"] == "待分派"
+
+    for task_response in (bug_fix_task, requirement_task):
+        claimed = client.post(
+            f"/api/v1/workflow-runtime/task/{task_response.json()['id']}/transition",
+            json={"action_key": "claim"},
+            headers={"Authorization": f"Bearer {handler_token}"},
+        )
+        assert claimed.status_code == 200, claimed.text
 
     bug_fix_actions = client.get(
         f"/api/v1/workflow-runtime/task/{bug_fix_task.json()['id']}/transitions",
@@ -331,6 +353,14 @@ def test_default_runtime_actions_match_prd_state_matrix(client: TestClient):
         "/api/v1/bugs",
         json={"project_id": project_id, "title": f"Owned bug {uuid4().hex[:8]}", "owner_id": developer_id},
     ).json()
+
+    for object_type, item in (("requirement", requirement), ("task", task)):
+        claimed = client.post(
+            f"/api/v1/workflow-runtime/{object_type}/{item['id']}/transition",
+            json={"action_key": "claim"},
+            headers={"Authorization": f"Bearer {developer_token}"},
+        )
+        assert claimed.status_code == 200, claimed.text
 
     requirement_actions = _action_keys(client, "requirement", requirement["id"], developer_token)
     assert {"complete", "transfer"} <= requirement_actions
@@ -443,7 +473,7 @@ def test_reactivate_uses_handler_presence_and_completed_requirement_can_reactiva
         headers={"Authorization": f"Bearer {creator_token}"},
     )
     assert unassigned.status_code == 200, unassigned.text
-    assert unassigned.json()["status"] == "pending_assignment"
+    assert unassigned.json()["status_name"] == "待分派"
     assert unassigned.json()["owner_id"] is None
 
     _set_requirement_owner_and_status(requirement["id"], None, "canceled")
@@ -458,7 +488,7 @@ def test_reactivate_uses_handler_presence_and_completed_requirement_can_reactiva
         headers={"Authorization": f"Bearer {manager_token}"},
     )
     assert assigned.status_code == 200
-    assert assigned.json()["status"] == "in_processing"
+    assert assigned.json()["status_name"] == "处理中"
     assert assigned.json()["owner_id"] == restored_id
 
     _set_requirement_owner_and_status(requirement["id"], restored_id, "completed")
@@ -470,7 +500,7 @@ def test_reactivate_uses_handler_presence_and_completed_requirement_can_reactiva
         headers={"Authorization": f"Bearer {manager_token}"},
     )
     assert reopened.status_code == 200
-    assert reopened.json()["status"] == "in_processing"
+    assert reopened.json()["status_name"] == "处理中"
     assert reopened.json()["owner_id"] == restored_id
 
     task = client.post(
@@ -485,11 +515,11 @@ def test_reactivate_uses_handler_presence_and_completed_requirement_can_reactiva
         headers={"Authorization": f"Bearer {creator_token}"},
     )
     assert task_reopened.status_code == 200
-    assert task_reopened.json()["status"] == "in_processing"
+    assert task_reopened.json()["status_name"] == "处理中"
     assert task_reopened.json()["owner_id"] == creator_id
 
 
-def test_requirement_and_task_create_status_always_matches_handler_presence(client: TestClient):
+def test_requirement_and_task_create_reject_legacy_status_even_with_handler(client: TestClient):
     project_id = _create_project_with_config(client)
     handler_id, _ = _create_user("Creation Invariant Handler", "developer")
     _add_project_member(project_id, handler_id, "developer")
@@ -529,10 +559,10 @@ def test_requirement_and_task_create_status_always_matches_handler_presence(clie
         },
     )
 
-    assert ownerless_requirement.json()["status"] == "pending_assignment"
-    assert assigned_requirement.json()["status"] == "in_processing"
-    assert ownerless_task.json()["status"] == "pending_assignment"
-    assert assigned_task.json()["status"] == "in_processing"
+    assert ownerless_requirement.status_code == 422
+    assert assigned_requirement.status_code == 422
+    assert ownerless_task.status_code == 422
+    assert assigned_task.status_code == 422
 
 
 def test_requirement_complete_and_cancel_block_on_direct_relations(client: TestClient):

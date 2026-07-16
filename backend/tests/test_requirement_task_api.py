@@ -98,7 +98,7 @@ def test_requirement_and_task_create_default_to_template_statuses_and_prd_fields
     )
     assert requirement.status_code == 200
     assert requirement.json()["priority"] == "3"
-    assert requirement.json()["status"] == "pending_assignment"
+    assert requirement.json()["status_name"] == "待分派"
 
     default_priority_requirement = client.post(
         "/api/v1/requirements",
@@ -106,7 +106,7 @@ def test_requirement_and_task_create_default_to_template_statuses_and_prd_fields
     )
     assert default_priority_requirement.status_code == 200
     assert default_priority_requirement.json()["priority"] == "3"
-    assert default_priority_requirement.json()["status"] == "pending_assignment"
+    assert default_priority_requirement.json()["status_name"] == "待分派"
 
     task = client.post(
         "/api/v1/tasks",
@@ -114,7 +114,7 @@ def test_requirement_and_task_create_default_to_template_statuses_and_prd_fields
     )
     assert task.status_code == 200
     assert task.json()["requirement_id"] == requirement.json()["id"]
-    assert task.json()["status"] == "pending_assignment"
+    assert task.json()["status_name"] == "待分派"
 
     updated = client.patch(f"/api/v1/tasks/{task.json()['id']}", json={"actual_hours": 1.5})
     assert updated.status_code == 200
@@ -174,7 +174,7 @@ def test_generated_task_inherits_requirement_current_handler_by_default(client: 
     assert data["requirement_id"] == requirement.json()["id"]
     assert data["project_id"] == project_id
     assert data["owner_id"] == owner_id
-    assert data["status"] == "pending_assignment"
+    assert data["status_name"] == "待分派"
     assert data["source_requirement_review_status"] == "not_required"
 
 
@@ -364,7 +364,7 @@ def test_requirement_cancel_records_history_through_runtime(client: TestClient):
     )
 
     assert canceled.status_code == 200
-    assert canceled.json()["status"] == "canceled"
+    assert canceled.json()["status_name"] == "已取消"
     history = client.get(f"/api/v1/requirements/{requirement.json()['id']}/status-operations")
     assert history.status_code == 200
     assert history.json()[-1]["action"] == "cancel"
@@ -396,8 +396,8 @@ def test_requirement_close_blocks_on_open_linked_tasks_and_does_not_cancel_them(
     )
 
     assert blocked.status_code == 400
-    assert client.get(f"/api/v1/requirements/{requirement['id']}").json()["status"] == "in_processing"
-    assert client.get(f"/api/v1/tasks/{task['id']}").json()["status"] == "pending_assignment"
+    assert client.get(f"/api/v1/requirements/{requirement['id']}").json()["status_name"] == "处理中"
+    assert client.get(f"/api/v1/tasks/{task['id']}").json()["status_name"] == "待分派"
 
 def test_requirement_complete_goes_directly_to_completed_and_blocks_on_open_tasks(client: TestClient):
     project_id = _create_project(client)
@@ -412,7 +412,7 @@ def test_requirement_complete_goes_directly_to_completed_and_blocks_on_open_task
 
     completed = _runtime_transition(client, "requirement", requirement["id"], "complete", token)
     assert completed.status_code == 200
-    assert completed.json()["status"] == "completed"
+    assert completed.json()["status_name"] == "已完成"
     history = client.get(f"/api/v1/requirements/{requirement['id']}/status-operations").json()
     assert history[-1]["action"] == "complete"
 
@@ -429,7 +429,7 @@ def test_requirement_complete_goes_directly_to_completed_and_blocks_on_open_task
 
     blocked = _runtime_transition(client, "requirement", blocked_requirement["id"], "complete", token)
     assert blocked.status_code == 400
-    assert client.get(f"/api/v1/requirements/{blocked_requirement['id']}").json()["status"] == "in_processing"
+    assert client.get(f"/api/v1/requirements/{blocked_requirement['id']}").json()["status_name"] == "处理中"
 
 def test_task_claim_and_cancel_follow_default_statuses(client: TestClient):
     project_id = _create_project(client)
@@ -440,11 +440,11 @@ def test_task_claim_and_cancel_follow_default_statuses(client: TestClient):
         json={"project_id": project_id, "title": f"Task status flow {uuid4().hex[:8]}"},
     )
     assert task.status_code == 200
-    assert task.json()["status"] == "pending_assignment"
+    assert task.json()["status_name"] == "待分派"
 
     claimed = _runtime_transition(client, "task", task.json()["id"], "claim", token)
     assert claimed.status_code == 200
-    assert claimed.json()["status"] == "in_processing"
+    assert claimed.json()["status_name"] == "处理中"
 
     canceled = _runtime_transition(
         client,
@@ -455,7 +455,7 @@ def test_task_claim_and_cancel_follow_default_statuses(client: TestClient):
         {"reason": "not needed", "remark": "cancel task"},
     )
     assert canceled.status_code == 200
-    assert canceled.json()["status"] == "canceled"
+    assert canceled.json()["status_name"] == "已取消"
 
     history = client.get(f"/api/v1/tasks/{task.json()['id']}/status-operations")
     assert history.status_code == 200
@@ -482,7 +482,7 @@ def test_bug_fix_task_complete_routes_to_pending_confirmation(client: TestClient
     completed = _runtime_transition(client, "task", task["id"], "submit_confirmation", developer_token)
 
     assert completed.status_code == 200
-    assert completed.json()["status"] == "pending_confirmation"
+    assert completed.json()["status_name"] == "待确认"
     assert completed.json()["owner_id"] == confirmer_id
 
 
@@ -532,7 +532,7 @@ def test_requirement_status_cannot_be_changed_by_form_save(client: TestClient):
         json={"project_id": project_id, "title": f"表单状态保护-{uuid4().hex[:8]}"},
     )
     assert requirement.status_code == 200
-    assert requirement.json()["status"] == "pending_assignment"
+    assert requirement.json()["status_name"] == "待分派"
 
     updated = client.patch(
         f"/api/v1/requirements/{requirement.json()['id']}",
@@ -541,7 +541,7 @@ def test_requirement_status_cannot_be_changed_by_form_save(client: TestClient):
     assert updated.status_code == 422
     unchanged = client.get(f"/api/v1/requirements/{requirement.json()['id']}").json()
     assert unchanged["title"] == requirement.json()["title"]
-    assert unchanged["status"] == "pending_assignment"
+    assert unchanged["status_name"] == "待分派"
 
 
 def test_task_status_cannot_be_changed_by_form_save(client: TestClient):
@@ -559,7 +559,7 @@ def test_task_status_cannot_be_changed_by_form_save(client: TestClient):
     assert updated.status_code == 422
     unchanged = client.get(f"/api/v1/tasks/{task['id']}").json()
     assert unchanged["title"] == task["title"]
-    assert unchanged["status"] == "pending_assignment"
+    assert unchanged["status_name"] == "待分派"
 
 
 def test_requirement_update_rejects_iteration_outside_project_scope(client: TestClient):

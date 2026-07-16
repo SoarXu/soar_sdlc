@@ -1,11 +1,7 @@
 from datetime import datetime
-from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.views.task_view import LinkedTaskSummary
-
-
-RequirementStatus = Literal["pending_assignment", "in_processing", "pending_confirmation", "completed", "canceled"]
 
 
 class RequirementBase(BaseModel):
@@ -17,7 +13,6 @@ class RequirementBase(BaseModel):
     priority: str = "3"
     owner_id: int | None = None
     proposer_id: int | None = None
-    status: RequirementStatus = "pending_assignment"
     lifecycle_phase: str | None = None
     review_status: str = "not_required"
     description: str | None = None
@@ -26,10 +21,12 @@ class RequirementBase(BaseModel):
 
 
 class RequirementCreate(RequirementBase):
-    pass
+    model_config = ConfigDict(extra="forbid")
 
 
 class RequirementUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     project_id: int | None = None
     source_project_id: int | None = None
     iteration_id: int | None = None
@@ -38,7 +35,6 @@ class RequirementUpdate(BaseModel):
     priority: str | None = None
     owner_id: int | None = None
     proposer_id: int | None = None
-    status: RequirementStatus | None = None
     lifecycle_phase: str | None = None
     review_status: str | None = None
     description: str | None = None
@@ -51,7 +47,6 @@ class RequirementRead(RequirementBase):
     model_config = ConfigDict(from_attributes=True)
 
     id: int
-    status: str
     workflow_definition_id: int
     current_state_id: int
     status_name: str

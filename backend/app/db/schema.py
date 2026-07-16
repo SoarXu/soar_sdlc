@@ -268,7 +268,7 @@ def ensure_runtime_schema(engine: Engine) -> None:
                    "ALTER TABLE requirements ADD COLUMN current_state_id BIGINT UNSIGNED NULL COMMENT 'current workflow state id' AFTER workflow_definition_id",
                    "CREATE INDEX ix_requirements_current_state_id ON requirements (current_state_id)")
     _ensure_column(engine, "requirements", "lifecycle_phase",
-                   "ALTER TABLE requirements ADD COLUMN lifecycle_phase VARCHAR(32) NOT NULL DEFAULT 'development' COMMENT '生命周期阶段' AFTER status")
+                   "ALTER TABLE requirements ADD COLUMN lifecycle_phase VARCHAR(32) NOT NULL DEFAULT 'development' COMMENT '生命周期阶段' AFTER current_state_id")
     _ensure_column(engine, "requirements", "deleted",
                    "ALTER TABLE requirements ADD COLUMN deleted TINYINT(1) NOT NULL DEFAULT 0 COMMENT '是否删除 0否1是' AFTER delete_time")
 
@@ -285,7 +285,7 @@ def ensure_runtime_schema(engine: Engine) -> None:
                    "ALTER TABLE tasks ADD COLUMN iteration_id BIGINT UNSIGNED NULL COMMENT '直接关联迭代 ID' AFTER source_project_id",
                    "CREATE INDEX idx_tasks_iteration ON tasks (iteration_id)")
     _ensure_column(engine, "tasks", "lifecycle_phase",
-                   "ALTER TABLE tasks ADD COLUMN lifecycle_phase VARCHAR(32) NOT NULL DEFAULT 'development' COMMENT '生命周期阶段' AFTER status")
+                   "ALTER TABLE tasks ADD COLUMN lifecycle_phase VARCHAR(32) NOT NULL DEFAULT 'development' COMMENT '生命周期阶段' AFTER current_state_id")
     _ensure_column(engine, "tasks", "deleted",
                    "ALTER TABLE tasks ADD COLUMN deleted TINYINT(1) NOT NULL DEFAULT 0 COMMENT '是否删除 0否1是' AFTER delete_time")
 
@@ -304,7 +304,7 @@ def ensure_runtime_schema(engine: Engine) -> None:
     _ensure_column(engine, "bugs", "bug_type",
                    "ALTER TABLE bugs ADD COLUMN bug_type VARCHAR(64) NULL COMMENT 'Bug 类型' AFTER title")
     _ensure_column(engine, "bugs", "lifecycle_phase",
-                   "ALTER TABLE bugs ADD COLUMN lifecycle_phase VARCHAR(32) NOT NULL DEFAULT 'development' COMMENT '生命周期阶段' AFTER status")
+                   "ALTER TABLE bugs ADD COLUMN lifecycle_phase VARCHAR(32) NOT NULL DEFAULT 'development' COMMENT '生命周期阶段' AFTER current_state_id")
     _ensure_column(engine, "bugs", "resolution",
                    "ALTER TABLE bugs ADD COLUMN resolution VARCHAR(64) NULL COMMENT '解决结果' AFTER lifecycle_phase")
     _ensure_column(engine, "bugs", "resolve_time",

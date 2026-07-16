@@ -128,7 +128,7 @@ def execute_transition(
     transition, current_state = transition_context
     _ensure_supported_runtime_configuration(transition)
     if object_type in CORE_ID_OBJECT_TYPES:
-        from_status = current_state.status_key
+        from_status = current_state.status_name
     else:
         from_status = current_state
         if from_status != item.status:
@@ -179,10 +179,11 @@ def execute_transition(
         None,
         transition,
     )
-    item.status = resolved_target_status
     if resolved_target_state is not None:
         item.workflow_definition_id = transition.definition_id
         item.current_state_id = resolved_target_state.id
+    else:
+        setattr(item, "status", resolved_target_status)
     handler_routing = _next_owner_resolution(
         db,
         object_type,
@@ -256,7 +257,7 @@ def execute_transition(
     return WorkflowTransitionExecuteRead(
         object_type=object_type,
         id=item.id,
-        status=item.status,
+        status=getattr(item, "status", None),
         workflow_definition_id=getattr(item, "workflow_definition_id", None),
         current_state_id=getattr(item, "current_state_id", None),
         status_name=resolved_target_state.status_name if resolved_target_state else item.status,
@@ -285,7 +286,7 @@ def _definition_candidates_for_item(db: Session, object_type: str, item) -> list
     project_id = _project_id_for_item(db, object_type, item)
     project = db.query(Project).filter(Project.id == project_id, Project.deleted == 0).first() if project_id else None
     candidates: list[WorkflowDefinition] = []
-    if project and project.assignee_rule_config_id:
+    if object_type in CORE_ID_OBJECT_TYPES and project and project.assignee_rule_config_id:
         scoped_definition = (
             db.query(WorkflowDefinition)
             .filter(
@@ -1372,8 +1373,10 @@ def _defer_requirement_links(db: Session, requirement: Requirement, payload: dic
     requirement.iteration_id = target_iteration_id
     for task in db.query(Task).filter(Task.requirement_id == requirement.id, Task.deleted == 0).all():
         task.iteration_id = target_iteration_id
-        if task.status != "canceled":
-            task.status = "pending_assignment"
+        if not is_terminal_state(task):
+            definition = db.query(WorkflowDefinition).filter(WorkflowDefinition.id == task.workflow_definition_id).first()
+            if definition and definition.initial_state_id:
+                task.current_state_id = definition.initial_state_id
     for test_case in db.query(TestCase).filter(TestCase.requirement_id == requirement.id, TestCase.deleted == 0).all():
         test_case.iteration_id = target_iteration_id
 
@@ -1383,7 +1386,11 @@ def _defer_requirement_links(db: Session, requirement: Requirement, payload: dic
             action="defer",
             object_type="requirement",
             object_id=requirement.id,
-            before_data={"iteration_id": from_iteration_id, "status": requirement.status},
+            before_data={
+                "iteration_id": from_iteration_id,
+                "current_state_id": requirement.current_state_id,
+                "status_name": requirement.status_name,
+            },
             after_data={"iteration_id": target_iteration_id},
         )
     )

@@ -17,7 +17,7 @@ def _create_bug(client: TestClient, **overrides) -> dict:
     payload.update(overrides)
     response = client.post("/api/v1/bugs", json=payload)
     assert response.status_code == 200
-    assert response.json()["status"] == "pending_handling"
+    assert response.json()["status_name"] == "待处理"
     return response.json()
 
 
@@ -32,7 +32,7 @@ def test_bug_crud_keeps_status_changes_on_workflow_runtime(client: TestClient):
     assert updated.status_code == 422
     unchanged = client.get(f"/api/v1/bugs/{bug['id']}").json()
     assert unchanged["title"] == bug["title"]
-    assert unchanged["status"] == "pending_handling"
+    assert unchanged["status_name"] == "待处理"
     assert history.status_code == 200
 
 

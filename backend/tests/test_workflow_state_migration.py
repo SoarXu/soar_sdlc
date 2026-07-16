@@ -10,10 +10,24 @@ MIGRATION_PATH = (
     / "versions"
     / "20260716_001_workflow_state_identity.py"
 )
+CLEANUP_MIGRATION_PATH = (
+    Path(__file__).parents[1]
+    / "alembic"
+    / "versions"
+    / "20260716_002_remove_core_status_columns.py"
+)
 
 
 def _migration_module():
     spec = importlib.util.spec_from_file_location("workflow_state_identity_migration", MIGRATION_PATH)
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _cleanup_migration_module():
+    spec = importlib.util.spec_from_file_location("workflow_state_cleanup_migration", CLEANUP_MIGRATION_PATH)
     assert spec and spec.loader
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
@@ -76,3 +90,13 @@ def test_migration_requires_one_initial_state_per_definition():
 
     with pytest.raises(ValueError, match="definition 7.*exactly one initial state"):
         migration._initial_state_id(states, definition_id=7)
+
+
+def test_cleanup_migration_targets_only_core_work_item_status_columns():
+    migration = _cleanup_migration_module()
+
+    assert migration._legacy_core_columns() == {
+        "requirements": "status",
+        "tasks": "status",
+        "bugs": "status",
+    }

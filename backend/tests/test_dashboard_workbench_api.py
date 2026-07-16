@@ -222,9 +222,14 @@ def test_workbench_returns_created_watched_mentioned_and_exception_center(client
                 is_workbench_participant=True,
             )
         )
+        verified_state_id = db.query(WorkflowState.id).filter(
+            WorkflowState.definition_id == verified_bug["workflow_definition_id"],
+            WorkflowState.status_key == "verified",
+        ).scalar()
+        assert verified_state_id is not None
         db.query(Bug).filter(Bug.id == verified_bug["id"]).update(
             {
-                "status": "verified",
+                "current_state_id": verified_state_id,
                 "creator_id": developer_id,
                 "create_time": datetime.now() - timedelta(hours=30),
             }

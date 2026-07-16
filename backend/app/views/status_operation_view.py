@@ -25,6 +25,11 @@ class StatusOperationRead(BaseModel):
     object_type: str
     object_id: int
     action: str
+    workflow_definition_id: int | None = None
+    from_state_id: int | None = None
+    to_state_id: int | None = None
+    from_state_name: str | None = None
+    to_state_name: str | None = None
     from_status: str | None = None
     to_status: str
     reason: str | None = None

@@ -2,7 +2,7 @@ from datetime import date, datetime
 from decimal import Decimal
 
 from sqlalchemy import BigInteger, Date, DateTime, DECIMAL, ForeignKey, Integer, String, Text, text
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.session import Base
 
@@ -48,3 +48,9 @@ class Task(Base):
     )
     deleted: Mapped[int] = mapped_column(Integer, default=0)
     delete_time: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+    current_state: Mapped["WorkflowState | None"] = relationship(foreign_keys=[current_state_id], lazy="joined")
+
+    @property
+    def status_name(self) -> str | None:
+        return self.current_state.status_name if self.current_state else None

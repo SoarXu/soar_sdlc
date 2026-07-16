@@ -15,6 +15,7 @@ from app.services.project_permission_service import ensure_workflow_fields_not_u
 from app.services.lifecycle_service import project_lifecycle_phase
 from app.services.status_operation_service import list_status_operations
 from app.services.task_service import linked_task_summaries
+from app.services.workflow_state_service import initial_workflow_values
 from app.views.requirement_view import RequirementCreate, RequirementUpdate
 
 
@@ -35,7 +36,7 @@ def create_requirement(db: Session, payload: RequirementCreate, actor_id: int | 
     data = payload.model_dump()
     data["creator_id"] = actor_id
     _ensure_requirement_iteration_scope(db, data.get("project_id"), data.get("iteration_id"))
-    data["status"] = _initial_requirement_status(data.get("owner_id"))
+    data.update(initial_workflow_values(db, "requirement", data.get("project_id")))
     data["lifecycle_phase"] = project_lifecycle_phase(db, data.get("project_id"))
     requirement = Requirement(**data)
     db.add(requirement)
@@ -128,10 +129,6 @@ def _get_active_requirement(db: Session, requirement_id: int) -> Requirement:
     if not requirement:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Requirement not found")
     return requirement
-
-
-def _initial_requirement_status(owner_id: int | None) -> str:
-    return "in_processing" if owner_id else "pending_assignment"
 
 
 def _ensure_project_editable_for_requirement(db: Session, requirement: Requirement) -> None:

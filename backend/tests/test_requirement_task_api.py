@@ -98,7 +98,7 @@ def test_requirement_and_task_create_default_to_template_statuses_and_prd_fields
     )
     assert requirement.status_code == 200
     assert requirement.json()["priority"] == "3"
-    assert requirement.json()["status"] == "in_processing"
+    assert requirement.json()["status"] == "pending_assignment"
 
     default_priority_requirement = client.post(
         "/api/v1/requirements",
@@ -114,11 +114,35 @@ def test_requirement_and_task_create_default_to_template_statuses_and_prd_fields
     )
     assert task.status_code == 200
     assert task.json()["requirement_id"] == requirement.json()["id"]
-    assert task.json()["status"] == "in_processing"
+    assert task.json()["status"] == "pending_assignment"
 
     updated = client.patch(f"/api/v1/tasks/{task.json()['id']}", json={"actual_hours": 1.5})
     assert updated.status_code == 200
     assert updated.json()["actual_hours"] == 1.5
+
+
+def test_new_work_items_always_enter_definition_initial_state_regardless_of_owner(client: TestClient):
+    project_id = _create_project(client)
+    payloads = {
+        "requirement": ("/api/v1/requirements", {"project_id": project_id, "title": "Initial requirement"}),
+        "task": ("/api/v1/tasks", {"project_id": project_id, "title": "Initial task"}),
+        "bug": ("/api/v1/bugs", {"project_id": project_id, "title": "Initial bug"}),
+    }
+
+    for object_type, (url, payload) in payloads.items():
+        without_owner = client.post(url, json=payload)
+        with_owner = client.post(url, json={**payload, "title": f"{payload['title']} owned", "owner_id": 1})
+
+        assert without_owner.status_code in {200, 201}, without_owner.text
+        assert with_owner.status_code in {200, 201}, with_owner.text
+        unowned_data = without_owner.json()
+        owned_data = with_owner.json()
+        assert unowned_data["workflow_definition_id"] is not None
+        assert unowned_data["current_state_id"] is not None
+        assert unowned_data["status_name"]
+        assert owned_data["workflow_definition_id"] == unowned_data["workflow_definition_id"]
+        assert owned_data["current_state_id"] == unowned_data["current_state_id"], object_type
+        assert owned_data["status_name"] == unowned_data["status_name"]
 
 
 def test_generated_task_inherits_requirement_current_handler_by_default(client: TestClient):
@@ -150,7 +174,7 @@ def test_generated_task_inherits_requirement_current_handler_by_default(client: 
     assert data["requirement_id"] == requirement.json()["id"]
     assert data["project_id"] == project_id
     assert data["owner_id"] == owner_id
-    assert data["status"] == "in_processing"
+    assert data["status"] == "pending_assignment"
     assert data["source_requirement_review_status"] == "not_required"
 
 
@@ -244,6 +268,8 @@ def test_derived_task_branch_always_exposes_a_completion_action(client: TestClie
         json={"project_id": project_id, "title": f"Completable standalone {uuid4().hex[:8]}", "owner_id": actor_id},
         headers={"Authorization": f"Bearer {token}"},
     ).json()
+    claimed = _runtime_transition(client, "task", standalone["id"], "claim", token)
+    assert claimed.status_code == 200, claimed.text
 
     actions = client.get(
         f"/api/v1/workflow-runtime/task/{standalone['id']}/transitions",
@@ -324,6 +350,9 @@ def test_requirement_cancel_records_history_through_runtime(client: TestClient):
         json={"project_id": project_id, "title": f"Cancelable requirement {uuid4().hex[:8]}", "owner_id": owner_id},
     )
     assert requirement.status_code == 200
+    _add_project_member(project_id, owner_id, "developer")
+    claimed = _runtime_transition(client, "requirement", requirement.json()["id"], "claim", token)
+    assert claimed.status_code == 200, claimed.text
 
     canceled = _runtime_transition(
         client,
@@ -353,6 +382,9 @@ def test_requirement_close_blocks_on_open_linked_tasks_and_does_not_cancel_them(
         "/api/v1/tasks",
         json={"project_id": project_id, "requirement_id": requirement["id"], "title": f"Open task {uuid4().hex[:8]}", "owner_id": owner_id},
     ).json()
+    _add_project_member(project_id, owner_id, "developer")
+    claimed = _runtime_transition(client, "requirement", requirement["id"], "claim", token)
+    assert claimed.status_code == 200, claimed.text
 
     blocked = _runtime_transition(
         client,
@@ -365,7 +397,7 @@ def test_requirement_close_blocks_on_open_linked_tasks_and_does_not_cancel_them(
 
     assert blocked.status_code == 400
     assert client.get(f"/api/v1/requirements/{requirement['id']}").json()["status"] == "in_processing"
-    assert client.get(f"/api/v1/tasks/{task['id']}").json()["status"] == "in_processing"
+    assert client.get(f"/api/v1/tasks/{task['id']}").json()["status"] == "pending_assignment"
 
 def test_requirement_complete_goes_directly_to_completed_and_blocks_on_open_tasks(client: TestClient):
     project_id = _create_project(client)
@@ -374,6 +406,9 @@ def test_requirement_complete_goes_directly_to_completed_and_blocks_on_open_task
         "/api/v1/requirements",
         json={"project_id": project_id, "title": f"Completable requirement {uuid4().hex[:8]}", "owner_id": owner_id},
     ).json()
+    _add_project_member(project_id, owner_id, "developer")
+    claimed = _runtime_transition(client, "requirement", requirement["id"], "claim", token)
+    assert claimed.status_code == 200, claimed.text
 
     completed = _runtime_transition(client, "requirement", requirement["id"], "complete", token)
     assert completed.status_code == 200
@@ -389,6 +424,8 @@ def test_requirement_complete_goes_directly_to_completed_and_blocks_on_open_task
         "/api/v1/tasks",
         json={"project_id": project_id, "requirement_id": blocked_requirement["id"], "title": f"Open task {uuid4().hex[:8]}", "owner_id": owner_id},
     )
+    claimed_blocked = _runtime_transition(client, "requirement", blocked_requirement["id"], "claim", token)
+    assert claimed_blocked.status_code == 200, claimed_blocked.text
 
     blocked = _runtime_transition(client, "requirement", blocked_requirement["id"], "complete", token)
     assert blocked.status_code == 400
@@ -439,6 +476,8 @@ def test_bug_fix_task_complete_routes_to_pending_confirmation(client: TestClient
             "owner_id": developer_id,
         },
     ).json()
+    claimed = _runtime_transition(client, "task", task["id"], "claim", developer_token)
+    assert claimed.status_code == 200, claimed.text
 
     completed = _runtime_transition(client, "task", task["id"], "submit_confirmation", developer_token)
 

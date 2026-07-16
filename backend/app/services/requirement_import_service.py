@@ -10,6 +10,7 @@ from app.models.project import Project
 from app.models.requirement import Requirement
 from app.models.user import User
 from app.services.lifecycle_service import project_lifecycle_phase
+from app.services.workflow_state_service import initial_workflow_values
 from app.services.project_permission_service import ensure_work_item_create_permission
 
 
@@ -103,6 +104,7 @@ def commit_requirement_import(
             _apply_row_to_requirement(db, existing, row)
             updated_count += 1
             continue
+        workflow_values = initial_workflow_values(db, "requirement", row.project_id)
         requirement = Requirement(
             project_id=row.project_id,
             source_project_id=None,
@@ -112,7 +114,7 @@ def commit_requirement_import(
             priority=row.priority,
             owner_id=row.owner_id,
             proposer_id=row.proposer_id,
-            status="in_processing" if row.owner_id else "pending_assignment",
+            **workflow_values,
             review_status=row.review_status,
             lifecycle_phase=project_lifecycle_phase(db, row.project_id),
             description=row.description,

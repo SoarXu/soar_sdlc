@@ -208,8 +208,14 @@ def test_requirement_import_commit_keeps_created_requirement_unassigned(client: 
         db.close()
     config = client.post(
         "/api/v1/assignee-rule-configs",
-        json={"name": f"导入负责人规则-{uuid4().hex[:8]}", "requirement_owner_roles": "tester"},
+        json={
+            "name": f"导入负责人规则-{uuid4().hex[:8]}",
+            "requirement_owner_roles": "tester",
+            "creation_mode": "template",
+            "template_source": {"source_type": "system", "source_id": "system-standard"},
+        },
     ).json()
+    assert client.post(f"/api/v1/assignee-rule-configs/{config['id']}/enable").status_code == 200
     project_name = f"导入负责人项目-{uuid4().hex[:8]}"
     project = client.post(
         "/api/v1/projects",
@@ -257,8 +263,14 @@ def test_requirement_import_update_preserves_existing_current_handler(client: Te
         db.close()
     config = client.post(
         "/api/v1/assignee-rule-configs",
-        json={"name": f"导入更新负责人规则-{uuid4().hex[:8]}", "requirement_owner_roles": "tester"},
+        json={
+            "name": f"导入更新负责人规则-{uuid4().hex[:8]}",
+            "requirement_owner_roles": "tester",
+            "creation_mode": "template",
+            "template_source": {"source_type": "system", "source_id": "system-standard"},
+        },
     ).json()
+    assert client.post(f"/api/v1/assignee-rule-configs/{config['id']}/enable").status_code == 200
     project_name = f"导入更新负责人项目-{uuid4().hex[:8]}"
     project = client.post(
         "/api/v1/projects",

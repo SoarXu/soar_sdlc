@@ -10,6 +10,7 @@ from app.models.test_case_execution import TestCaseExecutionLog
 from app.services.lifecycle_service import project_lifecycle_phase, requirement_lifecycle_phase
 from app.services.project_team_service import default_tester_id
 from app.services.task_service import linked_task_summaries
+from app.services.workflow_state_service import initial_workflow_values
 from app.views.test_case_view import BugFromTestCaseRequest, TestCaseCreate, TestCaseExecutionCreate, TestCaseUpdate
 
 
@@ -112,6 +113,7 @@ def create_bug_from_test_case(
     if not project_id:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="用例未关联项目，无法提交 Bug")
 
+    workflow_values = initial_workflow_values(db, "bug", project_id)
     bug = Bug(
         project_id=project_id,
         iteration_id=test_case.iteration_id or (requirement.iteration_id if requirement else None),
@@ -126,7 +128,7 @@ def create_bug_from_test_case(
         reproduce_steps=payload.reproduce_steps or _build_reproduce_steps(test_case, latest_execution),
         expected_result=payload.expected_result or test_case.expected_result,
         actual_result=payload.actual_result or _build_actual_result(latest_execution),
-        status="pending_handling",
+        **workflow_values,
         lifecycle_phase=test_case.lifecycle_phase,
         creator_id=actor_id,
     )

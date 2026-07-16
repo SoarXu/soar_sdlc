@@ -51,6 +51,10 @@ class RequirementRead(RequirementBase):
     model_config = ConfigDict(from_attributes=True)
 
     id: int
+    status: str
+    workflow_definition_id: int
+    current_state_id: int
+    status_name: str
     creator_id: int | None = None
     updater_id: int | None = None
     create_time: datetime | None = None

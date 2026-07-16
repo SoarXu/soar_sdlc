@@ -732,7 +732,6 @@ def _transition(
     if handler_scope:
         resolved_ui_config["handler_scope"] = handler_scope
     if action_key in {"claim", "assign"} and from_status in {"pending_assignment", "pending_handling"}:
-        resolved_ui_config.setdefault("ownerless_only", True)
         if action_key == "claim":
             resolved_ui_config["handler_scope"] = handler_scope or "project_member"
             resolved_ui_config["action_category"] = "ownership"

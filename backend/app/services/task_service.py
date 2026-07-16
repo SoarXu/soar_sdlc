@@ -22,6 +22,7 @@ from app.services.project_permission_service import (
 )
 from app.services.lifecycle_service import project_lifecycle_phase, requirement_lifecycle_phase
 from app.services.status_operation_service import list_status_operations
+from app.services.workflow_state_service import initial_workflow_values
 from app.views.task_view import LinkedTaskCreate, TaskCreate, TaskUpdate
 
 
@@ -60,7 +61,7 @@ def create_task(db: Session, payload: TaskCreate, actor_id: int | None = None) -
         requirement_lifecycle_phase(db, data.get("requirement_id"))
         or project_lifecycle_phase(db, data.get("project_id"))
     )
-    data["status"] = _initial_task_status(data.get("owner_id"))
+    data.update(initial_workflow_values(db, "task", data.get("project_id")))
     task = Task(**data)
     db.add(task)
     db.commit()
@@ -97,6 +98,7 @@ def create_linked_task(db: Session, payload: LinkedTaskCreate, actor: User | Non
         if final_owner_id and not is_project_member(db, project_id, final_owner_id):
             raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Selected handler is not a project member")
 
+    workflow_values = initial_workflow_values(db, "task", project_id)
     task = Task(
         project_id=project_id,
         source_project_id=getattr(source, "source_project_id", None),
@@ -107,7 +109,7 @@ def create_linked_task(db: Session, payload: LinkedTaskCreate, actor: User | Non
         priority=payload.priority,
         owner_id=final_owner_id,
         due_date=payload.due_date,
-        status=_initial_task_status(final_owner_id),
+        **workflow_values,
         description=payload.description,
         lifecycle_phase=getattr(source, "lifecycle_phase", None) or project_lifecycle_phase(db, project_id),
         source_requirement_review_status=getattr(source, "review_status", None),

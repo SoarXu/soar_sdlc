@@ -18,6 +18,7 @@ from app.services.lifecycle_service import (
 )
 from app.services.status_operation_service import list_status_operations
 from app.services.task_service import linked_task_summaries
+from app.services.workflow_state_service import initial_workflow_values
 from app.views.bug_view import BugCreate, BugFromTestRunCaseRequest, BugUpdate
 
 
@@ -44,7 +45,7 @@ def create_bug(db: Session, payload: BugCreate, actor_id: int | None = None) -> 
         or test_case_lifecycle_phase(db, data.get("test_case_id"))
         or project_lifecycle_phase(db, data.get("project_id"))
     )
-    data["status"] = "pending_handling"
+    data.update(initial_workflow_values(db, "bug", data.get("project_id")))
     bug = Bug(**data)
     db.add(bug)
     db.commit()
@@ -74,6 +75,7 @@ def create_bug_from_test_run_case(
         if test_case.requirement_id
         else None
     )
+    workflow_values = initial_workflow_values(db, "bug", test_run.project_id)
     bug = Bug(
         project_id=test_run.project_id,
         requirement_id=test_case.requirement_id,
@@ -87,7 +89,7 @@ def create_bug_from_test_run_case(
         reproduce_steps=payload.reproduce_steps,
         expected_result=payload.expected_result or test_case.expected_result,
         actual_result=payload.actual_result,
-        status="pending_handling",
+        **workflow_values,
         lifecycle_phase=test_case.lifecycle_phase,
         creator_id=actor_id,
     )

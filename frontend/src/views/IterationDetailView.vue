@@ -71,9 +71,9 @@
               <el-table-column label="状态" width="90">
                 <template #default="{ row }">
                   <el-tooltip v-if="closeReasonByRequirement[row.id]" :content="closeReasonByRequirement[row.id]" placement="top" raw-content>
-                    <span class="status-with-reason">{{ requirementStatusLabel(row.status) }}</span>
+                    <span class="status-with-reason">{{ row.status_name || '-' }}</span>
                   </el-tooltip>
-                  <span v-else>{{ requirementStatusLabel(row.status) }}</span>
+                  <span v-else>{{ row.status_name || '-' }}</span>
                 </template>
               </el-table-column>
               <el-table-column label="操作" width="420" fixed="right">
@@ -115,9 +115,9 @@
             <el-table-column label="状态" width="110">
               <template #default="{ row }">
                 <el-tooltip v-if="closeReasonByTask[row.id]" :content="closeReasonByTask[row.id]" placement="top" raw-content>
-                  <span class="status-with-reason">{{ taskStatusLabel(row.status) }}</span>
+                  <span class="status-with-reason">{{ row.status_name || '-' }}</span>
                 </el-tooltip>
-                <span v-else>{{ taskStatusLabel(row.status) }}</span>
+                <span v-else>{{ row.status_name || '-' }}</span>
               </template>
             </el-table-column>
             <el-table-column label="操作" width="260" fixed="right">
@@ -167,7 +167,7 @@
           <el-table-column label="严重程度" width="110"><template #default="{ row }"><RequirementPriorityBadge :value="row.severity" /></template></el-table-column>
           <el-table-column label="优先级" width="110"><template #default="{ row }"><RequirementPriorityBadge :value="row.priority" /></template></el-table-column>
           <el-table-column label="负责人" width="140"><template #default="{ row }">{{ userLabel(users, row.owner_id) }}</template></el-table-column>
-          <el-table-column label="状态" width="110"><template #default="{ row }">{{ bugStatusLabel(row.status) }}</template></el-table-column>
+          <el-table-column label="状态" width="110"><template #default="{ row }">{{ row.status_name || '-' }}</template></el-table-column>
         </el-table>
       </template>
     </el-card>
@@ -178,7 +178,7 @@
         <el-table-column prop="title" label="需求标题" min-width="240" />
         <el-table-column label="项目" width="180"><template #default="{ row }">{{ labelById(flatProjects, row.project_id) }}</template></el-table-column>
         <el-table-column label="负责人" width="140"><template #default="{ row }">{{ userLabel(users, row.owner_id) }}</template></el-table-column>
-        <el-table-column label="状态" width="110"><template #default="{ row }">{{ requirementStatusLabel(row.status) }}</template></el-table-column>
+        <el-table-column label="状态" width="110"><template #default="{ row }">{{ row.status_name || '-' }}</template></el-table-column>
       </el-table>
       <template #footer><el-button @click="requirementDialogVisible = false">取消</el-button><el-button type="primary" :loading="saving" @click="submitRequirements">关联</el-button></template>
     </el-dialog>
@@ -189,7 +189,7 @@
         <el-table-column prop="title" label="任务标题" min-width="240" />
         <el-table-column label="项目" width="180"><template #default="{ row }">{{ labelById(flatProjects, row.project_id) }}</template></el-table-column>
         <el-table-column label="负责人" width="140"><template #default="{ row }">{{ userLabel(users, row.owner_id) }}</template></el-table-column>
-        <el-table-column label="状态" width="110"><template #default="{ row }">{{ taskStatusLabel(row.status) }}</template></el-table-column>
+        <el-table-column label="状态" width="110"><template #default="{ row }">{{ row.status_name || '-' }}</template></el-table-column>
       </el-table>
       <template #footer><el-button @click="taskDialogVisible = false">取消</el-button><el-button type="primary" :loading="saving" @click="submitTasks">关联</el-button></template>
     </el-dialog>
@@ -273,7 +273,7 @@
           <h3>未完成需求 {{ unfinishedIterationRequirements.length }}</h3>
           <el-table :data="unfinishedIterationRequirements" max-height="220" border>
             <el-table-column prop="title" label="标题" min-width="220" />
-            <el-table-column label="状态" width="100"><template #default="{ row }">{{ requirementStatusLabel(row.status) }}</template></el-table-column>
+            <el-table-column label="状态" width="100"><template #default="{ row }">{{ row.status_name || '-' }}</template></el-table-column>
             <el-table-column label="负责人" width="120"><template #default="{ row }">{{ userLabel(users, row.owner_id) }}</template></el-table-column>
           </el-table>
         </div>
@@ -281,7 +281,7 @@
           <h3>未完成任务 {{ unfinishedIterationTasks.length }}</h3>
           <el-table :data="unfinishedIterationTasks" max-height="220" border>
             <el-table-column prop="title" label="标题" min-width="220" />
-            <el-table-column label="状态" width="100"><template #default="{ row }">{{ taskStatusLabel(row.status) }}</template></el-table-column>
+            <el-table-column label="状态" width="100"><template #default="{ row }">{{ row.status_name || '-' }}</template></el-table-column>
             <el-table-column label="负责人" width="120"><template #default="{ row }">{{ userLabel(users, row.owner_id) }}</template></el-table-column>
           </el-table>
         </div>
@@ -439,20 +439,6 @@ const iterationStatusOptions = [
   { label: '已完成', value: 'completed' },
   { label: '已取消', value: 'canceled' }
 ]
-const requirementStatusOptions = [
-  { label: '待分派', value: 'pending_assignment' },
-  { label: '处理中', value: 'in_processing' },
-  { label: '待确认', value: 'pending_confirmation' },
-  { label: '已完成', value: 'completed' },
-  { label: '已取消', value: 'canceled' }
-]
-const taskStatusOptions = [
-  { label: '待分派', value: 'pending_assignment' },
-  { label: '处理中', value: 'in_processing' },
-  { label: '待确认', value: 'pending_confirmation' },
-  { label: '已完成', value: 'completed' },
-  { label: '已取消', value: 'canceled' }
-]
 const caseTypeOptions = [
   { label: '接口测试', value: 'api' },
   { label: '功能测试', value: 'functional' },
@@ -475,13 +461,6 @@ const executionResultOptions = [
   { label: '通过', value: 'passed' },
   { label: '失败', value: 'failed' },
   { label: '阻塞', value: 'blocked' }
-]
-const bugStatusOptions = [
-  { label: '待处理', value: 'pending_handling' },
-  { label: '修复中', value: 'fixing' },
-  { label: '待验证', value: 'pending_verification' },
-  { label: '已验证', value: 'verified' },
-  { label: '已关闭', value: 'closed' }
 ]
 const { bugTypeOptions } = useBugTypes()
 const requirementTypeOptions = ['功能', '接口', '性能', '安全', '体验', '改进', '其他']
@@ -510,15 +489,12 @@ const canManageIteration = computed(() => (iteration.value.project_ids || []).so
 const projectNames = computed(() => (iteration.value.project_ids || []).map(id => labelById(flatProjects.value, id)).join('、') || '-')
 const failedExecutionCount = computed(() => caseExecutionHistory.value.filter((item) => item.result === 'failed').length)
 const deferTargetIterations = computed(() => iterations.value.filter((item) => item.id !== iterationId.value && !['completed', 'canceled'].includes(item.status)))
-const unfinishedIterationRequirements = computed(() => requirements.value.filter((item) => !['completed', 'canceled'].includes(item.status)))
-const directUnfinishedIterationTasks = computed(() => tasks.value.filter((item) => item.iteration_id === iterationId.value && !['completed', 'canceled'].includes(item.status)))
-const unfinishedIterationTasks = computed(() => tasks.value.filter((item) => !['completed', 'canceled'].includes(item.status)))
+const unfinishedIterationRequirements = computed(() => requirements.value.filter((item) => item.state_category !== 'terminal'))
+const directUnfinishedIterationTasks = computed(() => tasks.value.filter((item) => item.iteration_id === iterationId.value && item.state_category !== 'terminal'))
+const unfinishedIterationTasks = computed(() => tasks.value.filter((item) => item.state_category !== 'terminal'))
 
 function optionLabel(options, value) { return options.find((option) => option.value === value)?.label || value || '-' }
 function iterationStatusLabel(value) { return optionLabel(iterationStatusOptions, value) }
-function requirementStatusLabel(value) { return optionLabel(requirementStatusOptions, value) }
-function taskStatusLabel(value) { return optionLabel(taskStatusOptions, value) }
-function bugStatusLabel(value) { return optionLabel(bugStatusOptions, value) }
 function caseTypeLabel(value) { return optionLabel(caseTypeOptions, value) }
 function testScopeLabel(value) { return optionLabel(testScopeOptions, value) }
 function executionResultLabel(value) { return optionLabel(executionResultOptions, value) }

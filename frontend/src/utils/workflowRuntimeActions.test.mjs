@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 
 import {
   actionNeedsDialog,
-  actionNeedsTargetStatusSelection,
+  actionNeedsTargetStateSelection,
   workflowCommandType,
   splitListActions,
   visibleDetailActions
@@ -55,12 +55,12 @@ function action(actionKey, overrides = {}) {
 {
   assert.equal(actionNeedsDialog(action('confirm_bug_type', {
     routing_mode: 'automatic_with_override',
-    allowed_target_statuses: ['fixing', 'pending_verification']
+    allowed_target_states: [{ id: 2, status_name: '修复中' }, { id: 3, status_name: '待验证' }]
   })), true)
 
-  assert.equal(actionNeedsTargetStatusSelection(action('reroute', {
+  assert.equal(actionNeedsTargetStateSelection(action('reroute', {
     routing_mode: 'manual_allowed',
-    allowed_target_statuses: ['completed']
+    allowed_target_states: [{ id: 4, status_name: '已完成' }]
   })), true)
 
   assert.equal(actionNeedsDialog(action('claim')), false)

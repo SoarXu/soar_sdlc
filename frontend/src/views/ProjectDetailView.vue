@@ -128,9 +128,9 @@
           <el-table-column label="状态" width="90">
             <template #default="{ row }">
               <el-tooltip v-if="closeReasonByRequirement[row.id]" :content="closeReasonByRequirement[row.id]" placement="top" raw-content>
-                <span class="status-with-reason">{{ requirementStatusLabel(row.status) }}</span>
+                <span class="status-with-reason">{{ row.status_name || '-' }}</span>
               </el-tooltip>
-              <span v-else>{{ requirementStatusLabel(row.status) }}</span>
+              <span v-else>{{ row.status_name || '-' }}</span>
             </template>
           </el-table-column>
           <el-table-column label="操作" width="360" fixed="right">
@@ -183,9 +183,9 @@
           <el-table-column label="状态" width="110">
             <template #default="{ row }">
               <el-tooltip v-if="closeReasonByTask[row.id]" :content="closeReasonByTask[row.id]" placement="top" raw-content>
-                <span class="status-with-reason">{{ taskStatusLabel(row.status) }}</span>
+                <span class="status-with-reason">{{ row.status_name || '-' }}</span>
               </el-tooltip>
-              <span v-else>{{ taskStatusLabel(row.status) }}</span>
+              <span v-else>{{ row.status_name || '-' }}</span>
             </template>
           </el-table-column>
           <el-table-column label="操作" width="240" fixed="right">
@@ -275,7 +275,7 @@
           <el-table-column label="Bug 类型" width="120"><template #default="{ row }">{{ row.bug_type || '-' }}</template></el-table-column>
           <el-table-column label="严重程度" width="110"><template #default="{ row }"><RequirementPriorityBadge :value="row.severity" /></template></el-table-column>
           <el-table-column label="优先级" width="110"><template #default="{ row }"><RequirementPriorityBadge :value="row.priority" /></template></el-table-column>
-          <el-table-column label="状态" width="120"><template #default="{ row }">{{ bugStatusLabel(row.status) }}</template></el-table-column>
+          <el-table-column label="状态" width="120"><template #default="{ row }">{{ row.status_name || '-' }}</template></el-table-column>
           <el-table-column label="操作" width="380" fixed="right">
             <template #default="{ row }">
               <div class="table-actions">
@@ -439,7 +439,7 @@
           <h3>未完成需求 {{ unfinishedIterationRequirements.length }}</h3>
           <el-table :data="unfinishedIterationRequirements" max-height="220" border>
             <el-table-column prop="title" label="标题" min-width="220" />
-            <el-table-column label="状态" width="100"><template #default="{ row }">{{ requirementStatusLabel(row.status) }}</template></el-table-column>
+            <el-table-column label="状态" width="100"><template #default="{ row }">{{ row.status_name || '-' }}</template></el-table-column>
             <el-table-column label="当前处理人" width="120"><template #default="{ row }">{{ userLabel(users, row.owner_id) }}</template></el-table-column>
           </el-table>
         </div>
@@ -447,7 +447,7 @@
           <h3>未完成任务 {{ unfinishedIterationTasks.length }}</h3>
           <el-table :data="unfinishedIterationTasks" max-height="220" border>
             <el-table-column prop="title" label="标题" min-width="220" />
-            <el-table-column label="状态" width="100"><template #default="{ row }">{{ taskStatusLabel(row.status) }}</template></el-table-column>
+            <el-table-column label="状态" width="100"><template #default="{ row }">{{ row.status_name || '-' }}</template></el-table-column>
             <el-table-column label="当前处理人" width="120"><template #default="{ row }">{{ userLabel(users, row.owner_id) }}</template></el-table-column>
           </el-table>
         </div>
@@ -766,13 +766,6 @@ const iterationStatusOptions = [
   { label: '已完成', value: 'completed' },
   { label: '已取消', value: 'canceled' }
 ]
-const requirementStatusOptions = [
-  { label: '待分派', value: 'pending_assignment' },
-  { label: '处理中', value: 'in_processing' },
-  { label: '待确认', value: 'pending_confirmation' },
-  { label: '已完成', value: 'completed' },
-  { label: '已取消', value: 'canceled' }
-]
 const requirementPriorityOptions = [
   { label: '1', value: '1' },
   { label: '2', value: '2' },
@@ -782,13 +775,6 @@ const requirementPriorityOptions = [
 ]
 const requirementTypeOptions = ['功能', '接口', '性能', '安全', '体验', '改进', '其他']
 const legacyRequirementPriorityValues = { high: '1', medium: '3', low: '5' }
-const taskStatusOptions = [
-  { label: '待分派', value: 'pending_assignment' },
-  { label: '处理中', value: 'in_processing' },
-  { label: '待确认', value: 'pending_confirmation' },
-  { label: '已完成', value: 'completed' },
-  { label: '已取消', value: 'canceled' }
-]
 const caseTypeOptions = [
   { label: '接口测试', value: 'api' },
   { label: '功能测试', value: 'functional' },
@@ -834,13 +820,6 @@ const projectMemberRoleOptions = [
   { label: '测试', value: 'tester' },
   { label: '观察者', value: 'viewer' }
 ]
-const bugStatusOptions = [
-  { label: '待处理', value: 'pending_handling' },
-  { label: '修复中', value: 'fixing' },
-  { label: '待验证', value: 'pending_verification' },
-  { label: '已验证', value: 'verified' },
-  { label: '已关闭', value: 'closed' }
-]
 
 const projectIterations = computed(() => projectIterationRows.value)
 const projectRequirements = computed(() => projectRequirementRows.value)
@@ -885,13 +864,13 @@ const projectTestRunOptions = computed(() => projectTestRunRows.value)
 const bugEditableIterationOptions = computed(() => bugIterationOptions(iterations.value, projects.value, bugForm.project_id || projectId.value))
 const bugEditableIterationDisplayOptions = computed(() => includeSelectedIterationOption(bugEditableIterationOptions.value, iterations.value, bugForm.iteration_id))
 const deferTargetIterations = computed(() => projectIterationOptions.value.filter((item) => item.id !== startingIterationId.value && !['completed', 'canceled'].includes(item.status)))
-const unfinishedIterationRequirements = computed(() => requirements.value.filter((item) => item.iteration_id === startingIterationId.value && !['completed', 'canceled'].includes(item.status)))
-const directUnfinishedIterationTasks = computed(() => tasks.value.filter((item) => item.iteration_id === startingIterationId.value && !['completed', 'canceled'].includes(item.status)))
+const unfinishedIterationRequirements = computed(() => requirements.value.filter((item) => item.iteration_id === startingIterationId.value && item.state_category !== 'terminal'))
+const directUnfinishedIterationTasks = computed(() => tasks.value.filter((item) => item.iteration_id === startingIterationId.value && item.state_category !== 'terminal'))
 const unfinishedIterationTasks = computed(() => {
   const requirementIds = new Set(unfinishedIterationRequirements.value.map((item) => item.id))
   const taskById = new Map()
   tasks.value
-    .filter((item) => !['completed', 'canceled'].includes(item.status) && (item.iteration_id === startingIterationId.value || requirementIds.has(item.requirement_id)))
+    .filter((item) => item.state_category !== 'terminal' && (item.iteration_id === startingIterationId.value || requirementIds.has(item.requirement_id)))
     .forEach((item) => taskById.set(item.id, item))
   return Array.from(taskById.values())
 })
@@ -1035,10 +1014,7 @@ function resetProjectListSearch(key) {
 function projectStatusLabel(value) { return optionLabel(projectStatusOptions, value) }
 function iterationStatusLabel(value) { return optionLabel(iterationStatusOptions, value) }
 function normalizeRequirementPriority(value) { return legacyRequirementPriorityValues[value] || value || '3' }
-function requirementStatusLabel(value) { return optionLabel(requirementStatusOptions, value) }
-function taskStatusLabel(value) { return optionLabel(taskStatusOptions, value) }
 function testRunStatusLabel(value) { return optionLabel(testRunStatusOptions, value) }
-function bugStatusLabel(value) { return optionLabel(bugStatusOptions, value) }
 function operationActionLabel(value) { return optionLabel([{ label: '启动', value: 'start' }, { label: '挂起', value: 'suspend' }, { label: '关闭', value: 'close' }, { label: '激活', value: 'activate' }], value) }
 function projectWorkflowTransitionKey(objectType, id) { return `${objectType}:${id}` }
 function projectWorkflowTransitionsFor(objectType, id) { return projectWorkflowTransitions.value[projectWorkflowTransitionKey(objectType, id)] || [] }

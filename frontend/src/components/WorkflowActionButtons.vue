@@ -92,15 +92,15 @@
           />
         </el-form-item>
 
-        <el-form-item v-if="needsTargetStatusSelection" label="目标状态">
+        <el-form-item v-if="needsTargetStateSelection" label="目标状态">
           <el-select
-            v-model="selectedTargetStatus"
+            v-model="selectedTargetStateId"
             clearable
             filterable
-            :placeholder="targetStatusPlaceholder"
+            :placeholder="targetStatePlaceholder"
           >
             <el-option
-              v-for="option in targetStatusOptions"
+              v-for="option in targetStateOptions"
               :key="option.value"
               :label="option.label"
               :value="option.value"
@@ -148,7 +148,7 @@ import { showActionError } from '../utils/actionFeedback'
 import { isDelegateReasonRequiredError } from '../utils/permissions'
 import {
   actionNeedsDialog,
-  actionNeedsTargetStatusSelection,
+  actionNeedsTargetStateSelection,
   sortWorkflowActions,
   splitListActions,
   visibleDetailActions,
@@ -174,7 +174,7 @@ const submittingAction = ref('')
 const formPayload = reactive({})
 const nextOwnerId = ref(null)
 const delegateReason = ref('')
-const selectedTargetStatus = ref('')
+const selectedTargetStateId = ref(null)
 const overrideReason = ref('')
 const delegateReasonRequired = ref(false)
 const loadedUsers = ref([])
@@ -191,13 +191,13 @@ const formFields = computed(() => activeAction.value?.form_config?.fields || [])
 const dialogTitle = computed(() => activeAction.value?.form_config?.title || activeAction.value?.action_name || '执行流转')
 const submitText = computed(() => activeAction.value?.form_config?.submit_text || activeAction.value?.action_name || '确认')
 const allowManualOwner = computed(() => actionAllowsManualOwner(activeAction.value))
-const needsTargetStatusSelection = computed(() => actionNeedsTargetStatusSelection(activeAction.value))
-const showOverrideReason = computed(() => needsTargetStatusSelection.value && Boolean(selectedTargetStatus.value))
-const targetStatusOptions = computed(() => {
-  const statuses = activeAction.value?.allowed_target_statuses || []
-  return statuses.map((status) => ({ label: formatStatusLabel(status), value: status }))
+const needsTargetStateSelection = computed(() => actionNeedsTargetStateSelection(activeAction.value))
+const showOverrideReason = computed(() => needsTargetStateSelection.value && Boolean(selectedTargetStateId.value))
+const targetStateOptions = computed(() => {
+  const states = activeAction.value?.allowed_target_states || []
+  return states.map((state) => ({ label: state.status_name, value: state.id }))
 })
-const targetStatusPlaceholder = computed(() => (
+const targetStatePlaceholder = computed(() => (
   activeAction.value?.routing_mode === 'manual_allowed'
     ? '请选择目标状态'
     : '默认按规则自动流转，可按需覆盖'
@@ -222,14 +222,6 @@ function fieldOptions(field) {
   })
 }
 
-function formatStatusLabel(status) {
-  return String(status || '')
-    .split('_')
-    .filter(Boolean)
-    .map((segment) => segment.charAt(0).toUpperCase() + segment.slice(1))
-    .join(' ')
-}
-
 function resetForm(action) {
   Object.keys(formPayload).forEach((key) => delete formPayload[key])
   for (const field of action?.form_config?.fields || []) {
@@ -237,7 +229,7 @@ function resetForm(action) {
   }
   nextOwnerId.value = null
   delegateReason.value = ''
-  selectedTargetStatus.value = ''
+  selectedTargetStateId.value = null
   overrideReason.value = ''
   delegateReasonRequired.value = false
 }
@@ -281,7 +273,7 @@ function validatePayload() {
     ElMessage.warning('请填写代处理原因')
     return false
   }
-  if (activeAction.value?.routing_mode === 'manual_allowed' && !selectedTargetStatus.value) {
+  if (activeAction.value?.routing_mode === 'manual_allowed' && !selectedTargetStateId.value) {
     ElMessage.warning('请选择目标状态')
     return false
   }
@@ -325,7 +317,7 @@ async function submitAction(action) {
     }
     if (nextOwnerId.value) payload.next_owner_id = nextOwnerId.value
     if (delegateReason.value.trim()) payload.delegate_reason = delegateReason.value.trim()
-    if (selectedTargetStatus.value) payload.selected_target_status = selectedTargetStatus.value
+    if (selectedTargetStateId.value) payload.selected_target_state_id = selectedTargetStateId.value
     if (overrideReason.value.trim()) payload.override_reason = overrideReason.value.trim()
     const { data } = await executeWorkflowTransition(props.objectType, props.objectId, payload)
     dialogVisible.value = false

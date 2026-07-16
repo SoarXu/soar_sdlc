@@ -62,6 +62,22 @@ def test_template_sources_unify_system_and_existing_schemes(client: TestClient):
     )
 
 
+def test_template_sources_exclude_legacy_schemes_missing_core_definitions(client: TestClient):
+    existing = _create_draft_config(client)
+    definitions = _definitions_for_config(client, existing["id"])
+    for object_type in ("task", "bug"):
+        deleted = client.delete(f"/api/v1/workflow-definitions/{definitions[object_type]['id']}")
+        assert deleted.status_code == 204
+
+    response = client.get("/api/v1/assignee-rule-configs/template-sources")
+
+    assert response.status_code == 200
+    assert not any(
+        item["source_type"] == "scheme" and str(item["source_id"]) == str(existing["id"])
+        for item in response.json()
+    )
+
+
 def _create_from_template(client: TestClient, source_type: str, source_id: str) -> dict:
     response = client.post(
         "/api/v1/assignee-rule-configs",

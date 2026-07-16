@@ -21,9 +21,9 @@
         <el-table-column label="状态" width="110">
           <template #default="{ row }">
             <el-tooltip v-if="closeReasonByTask[row.id]" :content="closeReasonByTask[row.id]" placement="top" raw-content>
-              <span class="status-with-reason">{{ taskStatusLabel(row.status) }}</span>
+              <span class="status-with-reason">{{ row.status_name || '-' }}</span>
             </el-tooltip>
-            <span v-else>{{ taskStatusLabel(row.status) }}</span>
+            <span v-else>{{ row.status_name || '-' }}</span>
           </template>
         </el-table-column>
         <el-table-column label="操作" width="330" fixed="right">
@@ -132,16 +132,8 @@ const availableRequirements = computed(() => {
   if (!form.project_id) return requirements.value
   return requirements.value.filter((item) => item.project_id === form.project_id)
 })
-const taskStatusOptions = [
-  { label: '待分派', value: 'pending_assignment' },
-  { label: '处理中', value: 'in_processing' },
-  { label: '待确认', value: 'pending_confirmation' },
-  { label: '已完成', value: 'completed' },
-  { label: '已取消', value: 'canceled' }
-]
 
 function optionLabel(options, value) { return options.find((option) => option.value === value)?.label || value || '-' }
-function taskStatusLabel(value) { return optionLabel(taskStatusOptions, value) }
 function isTaskProjectClosed(row) { return projects.value.find((item) => item.id === row.project_id)?.status === 'closed' }
 function workflowTransitionsFor(row) { return workflowTransitions.value[`task:${row.id}`] || [] }
 function projectForTask(row) { return projects.value.find((item) => item.id === row.project_id) || null }

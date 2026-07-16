@@ -3,6 +3,8 @@ import assert from 'node:assert/strict'
 import {
   buildWorkbenchViewModel,
   filterWorkbenchItems,
+  isTerminalWorkItem,
+  itemStatusLabel,
   shouldShowWorkbenchWorkflowActions,
   workbenchInlineActions,
   workbenchItemActionGroup,
@@ -16,7 +18,8 @@ import {
       object_type: 'bug',
       project_id: 10,
       priority: '1',
-      status: 'fixing',
+      current_state_id: 101,
+      status_name: '团队修复阶段',
       owner_id: 7,
       handler_id: 8,
       overdue_hours: 6
@@ -26,7 +29,8 @@ import {
       object_type: 'task',
       project_id: 11,
       priority: '3',
-      status: 'in_processing',
+      current_state_id: 202,
+      status_name: '处理中',
       owner_id: 9,
       handler_id: 9,
       overdue_hours: 2
@@ -37,12 +41,23 @@ import {
     projectIds: [10],
     types: ['bug'],
     priorities: ['1'],
-    statuses: ['fixing'],
+    stateIds: [101],
     ownerIds: [7],
     handlerIds: [8],
     minOverdueHours: 6
   }).map((item) => item.id), [1])
   assert.deepEqual(filterWorkbenchItems(items, { minOverdueHours: 7 }), [])
+}
+
+{
+  const item = {
+    object_type: 'bug',
+    current_state_id: 101,
+    status_name: '团队自定义完成',
+    state_category: 'terminal'
+  }
+  assert.equal(itemStatusLabel(item), '团队自定义完成')
+  assert.equal(isTerminalWorkItem(item), true)
 }
 
 {

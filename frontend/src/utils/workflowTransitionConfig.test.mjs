@@ -11,8 +11,8 @@ const source = {
   definition_id: 3,
   action_key: 'classify',
   action_name: 'Classify',
-  from_status: 'pending_handling',
-  to_status: 'fixing',
+  from_state_id: 11,
+  to_state_id: 12,
   allowed_roles: 'current_handler,system_admin',
   handler_rule: {
     target_type: 'project_role',
@@ -20,7 +20,7 @@ const source = {
     fallback_type: 'project_owner',
     fallback_roles: ''
   },
-  condition_config: { field: 'bug_type', routes: { code_issue: 'fixing' }, routing_mode: 'automatic' },
+  condition_config: { field: 'bug_type', routes: { code_issue: 12 }, routing_mode: 'automatic' },
   form_config: { fields: [
     { field: 'bug_type', label: 'Bug Type', type: 'select', dictionary: 'bug_type' },
     { field: 'resolution', label: 'Resolution', type: 'select', options: [{ label: 'Fixed', value: 'fixed' }] }
@@ -34,10 +34,10 @@ const source = {
 const normalized = normalizeWorkflowTransition(source)
 assert.deepEqual(normalized.allowed_role_list, ['current_handler', 'system_admin'])
 assert.deepEqual(normalized.handler_target_roles, ['developer', 'tester'])
-assert.deepEqual(normalized.condition_routes, [{ value: 'code_issue', status: 'fixing' }])
+assert.deepEqual(normalized.condition_routes, [{ value: 'code_issue', state_id: 12 }])
 
 const serialized = serializeWorkflowTransition(normalized)
-assert.equal('id' in serialized, false)
+assert.equal(serialized.id, 9)
 assert.equal('definition_id' in serialized, false)
 for (const key of ['condition_config', 'form_config', 'validator_config', 'ui_config', 'trigger_config', 'post_action_config']) {
   assert.deepEqual(serialized[key], source[key])

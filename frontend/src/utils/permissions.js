@@ -72,7 +72,8 @@ export function canManageTestCase(project, user, members = []) {
 export function actionErrorMessage(error, fallback = '操作失败') {
   const detail = error?.response?.data?.detail
   if (Array.isArray(detail)) return detail.map((item) => item.msg || item.message || String(item)).join('；')
-  return friendlyErrorMessage(detail || error?.message, fallback) || fallback
+  const message = detail && typeof detail === 'object' ? detail.message : detail
+  return friendlyErrorMessage(message || error?.message, fallback) || fallback
 }
 
 export function isDelegateReasonRequiredError(error) {

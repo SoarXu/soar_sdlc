@@ -36,7 +36,10 @@ export function normalizeWorkflowTransition(item) {
     validator_config: item.validator_config ? { ...item.validator_config } : null,
     trigger_config: item.trigger_config ? { ...item.trigger_config } : null,
     post_action_config: item.post_action_config ? { ...item.post_action_config } : null,
-    condition_routes: Object.entries(item.condition_config?.routes || {}).map(([value, status]) => ({ value, status })),
+    condition_routes: Object.entries(item.condition_config?.routes || {}).map(([value, stateId]) => ({
+      value,
+      state_id: Number(stateId)
+    })),
     handler_rule: {
       ...handlerRule,
       target_type: handlerRule.target_type || 'keep_current',
@@ -54,6 +57,7 @@ export function serializeWorkflowTransition(item) {
   const {
     id,
     definition_id,
+    _client_id,
     allowed_role_list,
     handler_target_roles,
     handler_fallback_roles,
@@ -81,10 +85,13 @@ export function serializeWorkflowTransition(item) {
   }))
   if (condition_routes.length || Object.hasOwn(conditionConfig, 'routes')) {
     conditionConfig.routes = Object.fromEntries(
-      condition_routes.filter((route) => route.value && route.status).map((route) => [route.value, route.status])
+      condition_routes
+        .filter((route) => route.value && Number.isInteger(route.state_id))
+        .map((route) => [route.value, route.state_id])
     )
   }
   return {
+    ...(id ? { id } : {}),
     ...rest,
     condition_config: Object.keys(conditionConfig).length ? conditionConfig : null,
     form_config: formConfig.fields?.length || formConfig.title || formConfig.submit_text

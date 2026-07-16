@@ -306,7 +306,7 @@ const activeFilters = computed(() => ({
   ...(activeView.value === 'exception_center' ? {
     projectIds: exceptionProjectFilter.value,
     priorities: exceptionPriorityFilter.value,
-    statuses: exceptionStatusFilter.value,
+    stateIds: exceptionStatusFilter.value,
     ownerIds: exceptionOwnerFilter.value,
     handlerIds: exceptionHandlerFilter.value,
     minOverdueHours: exceptionMinOverdueHours.value
@@ -323,7 +323,9 @@ const exceptionPriorityOptions = computed(() => uniqueOptions(
 const exceptionStatusOptions = computed(() => {
   const seen = new Map()
   for (const item of exceptionItems.value) {
-    if (item.status && !seen.has(item.status)) seen.set(item.status, itemStatusLabel(item))
+    if (item.current_state_id && !seen.has(item.current_state_id)) {
+      seen.set(item.current_state_id, itemStatusLabel(item))
+    }
   }
   return [...seen].map(([value, label]) => ({ value, label }))
 })

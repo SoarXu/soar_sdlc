@@ -84,6 +84,7 @@ class BugRead(BugBase):
     workflow_definition_id: int
     current_state_id: int
     status_name: str
+    state_category: str
     creator_id: int | None = None
     updater_id: int | None = None
     create_time: datetime | None = None

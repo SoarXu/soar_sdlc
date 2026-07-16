@@ -23,9 +23,9 @@
         <el-table-column label="状态" width="100">
           <template #default="{ row }">
             <el-tooltip v-if="closeReasonByRequirement[row.id]" :content="closeReasonByRequirement[row.id]" placement="top" raw-content>
-              <span class="status-with-reason">{{ requirementStatusLabel(row.status) }}</span>
+              <span class="status-with-reason">{{ row.status_name || '-' }}</span>
             </el-tooltip>
-            <span v-else>{{ requirementStatusLabel(row.status) }}</span>
+            <span v-else>{{ row.status_name || '-' }}</span>
           </template>
         </el-table-column>
         <el-table-column label="操作" width="370" fixed="right">
@@ -236,16 +236,8 @@ const requirementPriorityOptions = [
 ]
 const requirementTypeOptions = ['功能', '接口', '性能', '安全', '体验', '改进', '其他']
 const legacyRequirementPriorityValues = { high: '1', medium: '3', low: '5' }
-const requirementStatusOptions = [
-  { label: '待分派', value: 'pending_assignment' },
-  { label: '处理中', value: 'in_processing' },
-  { label: '待确认', value: 'pending_confirmation' },
-  { label: '已完成', value: 'completed' },
-  { label: '已取消', value: 'canceled' }
-]
 
 function normalizeRequirementPriority(value) { return legacyRequirementPriorityValues[value] || value || '3' }
-function requirementStatusLabel(value) { return requirementStatusOptions.find((option) => option.value === value)?.label || value || '-' }
 function isRequirementProjectClosed(row) { return projects.value.find((item) => item.id === row.project_id)?.status === 'closed' }
 function workflowTransitionsFor(row) { return workflowTransitions.value[`requirement:${row.id}`] || [] }
 function projectForRequirement(row) { return projects.value.find((item) => item.id === row.project_id) || null }

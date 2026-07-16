@@ -53,7 +53,7 @@
         </el-descriptions-item>
         <el-descriptions-item label="负责人">{{ userLabel(users, bug.owner_id) }}</el-descriptions-item>
         <el-descriptions-item label="提出人">{{ userLabel(users, bug.reporter_id) }}</el-descriptions-item>
-        <el-descriptions-item label="状态">{{ bugStatusLabel(bug.status) }}</el-descriptions-item>
+        <el-descriptions-item label="状态">{{ bug.status_name || '-' }}</el-descriptions-item>
         <el-descriptions-item label="严重程度"><RequirementPriorityBadge :value="bug.severity" /></el-descriptions-item>
         <el-descriptions-item label="优先级"><RequirementPriorityBadge :value="bug.priority" /></el-descriptions-item>
         <el-descriptions-item label="解决方案">{{ resolutionLabel(bug.resolution) }}</el-descriptions-item>
@@ -175,7 +175,7 @@
             </div>
             <div class="project-history-detail">
               <div class="status-history-meta">
-                {{ bugStatusLabel(item.from_status) }} -> {{ bugStatusLabel(item.to_status) }}
+                {{ item.from_state_name || '-' }} → {{ item.to_state_name || '-' }}
                 <template v-if="item.reason"> · {{ item.reason }}</template>
               </div>
               <p v-if="item.remark">{{ item.remark }}</p>
@@ -244,13 +244,6 @@ const validationSourceLabel = computed(() => {
 const editableIterationOptions = computed(() => bugIterationOptions(iterations.value, projects.value, bugForm.value.project_id))
 const editableIterationDisplayOptions = computed(() => includeSelectedIterationOption(editableIterationOptions.value, iterations.value, bugForm.value.iteration_id))
 
-const bugStatusOptions = [
-  { label: '待处理', value: 'pending_handling' },
-  { label: '修复中', value: 'fixing' },
-  { label: '待验证', value: 'pending_verification' },
-  { label: '已验证', value: 'verified' },
-  { label: '已关闭', value: 'closed' }
-]
 const resolutionOptions = ['设计如此', '重复Bug', '外部原因', '已解决', '无法重现', '延期处理', '不予解决']
 const { bugTypeOptions } = useBugTypes()
 const priorityLevelOptions = [
@@ -279,7 +272,6 @@ function optionLabel(options, value) {
   const option = options.find((item) => item.value === value)
   return option?.label || value || '-'
 }
-function bugStatusLabel(value) { return optionLabel(bugStatusOptions, value) }
 function actionLabel(value) { return optionLabel(actionOptions, value) }
 function resolutionLabel(value) { return resolutionOptions.includes(value) ? value : value || '-' }
 function executionResultLabel(value) { return optionLabel(executionResultOptions, value) }

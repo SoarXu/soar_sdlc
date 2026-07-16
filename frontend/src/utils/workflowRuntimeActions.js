@@ -16,10 +16,10 @@ function actionKeyOf(action) {
   return action?.action_key || ''
 }
 
-export function actionNeedsTargetStatusSelection(action) {
+export function actionNeedsTargetStateSelection(action) {
   const routingMode = action?.routing_mode
-  const allowedTargetStatuses = action?.allowed_target_statuses || []
-  return ['manual_allowed', 'automatic_with_override'].includes(routingMode) && allowedTargetStatuses.length > 0
+  const allowedTargetStates = action?.allowed_target_states || []
+  return ['manual_allowed', 'automatic_with_override'].includes(routingMode) && allowedTargetStates.length > 0
 }
 
 export function workflowCommandType(action) {
@@ -30,7 +30,7 @@ export function actionNeedsDialog(action) {
   return Boolean(
     action?.requires_form ||
       action?.confirm_required ||
-      actionNeedsTargetStatusSelection(action) ||
+      actionNeedsTargetStateSelection(action) ||
       action?.form_config?.allow_manual_owner ||
       (action?.form_config?.fields || []).length
   )

@@ -99,6 +99,19 @@ const members = [
     actionErrorMessage({ response: { data: { detail: 'Delegate reason is required' } } }, '激活失败'),
     '请填写代处理原因'
   )
+  assert.equal(
+    actionErrorMessage({
+      response: {
+        data: {
+          detail: {
+            message: '模板来源不完整',
+            missing_object_types: ['bug', 'task']
+          }
+        }
+      }
+    }, '保存失败'),
+    '模板来源不完整'
+  )
   assert.equal(isDelegateReasonRequiredError({ response: { data: { detail: 'Delegate reason is required' } } }), true)
   assert.equal(isDelegateReasonRequiredError({ response: { data: { detail: '其他错误' } } }), false)
   assert.equal(actionErrorMessage({}, '保存失败'), '保存失败')

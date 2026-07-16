@@ -34,8 +34,8 @@ function createNormalizedTransition() {
     definition_id: 8,
     action_key: 'verify_failed',
     action_name: 'Verification failed',
-    from_status: 'pending_verification',
-    to_status: 'in_processing',
+    from_state_id: 10,
+    to_state_id: 20,
     allowed_roles: 'tester,project_owner',
     handler_rule: {
       target_type: 'previous_handler',
@@ -45,7 +45,7 @@ function createNormalizedTransition() {
     },
     condition_config: {
       field: 'review_result',
-      routes: { failed: 'in_processing' },
+      routes: { failed: 20 },
       routing_mode: 'automatic'
     },
     form_config: {
@@ -82,9 +82,9 @@ function createEmptyDraft() {
 }
 
 const states = [
-  { status_key: 'pending_verification' },
-  { status_key: 'in_processing' },
-  { status_key: 'closed' }
+  { id: 10 },
+  { id: 20 },
+  { id: 30 }
 ]
 
 const SECTION_OWNED_KEYS = {
@@ -124,8 +124,8 @@ assert.deepEqual(ADVANCED_SECTION_KEYS, ['rules', 'assignment', 'form', 'button'
   draft.handler_rule.target_type = 'project_role'
   draft.handler_target_roles.push('project_owner')
   draft.handler_fallback_roles[0] = 'system_admin'
-  draft.condition_config.routes.failed = 'closed'
-  draft.condition_routes[0].status = 'closed'
+  draft.condition_config.routes.failed = 30
+  draft.condition_routes[0].state_id = 30
   draft.form_config.fields[0].options[0].label = 'Rejected'
   draft.validator_config.options.strict = false
   draft.ui_config.labels.compact = 'Return'
@@ -305,7 +305,7 @@ assert.deepEqual(ADVANCED_SECTION_KEYS, ['rules', 'assignment', 'form', 'button'
 
 {
   const draft = createEmptyDraft()
-  draft.condition_routes = [{ value: ' ', status: 'missing' }]
+  draft.condition_routes = [{ value: ' ', state_id: 999 }]
 
   const result = validateAdvancedConfig(draft, states)
   const codes = result.errors.rules.map((item) => item.code)
@@ -318,7 +318,7 @@ assert.deepEqual(ADVANCED_SECTION_KEYS, ['rules', 'assignment', 'form', 'button'
 {
   const draft = createEmptyDraft()
   draft.condition_config = { field: 'category', route_dictionary: 'bug_type' }
-  draft.condition_routes = [{ value: 'defect', status: 'closed' }]
+  draft.condition_routes = [{ value: 'defect', state_id: 30 }]
 
   assert.ok(validateAdvancedConfig(draft, states).errors.rules.some(
     (item) => item.code === 'dictionary_static_routes_conflict'

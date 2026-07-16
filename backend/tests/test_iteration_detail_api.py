@@ -432,3 +432,6 @@ def test_iteration_progress_uses_current_state_category_when_legacy_status_confl
     assert detail.status_code == 200
     assert detail.json()["metrics"]["closed_requirement_total"] == 1
     assert detail.json()["metrics"]["progress_rate"] == 1.0
+    listed = next(item for item in detail.json()["requirements"] if item["id"] == requirement_id)
+    assert listed["status_name"] == "测试终态"
+    assert listed["state_category"] == "terminal"

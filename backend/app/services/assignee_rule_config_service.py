@@ -2,6 +2,7 @@ from copy import deepcopy
 from datetime import datetime
 
 from fastapi import HTTPException, status
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.models.assignee_rule_config import AssigneeRuleConfig
@@ -64,6 +65,20 @@ def list_template_sources(db: Session) -> list[dict]:
             "lifecycle_status": "enabled",
         }
     ]
+    complete_scheme_ids = {
+        item[0]
+        for item in (
+            db.query(WorkflowDefinition.scope_id)
+            .filter(
+                WorkflowDefinition.scope_type == "assignee_rule_config",
+                WorkflowDefinition.object_type.in_(("requirement", "task", "bug")),
+                WorkflowDefinition.enabled.is_(True),
+            )
+            .group_by(WorkflowDefinition.scope_id)
+            .having(func.count(func.distinct(WorkflowDefinition.object_type)) == 3)
+            .all()
+        )
+    }
     sources.extend(
         {
             "source_type": "scheme",
@@ -72,7 +87,12 @@ def list_template_sources(db: Session) -> list[dict]:
             "description": item.description,
             "lifecycle_status": item.lifecycle_status,
         }
-        for item in db.query(AssigneeRuleConfig).order_by(AssigneeRuleConfig.id.asc()).all()
+        for item in (
+            db.query(AssigneeRuleConfig)
+            .filter(AssigneeRuleConfig.id.in_(complete_scheme_ids))
+            .order_by(AssigneeRuleConfig.id.asc())
+            .all()
+        )
     )
     return sources
 

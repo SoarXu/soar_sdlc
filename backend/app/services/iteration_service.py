@@ -518,7 +518,11 @@ def _project_node(db: Session, project: Project) -> dict:
 
 
 def _model_to_dict(model) -> dict:
-    return {column.name: getattr(model, column.name) for column in model.__table__.columns}
+    data = {column.name: getattr(model, column.name) for column in model.__table__.columns}
+    if isinstance(model, (Requirement, Task, Bug)):
+        data["status_name"] = model.status_name
+        data["state_category"] = model.state_category
+    return data
 
 
 def _rate(numerator: int, denominator: int) -> float:

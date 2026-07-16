@@ -111,6 +111,7 @@ def test_runtime_discovers_executes_and_audits_transitions_by_state_id(client: T
     assert executed.status_code == 200, executed.text
     assert executed.json()["current_state_id"] == claim["to_state_id"]
     assert executed.json()["status_name"] == "处理中"
+    assert executed.json()["state_category"] == "normal"
     loaded = client.get(f"/api/v1/requirements/{requirement['id']}").json()
     assert loaded["current_state_id"] == claim["to_state_id"]
     assert loaded["status_name"] == "处理中"
@@ -738,6 +739,15 @@ def test_manual_routing_mode_requires_an_allowed_target_status(client: TestClien
         "/api/v1/bugs",
         json={"project_id": project["id"], "title": f"Manual Missing Target {uuid4().hex[:8]}", "owner_id": handler_id},
     ).json()
+    actions = client.get(
+        f"/api/v1/workflow-runtime/bug/{first_bug['id']}/transitions",
+        headers={"Authorization": f"Bearer {handler_token}"},
+    ).json()
+    manual_action = next(item for item in actions if item["action_key"] == "confirm_bug_type")
+    assert {
+        (item["id"], item["status_name"])
+        for item in manual_action["allowed_target_states"]
+    } == {(fixing_state_id, "Fixing"), (verify_state_id, "Verify")}
     missing_target = client.post(
         f"/api/v1/workflow-runtime/bug/{first_bug['id']}/transition",
         json={"action_key": "confirm_bug_type", "payload": {"selected_values": {"bug_type": "code_issue"}}},

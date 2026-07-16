@@ -14,6 +14,14 @@
         >
           <el-option v-for="item in objectTypes" :key="item.value" :label="item.label" :value="item.value" />
         </el-select>
+        <el-select v-model="initialStateId" size="small" class="workflow-initial-state-select" clearable placeholder="选择初始状态">
+          <el-option
+            v-for="state in enabledStates"
+            :key="state.id"
+            :label="`初始：${state.status_name}`"
+            :value="state.id"
+          />
+        </el-select>
         <el-button size="small" @click="addState">新增状态</el-button>
         <el-button size="small" @click="addTransition">新增流转</el-button>
         <el-button size="small" @click="fitToContent">适应视图</el-button>
@@ -62,7 +70,7 @@
             </g>
             <g
               v-for="state in states"
-              :key="state.status_key"
+              :key="state.id"
               class="workflow-node"
               :class="{ selected: isSelectedState(state), terminal: state.category === 'terminal' }"
               :transform="`translate(${state.x}, ${state.y})`"
@@ -81,7 +89,6 @@
           <h3>状态配置</h3>
           <el-form label-position="top">
             <el-form-item label="状态名称"><el-input v-model="selectedState.status_name" /></el-form-item>
-            <el-form-item label="状态键"><el-input v-model="selectedState.status_key" /></el-form-item>
             <el-form-item label="状态类型">
               <el-select v-model="selectedState.category">
                 <el-option label="开始" value="start" />
@@ -101,22 +108,22 @@
             <el-form-item label="动作名称"><el-input v-model="selectedTransition.action_name" /></el-form-item>
             <el-form-item label="动作键"><el-input v-model="selectedTransition.action_key" /></el-form-item>
             <el-form-item label="来源状态">
-              <el-select v-model="selectedTransition.from_status">
+              <el-select v-model="selectedTransition.from_state_id">
                 <el-option
                   v-for="state in states"
-                  :key="state.status_key"
+                  :key="state.id"
                   :label="state.status_name"
-                  :value="state.status_key"
+                  :value="state.id"
                 />
               </el-select>
             </el-form-item>
             <el-form-item label="目标状态">
-              <el-select v-model="selectedTransition.to_status">
+              <el-select v-model="selectedTransition.to_state_id">
                 <el-option
                   v-for="state in states"
-                  :key="state.status_key"
+                  :key="state.id"
                   :label="state.status_name"
-                  :value="state.status_key"
+                  :value="state.id"
                 />
               </el-select>
             </el-form-item>
@@ -229,6 +236,7 @@ const activeObjectType = ref('requirement')
 const definition = ref(null)
 const states = ref([])
 const transitions = ref([])
+const initialStateId = ref(null)
 const selectedKind = ref('')
 const selectedKey = ref('')
 const loading = ref(false)
@@ -238,10 +246,11 @@ const advancedDrawerVisible = ref(false)
 const viewportOffset = reactive({ x: 0, y: 0 })
 const dragging = reactive({ state: null, startX: 0, startY: 0, originX: 0, originY: 0 })
 const viewportDrag = reactive({ active: false, startX: 0, startY: 0, originX: 0, originY: 0 })
+const enabledStates = computed(() => states.value.filter((state) => state.enabled))
 
 const selectedState = computed(() => (
   selectedKind.value === 'state'
-    ? states.value.find((item) => item.status_key === selectedKey.value)
+    ? states.value.find((item) => item.id === selectedKey.value)
     : null
 ))
 const selectedTransition = computed(() => (
@@ -257,8 +266,8 @@ const canvasGridStyle = computed(() => ({
 }))
 const transitionViews = computed(() => transitions.value
   .map((transition) => {
-    const from = states.value.find((item) => item.status_key === transition.from_status)
-    const to = states.value.find((item) => item.status_key === transition.to_status)
+    const from = states.value.find((item) => item.id === transition.from_state_id)
+    const to = states.value.find((item) => item.id === transition.to_state_id)
     if (!from || !to) return null
     return { key: transitionKey(transition), transition, ...buildWorkflowEdgeView(from, to) }
   })
@@ -315,8 +324,13 @@ async function loadDefinition({ discardPendingDraft = true } = {}) {
 }
 
 function applyGraph(graph) {
+  definition.value = graph.definition || definition.value
   states.value = (graph.states || []).map((item) => ({ ...item }))
-  transitions.value = (graph.transitions || []).map(normalizeTransition)
+  transitions.value = (graph.transitions || []).map((item) => normalizeTransition({
+    ...item,
+    _client_id: `transition-${item.id}`
+  }))
+  initialStateId.value = graph.definition?.initial_state_id ?? null
   if (!states.value.length) {
     selectedKind.value = ''
     selectedKey.value = ''
@@ -354,7 +368,8 @@ async function saveGraph() {
   saving.value = true
   try {
     const payload = {
-      states: states.value.map(({ id, definition_id, ...item }) => item),
+      initial_state_id: initialStateId.value,
+      states: states.value.map(({ definition_id, ...item }) => item),
       transitions: transitions.value.map((item) => serializeTransition(item))
     }
     const graph = await saveWorkflowDefinitionGraph(definition.value.id, payload)
@@ -367,9 +382,9 @@ async function saveGraph() {
 
 function addState() {
   const index = states.value.length + 1
-  const statusKey = `state_${index}`
+  const temporaryId = nextTemporaryStateId()
   states.value.push({
-    status_key: statusKey,
+    id: temporaryId,
     status_name: `状态${index}`,
     category: 'normal',
     color: '#2563eb',
@@ -379,7 +394,11 @@ function addState() {
     enabled: true
   })
   selectedKind.value = 'state'
-  selectedKey.value = statusKey
+  selectedKey.value = temporaryId
+}
+
+function nextTemporaryStateId() {
+  return Math.min(-1, ...states.value.map((state) => state.id - 1))
 }
 
 function addTransition() {
@@ -392,8 +411,9 @@ function addTransition() {
   const transition = normalizeTransition({
     action_key: `action_${transitions.value.length + 1}`,
     action_name: `流转${transitions.value.length + 1}`,
-    from_status: from.status_key,
-    to_status: to.status_key,
+    from_state_id: from.id,
+    to_state_id: to.id,
+    _client_id: `new-transition-${Date.now()}-${transitions.value.length + 1}`,
     allowed_roles: '',
     handler_rule: {
       target_type: 'keep_current',
@@ -410,7 +430,7 @@ function addTransition() {
 
 function selectState(state) {
   selectedKind.value = 'state'
-  selectedKey.value = state.status_key
+  selectedKey.value = state.id
 }
 
 function selectTransition(transition) {
@@ -425,12 +445,12 @@ function clearSelection() {
 
 function removeSelectedState() {
   if (!selectedState.value) return
-  const key = selectedState.value.status_key
-  if (transitions.value.some((item) => item.from_status === key || item.to_status === key)) {
-    ElMessage.warning('请先删除引用该状态的流转')
-    return
-  }
-  states.value = states.value.filter((item) => item.status_key !== key)
+  const stateId = selectedState.value.id
+  transitions.value = transitions.value.filter((item) => (
+    item.from_state_id !== stateId && item.to_state_id !== stateId
+  ))
+  states.value = states.value.filter((item) => item.id !== stateId)
+  if (initialStateId.value === stateId) initialStateId.value = null
   clearSelection()
 }
 
@@ -537,7 +557,7 @@ function resetViewport() {
 }
 
 function isSelectedState(state) {
-  return selectedKind.value === 'state' && selectedKey.value === state.status_key
+  return selectedKind.value === 'state' && selectedKey.value === state.id
 }
 
 function isSelectedTransition(transition) {
@@ -545,7 +565,7 @@ function isSelectedTransition(transition) {
 }
 
 function transitionKey(transition) {
-  return `${transition.action_key}:${transition.from_status}:${transition.to_status}`
+  return transition.id || transition._client_id
 }
 
 </script>
@@ -591,6 +611,10 @@ function transitionKey(transition) {
 
 .workflow-object-select {
   width: 110px;
+}
+
+.workflow-initial-state-select {
+  width: 180px;
 }
 
 .workflow-designer-main {

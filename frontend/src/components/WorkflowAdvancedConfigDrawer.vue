@@ -13,7 +13,7 @@
       <div class="drawer-header">
         <div>
           <h2>{{ transition?.action_name || transition?.action_key || '流转高级配置' }}</h2>
-          <p>{{ transition?.from_status || '-' }} -&gt; {{ transition?.to_status || '-' }}</p>
+          <p>{{ stateName(transition?.from_state_id) }} -&gt; {{ stateName(transition?.to_state_id) }}</p>
         </div>
         <span v-if="hasPendingChanges()" class="draft-status">未应用修改</span>
       </div>
@@ -90,13 +90,13 @@
                 <el-form-item label="字段值" :error="errorFor(`condition_routes.${index}.value`)">
                   <el-input v-model="route.value" />
                 </el-form-item>
-                <el-form-item label="目标状态" :error="errorFor(`condition_routes.${index}.status`)">
-                  <el-select v-model="route.status">
+                <el-form-item label="目标状态" :error="errorFor(`condition_routes.${index}.state_id`)">
+                  <el-select v-model="route.state_id">
                     <el-option
                       v-for="state in states"
-                      :key="state.status_key"
-                      :label="state.status_name || state.status_key"
-                      :value="state.status_key"
+                      :key="state.id"
+                      :label="state.status_name"
+                      :value="state.id"
                     />
                   </el-select>
                 </el-form-item>
@@ -494,7 +494,11 @@ function errorFor(field) {
 }
 
 function addRoute() {
-  draft.value.condition_routes.push({ value: '', status: '' })
+  draft.value.condition_routes.push({ value: '', state_id: null })
+}
+
+function stateName(stateId) {
+  return props.states.find((state) => state.id === stateId)?.status_name || '-'
 }
 
 function removeRoute(index) {

@@ -1,10 +1,12 @@
 export async function loadCloseReasonMap(items, fetchStatusOperations) {
-  const closedItems = items.filter((item) => item.status === 'closed')
+  const closedItems = items.filter((item) => item.state_category === 'terminal')
   const entries = await Promise.all(
     closedItems.map(async (item) => {
       try {
         const { data } = await fetchStatusOperations(item.id)
-        const closeOperation = [...data].reverse().find((operation) => operation.action === 'close')
+        const closeOperation = [...data].reverse().find((operation) => (
+          operation.to_state_id === item.current_state_id
+        ))
         return [item.id, closeOperation ? closeReasonText(closeOperation) : '']
       } catch {
         return [item.id, '']

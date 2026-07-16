@@ -20,35 +20,12 @@ const TYPE_LABELS = {
   code_review: '代码评审'
 }
 
-const STATUS_LABELS = {
-  requirement: {
-    pending_assignment: '待分派',
-    in_processing: '处理中',
-    pending_confirmation: '待确认',
-    completed: '已完成',
-    canceled: '已取消'
-  },
-  task: {
-    pending_assignment: '待分派',
-    in_processing: '处理中',
-    pending_confirmation: '待确认',
-    completed: '已完成',
-    canceled: '已取消'
-  },
-  bug: {
-    pending_handling: '待处理',
-    fixing: '修复中',
-    pending_verification: '待验证',
-    verified: '已验证',
-    closed: '已关闭'
-  },
-  test_run: {
-    planning: '规划中',
-    active: '进行中',
-    completed: '已完成',
-    canceled: '已取消',
-    finished: '已结束'
-  }
+const TEST_RUN_LABELS = {
+  planning: '规划中',
+  active: '进行中',
+  completed: '已完成',
+  canceled: '已取消',
+  finished: '已结束'
 }
 
 const EXECUTION_RESULT_LABELS = {
@@ -78,7 +55,7 @@ function filterMatch(item, filters = {}) {
     ['projectIds', item.project_id],
     ['iterationKeys', item.iteration_group_key || (item.iteration_id ? String(item.iteration_id) : 'uniterated')],
     ['priorities', item.priority || item.severity],
-    ['statuses', item.status],
+    ['stateIds', item.current_state_id],
     ['ownerIds', item.owner_id],
     ['handlerIds', item.handler_id]
   ]
@@ -136,9 +113,9 @@ export function filterWorkbenchItems(items = [], filters = {}) {
 }
 
 export function isTerminalWorkItem(item = {}) {
-  if (item.object_type === 'requirement') return ['completed', 'canceled'].includes(item.status)
-  if (item.object_type === 'task') return ['completed', 'canceled'].includes(item.status)
-  if (item.object_type === 'bug') return item.status === 'closed'
+  if (['requirement', 'task', 'bug'].includes(item.object_type)) {
+    return item.state_category === 'terminal'
+  }
   return false
 }
 
@@ -168,15 +145,15 @@ export function itemStatusLabel(item = {}) {
   if (item.object_type === 'test_case') {
     return executionResultLabel(item.last_execute_result)
   }
-  return STATUS_LABELS[item.object_type]?.[item.status] || item.status || '-'
+  if (['requirement', 'task', 'bug'].includes(item.object_type)) return item.status_name || '-'
+  if (item.object_type === 'test_run') return TEST_RUN_LABELS[item.status] || item.status || '-'
+  return item.status || '-'
 }
 
 export function itemStatusTag(item = {}) {
-  if (isTerminalWorkItem(item)) {
-    return item.status === 'closed' || item.status === 'canceled' ? 'info' : 'success'
-  }
-  if (item.object_type === 'bug') {
-    return item.status === 'pending_handling' ? 'danger' : 'warning'
+  if (isTerminalWorkItem(item)) return 'success'
+  if (['requirement', 'task', 'bug'].includes(item.object_type)) {
+    return item.state_category === 'start' ? 'info' : 'primary'
   }
   if (item.object_type === 'test_case') {
     if (item.last_execute_result === 'passed') return 'success'
@@ -184,7 +161,7 @@ export function itemStatusTag(item = {}) {
     if (item.last_execute_result === 'blocked') return 'warning'
     return 'info'
   }
-  return ['in_processing', 'active', 'pending_confirmation'].includes(item.status) ? 'primary' : 'info'
+  return 'info'
 }
 
 export function workbenchMetaText(sectionKey, item = {}) {

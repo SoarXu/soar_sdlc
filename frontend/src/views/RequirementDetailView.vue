@@ -41,7 +41,7 @@
         <el-descriptions-item label="负责人">{{ userLabel(users, requirement.owner_id) }}</el-descriptions-item>
         <el-descriptions-item label="提出人">{{ userLabel(users, requirement.proposer_id) }}</el-descriptions-item>
         <el-descriptions-item label="优先级"><RequirementPriorityBadge :value="requirement.priority" /></el-descriptions-item>
-        <el-descriptions-item label="状态">{{ requirementStatusLabel(requirement.status) }}</el-descriptions-item>
+        <el-descriptions-item label="状态">{{ requirement.status_name || '-' }}</el-descriptions-item>
         <el-descriptions-item label="类型">{{ requirement.requirement_type || '-' }}</el-descriptions-item>
         <el-descriptions-item label="来源项目">{{ labelById(projects, requirement.source_project_id) }}</el-descriptions-item>
       </el-descriptions>
@@ -213,7 +213,7 @@
             </div>
             <div v-if="item.type === 'status'" class="project-history-detail">
               <div class="status-history-meta">
-                {{ requirementStatusLabel(item.fromStatus) }} → {{ requirementStatusLabel(item.toStatus) }}
+                {{ item.fromStateName || '-' }} → {{ item.toStateName || '-' }}
                 <template v-if="item.reason"> · 原因：{{ item.reason }}</template>
               </div>
               <p v-if="item.remark">{{ item.remark }}</p>
@@ -286,8 +286,8 @@ const requirementHistory = computed(() => {
     time: item.effective_time || item.create_time,
     actor: item.actor_name || '系统',
     actionLabel: operationActionLabel(item.action),
-    fromStatus: item.from_status,
-    toStatus: item.to_status,
+    fromStateName: item.from_state_name,
+    toStateName: item.to_state_name,
     reason: item.reason,
     remark: item.remark
   }))
@@ -305,13 +305,6 @@ const requirementHistory = computed(() => {
   }))
   return [...statusItems, ...auditItems].sort((a, b) => new Date(a.time) - new Date(b.time))
 })
-const requirementStatusOptions = [
-  { label: '待分派', value: 'pending_assignment' },
-  { label: '处理中', value: 'in_processing' },
-  { label: '待确认', value: 'pending_confirmation' },
-  { label: '已完成', value: 'completed' },
-  { label: '已取消', value: 'canceled' }
-]
 const operationActionOptions = [
   { label: '认领', value: 'claim' },
   { label: '指派', value: 'assign' },
@@ -363,7 +356,6 @@ const priorityLevelOptions = [
 ]
 
 function optionLabel(options, value) { return options.find((option) => option.value === value)?.label || value || '-' }
-function requirementStatusLabel(value) { return optionLabel(requirementStatusOptions, value) }
 function operationActionLabel(value) { return optionLabel(operationActionOptions, value) }
 function executionResultLabel(value) { return optionLabel(executionResultOptions, value) }
 function formatDateTime(value) {

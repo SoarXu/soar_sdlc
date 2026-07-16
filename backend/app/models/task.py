@@ -54,3 +54,7 @@ class Task(Base):
     @property
     def status_name(self) -> str | None:
         return self.current_state.status_name if self.current_state else None
+
+    @property
+    def state_category(self) -> str | None:
+        return self.current_state.category if self.current_state else None

@@ -159,6 +159,8 @@ def test_workbench_queue_uses_state_category_and_status_name(client: TestClient)
     assert response.status_code == 200
     listed = next(item for item in response.json()["pending_handling"]["items"] if item["id"] == task["id"])
     assert listed["status"] == "等待本人处理"
+    assert listed["status_name"] == "等待本人处理"
+    assert listed["state_category"] == "start"
 
 
 def test_workbench_returns_created_watched_mentioned_and_exception_center(client: TestClient):

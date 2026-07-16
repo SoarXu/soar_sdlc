@@ -12,6 +12,8 @@ class WorkItemRead(BaseModel):
     iteration_id: int | None = None
     iteration_name: str | None = None
     status: str
+    status_name: str | None = None
+    state_category: str | None = None
     priority: str | None = None
     severity: str | None = None
     owner_id: int | None = None

@@ -3,6 +3,11 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 
+class WorkflowTargetStateRead(BaseModel):
+    id: int
+    status_name: str
+
+
 class WorkflowTransitionActionRead(BaseModel):
     action_key: str
     action_name: str
@@ -15,6 +20,7 @@ class WorkflowTransitionActionRead(BaseModel):
     confirm_required: bool = False
     routing_mode: str | None = None
     allowed_target_state_ids: list[int] = Field(default_factory=list)
+    allowed_target_states: list[WorkflowTargetStateRead] = Field(default_factory=list)
     ui_config: dict[str, Any] = Field(default_factory=dict)
     form_config: dict[str, Any] = Field(default_factory=dict)
 
@@ -56,6 +62,7 @@ class WorkflowTransitionExecuteRead(BaseModel):
     workflow_definition_id: int | None = None
     current_state_id: int | None = None
     status_name: str | None = None
+    state_category: str | None = None
     owner_id: int | None = None
     default_target_status: str | None = None
     resolved_target_status: str | None = None

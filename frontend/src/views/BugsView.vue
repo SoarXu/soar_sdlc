@@ -17,7 +17,7 @@
         <el-table-column label="任务" width="180"><template #default="{ row }">{{ labelById(tasks, row.task_id, 'title') }}</template></el-table-column>
         <el-table-column label="当前处理人" width="140"><template #default="{ row }">{{ userLabel(users, row.owner_id) }}</template></el-table-column>
         <el-table-column label="严重程度" width="110"><template #default="{ row }"><RequirementPriorityBadge :value="row.severity" /></template></el-table-column>
-        <el-table-column label="状态" width="120"><template #default="{ row }">{{ bugStatusLabel(row.status) }}</template></el-table-column>
+        <el-table-column label="状态" width="120"><template #default="{ row }">{{ row.status_name || '-' }}</template></el-table-column>
         <el-table-column label="操作" width="470" fixed="right">
           <template #default="{ row }">
             <div class="table-actions">
@@ -107,13 +107,6 @@ const priorityLevelOptions = [
   { label: '④ 低', value: '4' },
   { label: '⑤ 最低', value: '5' }
 ]
-const bugStatusOptions = [
-  { label: '待处理', value: 'pending_handling' },
-  { label: '修复中', value: 'fixing' },
-  { label: '待验证', value: 'pending_verification' },
-  { label: '已验证', value: 'verified' },
-  { label: '已关闭', value: 'closed' }
-]
 const form = reactive({ project_id: null, iteration_id: null, requirement_id: null, task_id: null, test_case_id: null, test_run_id: null, title: '', severity: '3', priority: '3', owner_id: null, reporter_id: null, reproduce_steps: '', expected_result: '', actual_result: '' })
 const currentUser = computed(() => currentUserFromStorage(users.value))
 const canCreateAnyBug = computed(() => projects.value.some((project) => canCreateWorkItem(project, currentUser.value, membersForProject(project.id))))
@@ -121,7 +114,6 @@ const editableIterationOptions = computed(() => bugIterationOptions(iterations.v
 const editableIterationDisplayOptions = computed(() => includeSelectedIterationOption(editableIterationOptions.value, iterations.value, form.iteration_id))
 
 function optionLabel(options, value) { return options.find((option) => option.value === value)?.label || value || '-' }
-function bugStatusLabel(value) { return optionLabel(bugStatusOptions, value) }
 function workflowTransitionsFor(row) { return workflowTransitions.value[`bug:${row.id}`] || [] }
 function projectForBug(row) { return projects.value.find((item) => item.id === row.project_id) || null }
 function membersForProject(projectId) { return projectMembersById.value[projectId] || [] }

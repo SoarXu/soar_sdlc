@@ -72,7 +72,7 @@ export function clearAdvancedSection(source, section) {
 export function validateAdvancedConfig(draft, states) {
   const errors = Object.fromEntries(ADVANCED_SECTION_KEYS.map((key) => [key, []]))
   const add = (section, code, field, message) => errors[section].push({ code, field, message })
-  const statusKeys = new Set((states || []).map((item) => item.status_key))
+  const stateIds = new Set((states || []).map((item) => item.id))
   const fields = draft.form_config?.fields || []
   const fieldKeys = fields.map((field) => String(field.field || '').trim())
 
@@ -126,7 +126,7 @@ export function validateAdvancedConfig(draft, states) {
     if (!String(route.value || '').trim()) {
       add('rules', 'route_value_required', `condition_routes.${index}.value`, '路由值不能为空')
     }
-    if (!statusKeys.has(route.status)) {
+    if (!stateIds.has(route.state_id)) {
       add('rules', 'route_status_invalid', `condition_routes.${index}.status`, '目标状态无效')
     }
   })

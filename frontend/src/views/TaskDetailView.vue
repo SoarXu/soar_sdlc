@@ -54,7 +54,7 @@
         <el-descriptions-item label="负责人">{{ userLabel(users, task.owner_id) }}</el-descriptions-item>
         <el-descriptions-item label="任务分支">{{ taskBranchLabel(task.task_type) }}</el-descriptions-item>
         <el-descriptions-item label="优先级">{{ task.priority || '-' }}</el-descriptions-item>
-        <el-descriptions-item label="状态">{{ task.status || '-' }}</el-descriptions-item>
+        <el-descriptions-item label="状态">{{ task.status_name || '-' }}</el-descriptions-item>
         <el-descriptions-item label="截止日期">{{ task.due_date || '-' }}</el-descriptions-item>
       </el-descriptions>
 
@@ -101,7 +101,7 @@
             </div>
             <div v-if="item.type === 'status'" class="project-history-detail">
               <div class="status-history-meta">
-                {{ taskStatusLabel(item.fromStatus) }} → {{ taskStatusLabel(item.toStatus) }}
+                {{ item.fromStateName || '-' }} → {{ item.toStateName || '-' }}
                 <template v-if="item.reason"> · 原因：{{ item.reason }}</template>
               </div>
               <p v-if="item.remark">{{ item.remark }}</p>
@@ -144,13 +144,6 @@ const statusOperations = ref([])
 const auditLogs = ref([])
 const expandedHistory = reactive({})
 const taskForm = reactive({ requirement_id: null, title: '', task_type: 'standalone_operation', priority: 'medium', owner_id: null, due_date: null, description: '' })
-const taskStatusOptions = [
-  { label: '待分派', value: 'pending_assignment' },
-  { label: '处理中', value: 'in_processing' },
-  { label: '待确认', value: 'pending_confirmation' },
-  { label: '已完成', value: 'completed' },
-  { label: '已取消', value: 'canceled' }
-]
 const taskHistory = computed(() => {
   const statusItems = statusOperations.value.map((item) => ({
     key: `status-${item.id}`,
@@ -158,8 +151,8 @@ const taskHistory = computed(() => {
     time: item.effective_time || item.create_time,
     actor: item.actor_name || '系统',
     actionLabel: operationActionLabel(item.action),
-    fromStatus: item.from_status,
-    toStatus: item.to_status,
+    fromStateName: item.from_state_name,
+    toStateName: item.to_state_name,
     reason: item.reason,
     remark: item.remark
   }))
@@ -179,7 +172,6 @@ const taskHistory = computed(() => {
 })
 
 function optionLabel(options, value) { return options.find((option) => option.value === value)?.label || value || '-' }
-function taskStatusLabel(value) { return optionLabel(taskStatusOptions, value) }
 function operationActionLabel(value) { return optionLabel([{ label: '激活', value: 'activate' }, { label: '关闭', value: 'close' }], value) }
 function toggleHistory(key) { expandedHistory[key] = !expandedHistory[key] }
 function formatDateTime(value) { return value ? new Date(value).toLocaleString('zh-CN', { hour12: false }) : '-' }

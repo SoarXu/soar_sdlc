@@ -83,6 +83,8 @@ def _read_item(
         iteration_id=getattr(item, "iteration_id", None),
         iteration_name=iterations.get(item.iteration_id).name if getattr(item, "iteration_id", None) in iterations else None,
         status=current_state_name(item) or "",
+        status_name=current_state_name(item),
+        state_category=item.state_category,
         priority=getattr(item, "priority", None),
         severity=getattr(item, "severity", None),
         owner_id=item.owner_id,

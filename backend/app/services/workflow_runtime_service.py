@@ -260,6 +260,7 @@ def execute_transition(
         workflow_definition_id=getattr(item, "workflow_definition_id", None),
         current_state_id=getattr(item, "current_state_id", None),
         status_name=resolved_target_state.status_name if resolved_target_state else item.status,
+        state_category=resolved_target_state.category if resolved_target_state else None,
         owner_id=getattr(item, "owner_id", None),
         default_target_status=default_target_status,
         resolved_target_status=resolved_target_status,
@@ -427,6 +428,14 @@ def _transition_read(db: Session, transition: WorkflowTransition) -> WorkflowTra
     handler_rule = transition.handler_rule or {}
     condition_config = transition.condition_config or {}
     routes = condition_config.get("routes") or {}
+    allowed_target_state_ids = sorted({int(value) for value in routes.values()}) if routes else []
+    allowed_target_states = (
+        db.query(WorkflowState)
+        .filter(WorkflowState.id.in_(allowed_target_state_ids))
+        .order_by(WorkflowState.id.asc())
+        .all()
+        if allowed_target_state_ids else []
+    )
     if handler_rule.get("allow_manual_owner") and "allow_manual_owner" not in form_config:
         form_config["allow_manual_owner"] = True
     return WorkflowTransitionActionRead(
@@ -440,7 +449,11 @@ def _transition_read(db: Session, transition: WorkflowTransition) -> WorkflowTra
         requires_form=bool((form_config.get("fields") or [])),
         confirm_required=bool(ui_config.get("confirm_required", False)),
         routing_mode=condition_config.get("routing_mode"),
-        allowed_target_state_ids=sorted({int(value) for value in routes.values()}) if routes else [],
+        allowed_target_state_ids=allowed_target_state_ids,
+        allowed_target_states=[
+            {"id": state.id, "status_name": state.status_name}
+            for state in allowed_target_states
+        ],
         ui_config=ui_config,
         form_config=form_config,
     )

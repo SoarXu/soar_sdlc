@@ -22,6 +22,9 @@ class WorkbenchItem(BaseModel):
     handler_id: int | None = None
     iteration_group_key: str | None = None
     status: str | None = None
+    current_state_id: int | None = None
+    status_name: str | None = None
+    state_category: str | None = None
     priority: str | None = None
     due_date: str | None = None
     last_execute_time: str | None = None

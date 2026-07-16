@@ -113,6 +113,19 @@ def ensure_runtime_schema(engine: Engine) -> None:
                    "ALTER TABLE status_operation_log ADD COLUMN next_owner_name VARCHAR(100) NULL COMMENT 'next owner name snapshot' AFTER next_owner_id")
     _ensure_column(engine, "status_operation_log", "blocker_messages",
                    "ALTER TABLE status_operation_log ADD COLUMN blocker_messages JSON NULL COMMENT 'blocker messages' AFTER next_owner_name")
+    _ensure_column(engine, "status_operation_log", "workflow_definition_id",
+                   "ALTER TABLE status_operation_log ADD COLUMN workflow_definition_id BIGINT UNSIGNED NULL COMMENT 'workflow definition id' AFTER action",
+                   "CREATE INDEX ix_status_operation_log_workflow_definition_id ON status_operation_log (workflow_definition_id)")
+    _ensure_column(engine, "status_operation_log", "from_state_id",
+                   "ALTER TABLE status_operation_log ADD COLUMN from_state_id BIGINT UNSIGNED NULL COMMENT 'from workflow state id' AFTER workflow_definition_id",
+                   "CREATE INDEX ix_status_operation_log_from_state_id ON status_operation_log (from_state_id)")
+    _ensure_column(engine, "status_operation_log", "to_state_id",
+                   "ALTER TABLE status_operation_log ADD COLUMN to_state_id BIGINT UNSIGNED NULL COMMENT 'to workflow state id' AFTER from_state_id",
+                   "CREATE INDEX ix_status_operation_log_to_state_id ON status_operation_log (to_state_id)")
+    _ensure_column(engine, "status_operation_log", "from_state_name",
+                   "ALTER TABLE status_operation_log ADD COLUMN from_state_name VARCHAR(100) NULL COMMENT 'from state name snapshot' AFTER to_state_id")
+    _ensure_column(engine, "status_operation_log", "to_state_name",
+                   "ALTER TABLE status_operation_log ADD COLUMN to_state_name VARCHAR(100) NULL COMMENT 'to state name snapshot' AFTER from_state_name")
 
     if "workflow_definitions" not in inspector0.get_table_names():
         with engine.begin() as conn:
@@ -125,6 +138,7 @@ def ensure_runtime_schema(engine: Engine) -> None:
                 "scope_id BIGINT UNSIGNED NULL COMMENT 'scope id',"
                 "template_key VARCHAR(64) NULL COMMENT 'template key',"
                 "parent_definition_id BIGINT UNSIGNED NULL COMMENT 'parent definition id',"
+                "initial_state_id BIGINT UNSIGNED NULL COMMENT 'initial workflow state id',"
                 "is_default_template TINYINT(1) NOT NULL DEFAULT 0 COMMENT 'is default template',"
                 "enabled TINYINT(1) NOT NULL DEFAULT 1 COMMENT 'enabled',"
                 "version INT NOT NULL DEFAULT 1 COMMENT 'version',"
@@ -133,6 +147,7 @@ def ensure_runtime_schema(engine: Engine) -> None:
                 "KEY idx_wfd_object_scope (object_type, scope_type, scope_id, enabled),"
                 "KEY idx_wfd_template_key (template_key),"
                 "KEY idx_wfd_parent_definition_id (parent_definition_id)"
+                ",KEY ix_workflow_definitions_initial_state_id (initial_state_id)"
                 ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='visual workflow definitions'"
             ))
     _ensure_column(engine, "workflow_definitions", "template_key",
@@ -143,6 +158,9 @@ def ensure_runtime_schema(engine: Engine) -> None:
                    "CREATE INDEX idx_wfd_parent_definition_id ON workflow_definitions (parent_definition_id)")
     _ensure_column(engine, "workflow_definitions", "is_default_template",
                    "ALTER TABLE workflow_definitions ADD COLUMN is_default_template TINYINT(1) NOT NULL DEFAULT 0 COMMENT 'is default template' AFTER parent_definition_id")
+    _ensure_column(engine, "workflow_definitions", "initial_state_id",
+                   "ALTER TABLE workflow_definitions ADD COLUMN initial_state_id BIGINT UNSIGNED NULL COMMENT 'initial workflow state id' AFTER parent_definition_id",
+                   "CREATE INDEX ix_workflow_definitions_initial_state_id ON workflow_definitions (initial_state_id)")
 
     if "workflow_states" not in inspector0.get_table_names():
         with engine.begin() as conn:
@@ -175,6 +193,8 @@ def ensure_runtime_schema(engine: Engine) -> None:
                 "action_name VARCHAR(100) NOT NULL COMMENT 'action name',"
                 "from_status VARCHAR(64) NOT NULL COMMENT 'from status',"
                 "to_status VARCHAR(64) NOT NULL COMMENT 'to status',"
+                "from_state_id BIGINT UNSIGNED NULL COMMENT 'from workflow state id',"
+                "to_state_id BIGINT UNSIGNED NULL COMMENT 'to workflow state id',"
                 "allowed_roles VARCHAR(255) NOT NULL DEFAULT '' COMMENT 'allowed roles',"
                 "handler_rule JSON NULL COMMENT 'handler rule',"
                 "trigger_config JSON NULL COMMENT 'trigger config',"
@@ -189,12 +209,24 @@ def ensure_runtime_schema(engine: Engine) -> None:
                 "update_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT 'update time',"
                 "KEY idx_wft_definition (definition_id),"
                 "KEY idx_wft_action (definition_id, action_key, from_status, to_status)"
+                ",KEY ix_workflow_transitions_from_state_id (from_state_id)"
+                ",KEY ix_workflow_transitions_to_state_id (to_state_id)"
                 ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='visual workflow transitions'"
             ))
     _ensure_column(engine, "workflow_transitions", "ui_config",
                    "ALTER TABLE workflow_transitions ADD COLUMN ui_config JSON NULL COMMENT 'ui config' AFTER post_action_config")
     _ensure_column(engine, "workflow_transitions", "form_config",
                    "ALTER TABLE workflow_transitions ADD COLUMN form_config JSON NULL COMMENT 'form config' AFTER ui_config")
+    _ensure_column(engine, "workflow_transitions", "from_state_id",
+                   "ALTER TABLE workflow_transitions ADD COLUMN from_state_id BIGINT UNSIGNED NULL COMMENT 'from workflow state id' AFTER to_status",
+                   "CREATE INDEX ix_workflow_transitions_from_state_id ON workflow_transitions (from_state_id)")
+    _ensure_column(engine, "workflow_transitions", "to_state_id",
+                   "ALTER TABLE workflow_transitions ADD COLUMN to_state_id BIGINT UNSIGNED NULL COMMENT 'to workflow state id' AFTER from_state_id",
+                   "CREATE INDEX ix_workflow_transitions_to_state_id ON workflow_transitions (to_state_id)")
+
+    _ensure_column(engine, "assignee_rule_configs", "lifecycle_status",
+                   "ALTER TABLE assignee_rule_configs ADD COLUMN lifecycle_status VARCHAR(16) NOT NULL DEFAULT 'draft' COMMENT 'draft/enabled/disabled' AFTER description",
+                   "CREATE INDEX ix_assignee_rule_configs_lifecycle_status ON assignee_rule_configs (lifecycle_status)")
 
     _ensure_column(engine, "programs", "parent_id",
                    "ALTER TABLE programs ADD COLUMN parent_id BIGINT UNSIGNED NULL COMMENT '父项目集 ID' AFTER id",
@@ -229,6 +261,12 @@ def ensure_runtime_schema(engine: Engine) -> None:
     _ensure_column(engine, "requirements", "source_project_id",
                    "ALTER TABLE requirements ADD COLUMN source_project_id BIGINT UNSIGNED NULL COMMENT '来源项目 ID' AFTER project_id",
                    "CREATE INDEX idx_requirements_source_project ON requirements (source_project_id)")
+    _ensure_column(engine, "requirements", "workflow_definition_id",
+                   "ALTER TABLE requirements ADD COLUMN workflow_definition_id BIGINT UNSIGNED NULL COMMENT 'workflow definition id' AFTER proposer_id",
+                   "CREATE INDEX ix_requirements_workflow_definition_id ON requirements (workflow_definition_id)")
+    _ensure_column(engine, "requirements", "current_state_id",
+                   "ALTER TABLE requirements ADD COLUMN current_state_id BIGINT UNSIGNED NULL COMMENT 'current workflow state id' AFTER workflow_definition_id",
+                   "CREATE INDEX ix_requirements_current_state_id ON requirements (current_state_id)")
     _ensure_column(engine, "requirements", "lifecycle_phase",
                    "ALTER TABLE requirements ADD COLUMN lifecycle_phase VARCHAR(32) NOT NULL DEFAULT 'development' COMMENT '生命周期阶段' AFTER status")
     _ensure_column(engine, "requirements", "deleted",
@@ -237,6 +275,12 @@ def ensure_runtime_schema(engine: Engine) -> None:
     _ensure_column(engine, "tasks", "source_project_id",
                    "ALTER TABLE tasks ADD COLUMN source_project_id BIGINT UNSIGNED NULL COMMENT '来源项目 ID' AFTER project_id",
                    "CREATE INDEX idx_tasks_source_project ON tasks (source_project_id)")
+    _ensure_column(engine, "tasks", "workflow_definition_id",
+                   "ALTER TABLE tasks ADD COLUMN workflow_definition_id BIGINT UNSIGNED NULL COMMENT 'workflow definition id' AFTER owner_id",
+                   "CREATE INDEX ix_tasks_workflow_definition_id ON tasks (workflow_definition_id)")
+    _ensure_column(engine, "tasks", "current_state_id",
+                   "ALTER TABLE tasks ADD COLUMN current_state_id BIGINT UNSIGNED NULL COMMENT 'current workflow state id' AFTER workflow_definition_id",
+                   "CREATE INDEX ix_tasks_current_state_id ON tasks (current_state_id)")
     _ensure_column(engine, "tasks", "iteration_id",
                    "ALTER TABLE tasks ADD COLUMN iteration_id BIGINT UNSIGNED NULL COMMENT '直接关联迭代 ID' AFTER source_project_id",
                    "CREATE INDEX idx_tasks_iteration ON tasks (iteration_id)")
@@ -248,6 +292,12 @@ def ensure_runtime_schema(engine: Engine) -> None:
     _ensure_column(engine, "bugs", "source_project_id",
                    "ALTER TABLE bugs ADD COLUMN source_project_id BIGINT UNSIGNED NULL COMMENT '来源项目 ID' AFTER project_id",
                    "CREATE INDEX idx_bugs_source_project ON bugs (source_project_id)")
+    _ensure_column(engine, "bugs", "workflow_definition_id",
+                   "ALTER TABLE bugs ADD COLUMN workflow_definition_id BIGINT UNSIGNED NULL COMMENT 'workflow definition id' AFTER reporter_id",
+                   "CREATE INDEX ix_bugs_workflow_definition_id ON bugs (workflow_definition_id)")
+    _ensure_column(engine, "bugs", "current_state_id",
+                   "ALTER TABLE bugs ADD COLUMN current_state_id BIGINT UNSIGNED NULL COMMENT 'current workflow state id' AFTER workflow_definition_id",
+                   "CREATE INDEX ix_bugs_current_state_id ON bugs (current_state_id)")
     _ensure_column(engine, "bugs", "iteration_id",
                    "ALTER TABLE bugs ADD COLUMN iteration_id BIGINT UNSIGNED NULL COMMENT '迭代 ID' AFTER source_project_id",
                    "CREATE INDEX idx_bugs_iteration ON bugs (iteration_id)")

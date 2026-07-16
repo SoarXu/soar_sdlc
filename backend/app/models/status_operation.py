@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import BigInteger, Boolean, DateTime, JSON, String, Text, text
+from sqlalchemy import BigInteger, Boolean, DateTime, ForeignKey, JSON, String, Text, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.session import Base
@@ -13,6 +13,26 @@ class StatusOperationLog(Base):
     object_type: Mapped[str] = mapped_column(String(64))
     object_id: Mapped[int] = mapped_column(BigInteger)
     action: Mapped[str] = mapped_column(String(32))
+    workflow_definition_id: Mapped[int | None] = mapped_column(
+        BigInteger,
+        ForeignKey("workflow_definitions.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    from_state_id: Mapped[int | None] = mapped_column(
+        BigInteger,
+        ForeignKey("workflow_states.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    to_state_id: Mapped[int | None] = mapped_column(
+        BigInteger,
+        ForeignKey("workflow_states.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    from_state_name: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    to_state_name: Mapped[str | None] = mapped_column(String(100), nullable=True)
     from_status: Mapped[str | None] = mapped_column(String(32), nullable=True)
     to_status: Mapped[str] = mapped_column(String(32))
     reason: Mapped[str | None] = mapped_column(String(64), nullable=True)

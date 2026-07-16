@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import BigInteger, Boolean, DateTime, Integer, String, Text, text
+from sqlalchemy import BigInteger, Boolean, DateTime, ForeignKey, Integer, String, Text, text
 from sqlalchemy.dialects.mysql import MEDIUMTEXT
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -23,6 +23,18 @@ class Bug(Base):
     priority: Mapped[str] = mapped_column(String(32), default="3")
     owner_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     reporter_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    workflow_definition_id: Mapped[int | None] = mapped_column(
+        BigInteger,
+        ForeignKey("workflow_definitions.id", ondelete="RESTRICT"),
+        nullable=True,
+        index=True,
+    )
+    current_state_id: Mapped[int | None] = mapped_column(
+        BigInteger,
+        ForeignKey("workflow_states.id", ondelete="RESTRICT"),
+        nullable=True,
+        index=True,
+    )
     reproduce_steps: Mapped[str | None] = mapped_column(Text().with_variant(MEDIUMTEXT, "mysql"), nullable=True)
     expected_result: Mapped[str | None] = mapped_column(Text, nullable=True)
     actual_result: Mapped[str | None] = mapped_column(Text, nullable=True)

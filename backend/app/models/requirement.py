@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import BigInteger, Boolean, DateTime, Integer, String, Text, text
+from sqlalchemy import BigInteger, Boolean, DateTime, ForeignKey, Integer, String, Text, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.session import Base
@@ -18,6 +18,18 @@ class Requirement(Base):
     priority: Mapped[str] = mapped_column(String(32), default="3")
     owner_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     proposer_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    workflow_definition_id: Mapped[int | None] = mapped_column(
+        BigInteger,
+        ForeignKey("workflow_definitions.id", ondelete="RESTRICT"),
+        nullable=True,
+        index=True,
+    )
+    current_state_id: Mapped[int | None] = mapped_column(
+        BigInteger,
+        ForeignKey("workflow_states.id", ondelete="RESTRICT"),
+        nullable=True,
+        index=True,
+    )
     status: Mapped[str] = mapped_column(String(32), default="pending_assignment")
     lifecycle_phase: Mapped[str] = mapped_column(String(32), default="development")
     review_status: Mapped[str] = mapped_column(String(32), default="not_required")

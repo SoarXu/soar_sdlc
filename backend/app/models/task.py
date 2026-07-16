@@ -1,7 +1,7 @@
 from datetime import date, datetime
 from decimal import Decimal
 
-from sqlalchemy import BigInteger, Date, DateTime, DECIMAL, Integer, String, Text, text
+from sqlalchemy import BigInteger, Date, DateTime, DECIMAL, ForeignKey, Integer, String, Text, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.session import Base
@@ -19,6 +19,18 @@ class Task(Base):
     task_type: Mapped[str | None] = mapped_column(String(64), nullable=True)
     priority: Mapped[str] = mapped_column(String(32), default="medium")
     owner_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    workflow_definition_id: Mapped[int | None] = mapped_column(
+        BigInteger,
+        ForeignKey("workflow_definitions.id", ondelete="RESTRICT"),
+        nullable=True,
+        index=True,
+    )
+    current_state_id: Mapped[int | None] = mapped_column(
+        BigInteger,
+        ForeignKey("workflow_states.id", ondelete="RESTRICT"),
+        nullable=True,
+        index=True,
+    )
     estimated_hours: Mapped[Decimal | None] = mapped_column(DECIMAL(10, 2), nullable=True)
     actual_hours: Mapped[Decimal | None] = mapped_column(DECIMAL(10, 2), nullable=True)
     due_date: Mapped[date | None] = mapped_column(Date, nullable=True)

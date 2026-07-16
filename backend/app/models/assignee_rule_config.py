@@ -17,6 +17,7 @@ class AssigneeRuleConfig(Base):
     test_case_tester_roles: Mapped[str] = mapped_column(String(255), default="")
     test_run_owner_roles: Mapped[str] = mapped_column(String(255), default="")
     bug_owner_roles: Mapped[str] = mapped_column(String(255), default="")
+    lifecycle_status: Mapped[str] = mapped_column(String(16), default="draft", nullable=False, index=True)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     create_time: Mapped[datetime] = mapped_column(DateTime, server_default=text("CURRENT_TIMESTAMP"))
     update_time: Mapped[datetime] = mapped_column(

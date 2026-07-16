@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import BigInteger, Boolean, DateTime, Integer, JSON, String, text
+from sqlalchemy import BigInteger, Boolean, DateTime, ForeignKey, Integer, JSON, String, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.session import Base
@@ -16,6 +16,12 @@ class WorkflowDefinition(Base):
     scope_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True, index=True)
     template_key: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
     parent_definition_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True, index=True)
+    initial_state_id: Mapped[int | None] = mapped_column(
+        BigInteger,
+        ForeignKey("workflow_states.id", ondelete="RESTRICT"),
+        nullable=True,
+        index=True,
+    )
     is_default_template: Mapped[bool] = mapped_column(Boolean, default=False)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     version: Mapped[int] = mapped_column(Integer, default=1)
@@ -31,7 +37,11 @@ class WorkflowState(Base):
     __tablename__ = "workflow_states"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, index=True)
-    definition_id: Mapped[int] = mapped_column(BigInteger, index=True)
+    definition_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("workflow_definitions.id", ondelete="CASCADE"),
+        index=True,
+    )
     status_key: Mapped[str] = mapped_column(String(64))
     status_name: Mapped[str] = mapped_column(String(100))
     category: Mapped[str] = mapped_column(String(32), default="normal")
@@ -52,11 +62,27 @@ class WorkflowTransition(Base):
     __tablename__ = "workflow_transitions"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, index=True)
-    definition_id: Mapped[int] = mapped_column(BigInteger, index=True)
+    definition_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("workflow_definitions.id", ondelete="CASCADE"),
+        index=True,
+    )
     action_key: Mapped[str] = mapped_column(String(64))
     action_name: Mapped[str] = mapped_column(String(100))
     from_status: Mapped[str] = mapped_column(String(64))
     to_status: Mapped[str] = mapped_column(String(64))
+    from_state_id: Mapped[int | None] = mapped_column(
+        BigInteger,
+        ForeignKey("workflow_states.id", ondelete="RESTRICT"),
+        nullable=True,
+        index=True,
+    )
+    to_state_id: Mapped[int | None] = mapped_column(
+        BigInteger,
+        ForeignKey("workflow_states.id", ondelete="RESTRICT"),
+        nullable=True,
+        index=True,
+    )
     allowed_roles: Mapped[str] = mapped_column(String(255), default="")
     handler_rule: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     trigger_config: Mapped[dict | list | None] = mapped_column(JSON, nullable=True)

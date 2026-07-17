@@ -88,6 +88,32 @@ const transitionKey = (transition) => transition.id
 }
 
 {
+  const states = [
+    { id: 'start', x: 40, y: 100 },
+    { id: 'near-start', x: 200, y: 100 },
+    { id: 'finish', x: 480, y: 100 }
+  ]
+  const [edge] = buildWorkflowEdgeViews(states, [
+    { id: 'near-start-long', from_state_id: 'start', to_state_id: 'finish' }
+  ], transitionKey)
+
+  assertPathClearsRectangle(edge.path, { left: 180, top: 80, right: 338, bottom: 162 })
+}
+
+{
+  const states = [
+    { id: 'start', x: 40, y: 100 },
+    { id: 'near-finish', x: 340, y: 100 },
+    { id: 'finish', x: 480, y: 100 }
+  ]
+  const [edge] = buildWorkflowEdgeViews(states, [
+    { id: 'near-finish-long', from_state_id: 'start', to_state_id: 'finish' }
+  ], transitionKey)
+
+  assertPathClearsRectangle(edge.path, { left: 320, top: 80, right: 478, bottom: 162 })
+}
+
+{
   const state = { id: 'loop', x: 100, y: 100 }
   const [edge] = buildWorkflowEdgeViews([state], [
     { id: 'loop-edge', from_state_id: 'loop', to_state_id: 'loop', sort_order: 10 }
@@ -155,8 +181,47 @@ function pathPoints(path) {
 }
 
 function pathSegments(path) {
-  const points = pathPoints(path)
-  return points.slice(1).map((point, index) => ({ from: points[index], to: point }))
+  const commandPattern = /([MLQ])\s+(-?\d+(?:\.\d+)?)\s+(-?\d+(?:\.\d+)?)(?:\s+(-?\d+(?:\.\d+)?)\s+(-?\d+(?:\.\d+)?))?/g
+  const segments = []
+  let current
+  let match
+
+  while ((match = commandPattern.exec(path))) {
+    const command = match[1]
+    const firstPoint = { x: Number(match[2]), y: Number(match[3]) }
+    if (command === 'M') {
+      current = firstPoint
+    } else if (command === 'L') {
+      segments.push({ from: current, to: firstPoint })
+      current = firstPoint
+    } else {
+      const end = { x: Number(match[4]), y: Number(match[5]) }
+      let previous = current
+      for (let step = 1; step <= 16; step += 1) {
+        const ratio = step / 16
+        const point = quadraticPoint(current, firstPoint, end, ratio)
+        segments.push({ from: previous, to: point })
+        previous = point
+      }
+      current = end
+    }
+  }
+
+  return segments
+}
+
+function quadraticPoint(start, control, end, ratio) {
+  const inverse = 1 - ratio
+  return {
+    x: inverse * inverse * start.x + 2 * inverse * ratio * control.x + ratio * ratio * end.x,
+    y: inverse * inverse * start.y + 2 * inverse * ratio * control.y + ratio * ratio * end.y
+  }
+}
+
+function assertPathClearsRectangle(path, rectangle) {
+  assert.ok(pathSegments(path).every((segment) => (
+    !segmentIntersectsRectangle(segment, rectangle)
+  )))
 }
 
 function segmentIntersectsRectangle({ from, to }, rectangle) {

@@ -88,22 +88,30 @@ function buildForwardView(from, to, states, laneIndex, laneCount) {
     state.x < end.x &&
     state.x + NODE_WIDTH > start.x
   ))
-  const stubLength = Math.max(12, Math.min(PARALLEL_LANE_GAP, (end.x - start.x) / 4))
-  const startTrackX = start.x + stubLength
-  const endTrackX = end.x - stubLength
   let trackY
 
   if (skippedNodes.length) {
-    const above = Math.min(...skippedNodes.map((state) => state.y)) - OBSTACLE_CLEARANCE
-    const below = Math.max(...skippedNodes.map((state) => state.y + NODE_HEIGHT)) + OBSTACLE_CLEARANCE
+    const roundedClearance = OBSTACLE_CLEARANCE + CORNER_RADIUS
+    const above = Math.min(...skippedNodes.map((state) => state.y)) - roundedClearance
+    const below = Math.max(...skippedNodes.map((state) => state.y + NODE_HEIGHT)) + roundedClearance
     const useAbove = routeDistance(start, end, above) <= routeDistance(start, end, below)
     trackY = useAbove
       ? above - laneIndex * PARALLEL_LANE_GAP
       : below + laneIndex * PARALLEL_LANE_GAP
-  } else {
-    const centeredLaneIndex = laneIndex - (laneCount - 1) / 2
-    trackY = (start.y + end.y) / 2 + centeredLaneIndex * PARALLEL_LANE_GAP
+
+    return edgeView([
+      start,
+      { x: start.x, y: trackY },
+      { x: end.x, y: trackY },
+      end
+    ], (start.x + end.x) / 2, trackY)
   }
+
+  const centeredLaneIndex = laneIndex - (laneCount - 1) / 2
+  trackY = (start.y + end.y) / 2 + centeredLaneIndex * PARALLEL_LANE_GAP
+  const stubLength = Math.max(12, Math.min(PARALLEL_LANE_GAP, (end.x - start.x) / 4))
+  const startTrackX = start.x + stubLength
+  const endTrackX = end.x - stubLength
 
   return edgeView([
     start,

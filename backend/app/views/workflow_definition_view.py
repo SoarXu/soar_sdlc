@@ -94,7 +94,7 @@ class WorkflowGraphRead(BaseModel):
 
 
 class WorkflowTemplateState(BaseModel):
-    status_key: str
+    ref: str
     status_name: str
     category: str = "normal"
     color: str = "#2563eb"
@@ -107,8 +107,8 @@ class WorkflowTemplateState(BaseModel):
 class WorkflowTemplateTransition(BaseModel):
     action_key: str
     action_name: str
-    from_status: str
-    to_status: str
+    from_ref: str
+    to_ref: str
     allowed_roles: str = ""
     handler_rule: dict[str, Any] | None = None
     trigger_config: dict[str, Any] | list[Any] | None = None

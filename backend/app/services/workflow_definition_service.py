@@ -450,45 +450,34 @@ def _remap_condition_state_ids(config: dict | list | None, state_id_map: dict[in
 
 
 def _template_graph_payload(db: Session, definition: WorkflowDefinition, template) -> tuple[WorkflowGraphSave, dict[int, str]]:
-    existing_states = {
-        item.status_key: item
-        for item in db.query(WorkflowState).filter(WorkflowState.definition_id == definition.id).all()
-    }
-    key_to_input_id: dict[str, int] = {}
+    ref_to_input_id: dict[str, int] = {}
     internal_keys: dict[int, str] = {}
     states = []
     next_temp_id = -1
     for item in template.states:
-        existing = existing_states.get(item.status_key)
-        input_id = existing.id if existing else next_temp_id
-        if not existing:
-            next_temp_id -= 1
-            internal_keys[input_id] = item.status_key
-        key_to_input_id[item.status_key] = input_id
-        states.append({"id": input_id, **item.model_dump(exclude={"status_key"})})
+        input_id = next_temp_id
+        next_temp_id -= 1
+        internal_keys[input_id] = f"s_{uuid4().hex[:24]}"
+        ref_to_input_id[item.ref] = input_id
+        states.append({"id": input_id, **item.model_dump(exclude={"ref"})})
 
-    existing_transitions = {
-        (item.action_key, item.from_status, item.to_status): item
-        for item in db.query(WorkflowTransition).filter(WorkflowTransition.definition_id == definition.id).all()
-    }
     transitions = []
     for item in template.transitions:
-        existing = existing_transitions.get((item.action_key, item.from_status, item.to_status))
-        data = item.model_dump(exclude={"from_status", "to_status"})
-        data["id"] = existing.id if existing else None
-        data["from_state_id"] = key_to_input_id[item.from_status]
-        data["to_state_id"] = key_to_input_id[item.to_status]
+        data = item.model_dump(exclude={"from_ref", "to_ref"})
+        data["id"] = None
+        data["from_state_id"] = ref_to_input_id[item.from_ref]
+        data["to_state_id"] = ref_to_input_id[item.to_ref]
         condition = deepcopy(data.get("condition_config"))
         if isinstance(condition, dict):
             if isinstance(condition.get("routes"), dict):
                 condition["routes"] = {
-                    key: key_to_input_id[value]
+                    key: ref_to_input_id[value]
                     for key, value in condition["routes"].items()
                 }
             owner_targets = condition.pop("target_status_by_owner", None)
             if owner_targets is not None:
                 condition["target_state_id_by_owner"] = {
-                    key: key_to_input_id[value]
+                    key: ref_to_input_id[value]
                     for key, value in owner_targets.items()
                 }
         data["condition_config"] = condition
@@ -496,7 +485,7 @@ def _template_graph_payload(db: Session, definition: WorkflowDefinition, templat
     initial = next((item for item in template.states if item.category == "start"), None)
     return (
         WorkflowGraphSave(
-            initial_state_id=key_to_input_id[initial.status_key] if initial else None,
+            initial_state_id=ref_to_input_id[initial.ref] if initial else None,
             states=states,
             transitions=transitions,
         ),

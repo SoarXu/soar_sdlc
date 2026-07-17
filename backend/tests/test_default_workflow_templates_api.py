@@ -13,6 +13,15 @@ from app.models.role import Role, UserRole
 from app.models.task import Task
 from app.models.user import User
 from app.models.workflow_definition import WorkflowState
+from app.views.workflow_definition_view import WorkflowTemplateState, WorkflowTemplateTransition
+
+
+def test_template_build_contract_uses_request_local_refs_not_status_columns():
+    assert set(WorkflowTemplateState.model_fields) >= {"ref", "status_name"}
+    assert "status_key" not in WorkflowTemplateState.model_fields
+    assert set(WorkflowTemplateTransition.model_fields) >= {"from_ref", "to_ref"}
+    assert "from_status" not in WorkflowTemplateTransition.model_fields
+    assert "to_status" not in WorkflowTemplateTransition.model_fields
 
 
 def _create_user(full_name: str, role_key: str) -> tuple[int, str]:
@@ -101,6 +110,29 @@ def test_default_template_reconciliation_preserves_state_and_transition_ids(clie
         item["id"] for item in first_graph["transitions"]
     ]
     assert second_graph["definition"]["initial_state_id"] == first_graph["definition"]["initial_state_id"]
+
+
+def test_default_template_initialization_does_not_overwrite_persisted_state_edits(client: TestClient):
+    definitions = client.get(
+        "/api/v1/workflow-definitions?object_type=project&scope_type=system"
+    ).json()
+    definition = next(item for item in definitions if item["is_default_template"] is True)
+    graph = client.get(f"/api/v1/workflow-definitions/{definition['id']}").json()
+    state_id = graph["states"][0]["id"]
+    custom_name = f"项目状态 {uuid4().hex[:8]}"
+
+    db = SessionLocal()
+    try:
+        state = db.query(WorkflowState).filter(WorkflowState.id == state_id).one()
+        state.status_name = custom_name
+        db.commit()
+    finally:
+        db.close()
+
+    client.get("/api/v1/workflow-definitions?object_type=project&scope_type=system")
+    refreshed = client.get(f"/api/v1/workflow-definitions/{definition['id']}").json()
+
+    assert next(item for item in refreshed["states"] if item["id"] == state_id)["status_name"] == custom_name
 
 
 def _set_requirement_status(requirement_id: int, status: str) -> None:

@@ -1,4 +1,4 @@
-from datetime import datetime
+from uuid import uuid4
 
 from sqlalchemy.orm import Session
 
@@ -36,27 +36,7 @@ def ensure_default_workflow_templates(db: Session) -> list[WorkflowDefinition]:
             )
             db.add(definition)
             db.flush()
-            _reconcile_graph(db, definition, spec["graph"])
-        else:
-            changed = False
-            if definition.name != spec["name"]:
-                definition.name = spec["name"]
-                changed = True
-            if definition.template_key != spec["template_key"]:
-                definition.template_key = spec["template_key"]
-                changed = True
-            if definition.is_default_template is not True:
-                definition.is_default_template = True
-                changed = True
-            if definition.scope_type != "system" or definition.scope_id is not None:
-                definition.scope_type = "system"
-                definition.scope_id = None
-                changed = True
-            if _reconcile_graph(db, definition, spec["graph"]):
-                definition.version = (definition.version or 1) + 1
-                changed = True
-            if changed:
-                definition.update_time = datetime.now()
+            _create_graph(db, definition, spec["graph"])
         definitions.append(definition)
     db.commit()
     for definition in definitions:
@@ -89,89 +69,49 @@ def default_template_summaries() -> list[dict]:
     ]
 
 
-def _reconcile_graph(db: Session, definition: WorkflowDefinition, graph: WorkflowGraphSave) -> bool:
-    changed = False
-    existing_states = {
-        item.status_key: item
-        for item in db.query(WorkflowState).filter(WorkflowState.definition_id == definition.id).all()
-    }
-    state_by_key: dict[str, WorkflowState] = {}
+def _create_graph(db: Session, definition: WorkflowDefinition, graph: WorkflowGraphSave) -> None:
+    state_by_ref: dict[str, WorkflowState] = {}
     for item in graph.states:
-        state = existing_states.get(item.status_key)
-        data = item.model_dump(exclude={"status_key"})
-        if not state:
-            state = WorkflowState(definition_id=definition.id, status_key=item.status_key, **data)
-            db.add(state)
-            db.flush()
-            changed = True
-        else:
-            for field, value in data.items():
-                if getattr(state, field) != value:
-                    setattr(state, field, value)
-                    changed = True
-        state_by_key[item.status_key] = state
+        data = item.model_dump(exclude={"ref"})
+        state = WorkflowState(
+            definition_id=definition.id,
+            status_key=f"s_{uuid4().hex[:24]}",
+            **data,
+        )
+        db.add(state)
+        db.flush()
+        state_by_ref[item.ref] = state
 
-    for status_key, state in existing_states.items():
-        if status_key not in state_by_key and state.enabled:
-            state.enabled = False
-            changed = True
-
-    existing_transitions = {
-        (item.action_key, item.from_status, item.to_status): item
-        for item in db.query(WorkflowTransition).filter(WorkflowTransition.definition_id == definition.id).all()
-    }
-    kept_transition_ids: set[int] = set()
     for item in graph.transitions:
-        key = (item.action_key, item.from_status, item.to_status)
-        transition = existing_transitions.get(key)
-        condition_config = _template_condition_config(item.condition_config, state_by_key)
-        data = item.model_dump(exclude={"from_status", "to_status", "condition_config"})
+        from_state = state_by_ref[item.from_ref]
+        to_state = state_by_ref[item.to_ref]
+        condition_config = _template_condition_config(item.condition_config, state_by_ref)
+        data = item.model_dump(exclude={"from_ref", "to_ref", "condition_config"})
         data.update(
             {
-                "from_status": item.from_status,
-                "to_status": item.to_status,
-                "from_state_id": state_by_key[item.from_status].id,
-                "to_state_id": state_by_key[item.to_status].id,
+                "from_status": from_state.status_key,
+                "to_status": to_state.status_key,
+                "from_state_id": from_state.id,
+                "to_state_id": to_state.id,
                 "condition_config": condition_config,
             }
         )
-        if not transition:
-            transition = WorkflowTransition(definition_id=definition.id, **data)
-            db.add(transition)
-            db.flush()
-            changed = True
-        else:
-            for field, value in data.items():
-                if getattr(transition, field) != value:
-                    setattr(transition, field, value)
-                    changed = True
-        kept_transition_ids.add(transition.id)
-
-    omitted_transition_ids = set(item.id for item in existing_transitions.values()) - kept_transition_ids
-    if omitted_transition_ids:
-        db.query(WorkflowTransition).filter(WorkflowTransition.id.in_(omitted_transition_ids)).delete(
-            synchronize_session=False
-        )
-        changed = True
+        db.add(WorkflowTransition(definition_id=definition.id, **data))
 
     initial = next((item for item in graph.states if item.category == "start" and item.enabled), None)
-    initial_state_id = state_by_key[initial.status_key].id if initial else None
-    if definition.initial_state_id != initial_state_id:
-        definition.initial_state_id = initial_state_id
-        changed = True
-    return changed
+    definition.initial_state_id = state_by_ref[initial.ref].id if initial else None
 
 
-def _template_condition_config(config: dict | list | None, state_by_key: dict[str, WorkflowState]):
+def _template_condition_config(config: dict | list | None, state_by_ref: dict[str, WorkflowState]):
     if not config or not isinstance(config, dict):
         return config
     result = dict(config)
     if isinstance(result.get("routes"), dict):
-        result["routes"] = {key: state_by_key[value].id for key, value in result["routes"].items()}
+        result["routes"] = {key: state_by_ref[value].id for key, value in result["routes"].items()}
     owner_targets = result.pop("target_status_by_owner", None)
     if owner_targets is not None:
         result["target_state_id_by_owner"] = {
-            key: state_by_key[value].id for key, value in owner_targets.items()
+            key: state_by_ref[value].id for key, value in owner_targets.items()
         }
     return result
 
@@ -702,15 +642,15 @@ def _project_graph() -> WorkflowGraphSave:
     )
 
 
-def _state(status_key: str, status_name: str, category: str, color: str, x: int, y: int) -> WorkflowStateBase:
-    return WorkflowStateBase(status_key=status_key, status_name=status_name, category=category, color=color, x=x, y=y)
+def _state(ref: str, status_name: str, category: str, color: str, x: int, y: int) -> WorkflowStateBase:
+    return WorkflowStateBase(ref=ref, status_name=status_name, category=category, color=color, x=x, y=y)
 
 
 def _transition(
     action_key: str,
     action_name: str,
-    from_status: str,
-    to_status: str,
+    from_ref: str,
+    to_ref: str,
     *,
     allowed_roles: str = "",
     target_type: str = "keep_current",
@@ -731,7 +671,7 @@ def _transition(
     resolved_ui_config.setdefault("action_category", "process")
     if handler_scope:
         resolved_ui_config["handler_scope"] = handler_scope
-    if action_key in {"claim", "assign"} and from_status in {"pending_assignment", "pending_handling"}:
+    if action_key in {"claim", "assign"} and from_ref in {"pending_assignment", "pending_handling"}:
         if action_key == "claim":
             resolved_ui_config["handler_scope"] = handler_scope or "project_member"
             resolved_ui_config["action_category"] = "ownership"
@@ -747,8 +687,8 @@ def _transition(
     return WorkflowTransitionBase(
         action_key=action_key,
         action_name=action_name,
-        from_status=from_status,
-        to_status=to_status,
+        from_ref=from_ref,
+        to_ref=to_ref,
         allowed_roles=resolved_allowed_roles,
         handler_rule={
             "target_type": target_type,
@@ -826,11 +766,11 @@ def _command_transition(
     )
 
 
-def _reactivate_transition(from_status: str, *, allowed_roles: str) -> WorkflowTransitionBase:
+def _reactivate_transition(from_ref: str, *, allowed_roles: str) -> WorkflowTransitionBase:
     return _transition(
         "reactivate",
         "重新激活",
-        from_status,
+        from_ref,
         "pending_assignment",
         allowed_roles=allowed_roles,
         target_type="keep_current",
@@ -847,11 +787,11 @@ def _reactivate_transition(from_status: str, *, allowed_roles: str) -> WorkflowT
     )
 
 
-def _bug_void_transition(from_status: str) -> WorkflowTransitionBase:
+def _bug_void_transition(from_ref: str) -> WorkflowTransitionBase:
     return _transition(
         "void_close",
         "作废/关闭",
-        from_status,
+        from_ref,
         "closed",
         allowed_roles="project_owner",
         target_type="keep_current",

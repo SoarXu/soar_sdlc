@@ -906,6 +906,60 @@ assertVerticalColumnReservations(159, 159.001, 'exact-epsilon-boundary')
 
 {
   const states = [
+    { id: 1, x: 80, y: 80 },
+    { id: 5, x: 560, y: 440 },
+    { id: 8, x: 80, y: 440 }
+  ]
+  const transitions = [
+    { id: 'mixed-forward', from_state_id: 1, to_state_id: 5 },
+    ...Array.from({ length: 8 }, (_, index) => ({
+      id: `mixed-backward-${index + 1}`,
+      from_state_id: 5,
+      to_state_id: 1,
+      sort_order: index
+    }))
+  ]
+  const edges = buildWorkflowEdgeViews(states, transitions, transitionKey)
+  const labels = edges.map((edge) => ({
+    left: edge.labelX - 40,
+    top: edge.labelY - 13,
+    right: edge.labelX + 40,
+    bottom: edge.labelY + 13
+  }))
+  const collisions = {
+    labelNode: 0,
+    labelLabel: 0,
+    pathOtherLabel: 0
+  }
+
+  edges.forEach((edge, index) => {
+    states.forEach((state) => {
+      if (rectanglesIntersect(labels[index], nodeRectangle(state))) {
+        collisions.labelNode += 1
+      }
+    })
+    edges.forEach((other, otherIndex) => {
+      if (index === otherIndex) return
+      if (index < otherIndex && rectanglesIntersect(labels[index], labels[otherIndex])) {
+        collisions.labelLabel += 1
+      }
+      if (pathSegments(edge.path).some((segment) => (
+        segmentIntersectsRectangle(segment, labels[otherIndex])
+      ))) {
+        collisions.pathOtherLabel += 1
+      }
+    })
+  })
+
+  assert.deepEqual(collisions, {
+    labelNode: 0,
+    labelLabel: 0,
+    pathOtherLabel: 0
+  })
+}
+
+{
+  const states = [
     { id: 10329, x: 80, y: 140 },
     { id: 10330, x: 320, y: 140 },
     { id: 10331, x: 80, y: 440 },

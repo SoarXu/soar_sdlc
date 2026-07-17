@@ -92,7 +92,8 @@ export function buildWorkflowEdgeViews(states, transitions, transitionKey = defa
           edge.to,
           states,
           maximumNodeBottom,
-          metadata.backwardLaneIndex
+          metadata.backwardLaneIndex,
+          globalReservations
         )
       } else {
         view = buildForwardView(
@@ -100,7 +101,8 @@ export function buildWorkflowEdgeViews(states, transitions, transitionKey = defa
           edge.to,
           states,
           metadata.groupIndex,
-          groupSizes.get(metadata.groupKey)
+          groupSizes.get(metadata.groupKey),
+          globalReservations
         )
       }
 
@@ -290,16 +292,20 @@ function firstClearRouteView(candidates, pathBounds, labelBounds, reservations) 
 function routeViewWithClearLabel(points, labelBounds, reservations) {
   const normalized = normalizeOrthogonalPoints(points)
   const pathSegments = roundedPolylineSegments(normalized)
-  if (segmentsIntersectRectangles(pathSegments, reservations.labelRectangles)) return null
+  const pathLabelRectangles = reservationLabelsForSegments(reservations, pathSegments)
+  if (segmentsIntersectRectangles(pathSegments, pathLabelRectangles)) return null
   const labelSearchLimit = labelBounds.length + reservations.labelRectangles.length +
     normalized.length + 4
   for (const label of labelPointsForPolyline(normalized, labelSearchLimit)) {
     const labelRectangle = edgeLabelRectangle(label)
     if (labelBounds.some((rectangle) => rectanglesIntersect(labelRectangle, rectangle))) continue
-    if (reservations.labelRectangles.some((rectangle) => (
+    if (reservationLabelsForRectangle(reservations, labelRectangle).some((rectangle) => (
       rectanglesIntersect(labelRectangle, rectangle)
     ))) continue
-    if (segmentsIntersectRectangles(reservations.pathSegments, [labelRectangle])) continue
+    if (segmentsIntersectRectangles(
+      reservationPathsForRectangle(reservations, labelRectangle),
+      [labelRectangle]
+    )) continue
     return {
       view: edgeView(normalized, label.x, label.y),
       labelRectangle,
@@ -307,6 +313,74 @@ function routeViewWithClearLabel(points, labelBounds, reservations) {
     }
   }
   return null
+}
+
+function reservationLabelsForSegments(reservations, segments) {
+  return reservations.spatialIndex
+    ? queryWorkflowReservationsForSegments(
+        reservations.spatialIndex,
+        'labelRectangles',
+        segments
+      )
+    : reservations.labelRectangles
+}
+
+function reservationLabelsForRectangle(reservations, rectangle) {
+  return reservations.spatialIndex
+    ? queryWorkflowReservations(reservations.spatialIndex, 'labelRectangles', rectangle)
+    : reservations.labelRectangles
+}
+
+function reservationPathsForRectangle(reservations, rectangle) {
+  return reservations.spatialIndex
+    ? queryWorkflowReservations(reservations.spatialIndex, 'pathSegments', rectangle)
+    : reservations.pathSegments
+}
+
+function leastCollidingRouteView(candidates, pathBounds, labelBounds, reservations) {
+  let best = null
+
+  candidates.forEach((candidate, candidateIndex) => {
+    const points = normalizeOrthogonalPoints(candidate)
+    if (points.length < 2) return
+    const pathSegments = roundedPolylineSegments(points)
+    const pathLabelRectangles = reservationLabelsForSegments(reservations, pathSegments)
+    const labelSearchLimit = labelBounds.length + reservations.labelRectangles.length +
+      points.length + 4
+    const labels = labelPointsForPolyline(points, labelSearchLimit)
+    if (!labels.length) labels.push(labelPointForPolyline(points))
+
+    labels.forEach((label, labelIndex) => {
+      const labelRectangle = edgeLabelRectangle(label)
+      const score = pathBounds.filter((rectangle) => (
+        segmentsIntersectRectangles(pathSegments, [rectangle])
+      )).length + pathLabelRectangles.filter((rectangle) => (
+        segmentsIntersectRectangles(pathSegments, [rectangle])
+      )).length + labelBounds.filter((rectangle) => (
+        rectanglesIntersect(labelRectangle, rectangle)
+      )).length + reservationLabelsForRectangle(reservations, labelRectangle)
+        .filter((rectangle) => rectanglesIntersect(labelRectangle, rectangle)).length +
+        reservationPathsForRectangle(reservations, labelRectangle)
+          .filter((segment) => segmentIntersectsRectangle(
+            segment.from,
+            segment.to,
+            labelRectangle
+          )).length
+
+      if (!best || score < best.score) {
+        best = { candidateIndex, labelIndex, label, points, score }
+      }
+    })
+  })
+
+  const fallback = best ?? {
+    label: labelPointForPolyline(candidates[0]),
+    points: normalizeOrthogonalPoints(candidates[0])
+  }
+  return {
+    ...edgeView(fallback.points, fallback.label.x, fallback.label.y),
+    degraded: true
+  }
 }
 
 function reserveVerticalRoute(candidate, reservations) {
@@ -334,10 +408,11 @@ function isVerticalConnection(from, to) {
   return Math.abs(centerOf(to).x - centerOf(from).x) <= POSITION_EPSILON
 }
 
-function buildForwardView(from, to, states, laneIndex, laneCount) {
+function buildForwardView(from, to, states, laneIndex, laneCount, reservations) {
   const start = anchorPoint(from, 'right')
   const end = anchorPoint(to, 'left')
   const obstacles = states.filter((state) => state !== from && state !== to)
+  const labelBounds = states.map((state) => expandedRectangle(state, 0))
   const skippedNodes = states.filter((state) => (
     state !== from &&
     state !== to &&
@@ -347,7 +422,14 @@ function buildForwardView(from, to, states, laneIndex, laneCount) {
   let trackY
 
   if (skippedNodes.length) {
-    return buildObstacleAvoidingForwardView(start, end, obstacles, laneIndex)
+    return buildObstacleAvoidingForwardView(
+      start,
+      end,
+      obstacles,
+      laneIndex,
+      labelBounds,
+      reservations
+    )
   }
 
   const centeredLaneIndex = laneIndex - (laneCount - 1) / 2
@@ -356,24 +438,96 @@ function buildForwardView(from, to, states, laneIndex, laneCount) {
   const startTrackX = start.x + stubLength
   const endTrackX = end.x - stubLength
 
-  return routedEdgeView([
+  const direct = [
     start,
     { x: startTrackX, y: start.y },
     { x: startTrackX, y: trackY },
     { x: endTrackX, y: trackY },
     { x: endTrackX, y: end.y },
     end
-  ])
+  ]
+  const clearView = firstClearRouteView(
+    [direct],
+    obstacles.map((state) => expandedRectangle(state, OBSTACLE_CLEARANCE)),
+    labelBounds,
+    reservations
+  )
+  if (clearView) return clearView.view
+
+  const alternative = findForwardRouteView(
+    start,
+    end,
+    obstacles,
+    laneIndex,
+    OBSTACLE_CLEARANCE,
+    labelBounds,
+    reservations
+  )
+  if (alternative) return alternative
+
+  const nodeAvoiding = firstClearRouteView(
+    [direct],
+    obstacles.map((state) => expandedRectangle(state, 0)),
+    labelBounds,
+    reservations
+  ) || findForwardRouteCandidate(
+    start,
+    end,
+    obstacles,
+    laneIndex,
+    0,
+    (points) => routeViewWithClearLabel(points, labelBounds, reservations)
+  )
+  if (nodeAvoiding) {
+    return {
+      ...(nodeAvoiding.view ?? nodeAvoiding),
+      degraded: true
+    }
+  }
+
+  const fallbackCandidates = [
+    direct,
+    ...collectForwardRouteCandidates(start, end, obstacles, laneIndex, 0)
+  ]
+  return leastCollidingRouteView(
+    fallbackCandidates,
+    obstacles.map((state) => expandedRectangle(state, 0)),
+    labelBounds,
+    reservations
+  )
 }
 
-function buildObstacleAvoidingForwardView(start, end, obstacles, laneIndex) {
-  const clearRoute = findForwardRoute(start, end, obstacles, laneIndex, OBSTACLE_CLEARANCE)
-  if (clearRoute) return forwardRouteView(clearRoute)
+function buildObstacleAvoidingForwardView(
+  start,
+  end,
+  obstacles,
+  laneIndex,
+  labelBounds,
+  reservations
+) {
+  const clearView = findForwardRouteView(
+    start,
+    end,
+    obstacles,
+    laneIndex,
+    OBSTACLE_CLEARANCE,
+    labelBounds,
+    reservations
+  )
+  if (clearView) return clearView
 
-  const nodeAvoidingRoute = findForwardRoute(start, end, obstacles, laneIndex, 0)
-  if (nodeAvoidingRoute) {
+  const nodeAvoidingView = findForwardRouteView(
+    start,
+    end,
+    obstacles,
+    laneIndex,
+    0,
+    labelBounds,
+    reservations
+  )
+  if (nodeAvoidingView) {
     return {
-      ...forwardRouteView(nodeAvoidingRoute),
+      ...nodeAvoidingView,
       degraded: true
     }
   }
@@ -383,12 +537,61 @@ function buildObstacleAvoidingForwardView(start, end, obstacles, laneIndex) {
     OBSTACLE_CLEARANCE - CORNER_RADIUS - 1 - laneOffset
   const fallbackStartX = start.x + PARALLEL_LANE_GAP
   const fallbackEndX = end.x - PARALLEL_LANE_GAP
-  return degradedEdgeView(
-    forwardRoutePoints(start, end, fallbackStartX, fallbackEndX, fallbackTrackY)
+  return leastCollidingRouteView(
+    [
+      forwardRoutePoints(start, end, fallbackStartX, fallbackEndX, fallbackTrackY),
+      ...collectForwardRouteCandidates(start, end, obstacles, laneIndex, 0)
+    ],
+    obstacles.map((state) => expandedRectangle(state, 0)),
+    labelBounds,
+    reservations
   )
 }
 
-function findForwardRoute(start, end, obstacles, laneIndex, clearance) {
+function findForwardRouteView(
+  start,
+  end,
+  obstacles,
+  laneIndex,
+  clearance,
+  labelBounds,
+  reservations
+) {
+  const candidate = findForwardRouteCandidate(
+    start,
+    end,
+    obstacles,
+    laneIndex,
+    clearance,
+    (points) => routeViewWithClearLabel(points, labelBounds, reservations)
+  )
+  return candidate?.view ?? null
+}
+
+function collectForwardRouteCandidates(start, end, obstacles, laneIndex, clearance) {
+  const candidates = []
+  findForwardRouteCandidate(
+    start,
+    end,
+    obstacles,
+    laneIndex,
+    clearance,
+    (points) => {
+      candidates.push(points)
+      return null
+    }
+  )
+  return candidates
+}
+
+function findForwardRouteCandidate(
+  start,
+  end,
+  obstacles,
+  laneIndex,
+  clearance,
+  accept
+) {
   const routePadding = clearance + CORNER_RADIUS
   const rectangles = obstacles.map((node) => expandedRectangle(node, clearance))
   const routingBounds = obstacles.map((node) => expandedRectangle(node, routePadding))
@@ -424,21 +627,13 @@ function findForwardRoute(start, end, obstacles, laneIndex, clearance) {
           forwardRoutePoints(start, end, startTrackX, endTrackX, trackY)
         ], rectangles)
         if (!points) continue
-        return {
-          points,
-          startTrackX,
-          endTrackX,
-          trackY
-        }
+        const accepted = accept(points)
+        if (accepted) return accepted
       }
     }
   }
 
   return null
-}
-
-function forwardRouteView({ points }) {
-  return routedEdgeView(points)
 }
 
 function forwardLegClears(anchor, trackX, trackY, direction, rectangles) {
@@ -696,7 +891,7 @@ function normalizeOrthogonalPoints(points) {
   return normalized
 }
 
-function buildBackwardView(from, to, states, maximumNodeBottom, laneIndex) {
+function buildBackwardView(from, to, states, maximumNodeBottom, laneIndex, reservations) {
   const start = anchorPoint(from, 'bottom')
   const end = anchorPoint(to, 'bottom')
   const trackY = Math.max(maximumNodeBottom, start.y, end.y) +
@@ -704,6 +899,10 @@ function buildBackwardView(from, to, states, maximumNodeBottom, laneIndex) {
   const rectangles = states
     .filter((state) => state !== from && state !== to)
     .map((state) => expandedRectangle(state, OBSTACLE_CLEARANCE))
+  const nodeRectangles = states
+    .filter((state) => state !== from && state !== to)
+    .map((state) => expandedRectangle(state, 0))
+  const labelBounds = states.map((state) => expandedRectangle(state, 0))
   const routingBounds = states
     .filter((state) => state !== from && state !== to)
     .map((state) => expandedRectangle(state, OBSTACLE_CLEARANCE + CORNER_RADIUS))
@@ -725,14 +924,23 @@ function buildBackwardView(from, to, states, maximumNodeBottom, laneIndex) {
     backwardRoutePoints(start, end, channels[0], channels[1], trackY),
     backwardRoutePoints(start, end, channels[1], channels[0], trackY)
   ]
-  const points = firstClearPolyline(candidates, rectangles)
+  const clearView = firstClearRouteView(candidates, rectangles, labelBounds, reservations)
+  if (clearView) return clearView.view
 
-  if (!points) {
-    return degradedEdgeView(
-      backwardRoutePoints(start, end, start.x, end.x, trackY)
-    )
+  const nodeAvoidingView = firstClearRouteView(
+    candidates,
+    nodeRectangles,
+    labelBounds,
+    reservations
+  )
+  if (nodeAvoidingView) {
+    return {
+      ...nodeAvoidingView.view,
+      degraded: true
+    }
   }
-  return routedEdgeView(points)
+
+  return leastCollidingRouteView(candidates, nodeRectangles, labelBounds, reservations)
 }
 
 function backwardRoutePoints(start, end, startTrackX, endTrackX, trackY) {

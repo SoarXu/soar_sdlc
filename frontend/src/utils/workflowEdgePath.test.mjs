@@ -149,6 +149,30 @@ const transitionKey = (transition) => transition.id
   const states = [
     { id: 'source', x: 100, y: 0 },
     { id: 'middle', x: 100, y: 140 },
+    { id: 'target', x: 100, y: 300 }
+  ]
+  const transitions = Array.from({ length: 4 }, (_, index) => ({
+    id: `vertical-parallel-${index + 1}`,
+    from_state_id: 'source',
+    to_state_id: 'target',
+    sort_order: (index + 1) * 10
+  }))
+  const edges = buildWorkflowEdgeViews(states, transitions, transitionKey)
+
+  assert.equal(new Set(edges.map((edge) => edge.path)).size, edges.length)
+  assert.equal(
+    new Set(edges.map((edge) => `${edge.labelX}:${edge.labelY}`)).size,
+    edges.length
+  )
+  edges.forEach((edge) => {
+    assertPathClearsRectangle(edge.path, expandedNodeRectangle(states[1]))
+  })
+}
+
+{
+  const states = [
+    { id: 'source', x: 100, y: 0 },
+    { id: 'middle', x: 100, y: 140 },
     { id: 'left-wall', x: -100, y: 20 },
     { id: 'right-wall', x: 220, y: 20 },
     { id: 'target', x: 100, y: 300 }

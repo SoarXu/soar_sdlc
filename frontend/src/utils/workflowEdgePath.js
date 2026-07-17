@@ -110,16 +110,19 @@ function buildVerticalView(from, to, states, laneIndex, laneCount) {
   const directPoints = firstClearPolyline([direct], rectangles)
   if (directPoints) return edgeView(directPoints, trackX, (start.y + end.y) / 2)
 
+  const laneOffset = laneIndex * PARALLEL_LANE_GAP
   const leftChannel = Math.min(...routingBounds.map((rectangle) => rectangle.left)) -
-    1 - laneIndex * PARALLEL_LANE_GAP
+    1 - laneOffset
   const rightChannel = Math.max(...routingBounds.map((rectangle) => rectangle.right)) +
-    1 + laneIndex * PARALLEL_LANE_GAP
+    1 + laneOffset
   const channels = channelCandidates(
     trackX,
     [
       leftChannel,
       rightChannel,
-      ...routingBounds.flatMap((rectangle) => [rectangle.left - 1, rectangle.right + 1])
+      ...routingBounds.flatMap((rectangle) => (
+        [rectangle.left - 1 - laneOffset, rectangle.right + 1 + laneOffset]
+      ))
     ],
     () => true
   )

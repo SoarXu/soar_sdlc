@@ -314,6 +314,13 @@ const transitionKey = (transition) => transition.id
   assert.equal(first.length, transitions.length)
   assert.ok(first.every((edge) => edge.path.length > 0))
   assert.deepEqual(first, second)
+  const closeEdge = first.find((edge) => edge.transition.id === 'insufficient-clearance')
+  assertPathClearsRectangle(closeEdge.path, {
+    left: 130,
+    top: 0,
+    right: 248,
+    bottom: 42
+  })
 }
 
 {
@@ -349,6 +356,57 @@ const transitionKey = (transition) => transition.id
 
   assert.equal(edges.length, 1)
   assert.ok(edges[0].path.length > 0)
+}
+
+{
+  const states = [
+    { id: 0, x: -150, y: 241 },
+    { id: 6, x: -135, y: 543 },
+    { id: 10, x: 9, y: 568 },
+    { id: 11, x: -81, y: 243 }
+  ]
+  let edges
+
+  assert.doesNotThrow(() => {
+    edges = buildWorkflowEdgeViews(states, [
+      { id: 'normalization-regression', from_state_id: 6, to_state_id: 10 }
+    ], transitionKey)
+  })
+  assert.equal(edges.length, 1)
+  assertFiniteEdgeView(edges[0])
+}
+
+{
+  let seed = 0x5eed1234
+  const random = () => {
+    seed = (seed * 1664525 + 1013904223) >>> 0
+    return seed / 0x100000000
+  }
+
+  for (let graphIndex = 0; graphIndex < 12; graphIndex += 1) {
+    const states = Array.from({ length: 6 }, (_, index) => ({
+      id: index,
+      x: Math.floor(random() * 700) - 350,
+      y: Math.floor(random() * 700) - 350
+    }))
+    const transitions = Array.from({ length: 8 }, (_, index) => {
+      const from = Math.floor(random() * states.length)
+      const to = (from + 1 + Math.floor(random() * (states.length - 1))) % states.length
+      return {
+        id: `fuzz-${graphIndex}-${index}`,
+        from_state_id: from,
+        to_state_id: to,
+        sort_order: index * 10
+      }
+    })
+    let edges
+
+    assert.doesNotThrow(() => {
+      edges = buildWorkflowEdgeViews(states, transitions, transitionKey)
+    })
+    assert.equal(edges.length, transitions.length)
+    edges.forEach(assertFiniteEdgeView)
+  }
 }
 
 {
@@ -487,6 +545,20 @@ function assertPathClearsRectangle(path, rectangle) {
   assert.ok(pathSegments(path).every((segment) => (
     !segmentIntersectsRectangle(segment, rectangle)
   )))
+}
+
+function assertFiniteEdgeView(edge) {
+  assert.ok(edge.path.length > 0)
+  assert.doesNotMatch(edge.path, /NaN|Infinity/)
+  assert.ok([
+    edge.labelX,
+    edge.labelY,
+    edge.start.x,
+    edge.start.y,
+    edge.end.x,
+    edge.end.y,
+    ...pathPoints(edge.path).flatMap((point) => [point.x, point.y])
+  ].every(Number.isFinite))
 }
 
 function expandedNodeRectangle(node) {

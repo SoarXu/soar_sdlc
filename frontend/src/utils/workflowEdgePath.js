@@ -134,7 +134,7 @@ function buildVerticalView(from, to, states, laneIndex, laneCount) {
   if (!points) {
     return degradedEdgeView(direct, trackX, (start.y + end.y) / 2)
   }
-  return edgeView(points, points[1].x, (start.y + end.y) / 2)
+  return edgeView(points, points[1]?.x ?? trackX, (start.y + end.y) / 2)
 }
 
 function verticalRoutePoints(start, end, trackX) {
@@ -184,8 +184,32 @@ function buildForwardView(from, to, states, laneIndex, laneCount) {
 }
 
 function buildObstacleAvoidingForwardView(start, end, obstacles, laneIndex) {
-  const routePadding = OBSTACLE_CLEARANCE + CORNER_RADIUS
-  const rectangles = obstacles.map((node) => expandedRectangle(node, OBSTACLE_CLEARANCE))
+  const clearRoute = findForwardRoute(start, end, obstacles, laneIndex, OBSTACLE_CLEARANCE)
+  if (clearRoute) return forwardRouteView(clearRoute)
+
+  const nodeAvoidingRoute = findForwardRoute(start, end, obstacles, laneIndex, 0)
+  if (nodeAvoidingRoute) {
+    return {
+      ...forwardRouteView(nodeAvoidingRoute),
+      degraded: true
+    }
+  }
+
+  const laneOffset = laneIndex * PARALLEL_LANE_GAP
+  const fallbackTrackY = Math.min(...obstacles.map((node) => node.y)) -
+    OBSTACLE_CLEARANCE - CORNER_RADIUS - 1 - laneOffset
+  const fallbackStartX = start.x + PARALLEL_LANE_GAP
+  const fallbackEndX = end.x - PARALLEL_LANE_GAP
+  return degradedEdgeView(
+    forwardRoutePoints(start, end, fallbackStartX, fallbackEndX, fallbackTrackY),
+    (fallbackStartX + fallbackEndX) / 2,
+    fallbackTrackY
+  )
+}
+
+function findForwardRoute(start, end, obstacles, laneIndex, clearance) {
+  const routePadding = clearance + CORNER_RADIUS
+  const rectangles = obstacles.map((node) => expandedRectangle(node, clearance))
   const routingBounds = obstacles.map((node) => expandedRectangle(node, routePadding))
   const above = Math.min(...routingBounds.map((rectangle) => rectangle.top)) - 1
   const below = Math.max(...routingBounds.map((rectangle) => rectangle.bottom)) + 1
@@ -219,23 +243,24 @@ function buildObstacleAvoidingForwardView(start, end, obstacles, laneIndex) {
           forwardRoutePoints(start, end, startTrackX, endTrackX, trackY)
         ], rectangles)
         if (!points) continue
-        const trackPoints = points.filter((point) => point.y === trackY)
-        return edgeView(
+        return {
           points,
-          (trackPoints[0].x + trackPoints[trackPoints.length - 1].x) / 2,
+          startTrackX,
+          endTrackX,
           trackY
-        )
+        }
       }
     }
   }
 
-  const fallbackTrackY = tracks[0]
-  const fallbackStartX = start.x + PARALLEL_LANE_GAP
-  const fallbackEndX = end.x - PARALLEL_LANE_GAP
-  return degradedEdgeView(
-    forwardRoutePoints(start, end, fallbackStartX, fallbackEndX, fallbackTrackY),
-    (fallbackStartX + fallbackEndX) / 2,
-    fallbackTrackY
+  return null
+}
+
+function forwardRouteView({ points, startTrackX, endTrackX, trackY }) {
+  return edgeView(
+    points,
+    (startTrackX + endTrackX) / 2,
+    trackY
   )
 }
 
@@ -413,7 +438,9 @@ function buildBackwardView(from, to, states, maximumNodeBottom, laneIndex) {
   const trackPoints = points.filter((point) => point.y === trackY)
   return edgeView(
     points,
-    (trackPoints[0].x + trackPoints[trackPoints.length - 1].x) / 2,
+    trackPoints.length
+      ? (trackPoints[0].x + trackPoints[trackPoints.length - 1].x) / 2
+      : (start.x + end.x) / 2,
     trackY
   )
 }

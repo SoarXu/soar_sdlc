@@ -134,7 +134,7 @@ const availableRequirements = computed(() => {
 })
 
 function optionLabel(options, value) { return options.find((option) => option.value === value)?.label || value || '-' }
-function isTaskProjectClosed(row) { return projects.value.find((item) => item.id === row.project_id)?.status === 'closed' }
+function isTaskProjectClosed(row) { return projects.value.find((item) => item.id === row.project_id)?.state_category === 'terminal' }
 function workflowTransitionsFor(row) { return workflowTransitions.value[`task:${row.id}`] || [] }
 function projectForTask(row) { return projects.value.find((item) => item.id === row.project_id) || null }
 function membersForProject(projectId) { return projectMembersById.value[projectId] || [] }

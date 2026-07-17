@@ -238,7 +238,7 @@ const requirementTypeOptions = ['功能', '接口', '性能', '安全', '体验'
 const legacyRequirementPriorityValues = { high: '1', medium: '3', low: '5' }
 
 function normalizeRequirementPriority(value) { return legacyRequirementPriorityValues[value] || value || '3' }
-function isRequirementProjectClosed(row) { return projects.value.find((item) => item.id === row.project_id)?.status === 'closed' }
+function isRequirementProjectClosed(row) { return projects.value.find((item) => item.id === row.project_id)?.state_category === 'terminal' }
 function workflowTransitionsFor(row) { return workflowTransitions.value[`requirement:${row.id}`] || [] }
 function projectForRequirement(row) { return projects.value.find((item) => item.id === row.project_id) || null }
 function membersForProject(projectId) { return projectMembersById.value[projectId] || [] }

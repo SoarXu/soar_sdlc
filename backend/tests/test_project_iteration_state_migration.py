@@ -1,4 +1,5 @@
 import importlib.util
+import json
 from pathlib import Path
 
 import pytest
@@ -91,6 +92,85 @@ def test_project_iteration_migration_targets_only_confirmed_objects():
         "projects": "project",
         "iterations": "iteration",
     }
+
+
+class _ScalarOneOrNone:
+    def __init__(self, value):
+        self._value = value
+
+    def scalar_one_or_none(self):
+        return self._value
+
+
+class _TransitionCaptureBind:
+    def __init__(self, scalar_value=None):
+        self.calls = []
+        self.scalar_value = scalar_value
+
+    def execute(self, statement, params=None):
+        self.calls.append((str(statement), params or {}))
+        return _ScalarOneOrNone(self.scalar_value)
+
+
+def test_existing_project_activate_short_circuits_before_legacy_state_lookup(monkeypatch):
+    migration = _migration_module()
+    bind = _TransitionCaptureBind(scalar_value=45448)
+    monkeypatch.setattr(migration, "_system_definition", lambda _bind, _object_type: 7)
+    monkeypatch.setattr(
+        migration,
+        "_definition_states",
+        lambda _bind, _definition_id: [
+            {"id": 11, "status_key": "state_11"},
+            {"id": 12, "status_key": "state_12"},
+        ],
+    )
+
+    migration._ensure_project_activate_transition(bind)
+
+    assert not any("INSERT INTO workflow_transitions" in sql for sql, _params in bind.calls)
+    lookup_sql = bind.calls[0][0]
+    assert "source_state.category = 'terminal'" in lookup_sql
+    assert "target_state.category <> 'terminal'" in lookup_sql
+
+
+def test_project_activate_transition_insert_is_marked_as_owned_by_migration(monkeypatch):
+    migration = _migration_module()
+    bind = _TransitionCaptureBind()
+    monkeypatch.setattr(migration, "_system_definition", lambda _bind, _object_type: 7)
+    monkeypatch.setattr(
+        migration,
+        "_definition_states",
+        lambda _bind, _definition_id: [
+            {"id": 11, "status_key": "closed"},
+            {"id": 12, "status_key": "active"},
+        ],
+    )
+
+    migration._ensure_project_activate_transition(bind)
+
+    insert_sql, insert_params = next(
+        (sql, params) for sql, params in bind.calls if "INSERT INTO workflow_transitions" in sql
+    )
+    assert "ui_config" in insert_sql
+    assert json.loads(insert_params["ui_config"]) == {
+        "migration_origin": "20260717_001"
+    }
+
+
+def test_project_activate_transition_downgrade_deletes_only_migration_owned_edge(monkeypatch):
+    migration = _migration_module()
+    bind = _TransitionCaptureBind()
+    monkeypatch.setattr(migration.op, "get_bind", lambda: bind)
+    monkeypatch.setattr(migration, "_legacy_status_tables", lambda: {})
+
+    migration.downgrade()
+
+    delete_sql, delete_params = next(
+        (sql, params) for sql, params in bind.calls if "DELETE" in sql
+    )
+    assert "JSON_EXTRACT" in delete_sql
+    assert "$.migration_origin" in delete_sql
+    assert delete_params == {"migration_origin": "20260717_001"}
 
 
 def test_finalization_migration_has_deterministic_audit_diagnostic():

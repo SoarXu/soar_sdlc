@@ -6,6 +6,7 @@ Create Date: 2026-07-17 10:00:00.000000
 """
 
 from collections.abc import Mapping, Sequence
+import json
 from typing import Any, Union
 
 from alembic import op
@@ -17,6 +18,8 @@ revision: str = "20260717_001"
 down_revision: Union[str, None] = "20260716_002"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
+
+_MIGRATION_ORIGIN = revision
 
 
 def _legacy_status_tables() -> dict[str, str]:
@@ -109,26 +112,31 @@ def _backfill_table(bind, table_name: str, object_type: str) -> None:
 
 def _ensure_project_activate_transition(bind) -> None:
     definition_id = _system_definition(bind, "project")
-    states = _definition_states(bind, definition_id)
-    closed_state_id = _match_state_id(states, "project", definition_id, "closed")
-    active_state_id = _match_state_id(states, "project", definition_id, "active")
     exists = bind.execute(
         sa.text(
-            "SELECT id FROM workflow_transitions WHERE definition_id = :definition_id "
-            "AND action_key = 'activate' AND from_state_id = :from_state_id LIMIT 1"
+            "SELECT transition_item.id FROM workflow_transitions transition_item "
+            "JOIN workflow_states source_state ON source_state.id = transition_item.from_state_id "
+            "JOIN workflow_states target_state ON target_state.id = transition_item.to_state_id "
+            "WHERE transition_item.definition_id = :definition_id "
+            "AND transition_item.action_key = 'activate' "
+            "AND source_state.category = 'terminal' "
+            "AND target_state.category <> 'terminal' LIMIT 1"
         ),
-        {"definition_id": definition_id, "from_state_id": closed_state_id},
+        {"definition_id": definition_id},
     ).scalar_one_or_none()
     if exists is not None:
         return
+    states = _definition_states(bind, definition_id)
+    closed_state_id = _match_state_id(states, "project", definition_id, "closed")
+    active_state_id = _match_state_id(states, "project", definition_id, "active")
     state_keys = {int(item["id"]): str(item["status_key"]) for item in states}
     bind.execute(
         sa.text(
             "INSERT INTO workflow_transitions "
             "(definition_id, action_key, action_name, from_status, to_status, "
-            "from_state_id, to_state_id, allowed_roles, enabled, sort_order) "
+            "from_state_id, to_state_id, allowed_roles, enabled, sort_order, ui_config) "
             "VALUES (:definition_id, 'activate', '激活', :from_status, :to_status, "
-            ":from_state_id, :to_state_id, '', 1, 100)"
+            ":from_state_id, :to_state_id, '', 1, 100, :ui_config)"
         ),
         {
             "definition_id": definition_id,
@@ -136,6 +144,7 @@ def _ensure_project_activate_transition(bind) -> None:
             "to_status": state_keys[active_state_id],
             "from_state_id": closed_state_id,
             "to_state_id": active_state_id,
+            "ui_config": json.dumps({"migration_origin": _MIGRATION_ORIGIN}),
         },
     )
 
@@ -186,8 +195,11 @@ def downgrade() -> None:
             "DELETE transition_item FROM workflow_transitions transition_item "
             "JOIN workflow_definitions definition ON definition.id = transition_item.definition_id "
             "WHERE definition.object_type = 'project' AND definition.scope_type = 'system' "
-            "AND transition_item.action_key = 'activate'"
-        )
+            "AND transition_item.action_key = 'activate' "
+            "AND JSON_UNQUOTE(JSON_EXTRACT(transition_item.ui_config, '$.migration_origin')) "
+            "= :migration_origin"
+        ),
+        {"migration_origin": _MIGRATION_ORIGIN},
     )
     for table_name in reversed(tuple(_legacy_status_tables())):
         foreign_keys = _foreign_key_names(table_name)

@@ -52,6 +52,22 @@ assert.doesNotMatch(projectStartDateGate, /\.status/, 'ProgramsView.vue project 
 const projectDetailSource = sources.find(([path]) => path.endsWith('ProjectDetailView.vue'))[1]
 assert.doesNotMatch(projectDetailSource, /\[['"]completed['"],\s*['"]canceled['"]\]\.includes\(item\.status\)/, 'ProjectDetailView.vue iteration filters must use state_category')
 
+for (const [path, gateName, guardedActions] of [
+  ['frontend/src/views/RequirementsView.vue', 'isRequirementProjectClosed', ['canGenerateTask', 'canDeleteRequirement']],
+  ['frontend/src/views/TasksView.vue', 'isTaskProjectClosed', ['canDeleteTaskRow']]
+]) {
+  const source = readFileSync(path, 'utf8')
+  const gate = source.match(new RegExp(`function ${gateName}\\(row\\) \\{([^}]*)\\}`))?.[1] || ''
+  assert.ok(gate, `${path} terminal-project gate must be present`)
+  assert.match(gate, /\.state_category\s*===\s*['"]terminal['"]/, `${path} terminal-project gate must use state_category`)
+  assert.doesNotMatch(gate, /\.status\b/, `${path} terminal-project gate must not read removed project.status`)
+  for (const actionName of guardedActions) {
+    const action = source.match(new RegExp(`function ${actionName}\\([^)]*\\) \\{([\\s\\S]*?)\\n\\}`))?.[1] || ''
+    assert.match(action, new RegExp(`${gateName}\\(row\\)`), `${path} ${actionName} must retain the terminal-project guard`)
+  }
+  assert.match(source, /<WorkflowActionButtons\b/, `${path} edit commands must remain workflow-action driven`)
+}
+
 for (const [path, source] of sources.filter(([path]) => /(?:Programs|Projects)View\.vue$/.test(path))) {
   const loadData = source.match(/async function loadData\(\) \{([\s\S]*?)^\}/m)?.[1] || ''
   assert.ok(loadData, path + ' loadData must be present')

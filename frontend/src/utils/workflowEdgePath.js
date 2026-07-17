@@ -4,6 +4,7 @@ const NODE_CENTER_X = NODE_WIDTH / 2
 const NODE_CENTER_Y = NODE_HEIGHT / 2
 const CORNER_RADIUS = 16
 const PARALLEL_LANE_GAP = 28
+const VERTICAL_LANE_GAP = 48
 const BACKWARD_LANE_GAP = 36
 const OBSTACLE_CLEARANCE = 21
 const EDGE_LABEL_HALF_WIDTH = 40
@@ -44,7 +45,9 @@ export function buildWorkflowEdgeViews(states, transitions, transitionKey = defa
     .filter(({ from, to }) => from && to)
     .sort(compareResolvedTransitions)
   const groupSizes = countEndpointGroups(resolved)
+  const verticalGroupSizes = countVerticalGroups(resolved)
   const groupIndexes = new Map()
+  const verticalGroupIndexes = new Map()
   const selfLoopReservations = new Map()
   const verticalLabelReservations = new Map()
   const usedKeys = new Set()
@@ -71,16 +74,19 @@ export function buildWorkflowEdgeViews(states, transitions, transitionKey = defa
         selfLoopReservations.get(groupKey)
       )
     } else if (isVerticalConnection(edge.from, edge.to)) {
-      if (!verticalLabelReservations.has(groupKey)) {
-        verticalLabelReservations.set(groupKey, [])
+      const verticalGroupKey = verticalEndpointGroupKey(edge.transition)
+      const verticalGroupIndex = verticalGroupIndexes.get(verticalGroupKey) || 0
+      verticalGroupIndexes.set(verticalGroupKey, verticalGroupIndex + 1)
+      if (!verticalLabelReservations.has(verticalGroupKey)) {
+        verticalLabelReservations.set(verticalGroupKey, { labelRectangles: [], pathSegments: [] })
       }
       view = buildVerticalView(
         edge.from,
         edge.to,
         states,
-        groupIndex,
-        groupSizes.get(groupKey),
-        verticalLabelReservations.get(groupKey)
+        verticalGroupIndex,
+        verticalGroupSizes.get(verticalGroupKey),
+        verticalLabelReservations.get(verticalGroupKey)
       )
     } else if (centerOf(edge.to).x < centerOf(edge.from).x) {
       view = buildBackwardView(
@@ -109,7 +115,7 @@ export function buildWorkflowEdgeViews(states, transitions, transitionKey = defa
   })
 }
 
-function buildVerticalView(from, to, states, laneIndex, laneCount, reservedLabels) {
+function buildVerticalView(from, to, states, laneIndex, laneCount, reservations) {
   const downward = centerOf(to).y > centerOf(from).y
   const start = anchorPoint(from, downward ? 'bottom' : 'top')
   const end = anchorPoint(to, downward ? 'top' : 'bottom')
@@ -123,9 +129,9 @@ function buildVerticalView(from, to, states, laneIndex, laneCount, reservedLabel
     laneCount,
     OBSTACLE_CLEARANCE,
     labelBounds,
-    reservedLabels
+    reservations
   )
-  if (clearView) return reserveVerticalLabel(clearView, reservedLabels)
+  if (clearView) return reserveVerticalRoute(clearView, reservations)
 
   const nodeAvoidingView = findVerticalRouteView(
     start,
@@ -135,30 +141,32 @@ function buildVerticalView(from, to, states, laneIndex, laneCount, reservedLabel
     laneCount,
     0,
     labelBounds,
-    reservedLabels
+    reservations
   )
   if (nodeAvoidingView) {
     return {
-      ...reserveVerticalLabel(nodeAvoidingView, reservedLabels),
+      ...reserveVerticalRoute(nodeAvoidingView, reservations),
       degraded: true
     }
   }
 
   const centeredLaneIndex = laneIndex - (laneCount - 1) / 2
-  const trackX = start.x + centeredLaneIndex * PARALLEL_LANE_GAP
+  const trackX = start.x + centeredLaneIndex * VERTICAL_LANE_GAP
   const direct = verticalRoutePoints(start, end, trackX)
   const labelAvoidingFallback = routeViewWithClearLabel(
     direct,
     labelBounds,
-    reservedLabels
+    reservations
   )
   if (labelAvoidingFallback) {
     return {
-      ...reserveVerticalLabel(labelAvoidingFallback, reservedLabels),
+      ...reserveVerticalRoute(labelAvoidingFallback, reservations),
       degraded: true
     }
   }
-  return degradedEdgeView(direct)
+  const fallbackView = degradedEdgeView(direct)
+  reserveVerticalRouteGeometry(fallbackView, direct, reservations)
+  return fallbackView
 }
 
 function findVerticalRouteView(
@@ -169,10 +177,10 @@ function findVerticalRouteView(
   laneCount,
   clearance,
   labelBounds,
-  reservedLabels
+  reservations
 ) {
   const centeredLaneIndex = laneIndex - (laneCount - 1) / 2
-  const trackX = start.x + centeredLaneIndex * PARALLEL_LANE_GAP
+  const trackX = start.x + centeredLaneIndex * VERTICAL_LANE_GAP
   const pathBounds = obstacles.map((state) => expandedRectangle(state, clearance))
   const verticalRoutePadding = Math.max(
     clearance + CORNER_RADIUS,
@@ -182,7 +190,7 @@ function findVerticalRouteView(
   const candidates = [verticalRoutePoints(start, end, trackX)]
 
   if (routingBounds.length) {
-    const laneOffset = laneIndex * PARALLEL_LANE_GAP
+    const laneOffset = laneIndex * VERTICAL_LANE_GAP
     const leftChannel = Math.min(...routingBounds.map((rectangle) => rectangle.left)) -
       1 - laneOffset
     const rightChannel = Math.max(...routingBounds.map((rectangle) => rectangle.right)) +
@@ -201,33 +209,50 @@ function findVerticalRouteView(
     candidates.push(...channels.map((channel) => verticalRoutePoints(start, end, channel)))
   }
 
-  return firstClearRouteView(candidates, pathBounds, labelBounds, reservedLabels)
+  return firstClearRouteView(candidates, pathBounds, labelBounds, reservations)
 }
 
-function firstClearRouteView(candidates, pathBounds, labelBounds, reservedLabels) {
+function firstClearRouteView(candidates, pathBounds, labelBounds, reservations) {
   for (const candidate of candidates) {
     const points = normalizeOrthogonalPoints(candidate)
     if (!polylineClearsRectangles(points, pathBounds)) continue
-    const view = routeViewWithClearLabel(points, labelBounds, reservedLabels)
+    const view = routeViewWithClearLabel(points, labelBounds, reservations)
     if (view) return view
   }
   return null
 }
 
-function routeViewWithClearLabel(points, labelBounds, reservedLabels) {
+function routeViewWithClearLabel(points, labelBounds, reservations) {
   const normalized = normalizeOrthogonalPoints(points)
-  for (const label of labelPointsForPolyline(normalized)) {
+  const pathSegments = roundedPolylineSegments(normalized)
+  if (segmentsIntersectRectangles(pathSegments, reservations.labelRectangles)) return null
+  const labelSearchLimit = labelBounds.length + reservations.labelRectangles.length +
+    normalized.length + 4
+  for (const label of labelPointsForPolyline(normalized, labelSearchLimit)) {
     const labelRectangle = edgeLabelRectangle(label)
     if (labelBounds.some((rectangle) => rectanglesIntersect(labelRectangle, rectangle))) continue
-    if (reservedLabels.some((rectangle) => rectanglesIntersect(labelRectangle, rectangle))) continue
-    return edgeView(normalized, label.x, label.y)
+    if (reservations.labelRectangles.some((rectangle) => (
+      rectanglesIntersect(labelRectangle, rectangle)
+    ))) continue
+    if (segmentsIntersectRectangles(reservations.pathSegments, [labelRectangle])) continue
+    return {
+      view: edgeView(normalized, label.x, label.y),
+      labelRectangle,
+      pathSegments
+    }
   }
   return null
 }
 
-function reserveVerticalLabel(view, reservedLabels) {
-  reservedLabels.push(edgeLabelRectangle(view))
-  return view
+function reserveVerticalRoute(candidate, reservations) {
+  reservations.labelRectangles.push(candidate.labelRectangle)
+  reservations.pathSegments.push(...candidate.pathSegments)
+  return candidate.view
+}
+
+function reserveVerticalRouteGeometry(view, points, reservations) {
+  reservations.labelRectangles.push(edgeLabelRectangle(view))
+  reservations.pathSegments.push(...roundedPolylineSegments(normalizeOrthogonalPoints(points)))
 }
 
 function verticalRoutePoints(start, end, trackX) {
@@ -761,7 +786,7 @@ function labelPointForPolyline(points) {
   }
 }
 
-function labelPointsForPolyline(points) {
+function labelPointsForPolyline(points, maximumOffsetSteps = 0) {
   const segments = []
 
   for (let index = 1; index < points.length; index += 1) {
@@ -793,7 +818,9 @@ function labelPointsForPolyline(points) {
       : 26 + EDGE_LABEL_GAP
     const maximumOffset = segment.length / 2
     const offsets = [0]
-    for (let offset = step; offset <= maximumOffset; offset += step) {
+    const offsetSteps = Math.min(Math.floor(maximumOffset / step), maximumOffsetSteps)
+    for (let stepIndex = 1; stepIndex <= offsetSteps; stepIndex += 1) {
+      const offset = stepIndex * step
       offsets.push(-offset, offset)
     }
     offsets.forEach((offset) => {
@@ -838,6 +865,24 @@ function countEndpointGroups(edges) {
     sizes.set(key, (sizes.get(key) || 0) + 1)
   })
   return sizes
+}
+
+function countVerticalGroups(edges) {
+  const sizes = new Map()
+  edges.forEach((edge) => {
+    if (edge.transition.from_state_id === edge.transition.to_state_id ||
+        !isVerticalConnection(edge.from, edge.to)) return
+    const key = verticalEndpointGroupKey(edge.transition)
+    sizes.set(key, (sizes.get(key) || 0) + 1)
+  })
+  return sizes
+}
+
+function verticalEndpointGroupKey(transition) {
+  const fromId = transition.from_state_id
+  const toId = transition.to_state_id
+  const [first, second] = compareIds(fromId, toId) <= 0 ? [fromId, toId] : [toId, fromId]
+  return `${typedId(first)}<>${typedId(second)}`
 }
 
 function endpointGroupKey(transition) {

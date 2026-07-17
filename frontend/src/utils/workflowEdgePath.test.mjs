@@ -197,6 +197,10 @@ const transitionKey = (transition) => transition.id
     for (let right = left + 1; right < labelRectangles.length; right += 1) {
       assert.equal(rectanglesIntersect(labelRectangles[left], labelRectangles[right]), false)
     }
+    for (let other = 0; other < edges.length; other += 1) {
+      if (left === other) continue
+      assertPathClearsRectangle(edges[left].path, labelRectangles[other])
+    }
   }
   edges.forEach((edge) => {
     assertPathClearsRectangle(edge.path, expandedNodeRectangle(states[1]))
@@ -246,6 +250,32 @@ const transitionKey = (transition) => transition.id
   assert.deepEqual(edge.end, { x: 159, y: 142 })
   assert.ok(segments.every(({ from, to }) => to.y <= from.y))
   assert.ok(segments.every(({ from, to }) => from.x !== to.x || from.y !== to.y))
+}
+
+{
+  const states = [
+    { id: 'a', x: 100, y: 0 },
+    { id: 'b', x: 100, y: 300 }
+  ]
+  const edges = buildWorkflowEdgeViews(states, [
+    { id: 'a-to-b', from_state_id: 'a', to_state_id: 'b' },
+    { id: 'b-to-a', from_state_id: 'b', to_state_id: 'a' }
+  ], transitionKey)
+  const labels = edges.map((edge) => ({
+    left: edge.labelX - 40,
+    top: edge.labelY - 13,
+    right: edge.labelX + 40,
+    bottom: edge.labelY + 13
+  }))
+
+  assert.notEqual(edges[0].path, edges[1].path)
+  assert.notDeepEqual(
+    [edges[0].labelX, edges[0].labelY],
+    [edges[1].labelX, edges[1].labelY]
+  )
+  assert.equal(rectanglesIntersect(labels[0], labels[1]), false)
+  assertPathClearsRectangle(edges[0].path, labels[1])
+  assertPathClearsRectangle(edges[1].path, labels[0])
 }
 
 {

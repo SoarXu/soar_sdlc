@@ -73,6 +73,38 @@ const transitionKey = (transition) => transition.id
 
 {
   const states = [
+    { id: 'upper', x: 100, y: 100 },
+    { id: 'lower', x: 100, y: 300 }
+  ]
+  const [edge] = buildWorkflowEdgeViews(states, [
+    { id: 'down', from_state_id: 'upper', to_state_id: 'lower' }
+  ], transitionKey)
+  const segments = pathSegments(edge.path)
+
+  assert.deepEqual(edge.start, { x: 159, y: 142 })
+  assert.deepEqual(edge.end, { x: 159, y: 300 })
+  assert.ok(segments.every(({ from, to }) => to.y >= from.y))
+  assert.ok(segments.every(({ from, to }) => from.x !== to.x || from.y !== to.y))
+}
+
+{
+  const states = [
+    { id: 'upper', x: 100, y: 100 },
+    { id: 'lower', x: 100, y: 300 }
+  ]
+  const [edge] = buildWorkflowEdgeViews(states, [
+    { id: 'up', from_state_id: 'lower', to_state_id: 'upper' }
+  ], transitionKey)
+  const segments = pathSegments(edge.path)
+
+  assert.deepEqual(edge.start, { x: 159, y: 300 })
+  assert.deepEqual(edge.end, { x: 159, y: 142 })
+  assert.ok(segments.every(({ from, to }) => to.y <= from.y))
+  assert.ok(segments.every(({ from, to }) => from.x !== to.x || from.y !== to.y))
+}
+
+{
+  const states = [
     { id: 'start', x: 40, y: 100 },
     { id: 'skipped', x: 240, y: 100 },
     { id: 'finish', x: 480, y: 100 }
@@ -114,6 +146,38 @@ const transitionKey = (transition) => transition.id
 }
 
 {
+  const states = [
+    { id: 'source', x: 0, y: 0 },
+    { id: 'upper', x: 100, y: -100 },
+    { id: 'lower', x: 100, y: 100 },
+    { id: 'target', x: 500, y: 0 }
+  ]
+  const [edge] = buildWorkflowEdgeViews(states, [
+    { id: 'source-side-obstacles', from_state_id: 'source', to_state_id: 'target' }
+  ], transitionKey)
+
+  states.slice(1, 3).forEach((state) => {
+    assertPathClearsRectangle(edge.path, expandedNodeRectangle(state))
+  })
+}
+
+{
+  const states = [
+    { id: 'source', x: 0, y: 0 },
+    { id: 'upper', x: 400, y: -100 },
+    { id: 'lower', x: 400, y: 100 },
+    { id: 'target', x: 500, y: 0 }
+  ]
+  const [edge] = buildWorkflowEdgeViews(states, [
+    { id: 'target-side-obstacles', from_state_id: 'source', to_state_id: 'target' }
+  ], transitionKey)
+
+  states.slice(1, 3).forEach((state) => {
+    assertPathClearsRectangle(edge.path, expandedNodeRectangle(state))
+  })
+}
+
+{
   const state = { id: 'loop', x: 100, y: 100 }
   const [edge] = buildWorkflowEdgeViews([state], [
     { id: 'loop-edge', from_state_id: 'loop', to_state_id: 'loop', sort_order: 10 }
@@ -125,6 +189,28 @@ const transitionKey = (transition) => transition.id
   assert.ok(Math.max(...points.map(({ x }) => x)) > 218)
   assert.ok(Math.max(...points.map(({ y }) => y)) > 142)
   assert.ok(edge.labelX > 218 || edge.labelY > 142)
+  assertPathClearsRectangle(edge.path, {
+    left: edge.labelX - 40,
+    top: edge.labelY - 13,
+    right: edge.labelX + 40,
+    bottom: edge.labelY + 13
+  })
+}
+
+{
+  const states = [
+    { id: 'left-loop', x: 100, y: 100 },
+    { id: 'right-loop', x: 500, y: 100 }
+  ]
+  const edges = buildWorkflowEdgeViews(states, [
+    { id: 'left-self', from_state_id: 'left-loop', to_state_id: 'left-loop' },
+    { id: 'right-self', from_state_id: 'right-loop', to_state_id: 'right-loop' }
+  ], transitionKey)
+  const relativeWidths = edges.map((edge, index) => (
+    Math.max(...pathPoints(edge.path).map(({ x }) => x)) - states[index].x
+  ))
+
+  assert.equal(relativeWidths[0], relativeWidths[1])
 }
 
 {
@@ -222,6 +308,15 @@ function assertPathClearsRectangle(path, rectangle) {
   assert.ok(pathSegments(path).every((segment) => (
     !segmentIntersectsRectangle(segment, rectangle)
   )))
+}
+
+function expandedNodeRectangle(node) {
+  return {
+    left: node.x - 20,
+    top: node.y - 20,
+    right: node.x + 138,
+    bottom: node.y + 62
+  }
 }
 
 function segmentIntersectsRectangle({ from, to }, rectangle) {

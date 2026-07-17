@@ -6,6 +6,8 @@ const CORNER_RADIUS = 16
 const PARALLEL_LANE_GAP = 28
 const BACKWARD_LANE_GAP = 36
 const OBSTACLE_CLEARANCE = 21
+const EDGE_LABEL_HALF_WIDTH = 40
+const EDGE_LABEL_GAP = 8
 
 export function buildWorkflowEdgeView(from, to) {
   const fromCenter = centerOf(from)
@@ -47,7 +49,6 @@ export function buildWorkflowEdgeViews(states, transitions, transitionKey = defa
     Math.max(maximum, state.y + NODE_HEIGHT)
   ), 0)
   let backwardLaneIndex = 0
-  let selfLoopIndex = 0
 
   return resolved.map((edge) => {
     const groupKey = endpointGroupKey(edge.transition)
@@ -56,9 +57,15 @@ export function buildWorkflowEdgeViews(states, transitions, transitionKey = defa
 
     let view
     if (edge.transition.from_state_id === edge.transition.to_state_id) {
-      view = buildSelfLoopView(edge.from, selfLoopIndex)
-      selfLoopIndex += 1
-    } else if (centerOf(edge.to).x <= centerOf(edge.from).x) {
+      view = buildSelfLoopView(edge.from, groupIndex)
+    } else if (isVerticalConnection(edge.from, edge.to)) {
+      view = buildVerticalView(
+        edge.from,
+        edge.to,
+        groupIndex,
+        groupSizes.get(groupKey)
+      )
+    } else if (centerOf(edge.to).x < centerOf(edge.from).x) {
       view = buildBackwardView(edge.from, edge.to, maximumNodeBottom, backwardLaneIndex)
       backwardLaneIndex += 1
     } else {
@@ -79,9 +86,37 @@ export function buildWorkflowEdgeViews(states, transitions, transitionKey = defa
   })
 }
 
+function buildVerticalView(from, to, laneIndex, laneCount) {
+  const downward = centerOf(to).y > centerOf(from).y
+  const start = anchorPoint(from, downward ? 'bottom' : 'top')
+  const end = anchorPoint(to, downward ? 'top' : 'bottom')
+  const centeredLaneIndex = laneIndex - (laneCount - 1) / 2
+  const trackX = start.x + centeredLaneIndex * PARALLEL_LANE_GAP
+
+  if (trackX === start.x && start.x === end.x) {
+    return edgeView([start, end], trackX, (start.y + end.y) / 2)
+  }
+
+  return edgeView([
+    start,
+    { x: trackX, y: start.y },
+    { x: trackX, y: end.y },
+    end
+  ], trackX, (start.y + end.y) / 2)
+}
+
+function isVerticalConnection(from, to) {
+  const fromCenter = centerOf(from)
+  const toCenter = centerOf(to)
+  const dx = toCenter.x - fromCenter.x
+  const dy = toCenter.y - fromCenter.y
+  return Math.abs(dy) > Math.abs(dx) * 0.8
+}
+
 function buildForwardView(from, to, states, laneIndex, laneCount) {
   const start = anchorPoint(from, 'right')
   const end = anchorPoint(to, 'left')
+  const obstacles = states.filter((state) => state !== from && state !== to)
   const skippedNodes = states.filter((state) => (
     state !== from &&
     state !== to &&
@@ -91,20 +126,7 @@ function buildForwardView(from, to, states, laneIndex, laneCount) {
   let trackY
 
   if (skippedNodes.length) {
-    const roundedClearance = OBSTACLE_CLEARANCE + CORNER_RADIUS
-    const above = Math.min(...skippedNodes.map((state) => state.y)) - roundedClearance
-    const below = Math.max(...skippedNodes.map((state) => state.y + NODE_HEIGHT)) + roundedClearance
-    const useAbove = routeDistance(start, end, above) <= routeDistance(start, end, below)
-    trackY = useAbove
-      ? above - laneIndex * PARALLEL_LANE_GAP
-      : below + laneIndex * PARALLEL_LANE_GAP
-
-    return edgeView([
-      start,
-      { x: start.x, y: trackY },
-      { x: end.x, y: trackY },
-      end
-    ], (start.x + end.x) / 2, trackY)
+    return buildObstacleAvoidingForwardView(start, end, obstacles, laneIndex)
   }
 
   const centeredLaneIndex = laneIndex - (laneCount - 1) / 2
@@ -121,6 +143,121 @@ function buildForwardView(from, to, states, laneIndex, laneCount) {
     { x: endTrackX, y: end.y },
     end
   ], (startTrackX + endTrackX) / 2, trackY)
+}
+
+function buildObstacleAvoidingForwardView(start, end, obstacles, laneIndex) {
+  const routePadding = OBSTACLE_CLEARANCE + CORNER_RADIUS
+  const rectangles = obstacles.map((node) => expandedRectangle(node, OBSTACLE_CLEARANCE))
+  const routingBounds = obstacles.map((node) => expandedRectangle(node, routePadding))
+  const above = Math.min(...routingBounds.map((rectangle) => rectangle.top)) - 1
+  const below = Math.max(...routingBounds.map((rectangle) => rectangle.bottom)) + 1
+  const startChannels = channelCandidates(
+    start.x + PARALLEL_LANE_GAP,
+    [start.x, ...routingBounds.flatMap((rectangle) => [rectangle.left - 1, rectangle.right + 1])],
+    (x) => x >= start.x && x < end.x
+  )
+  const endChannels = channelCandidates(
+    end.x - PARALLEL_LANE_GAP,
+    [end.x, ...routingBounds.flatMap((rectangle) => [rectangle.left - 1, rectangle.right + 1])],
+    (x) => x > start.x && x <= end.x
+  )
+
+  for (let iteration = 0; iteration < rectangles.length + 8; iteration += 1) {
+    const laneOffset = (laneIndex + iteration) * PARALLEL_LANE_GAP
+    const tracks = [above - laneOffset, below + laneOffset]
+      .sort((left, right) => routeDistance(start, end, left) - routeDistance(start, end, right) || left - right)
+
+    for (const trackY of tracks) {
+      for (const startTrackX of startChannels) {
+        for (const endTrackX of endChannels) {
+          const points = normalizeOrthogonalPoints([
+            start,
+            { x: startTrackX, y: start.y },
+            { x: startTrackX, y: trackY },
+            { x: endTrackX, y: trackY },
+            { x: endTrackX, y: end.y },
+            end
+          ])
+          if (!polylineClearsRectangles(points, rectangles)) continue
+          return edgeView(points, (startTrackX + endTrackX) / 2, trackY)
+        }
+      }
+    }
+  }
+
+  const trackY = above - (laneIndex + rectangles.length + 8) * PARALLEL_LANE_GAP
+  const startTrackX = Math.max(start.x, ...routingBounds.map((rectangle) => rectangle.right + 1))
+  const endTrackX = Math.min(end.x, ...routingBounds.map((rectangle) => rectangle.left - 1))
+  return edgeView(normalizeOrthogonalPoints([
+    start,
+    { x: startTrackX, y: start.y },
+    { x: startTrackX, y: trackY },
+    { x: endTrackX, y: trackY },
+    { x: endTrackX, y: end.y },
+    end
+  ]), (startTrackX + endTrackX) / 2, trackY)
+}
+
+function channelCandidates(preferred, boundaries, allowed) {
+  return [...new Set([preferred, ...boundaries].filter(allowed))]
+    .sort((left, right) => Math.abs(left - preferred) - Math.abs(right - preferred) || left - right)
+}
+
+function expandedRectangle(node, padding) {
+  return {
+    left: node.x - padding,
+    top: node.y - padding,
+    right: node.x + NODE_WIDTH + padding,
+    bottom: node.y + NODE_HEIGHT + padding
+  }
+}
+
+function polylineClearsRectangles(points, rectangles) {
+  for (let index = 1; index < points.length; index += 1) {
+    const from = points[index - 1]
+    const to = points[index]
+    if (rectangles.some((rectangle) => segmentIntersectsRectangle(from, to, rectangle))) {
+      return false
+    }
+  }
+  return true
+}
+
+function segmentIntersectsRectangle(from, to, rectangle) {
+  if (from.x === to.x) {
+    return from.x >= rectangle.left && from.x <= rectangle.right &&
+      rangesOverlap(from.y, to.y, rectangle.top, rectangle.bottom)
+  }
+  return from.y >= rectangle.top && from.y <= rectangle.bottom &&
+    rangesOverlap(from.x, to.x, rectangle.left, rectangle.right)
+}
+
+function rangesOverlap(firstStart, firstEnd, secondStart, secondEnd) {
+  const firstMinimum = Math.min(firstStart, firstEnd)
+  const firstMaximum = Math.max(firstStart, firstEnd)
+  return firstMaximum >= secondStart && firstMinimum <= secondEnd
+}
+
+function normalizeOrthogonalPoints(points) {
+  const normalized = []
+  points.forEach((point) => {
+    const previous = normalized[normalized.length - 1]
+    if (!previous || previous.x !== point.x || previous.y !== point.y) normalized.push(point)
+  })
+
+  let index = 1
+  while (index < normalized.length - 1) {
+    const previous = normalized[index - 1]
+    const current = normalized[index]
+    const next = normalized[index + 1]
+    if ((previous.x === current.x && current.x === next.x) ||
+        (previous.y === current.y && current.y === next.y)) {
+      normalized.splice(index, 1)
+    } else {
+      index += 1
+    }
+  }
+  return normalized
 }
 
 function buildBackwardView(from, to, maximumNodeBottom, laneIndex) {
@@ -149,7 +286,7 @@ function buildSelfLoopView(node, loopIndex) {
     { x: loopRight, y: loopBottom },
     { x: end.x, y: loopBottom },
     end
-  ], loopRight, loopBottom)
+  ], loopRight + EDGE_LABEL_HALF_WIDTH + EDGE_LABEL_GAP, (start.y + loopBottom) / 2)
 }
 
 function edgeView(points, labelX, labelY) {

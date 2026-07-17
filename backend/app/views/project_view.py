@@ -49,6 +49,9 @@ class ProjectRead(ProjectBase):
     model_config = ConfigDict(from_attributes=True)
 
     id: int
+    workflow_definition_id: int | None = None
+    current_state_id: int | None = None
+    status_name: str | None = None
     workflow_config_id: int | None = None
     assignee_rule_config_id: int | None = None
     creator_id: int | None = None

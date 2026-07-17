@@ -1,7 +1,7 @@
 from datetime import date, datetime
 
-from sqlalchemy import BigInteger, Boolean, Date, DateTime, Integer, String, Text, text
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy import BigInteger, Boolean, Date, DateTime, ForeignKey, Integer, String, Text, text
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.session import Base
 
@@ -20,6 +20,18 @@ class Project(Base):
     actual_end_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     is_long_term: Mapped[bool] = mapped_column(Boolean, default=False)
     status: Mapped[str] = mapped_column(String(32), default="planning")
+    workflow_definition_id: Mapped[int | None] = mapped_column(
+        BigInteger,
+        ForeignKey("workflow_definitions.id", ondelete="RESTRICT"),
+        nullable=True,
+        index=True,
+    )
+    current_state_id: Mapped[int | None] = mapped_column(
+        BigInteger,
+        ForeignKey("workflow_states.id", ondelete="RESTRICT"),
+        nullable=True,
+        index=True,
+    )
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     workflow_config_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     assignee_rule_config_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
@@ -33,3 +45,9 @@ class Project(Base):
     )
     deleted: Mapped[int] = mapped_column(Integer, default=0)
     delete_time: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+    current_state: Mapped["WorkflowState | None"] = relationship(foreign_keys=[current_state_id], lazy="joined")
+
+    @property
+    def status_name(self) -> str | None:
+        return self.current_state.status_name if self.current_state else None

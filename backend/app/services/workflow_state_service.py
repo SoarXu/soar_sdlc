@@ -8,6 +8,7 @@ from app.services.default_workflow_template_service import ensure_default_workfl
 
 
 CORE_OBJECT_TYPES = {"requirement", "task", "bug"}
+SYSTEM_OBJECT_TYPES = {"project", "iteration"}
 
 
 def initial_workflow_values(db: Session, object_type: str, project_id: int | None) -> dict:
@@ -16,6 +17,42 @@ def initial_workflow_values(db: Session, object_type: str, project_id: int | Non
         "workflow_definition_id": definition.id,
         "current_state_id": initial_state.id,
     }
+
+
+def initial_system_workflow_values(db: Session, object_type: str) -> dict:
+    if object_type not in SYSTEM_OBJECT_TYPES:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unsupported system workflow object type")
+    definition_query = (
+        db.query(WorkflowDefinition)
+        .filter(
+            WorkflowDefinition.object_type == object_type,
+            WorkflowDefinition.scope_type == "system",
+            WorkflowDefinition.is_default_template.is_(True),
+            WorkflowDefinition.enabled.is_(True),
+        )
+        .order_by(WorkflowDefinition.id.desc())
+    )
+    definition = definition_query.first()
+    if not definition:
+        ensure_default_workflow_templates(db)
+        definition = definition_query.first()
+    if not definition:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="System workflow definition not found")
+    initial_state = (
+        db.query(WorkflowState)
+        .filter(
+            WorkflowState.id == definition.initial_state_id,
+            WorkflowState.definition_id == definition.id,
+            WorkflowState.enabled.is_(True),
+        )
+        .first()
+    )
+    if not initial_state:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Workflow definition {definition.id} has no valid initial state",
+        )
+    return {"workflow_definition_id": definition.id, "current_state_id": initial_state.id}
 
 
 def resolve_effective_workflow(

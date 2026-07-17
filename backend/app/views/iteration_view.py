@@ -44,6 +44,9 @@ class IterationRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: int
+    workflow_definition_id: int | None = None
+    current_state_id: int | None = None
+    status_name: str | None = None
     project_id: int | None = None
     project_ids: list[int] = []
     name: str

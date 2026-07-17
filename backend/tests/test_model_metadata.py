@@ -74,12 +74,23 @@ def test_workflow_state_identity_columns_have_foreign_keys_and_indexes():
         ("tasks", "current_state_id"): "workflow_states.id",
         ("bugs", "workflow_definition_id"): "workflow_definitions.id",
         ("bugs", "current_state_id"): "workflow_states.id",
+        ("projects", "workflow_definition_id"): "workflow_definitions.id",
+        ("projects", "current_state_id"): "workflow_states.id",
+        ("iterations", "workflow_definition_id"): "workflow_definitions.id",
+        ("iterations", "current_state_id"): "workflow_states.id",
     }
 
     for (table_name, column_name), target in expected_targets.items():
         column = Base.metadata.tables[table_name].columns[column_name]
         assert {fk.target_fullname for fk in column.foreign_keys} == {target}
         assert column.index is True
+
+
+def test_project_and_iteration_workflow_identity_is_transitional_nullable():
+    for table_name in ("projects", "iterations"):
+        table = Base.metadata.tables[table_name]
+        assert table.columns["workflow_definition_id"].nullable is True
+        assert table.columns["current_state_id"].nullable is True
 
 
 def test_workflow_scheme_lifecycle_column_defaults_to_draft():

@@ -47,6 +47,7 @@ class IterationRead(BaseModel):
     workflow_definition_id: int | None = None
     current_state_id: int | None = None
     status_name: str | None = None
+    state_category: str | None = None
     project_id: int | None = None
     project_ids: list[int] = []
     name: str

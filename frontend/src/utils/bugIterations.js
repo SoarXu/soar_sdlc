@@ -1,5 +1,3 @@
-const TERMINAL_ITERATION_STATUSES = new Set(['completed', 'canceled'])
-
 export function projectAncestorIds(projects, projectId) {
   const ids = []
   const projectById = new Map(projects.map((project) => [project.id, project]))
@@ -17,12 +15,12 @@ export function projectAncestorIds(projects, projectId) {
 
 export function bugIterationOptions(iterations, projects, projectId) {
   if (!projectId) {
-    return iterations.filter((iteration) => !TERMINAL_ITERATION_STATUSES.has(iteration.status))
+    return iterations.filter((iteration) => iteration.state_category !== 'terminal')
   }
 
   const scopedProjectIds = new Set(projectAncestorIds(projects, projectId))
   return iterations.filter((iteration) => {
-    if (TERMINAL_ITERATION_STATUSES.has(iteration.status)) return false
+    if (iteration.state_category === 'terminal') return false
     return (iteration.project_ids || []).some((id) => scopedProjectIds.has(id))
   })
 }

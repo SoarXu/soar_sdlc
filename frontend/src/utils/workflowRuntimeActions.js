@@ -16,6 +16,24 @@ function actionKeyOf(action) {
   return action?.action_key || ''
 }
 
+export async function replaceWorkflowTransitionMap(fetchBatch, projectIds = [], replaceMap = () => {}) {
+  replaceMap({})
+  const items = [...new Set(projectIds.filter((id) => id !== null && id !== undefined))]
+    .map((id) => ({ object_type: 'project', id }))
+  if (!items.length) return {}
+  try {
+    const { data } = await fetchBatch(items)
+    const transitionMap = Object.fromEntries(
+      (data.items || []).map((item) => [item.id, item.transitions || []])
+    )
+    replaceMap(transitionMap)
+    return transitionMap
+  } catch (error) {
+    replaceMap({})
+    throw error
+  }
+}
+
 export function actionNeedsTargetStateSelection(action) {
   const routingMode = action?.routing_mode
   const allowedTargetStates = action?.allowed_target_states || []

@@ -21,7 +21,7 @@
         <el-table-column prop="actual_start_date" label="实际开始" width="130" />
         <el-table-column prop="actual_end_date" label="实际结束" width="130" />
         <el-table-column label="状态" width="120">
-          <template #default="{ row }">{{ iterationStatusLabel(row.status) }}</template>
+          <template #default="{ row }">{{ row.status_name || '-' }}</template>
         </el-table-column>
         <el-table-column label="操作" width="210" fixed="right">
           <template #default="{ row }">
@@ -117,16 +117,6 @@ const projectOptions = computed(() => {
   return result
 })
 const form = reactive({ project_ids: [], name: '', owner_id: null, start_date: null, end_date: null, goal: '' })
-const iterationStatusOptions = [
-  { label: '规划中', value: 'planning' },
-  { label: '进行中', value: 'active' },
-  { label: '已完成', value: 'completed' },
-  { label: '已取消', value: 'canceled' }
-]
-
-function iterationStatusLabel(value) {
-  return iterationStatusOptions.find((option) => option.value === value)?.label || value || '-'
-}
 function resetForm() { Object.assign(form, { project_ids: [], name: '', owner_id: null, start_date: null, end_date: null, goal: '' }); delete form.status }
 function openCreate() { editingId.value = null; resetForm(); dialogVisible.value = true }
 function openEdit(row) { editingId.value = row.id; Object.assign(form, { ...row, project_ids: row.project_ids || [], goal: row.goal || '' }); dialogVisible.value = true }

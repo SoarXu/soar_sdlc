@@ -9,7 +9,7 @@
           计划 {{ project.start_date || '未设置开始' }} 至 {{ projectEndDateLabel }}
         </p>
       </div>
-      <el-tag size="large">{{ projectStatusLabel(project.status) }}</el-tag>
+      <el-tag size="large">{{ project.status_name || '-' }}</el-tag>
     </div>
 
     <div class="project-tabs">
@@ -37,7 +37,7 @@
           <el-descriptions-item label="项目名称">{{ project.name || '-' }}</el-descriptions-item>
           <el-descriptions-item label="所属项目集">{{ labelById(programs, project.program_id) }}</el-descriptions-item>
           <el-descriptions-item label="负责人">{{ userLabel(users, project.owner_id) }}</el-descriptions-item>
-          <el-descriptions-item label="状态">{{ projectStatusLabel(project.status) }}</el-descriptions-item>
+          <el-descriptions-item label="状态">{{ project.status_name || '-' }}</el-descriptions-item>
           <el-descriptions-item label="计划开始">{{ project.start_date || '-' }}</el-descriptions-item>
           <el-descriptions-item label="计划结束">{{ projectEndDateLabel }}</el-descriptions-item>
           <el-descriptions-item label="实际开始">{{ project.actual_start_date || '-' }}</el-descriptions-item>
@@ -93,9 +93,9 @@
           <el-table-column prop="end_date" label="结束日期" width="130" />
           <el-table-column prop="actual_start_date" label="实际开始" width="130" />
           <el-table-column prop="actual_end_date" label="实际结束" width="130" />
-          <el-table-column label="状态" width="120"><template #default="{ row }">{{ iterationStatusLabel(row.status) }}</template></el-table-column>
+          <el-table-column label="状态" width="120"><template #default="{ row }">{{ row.status_name || '-' }}</template></el-table-column>
           <el-table-column label="操作" width="250" fixed="right">
-            <template #default="{ row }"><WorkflowActionButtons v-if="canManageCurrentProject" object-type="iteration" :object-id="row.id" mode="list" :transitions="projectWorkflowTransitionsFor('iteration', row.id)" :auto-load="false" :users="users" @executed="refreshAfterMutation" /><el-button v-if="canManageCurrentProject && row.status === 'active'" link type="warning" @click="openDeferWorkItems(row)">延期工作项</el-button><el-button v-if="canManageCurrentProject" link type="primary" @click="openIterationEdit(row)">编辑</el-button><el-popconfirm v-if="canManageCurrentProject" title="确认删除该迭代？" @confirm="removeIteration(row.id)"><template #reference><el-button link type="danger">删除</el-button></template></el-popconfirm></template>
+            <template #default="{ row }"><WorkflowActionButtons v-if="canManageCurrentProject" object-type="iteration" :object-id="row.id" mode="list" :transitions="projectWorkflowTransitionsFor('iteration', row.id)" :auto-load="false" :users="users" @executed="refreshAfterMutation" /><el-button v-if="canManageCurrentProject && iterationCanDefer(row)" link type="warning" @click="openDeferWorkItems(row)">延期工作项</el-button><el-button v-if="canManageCurrentProject" link type="primary" @click="openIterationEdit(row)">编辑</el-button><el-popconfirm v-if="canManageCurrentProject" title="确认删除该迭代？" @confirm="removeIteration(row.id)"><template #reference><el-button link type="danger">删除</el-button></template></el-popconfirm></template>
           </el-table-column>
         </el-table>
         <div class="table-pagination">
@@ -754,18 +754,6 @@ const tabs = [
   { key: 'members', label: '成员' },
   { key: 'settings', label: '配置' }
 ]
-const projectStatusOptions = [
-  { label: '规划中', value: 'planning' },
-  { label: '进行中', value: 'active' },
-  { label: '已挂起', value: 'paused' },
-  { label: '已关闭', value: 'closed' }
-]
-const iterationStatusOptions = [
-  { label: '规划中', value: 'planning' },
-  { label: '进行中', value: 'active' },
-  { label: '已完成', value: 'completed' },
-  { label: '已取消', value: 'canceled' }
-]
 const requirementPriorityOptions = [
   { label: '1', value: '1' },
   { label: '2', value: '2' },
@@ -824,7 +812,7 @@ const projectMemberRoleOptions = [
 const projectIterations = computed(() => projectIterationRows.value)
 const projectRequirements = computed(() => projectRequirementRows.value)
 const projectTasks = computed(() => projectTaskRows.value)
-const projectClosed = computed(() => project.value.status === 'closed')
+const projectClosed = computed(() => project.value.state_category === 'terminal')
 const currentUser = computed(() => currentUserFromStorage(users.value))
 const canManageCurrentProject = computed(() => canManageProject(project.value, currentUser.value, projectMembers.value))
 const canCreateCurrentWorkItem = computed(() => !projectClosed.value && canCreateWorkItem(project.value, currentUser.value, projectMembers.value))
@@ -856,14 +844,14 @@ const requirementIterationDisplayOptions = computed(() => iterations.value.filte
   const optionProjectIds = item.project_ids || []
   return optionProjectIds.some((id) => requirementProjectScopeIds.value.includes(id))
 }))
-const requirementIterationOptions = computed(() => requirementIterationDisplayOptions.value.filter((item) => !['completed', 'canceled'].includes(item.status)))
+const requirementIterationOptions = computed(() => requirementIterationDisplayOptions.value.filter((item) => item.state_category !== 'terminal'))
 const projectRequirementOptions = computed(() => requirements.value.filter((item) => item.project_id === projectId.value))
 const projectTaskOptions = computed(() => tasks.value.filter((item) => item.project_id === projectId.value))
 const projectTestCaseOptions = computed(() => projectTestCaseRows.value)
 const projectTestRunOptions = computed(() => projectTestRunRows.value)
 const bugEditableIterationOptions = computed(() => bugIterationOptions(iterations.value, projects.value, bugForm.project_id || projectId.value))
 const bugEditableIterationDisplayOptions = computed(() => includeSelectedIterationOption(bugEditableIterationOptions.value, iterations.value, bugForm.iteration_id))
-const deferTargetIterations = computed(() => projectIterationOptions.value.filter((item) => item.id !== startingIterationId.value && !['completed', 'canceled'].includes(item.status)))
+const deferTargetIterations = computed(() => projectIterationOptions.value.filter((item) => item.id !== startingIterationId.value && item.state_category !== 'terminal'))
 const unfinishedIterationRequirements = computed(() => requirements.value.filter((item) => item.iteration_id === startingIterationId.value && item.state_category !== 'terminal'))
 const directUnfinishedIterationTasks = computed(() => tasks.value.filter((item) => item.iteration_id === startingIterationId.value && item.state_category !== 'terminal'))
 const unfinishedIterationTasks = computed(() => {
@@ -1011,13 +999,12 @@ function resetProjectListSearch(key) {
   pager.currentPage = 1
   loadProjectListPage(key)
 }
-function projectStatusLabel(value) { return optionLabel(projectStatusOptions, value) }
-function iterationStatusLabel(value) { return optionLabel(iterationStatusOptions, value) }
 function normalizeRequirementPriority(value) { return legacyRequirementPriorityValues[value] || value || '3' }
 function testRunStatusLabel(value) { return optionLabel(testRunStatusOptions, value) }
 function operationActionLabel(value) { return optionLabel([{ label: '启动', value: 'start' }, { label: '挂起', value: 'suspend' }, { label: '关闭', value: 'close' }, { label: '激活', value: 'activate' }], value) }
 function projectWorkflowTransitionKey(objectType, id) { return `${objectType}:${id}` }
 function projectWorkflowTransitionsFor(objectType, id) { return projectWorkflowTransitions.value[projectWorkflowTransitionKey(objectType, id)] || [] }
+function iterationCanDefer(row) { return projectWorkflowTransitionsFor('iteration', row.id).some((item) => ['complete', 'cancel'].includes(item.action_key)) }
 async function loadProjectWorkflowTransitions(objectType, rows) {
   const items = (rows || []).map((row) => ({ object_type: objectType, id: row.id }))
   if (!items.length) return
@@ -1071,7 +1058,7 @@ function displayHistoryValue(field, value) {
     tasks: projectTaskOptions.value,
     testCases: projectTestCaseOptions.value,
     testRuns: projectTestRunOptions.value,
-    statusOptions: projectStatusOptions,
+    statusOptions: [],
     priorityOptions: priorityLevelOptions,
     requirementTypeOptions,
     caseTypeOptions,

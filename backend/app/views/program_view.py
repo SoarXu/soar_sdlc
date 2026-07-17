@@ -55,6 +55,10 @@ class ProgramProjectRead(BaseModel):
     name: str
     owner_id: int | None = None
     status: str
+    workflow_definition_id: int | None = None
+    current_state_id: int | None = None
+    status_name: str | None = None
+    state_category: str | None = None
     start_date: date | None = None
     end_date: date | None = None
     actual_start_date: date | None = None
@@ -70,6 +74,10 @@ class ProgramStatusOption(BaseModel):
 class ProgramTreeRead(ProgramRead):
     node_type: str | None = None
     program_id: int | None = None
+    workflow_definition_id: int | None = None
+    current_state_id: int | None = None
+    status_name: str | None = None
+    state_category: str | None = None
     start_date: date | None = None
     end_date: date | None = None
     children: list[ProgramTreeRead] = []

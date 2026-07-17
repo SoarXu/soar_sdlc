@@ -68,10 +68,10 @@
             </template>
             <template v-else>
               <el-button link type="primary" @click="openProjectEdit(row.id)">编辑</el-button>
-              <el-button v-if="row.status === 'planning' || row.status === 'paused'" link type="success" @click="openStatusDialog(row, 'project', 'start')">启动</el-button>
-              <el-button v-if="row.status === 'active'" link type="warning" @click="openStatusDialog(row, 'project', 'suspend')">挂起</el-button>
-              <el-button v-if="row.status === 'active' || row.status === 'paused'" link type="danger" @click="openStatusDialog(row, 'project', 'close')">关闭</el-button>
-              <el-button v-if="row.status === 'closed'" link type="success" @click="openStatusDialog(row, 'project', 'activate')">激活</el-button>
+              <el-button v-if="hasProjectAction(row, 'start') || hasProjectAction(row, 'resume')" link type="success" @click="openStatusDialog(row, 'project', 'start')">启动</el-button>
+              <el-button v-if="hasProjectAction(row, 'suspend')" link type="warning" @click="openStatusDialog(row, 'project', 'suspend')">挂起</el-button>
+              <el-button v-if="hasProjectAction(row, 'close')" link type="danger" @click="openStatusDialog(row, 'project', 'close')">关闭</el-button>
+              <el-button v-if="hasProjectAction(row, 'activate')" link type="success" @click="openStatusDialog(row, 'project', 'activate')">激活</el-button>
               <el-button link type="success" @click="openSubProjectCreate(row)">新增项目</el-button>
             </template>
           </template>
@@ -225,8 +225,10 @@ import {
   updateProject
 } from '../api/projects'
 import { fetchUsers } from '../api/users'
+import { fetchWorkflowTransitionsBatch } from '../api/workflowRuntime'
 import { userLabel } from '../utils/referenceLabels'
 import { usePagination } from '../utils/usePagination'
+import { replaceWorkflowTransitionMap } from '../utils/workflowRuntimeActions'
 
 const router = useRouter()
 const loading = ref(false)
@@ -242,14 +244,9 @@ const statusTargetType = ref('')
 const statusAction = ref('')
 const statusHistory = ref([])
 const programTree = ref([])
+const projectWorkflowTransitions = ref({})
 const statusOptions = ref([])
 const users = ref([])
-const projectStatusOptions = [
-  { label: '规划中', value: 'planning' },
-  { label: '进行中', value: 'active' },
-  { label: '已挂起', value: 'paused' },
-  { label: '已关闭', value: 'closed' }
-]
 const statusActionOptions = {
   start: '启动',
   suspend: '挂起',
@@ -290,7 +287,7 @@ const projectDialogTitle = computed(() => {
 const statusTargetLabel = computed(() => (statusTargetType.value === 'program' ? '项目集' : '项目'))
 const statusDialogTitle = computed(() => `${statusActionLabel(statusAction.value)}${statusTargetLabel.value} ${statusTarget.value?.name || ''}`)
 const statusConfirmText = computed(() => `${statusActionLabel(statusAction.value)}${statusTargetLabel.value}`)
-const statusDateRequired = computed(() => statusAction.value === 'close' || (statusAction.value === 'start' && statusTarget.value?.status === 'planning'))
+const statusDateRequired = computed(() => statusAction.value === 'close' || (statusAction.value === 'start' && startDateRequired()))
 const statusDateLabel = computed(() => (statusAction.value === 'start' ? '实际开始日期' : '实际完成日期'))
 
 const treeRows = computed(() => programTree.value.map(toTreeRow))
@@ -315,19 +312,31 @@ const {
 } = usePagination(treeRows)
 
 function statusLabel(row) {
-  const options = row.nodeType === 'program' ? statusOptions.value : projectStatusOptions
+  if ('from_state_name' in row || 'to_state_name' in row) {
+    return `${row.from_state_name || '-'} → ${row.to_state_name || '-'}`
+  }
   if ('from_status' in row || 'to_status' in row) {
     return `${statusValueLabel(row.from_status)} → ${statusValueLabel(row.to_status)}`
   }
-  return options.find((option) => option.value === row.status)?.label || row.status || '-'
+  if (row.nodeType === 'project') return row.status_name || '-'
+  return statusOptions.value.find((option) => option.value === row.status)?.label || row.status || '-'
 }
 
 function statusValueLabel(value) {
-  return [...statusOptions.value, ...projectStatusOptions].find((option) => option.value === value)?.label || value || '-'
+  return statusOptions.value.find((option) => option.value === value)?.label || value || '-'
 }
 
 function statusActionLabel(value) {
   return statusActionOptions[value] || value || '-'
+}
+
+function hasProjectAction(row, actionKey) {
+  return Boolean(row && (projectWorkflowTransitions.value[row.id] || []).some((item) => item.action_key === actionKey))
+}
+
+function startDateRequired() {
+  if (statusTargetType.value === 'program') return statusTarget.value?.status === 'planning'
+  return hasProjectAction(statusTarget.value, 'start')
 }
 
 function buildProjectTree(projects, programId) {
@@ -494,14 +503,30 @@ async function openStatusDialog(row, targetType, action) {
 async function loadData() {
   loading.value = true
   try {
-    const [treeRes, statusRes, userRes] = await Promise.all([fetchProgramTree(), fetchProgramStatusOptions(), fetchUsers()])
-    programTree.value = treeRes.data
-    statusOptions.value = statusRes.data
-    users.value = userRes.data
-  } catch {
-    ElMessage.error('项目集树加载失败')
+    try {
+      const [treeRes, statusRes, userRes] = await Promise.all([fetchProgramTree(), fetchProgramStatusOptions(), fetchUsers()])
+      programTree.value = treeRes.data
+      statusOptions.value = statusRes.data
+      users.value = userRes.data
+    } catch {
+      ElMessage.error('项目集树加载失败')
+      return
+    }
+    await loadProjectWorkflowTransitions()
   } finally {
     loading.value = false
+  }
+}
+
+async function loadProjectWorkflowTransitions() {
+  try {
+    await replaceWorkflowTransitionMap(
+      fetchWorkflowTransitionsBatch,
+      flattenProjects(programTree.value).map((item) => item.id),
+      (value) => { projectWorkflowTransitions.value = value }
+    )
+  } catch {
+    ElMessage.error('项目动作加载失败')
   }
 }
 

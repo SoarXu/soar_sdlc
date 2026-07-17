@@ -16,7 +16,7 @@
           :users="users"
           @executed="loadData"
         />
-        <el-tag size="large">{{ iterationStatusLabel(iteration.status) }}</el-tag>
+        <el-tag size="large">{{ iteration.status_name || '-' }}</el-tag>
       </div>
     </div>
 
@@ -433,12 +433,6 @@ const tabs = [
   { key: 'cases', label: '用例' },
   { key: 'bugs', label: 'Bug' }
 ]
-const iterationStatusOptions = [
-  { label: '规划中', value: 'planning' },
-  { label: '进行中', value: 'active' },
-  { label: '已完成', value: 'completed' },
-  { label: '已取消', value: 'canceled' }
-]
 const caseTypeOptions = [
   { label: '接口测试', value: 'api' },
   { label: '功能测试', value: 'functional' },
@@ -488,13 +482,12 @@ const currentUser = computed(() => currentUserFromStorage(users.value))
 const canManageIteration = computed(() => (iteration.value.project_ids || []).some((projectId) => canManageProjectFor(projectId)))
 const projectNames = computed(() => (iteration.value.project_ids || []).map(id => labelById(flatProjects.value, id)).join('、') || '-')
 const failedExecutionCount = computed(() => caseExecutionHistory.value.filter((item) => item.result === 'failed').length)
-const deferTargetIterations = computed(() => iterations.value.filter((item) => item.id !== iterationId.value && !['completed', 'canceled'].includes(item.status)))
+const deferTargetIterations = computed(() => iterations.value.filter((item) => item.id !== iterationId.value && item.state_category !== 'terminal'))
 const unfinishedIterationRequirements = computed(() => requirements.value.filter((item) => item.state_category !== 'terminal'))
 const directUnfinishedIterationTasks = computed(() => tasks.value.filter((item) => item.iteration_id === iterationId.value && item.state_category !== 'terminal'))
 const unfinishedIterationTasks = computed(() => tasks.value.filter((item) => item.state_category !== 'terminal'))
 
 function optionLabel(options, value) { return options.find((option) => option.value === value)?.label || value || '-' }
-function iterationStatusLabel(value) { return optionLabel(iterationStatusOptions, value) }
 function caseTypeLabel(value) { return optionLabel(caseTypeOptions, value) }
 function testScopeLabel(value) { return optionLabel(testScopeOptions, value) }
 function executionResultLabel(value) { return optionLabel(executionResultOptions, value) }

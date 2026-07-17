@@ -38,7 +38,7 @@
         <el-table-column prop="actual_start_date" label="实际开始" width="130" />
         <el-table-column prop="actual_end_date" label="实际结束" width="130" />
         <el-table-column label="状态" width="110">
-          <template #default="{ row }">{{ projectStatusLabel(row.status) }}</template>
+          <template #default="{ row }">{{ row.status_name || '-' }}</template>
         </el-table-column>
         <el-table-column label="工作流方案" width="180" show-overflow-tooltip>
           <template #default="{ row }">{{ workflowSchemeLabel(row.assignee_rule_config_id) }}</template>
@@ -47,10 +47,10 @@
           <template #default="{ row }">
             <el-button v-if="canManageProjectRow(row)" link type="primary" @click="openEdit(row)">编辑</el-button>
             <el-button v-if="canCreateProject" link type="success" @click="openCreate(row)">新增项目</el-button>
-            <el-button v-if="canManageProjectRow(row) && (row.status === 'planning' || row.status === 'paused')" link type="success" @click="openStatusDialog(row, 'start')">启动</el-button>
-            <el-button v-if="canManageProjectRow(row) && row.status === 'active'" link type="warning" @click="openStatusDialog(row, 'suspend')">挂起</el-button>
-            <el-button v-if="canManageProjectRow(row) && (row.status === 'active' || row.status === 'paused')" link type="danger" @click="openStatusDialog(row, 'close')">关闭</el-button>
-            <el-button v-if="canManageProjectRow(row) && row.status === 'closed'" link type="success" @click="openStatusDialog(row, 'activate')">激活</el-button>
+            <el-button v-if="canManageProjectRow(row) && (hasProjectAction(row, 'start') || hasProjectAction(row, 'resume'))" link type="success" @click="openStatusDialog(row, 'start')">启动</el-button>
+            <el-button v-if="canManageProjectRow(row) && hasProjectAction(row, 'suspend')" link type="warning" @click="openStatusDialog(row, 'suspend')">挂起</el-button>
+            <el-button v-if="canManageProjectRow(row) && hasProjectAction(row, 'close')" link type="danger" @click="openStatusDialog(row, 'close')">关闭</el-button>
+            <el-button v-if="canManageProjectRow(row) && hasProjectAction(row, 'activate')" link type="success" @click="openStatusDialog(row, 'activate')">激活</el-button>
             <el-popconfirm v-if="canDeleteProjectRow" title="确认删除该项目？子项目将一并删除。" @confirm="removeProject(row.id)">
               <template #reference><el-button link type="danger">删除</el-button></template>
             </el-popconfirm>
@@ -129,7 +129,7 @@
           <el-timeline-item v-for="item in statusHistory" :key="item.id" :timestamp="formatDateTime(item.effective_time)">
             <div>
               由 <strong>{{ item.actor_name || '系统' }}</strong> {{ statusActionLabel(item.action) }}。
-              <el-tag size="small" effect="plain">{{ projectStatusLabel(item.from_status) }} → {{ projectStatusLabel(item.to_status) }}</el-tag>
+              <el-tag size="small" effect="plain">{{ item.from_state_name || '-' }} → {{ item.to_state_name || '-' }}</el-tag>
             </div>
             <div v-if="item.remark" class="status-history-remark">{{ item.remark }}</div>
           </el-timeline-item>
@@ -163,10 +163,12 @@ import {
   updateProject
 } from '../api/projects'
 import { fetchUsers } from '../api/users'
+import { fetchWorkflowTransitionsBatch } from '../api/workflowRuntime'
 import { showActionError } from '../utils/actionFeedback'
 import { canDeleteProject, canManageProject, currentUserFromStorage, isSystemAdmin } from '../utils/permissions'
 import { labelById, userLabel } from '../utils/referenceLabels'
 import { usePagination } from '../utils/usePagination'
+import { replaceWorkflowTransitionMap } from '../utils/workflowRuntimeActions'
 
 const loading = ref(false)
 const saving = ref(false)
@@ -181,6 +183,7 @@ const projectMembersById = ref({})
 const programs = ref([])
 const users = ref([])
 const workflowSchemes = ref([])
+const workflowTransitions = ref({})
 const currentUser = computed(() => currentUserFromStorage(users.value))
 const canCreateProject = computed(() => isSystemAdmin(currentUser.value))
 const canDeleteProjectRow = computed(() => canDeleteProject(currentUser.value))
@@ -211,12 +214,6 @@ const {
   pagedItems: pagedProjectTree
 } = usePagination(projectTree)
 const form = reactive({ parent_id: null, program_id: null, name: '', owner_id: null, assignee_rule_config_id: null, start_date: null, end_date: null, is_long_term: false, status: 'planning', description: '' })
-const projectStatusOptions = [
-  { label: '规划中', value: 'planning' },
-  { label: '进行中', value: 'active' },
-  { label: '已挂起', value: 'paused' },
-  { label: '已关闭', value: 'closed' }
-]
 const statusActionOptions = {
   start: '启动',
   suspend: '挂起',
@@ -227,12 +224,8 @@ const statusForm = reactive({ effective_time: '', remark: '' })
 
 const statusDialogTitle = computed(() => `${statusActionLabel(statusAction.value)}项目 ${statusTarget.value?.name || ''}`)
 const statusConfirmText = computed(() => `${statusActionLabel(statusAction.value)}项目`)
-const statusDateRequired = computed(() => statusAction.value === 'close' || (statusAction.value === 'start' && statusTarget.value?.status === 'planning'))
+const statusDateRequired = computed(() => statusAction.value === 'close' || (statusAction.value === 'start' && hasProjectAction(statusTarget.value, 'start')))
 const statusDateLabel = computed(() => (statusAction.value === 'start' ? '实际开始日期' : '实际完成日期'))
-
-function projectStatusLabel(value) {
-  return projectStatusOptions.find((option) => option.value === value)?.label || value || '-'
-}
 
 function statusActionLabel(value) {
   return statusActionOptions[value] || value || '-'
@@ -244,6 +237,7 @@ function workflowSchemeLabel(configId) {
 }
 function membersForProject(projectId) { return projectMembersById.value[projectId] || [] }
 function canManageProjectRow(row) { return canManageProject(row, currentUser.value, membersForProject(row.id)) }
+function hasProjectAction(row, actionKey) { return Boolean(row && (workflowTransitions.value[row.id] || []).some((item) => item.action_key === actionKey)) }
 
 function resetForm() {
   Object.assign(form, { parent_id: null, program_id: null, name: '', owner_id: null, assignee_rule_config_id: null, start_date: null, end_date: null, is_long_term: false, status: 'planning', description: '' })
@@ -314,21 +308,36 @@ async function openStatusDialog(row, action) {
 async function loadData() {
   loading.value = true
   try {
-    const [projectRes, programRes, userRes, workflowSchemeRes] = await Promise.all([
-      fetchProjects(),
-      fetchPrograms(),
-      fetchUsers(),
-      fetchAssigneeRuleConfigs()
-    ])
-    projects.value = projectRes.data
-    programs.value = programRes.data
-    users.value = userRes.data
-    workflowSchemes.value = workflowSchemeRes.data
-    await loadProjectMembers()
-  } catch {
-    ElMessage.error('项目列表加载失败')
+    try {
+      const [projectRes, programRes, userRes, workflowSchemeRes] = await Promise.all([
+        fetchProjects(),
+        fetchPrograms(),
+        fetchUsers(),
+        fetchAssigneeRuleConfigs()
+      ])
+      projects.value = projectRes.data
+      programs.value = programRes.data
+      users.value = userRes.data
+      workflowSchemes.value = workflowSchemeRes.data
+    } catch {
+      ElMessage.error('项目列表加载失败')
+      return
+    }
+    await Promise.all([loadProjectMembers(), loadProjectWorkflowTransitions()])
   } finally {
     loading.value = false
+  }
+}
+
+async function loadProjectWorkflowTransitions() {
+  try {
+    await replaceWorkflowTransitionMap(
+      fetchWorkflowTransitionsBatch,
+      projects.value.map((item) => item.id),
+      (value) => { workflowTransitions.value = value }
+    )
+  } catch {
+    ElMessage.error('项目动作加载失败')
   }
 }
 

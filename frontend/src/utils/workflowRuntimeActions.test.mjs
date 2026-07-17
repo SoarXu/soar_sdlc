@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 
+import * as workflowRuntimeActions from './workflowRuntimeActions.js'
 import {
   actionNeedsDialog,
   actionNeedsTargetStateSelection,
@@ -7,6 +8,8 @@ import {
   splitListActions,
   visibleDetailActions
 } from './workflowRuntimeActions.js'
+
+const { replaceWorkflowTransitionMap } = workflowRuntimeActions
 
 function action(actionKey, overrides = {}) {
   return {
@@ -78,6 +81,48 @@ function action(actionKey, overrides = {}) {
 {
   assert.equal(workflowCommandType(action('edit', { ui_config: { command_type: 'edit' } })), 'edit')
   assert.equal(workflowCommandType(action('complete')), '')
+}
+
+{
+  assert.equal(typeof replaceWorkflowTransitionMap, 'function')
+  const replacements = []
+  let requestedItems = []
+  const result = await replaceWorkflowTransitionMap(
+    async (items) => {
+      requestedItems = items
+      assert.deepEqual(replacements, [{}])
+      return {
+        data: {
+          items: [
+            { object_type: 'project', id: 3, transitions: [{ action_key: 'start' }] },
+            { object_type: 'project', id: 8, transitions: null }
+          ]
+        }
+      }
+    },
+    [3, 3, 8],
+    (value) => replacements.push(value)
+  )
+
+  assert.deepEqual(requestedItems, [
+    { object_type: 'project', id: 3 },
+    { object_type: 'project', id: 8 }
+  ])
+  assert.deepEqual(result, { 3: [{ action_key: 'start' }], 8: [] })
+  assert.deepEqual(replacements, [{}, result])
+}
+
+{
+  const replacements = []
+  await assert.rejects(
+    replaceWorkflowTransitionMap(
+      async () => { throw new Error('transition service unavailable') },
+      [5, 5],
+      (value) => replacements.push(value)
+    ),
+    /transition service unavailable/
+  )
+  assert.deepEqual(replacements, [{}, {}])
 }
 
 console.log('workflowRuntimeActions tests passed')

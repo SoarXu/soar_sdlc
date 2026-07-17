@@ -490,6 +490,30 @@ def test_project_can_create_child_project_and_inherit_program(client: TestClient
     assert cycle.json()["detail"] == "项目不能选择下级项目作为上级项目"
 
 
+def test_project_iteration_list_exposes_workflow_state_identity(client: TestClient):
+    project = client.post("/api/v1/projects", json={"name": f"迭代状态项目-{uuid4().hex[:8]}"}).json()
+    iteration = client.post(
+        "/api/v1/iterations",
+        json={"project_ids": [project["id"]], "name": f"项目迭代状态-{uuid4().hex[:8]}"},
+    ).json()
+
+    response = client.get(f"/api/v1/projects/{project['id']}/iterations")
+
+    assert response.status_code == 200
+    listed = next(item for item in response.json()["items"] if item["id"] == iteration["id"])
+    assert {
+        "workflow_definition_id": listed.get("workflow_definition_id"),
+        "current_state_id": listed.get("current_state_id"),
+        "status_name": listed.get("status_name"),
+        "state_category": listed.get("state_category"),
+    } == {
+        "workflow_definition_id": iteration["workflow_definition_id"],
+        "current_state_id": iteration["current_state_id"],
+        "status_name": iteration["status_name"],
+        "state_category": iteration["state_category"],
+    }
+
+
 def test_project_delete_cascades_project_tree_work_items_and_iterations(client: TestClient):
     parent = client.post("/api/v1/projects", json={"name": f"级联删除父项目-{uuid4().hex[:8]}"}).json()
     child = client.post(
@@ -718,7 +742,19 @@ def test_program_tree_contains_child_programs_and_bound_projects(client: TestCli
     assert response.status_code == 200
     parent_node = next(item for item in response.json() if item["id"] == parent["id"])
     child_node = next(item for item in parent_node["children"] if item["id"] == child["id"])
-    assert any(item["id"] == project["id"] and item["name"] == project["name"] for item in child_node["projects"])
+    project_node = next(item for item in child_node["projects"] if item["id"] == project["id"])
+    assert project_node["name"] == project["name"]
+    assert {
+        "workflow_definition_id": project_node.get("workflow_definition_id"),
+        "current_state_id": project_node.get("current_state_id"),
+        "status_name": project_node.get("status_name"),
+        "state_category": project_node.get("state_category"),
+    } == {
+        "workflow_definition_id": project["workflow_definition_id"],
+        "current_state_id": project["current_state_id"],
+        "status_name": project["status_name"],
+        "state_category": project["state_category"],
+    }
 
 
 def test_program_tree_contains_unbound_projects_as_top_level_nodes(client: TestClient):
@@ -730,10 +766,19 @@ def test_program_tree_contains_unbound_projects_as_top_level_nodes(client: TestC
     response = client.get("/api/v1/programs/tree")
 
     assert response.status_code == 200
-    assert any(
-        item["id"] == project["id"] and item["name"] == project["name"] and item.get("node_type") == "project"
-        for item in response.json()
-    )
+    project_node = next(item for item in response.json() if item["id"] == project["id"] and item.get("node_type") == "project")
+    assert project_node["name"] == project["name"]
+    assert {
+        "workflow_definition_id": project_node.get("workflow_definition_id"),
+        "current_state_id": project_node.get("current_state_id"),
+        "status_name": project_node.get("status_name"),
+        "state_category": project_node.get("state_category"),
+    } == {
+        "workflow_definition_id": project["workflow_definition_id"],
+        "current_state_id": project["current_state_id"],
+        "status_name": project["status_name"],
+        "state_category": project["state_category"],
+    }
 
 
 def test_project_start_activates_parent_program(client: TestClient):

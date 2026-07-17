@@ -22,10 +22,10 @@ const projects = [
 ]
 
 const iterations = [
-  { id: 10, name: 'Parent Active', status: 'active', project_ids: [1] },
-  { id: 11, name: 'Child Planning', status: 'planning', project_ids: [2] },
-  { id: 12, name: 'Parent Completed', status: 'completed', project_ids: [1] },
-  { id: 13, name: 'Sibling Active', status: 'active', project_ids: [3] }
+  { id: 10, name: 'Parent Active', state_category: 'normal', project_ids: [1] },
+  { id: 11, name: 'Child Planning', state_category: 'start', project_ids: [2] },
+  { id: 12, name: 'Parent Completed', state_category: 'terminal', project_ids: [1] },
+  { id: 13, name: 'Sibling Active', state_category: 'normal', project_ids: [3] }
 ]
 
 run('returns project ancestors including itself', () => {

@@ -199,7 +199,8 @@ import {
 import {
   applyPanDelta,
   clampViewport,
-  fitViewportToNodes
+  fitViewportToNodes,
+  workflowCanvasSize
 } from '../utils/workflowViewport'
 
 const props = defineProps({
@@ -233,7 +234,7 @@ const targetTypes = [
   { label: '上次修复人', value: 'last_resolver' },
   { label: '无处理人', value: 'none' }
 ]
-const canvas = { width: 2400, height: 1400 }
+const minimumCanvas = { width: 2400, height: 1400 }
 const viewportSize = { width: 980, height: 540 }
 const activeObjectType = ref('requirement')
 const definition = ref(null)
@@ -250,6 +251,7 @@ const viewportOffset = reactive({ x: 0, y: 0 })
 const dragging = reactive({ state: null, startX: 0, startY: 0, originX: 0, originY: 0 })
 const viewportDrag = reactive({ active: false, startX: 0, startY: 0, originX: 0, originY: 0 })
 const enabledStates = computed(() => states.value.filter((state) => state.enabled))
+const canvasSize = computed(() => workflowCanvasSize(states.value, minimumCanvas))
 
 const selectedState = computed(() => (
   selectedKind.value === 'state'
@@ -526,8 +528,8 @@ function startDrag(state, event) {
 
 function onDrag(event) {
   if (!dragging.state) return
-  dragging.state.x = Math.max(20, Math.min(canvas.width - 140, dragging.originX + event.clientX - dragging.startX))
-  dragging.state.y = Math.max(20, Math.min(canvas.height - 70, dragging.originY + event.clientY - dragging.startY))
+  dragging.state.x = Math.max(20, Math.min(canvasSize.value.width - 140, dragging.originX + event.clientX - dragging.startX))
+  dragging.state.y = Math.max(20, Math.min(canvasSize.value.height - 70, dragging.originY + event.clientY - dragging.startY))
 }
 
 function stopDrag() {
@@ -547,7 +549,7 @@ function onViewportDrag(event) {
   const next = applyPanDelta(
     { x: viewportDrag.originX, y: viewportDrag.originY },
     { dx: event.clientX - viewportDrag.startX, dy: event.clientY - viewportDrag.startY },
-    canvas,
+    canvasSize.value,
     viewportSize
   )
   viewportOffset.x = next.x
@@ -559,13 +561,13 @@ function stopViewportDrag() {
 }
 
 function fitToContent() {
-  const next = fitViewportToNodes(states.value, canvas, viewportSize)
+  const next = fitViewportToNodes(states.value, canvasSize.value, viewportSize)
   viewportOffset.x = next.x
   viewportOffset.y = next.y
 }
 
 function resetViewport() {
-  const next = clampViewport({ x: 0, y: 0 }, canvas, viewportSize)
+  const next = clampViewport({ x: 0, y: 0 }, canvasSize.value, viewportSize)
   viewportOffset.x = next.x
   viewportOffset.y = next.y
 }

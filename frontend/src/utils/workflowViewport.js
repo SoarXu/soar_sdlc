@@ -1,6 +1,22 @@
 const NODE_WIDTH = 118
 const NODE_HEIGHT = 42
 
+export function workflowCanvasSize(
+  nodes,
+  minimumCanvas = { width: 2400, height: 1400 },
+  padding = { right: 160, bottom: 120 }
+) {
+  const contentBounds = nodes.reduce((bounds, node) => ({
+    right: Math.max(bounds.right, node.x + NODE_WIDTH),
+    bottom: Math.max(bounds.bottom, node.y + NODE_HEIGHT)
+  }), { right: 0, bottom: 0 })
+
+  return {
+    width: Math.max(minimumCanvas.width, contentBounds.right + padding.right),
+    height: Math.max(minimumCanvas.height, contentBounds.bottom + padding.bottom)
+  }
+}
+
 export function applyPanDelta(offset, delta, canvas, viewport) {
   return clampViewport(
     {

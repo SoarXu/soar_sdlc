@@ -272,9 +272,8 @@ const canvasGridStyle = computed(() => ({
 const transitionViews = computed(() => buildWorkflowEdgeViews(states.value, transitions.value, transitionKey))
 
 watch(canvasSize, (nextCanvas) => {
-  const next = clampViewport({ x: viewportOffset.x, y: viewportOffset.y }, nextCanvas, viewportSize)
-  viewportOffset.x = next.x
-  viewportOffset.y = next.y
+  if (dragging.state) return
+  clampCurrentViewport(nextCanvas)
 }, { flush: 'sync' })
 
 watch(() => props.configId, () => loadDefinition())
@@ -538,8 +537,15 @@ function onDrag(event) {
   dragging.state.y = Math.max(20, Math.min(canvasSize.value.height - 70, dragging.originY + event.clientY - dragging.startY))
 }
 
+function clampCurrentViewport(nextCanvas = canvasSize.value) {
+  const next = clampViewport({ x: viewportOffset.x, y: viewportOffset.y }, nextCanvas, viewportSize)
+  viewportOffset.x = next.x
+  viewportOffset.y = next.y
+}
+
 function stopDrag() {
   dragging.state = null
+  clampCurrentViewport()
 }
 
 function startViewportDrag(event) {

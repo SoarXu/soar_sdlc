@@ -89,6 +89,15 @@ const viewport = { width: 900, height: 540 }
 }
 
 {
+  const offsetAfterDrag = clampViewport(
+    { x: -4298, y: 0 },
+    { width: 5078, height: 1400 },
+    { width: 980, height: 540 }
+  )
+  assert.deepEqual(offsetAfterDrag, { x: -4098, y: 0 })
+}
+
+{
   const next = fitViewportToNodes(
     [
       { x: 300, y: 200 },

@@ -34,13 +34,20 @@ const configWatchStart = source.indexOf('watch(() => props.configId')
 assert.ok(canvasSizeWatchStart >= 0, 'canvas size changes must clamp the current viewport')
 assert.ok(configWatchStart > canvasSizeWatchStart, 'canvas size watcher must be defined before config loading watcher')
 const canvasSizeWatch = source.slice(canvasSizeWatchStart, configWatchStart)
-assert.match(
-  canvasSizeWatch,
-  /const next = clampViewport\(\{ x: viewportOffset\.x, y: viewportOffset\.y \}, nextCanvas, viewportSize\)/
-)
-assert.match(canvasSizeWatch, /viewportOffset\.x = next\.x[\s\S]*viewportOffset\.y = next\.y/)
+assert.match(canvasSizeWatch, /if \(dragging\.state\) return[\s\S]*clampCurrentViewport\(nextCanvas\)/)
 assert.match(canvasSizeWatch, /\{ flush: 'sync' \}/)
 assert.doesNotMatch(canvasSizeWatch, /saveGraph|saveWorkflowDefinitionGraph|fetchWorkflowDefinitionGraph|applyWorkflowDefinitionTemplate/)
+
+const clampCurrentViewportBody = functionBody('clampCurrentViewport', 'stopDrag')
+assert.match(source, /function clampCurrentViewport\(nextCanvas = canvasSize\.value\)/)
+assert.match(
+  clampCurrentViewportBody,
+  /const next = clampViewport\(\{ x: viewportOffset\.x, y: viewportOffset\.y \}, nextCanvas, viewportSize\)/
+)
+assert.match(clampCurrentViewportBody, /viewportOffset\.x = next\.x[\s\S]*viewportOffset\.y = next\.y/)
+
+const stopDragBody = functionBody('stopDrag', 'startViewportDrag')
+assert.match(stopDragBody, /dragging\.state = null[\s\S]*clampCurrentViewport\(\)/)
 
 assert.match(
   source,

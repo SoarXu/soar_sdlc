@@ -17,8 +17,10 @@ from app.models.test_case import TestCase
 from app.models.test_case_execution import TestCaseExecutionLog
 from app.models.test_run import TestRun, TestRunCase
 from app.models.user import User
+from app.models.workflow_definition import WorkflowTransition
 from app.services.status_operation_service import create_status_operation, list_status_operations
 from app.services.workflow_runtime_service import execute_transition
+from app.services.workflow_state_service import initial_system_workflow_values
 from app.views.project_view import ProjectCreate, ProjectMemberCreate, ProjectUpdate
 from app.views.status_operation_view import StatusOperationCreate
 from app.views.workflow_runtime_view import WorkflowTransitionExecuteRequest
@@ -185,6 +187,7 @@ def create_project(db: Session, payload: ProjectCreate) -> Project:
     if data.get("is_long_term"):
         data["end_date"] = None
     data["status"] = "planning"
+    data.update(initial_system_workflow_values(db, "project"))
     project = Project(**data)
     db.add(project)
     db.commit()
@@ -300,23 +303,34 @@ def replace_project_members(db: Session, project_id: int, payload: list[ProjectM
 
 def start_project(db: Session, project_id: int, payload: StatusOperationCreate | None = None, actor_id: int | None = None) -> Project:
     project = _get_active_project(db, project_id)
-    _require_status(project.status, {"planning", "paused"}, "只有规划中或已挂起的项目可以启动")
-    from_status = project.status
-    project.status = "active"
-    if from_status == "planning":
+    transition = (
+        db.query(WorkflowTransition)
+        .filter(
+            WorkflowTransition.definition_id == project.workflow_definition_id,
+            WorkflowTransition.from_state_id == project.current_state_id,
+            WorkflowTransition.action_key.in_(("start", "resume")),
+            WorkflowTransition.enabled.is_(True),
+        )
+        .order_by(WorkflowTransition.id.asc())
+        .first()
+    )
+    if not transition:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="只有规划中或已挂起的项目可以启动")
+    if transition.action_key == "start":
         _require_effective_time(payload, "请选择实际开始日期")
         project.actual_start_date = _effective_date(payload)
-    _activate_program_tree(db, project.program_id, actual_start_date=project.actual_start_date)
-    create_status_operation(
+    execute_transition(
         db,
-        object_type="project",
-        object_id=project.id,
-        action="start",
-        from_status=from_status,
-        to_status=project.status,
-        payload=payload,
-        actor_id=actor_id,
+        "project",
+        project.id,
+        WorkflowTransitionExecuteRequest(
+            action_key=transition.action_key,
+            payload=_status_payload_dict(payload),
+        ),
+        _actor_user(db, actor_id),
     )
+    project.status = "active"
+    _activate_program_tree(db, project.program_id, actual_start_date=project.actual_start_date)
     db.commit()
     db.refresh(project)
     return project
@@ -324,19 +338,14 @@ def start_project(db: Session, project_id: int, payload: StatusOperationCreate |
 
 def suspend_project(db: Session, project_id: int, payload: StatusOperationCreate | None = None, actor_id: int | None = None) -> Project:
     project = _get_active_project(db, project_id)
-    _require_status(project.status, {"active"}, "只有进行中的项目可以挂起")
-    from_status = project.status
-    project.status = "paused"
-    create_status_operation(
+    execute_transition(
         db,
-        object_type="project",
-        object_id=project.id,
-        action="suspend",
-        from_status=from_status,
-        to_status=project.status,
-        payload=payload,
-        actor_id=actor_id,
+        "project",
+        project.id,
+        WorkflowTransitionExecuteRequest(action_key="suspend", payload=_status_payload_dict(payload)),
+        _actor_user(db, actor_id),
     )
+    project.status = "paused"
     db.commit()
     db.refresh(project)
     return project
@@ -344,7 +353,6 @@ def suspend_project(db: Session, project_id: int, payload: StatusOperationCreate
 
 def close_project(db: Session, project_id: int, payload: StatusOperationCreate | None = None, actor_id: int | None = None) -> Project:
     project = _get_active_project(db, project_id)
-    _require_status(project.status, {"active", "paused"}, "只有进行中或已挂起的项目可以关闭")
     _require_effective_time(payload, "请选择实际完成日期")
     execute_transition(
         db,
@@ -356,6 +364,7 @@ def close_project(db: Session, project_id: int, payload: StatusOperationCreate |
         ),
         _actor_user(db, actor_id),
     )
+    project.status = "closed"
     project.actual_end_date = _effective_date(payload)
     db.commit()
     db.refresh(project)
@@ -364,21 +373,16 @@ def close_project(db: Session, project_id: int, payload: StatusOperationCreate |
 
 def activate_project(db: Session, project_id: int, payload: StatusOperationCreate | None = None, actor_id: int | None = None) -> Project:
     project = _get_active_project(db, project_id)
-    _require_status(project.status, {"closed"}, "只有已关闭的项目可以激活")
-    from_status = project.status
+    execute_transition(
+        db,
+        "project",
+        project.id,
+        WorkflowTransitionExecuteRequest(action_key="activate", payload=_status_payload_dict(payload)),
+        _actor_user(db, actor_id),
+    )
     project.status = "active"
     project.actual_end_date = None
     _activate_program_tree(db, project.program_id)
-    create_status_operation(
-        db,
-        object_type="project",
-        object_id=project.id,
-        action="activate",
-        from_status=from_status,
-        to_status=project.status,
-        payload=payload,
-        actor_id=actor_id,
-    )
     db.commit()
     db.refresh(project)
     return project
@@ -409,11 +413,6 @@ def _is_project_descendant_of(db: Session, project: Project, ancestor_id: int) -
         if current is None:
             return False
     return False
-
-
-def _require_status(current_status: str, allowed_statuses: set[str], message: str) -> None:
-    if current_status not in allowed_statuses:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=message)
 
 
 def _require_effective_time(payload: StatusOperationCreate | None, message: str) -> None:

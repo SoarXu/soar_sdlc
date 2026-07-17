@@ -638,6 +638,7 @@ def _project_graph() -> WorkflowGraphSave:
             _transition("resume", "恢复", "paused", "active"),
             _transition("close", "关闭", "active", "closed", validator_config={"type": "project_close_gate"}),
             _transition("close", "关闭", "paused", "closed", validator_config={"type": "project_close_gate"}),
+            _transition("activate", "激活", "closed", "active"),
         ],
     )
 

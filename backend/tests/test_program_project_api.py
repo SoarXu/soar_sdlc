@@ -11,6 +11,54 @@ from app.models.requirement import Requirement
 from app.models.workflow_definition import WorkflowState
 
 
+def test_project_creation_uses_system_workflow_initial_state(client: TestClient):
+    created = client.post("/api/v1/projects", json={"name": f"ID 项目-{uuid4().hex[:8]}"})
+
+    assert created.status_code == 200
+    data = created.json()
+    assert isinstance(data["workflow_definition_id"], int)
+    assert isinstance(data["current_state_id"], int)
+    assert data["status_name"]
+
+    db = SessionLocal()
+    try:
+        state = db.query(WorkflowState).filter(WorkflowState.id == data["current_state_id"]).one()
+        assert state.definition_id == data["workflow_definition_id"]
+        assert data["status_name"] == state.status_name
+        assert state.id == db.query(WorkflowState.id).filter(
+            WorkflowState.id == data["current_state_id"],
+            WorkflowState.category == "start",
+        ).scalar()
+    finally:
+        db.close()
+
+
+def test_project_runtime_uses_current_state_id_even_when_legacy_status_disagrees(client: TestClient):
+    project = client.post("/api/v1/projects", json={"name": f"ID runtime-{uuid4().hex[:8]}"}).json()
+    initial_state_id = project["current_state_id"]
+
+    db = SessionLocal()
+    try:
+        stored = db.execute(text("select id from projects where id = :id"), {"id": project["id"]}).one()
+        assert stored.id == project["id"]
+        db.execute(text("update projects set status = 'closed' where id = :id"), {"id": project["id"]})
+        db.commit()
+    finally:
+        db.close()
+
+    actions = client.get(f"/api/v1/workflow-runtime/project/{project['id']}/transitions")
+    assert actions.status_code == 200
+    assert "start" in {item["action_key"] for item in actions.json()}
+
+    started = client.post(
+        f"/api/v1/workflow-runtime/project/{project['id']}/transition",
+        json={"action_key": "start", "payload": {}},
+    )
+    assert started.status_code == 200, started.text
+    assert started.json()["current_state_id"] != initial_state_id
+    assert started.json()["workflow_definition_id"] == project["workflow_definition_id"]
+
+
 def _configure_and_enable_scheme(client: TestClient, config_id: int) -> None:
     definitions = client.get(
         f"/api/v1/workflow-definitions?scope_type=assignee_rule_config&scope_id={config_id}"

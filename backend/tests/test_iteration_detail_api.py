@@ -9,6 +9,29 @@ from app.models.task import Task
 from app.models.workflow_definition import WorkflowState
 
 
+def test_iteration_creation_uses_system_workflow_initial_state(client: TestClient):
+    project_id = _create_project(client)
+    created = client.post(
+        "/api/v1/iterations",
+        json={"project_ids": [project_id], "name": f"ID Iteration-{uuid4().hex[:8]}"},
+    )
+
+    assert created.status_code == 200
+    data = created.json()
+    assert isinstance(data["workflow_definition_id"], int)
+    assert isinstance(data["current_state_id"], int)
+    assert data["status_name"]
+
+    db = SessionLocal()
+    try:
+        state = db.query(WorkflowState).filter(WorkflowState.id == data["current_state_id"]).one()
+        assert state.definition_id == data["workflow_definition_id"]
+        assert state.category == "start"
+        assert data["status_name"] == state.status_name
+    finally:
+        db.close()
+
+
 def _create_project(client: TestClient, name: str | None = None, parent_id: int | None = None) -> int:
     payload = {"name": name or f"Project-{uuid4().hex[:8]}"}
     if parent_id:
@@ -21,10 +44,17 @@ def _create_project(client: TestClient, name: str | None = None, parent_id: int 
 def _create_iteration(client: TestClient, project_ids: list[int], name: str | None = None, status: str = "planning") -> int:
     response = client.post(
         "/api/v1/iterations",
-        json={"project_ids": project_ids, "name": name or f"Iteration-{uuid4().hex[:8]}", "status": status},
+        json={"project_ids": project_ids, "name": name or f"Iteration-{uuid4().hex[:8]}"},
     )
     assert response.status_code == 200
-    return response.json()["id"]
+    iteration_id = response.json()["id"]
+    if status == "active":
+        started = client.post(
+            f"/api/v1/workflow-runtime/iteration/{iteration_id}/transition",
+            json={"action_key": "start", "payload": {}},
+        )
+        assert started.status_code == 200, started.text
+    return iteration_id
 
 
 def _create_requirement(client: TestClient, project_id: int, title: str | None = None, owner_id: int | None = None) -> int:

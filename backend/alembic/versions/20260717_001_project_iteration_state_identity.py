@@ -107,6 +107,39 @@ def _backfill_table(bind, table_name: str, object_type: str) -> None:
         )
 
 
+def _ensure_project_activate_transition(bind) -> None:
+    definition_id = _system_definition(bind, "project")
+    states = _definition_states(bind, definition_id)
+    closed_state_id = _match_state_id(states, "project", definition_id, "closed")
+    active_state_id = _match_state_id(states, "project", definition_id, "active")
+    exists = bind.execute(
+        sa.text(
+            "SELECT id FROM workflow_transitions WHERE definition_id = :definition_id "
+            "AND action_key = 'activate' AND from_state_id = :from_state_id LIMIT 1"
+        ),
+        {"definition_id": definition_id, "from_state_id": closed_state_id},
+    ).scalar_one_or_none()
+    if exists is not None:
+        return
+    state_keys = {int(item["id"]): str(item["status_key"]) for item in states}
+    bind.execute(
+        sa.text(
+            "INSERT INTO workflow_transitions "
+            "(definition_id, action_key, action_name, from_status, to_status, "
+            "from_state_id, to_state_id, allowed_roles, enabled, sort_order) "
+            "VALUES (:definition_id, 'activate', '激活', :from_status, :to_status, "
+            ":from_state_id, :to_state_id, '', 1, 100)"
+        ),
+        {
+            "definition_id": definition_id,
+            "from_status": state_keys[closed_state_id],
+            "to_status": state_keys[active_state_id],
+            "from_state_id": closed_state_id,
+            "to_state_id": active_state_id,
+        },
+    )
+
+
 def upgrade() -> None:
     bigint = mysql.BIGINT(unsigned=True)
     for table_name in _legacy_status_tables():
@@ -143,9 +176,19 @@ def upgrade() -> None:
                 ["id"],
                 ondelete="RESTRICT",
             )
+    _ensure_project_activate_transition(bind)
 
 
 def downgrade() -> None:
+    bind = op.get_bind()
+    bind.execute(
+        sa.text(
+            "DELETE transition_item FROM workflow_transitions transition_item "
+            "JOIN workflow_definitions definition ON definition.id = transition_item.definition_id "
+            "WHERE definition.object_type = 'project' AND definition.scope_type = 'system' "
+            "AND transition_item.action_key = 'activate'"
+        )
+    )
     for table_name in reversed(tuple(_legacy_status_tables())):
         foreign_keys = _foreign_key_names(table_name)
         for constraint_name in (

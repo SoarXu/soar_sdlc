@@ -9,9 +9,11 @@ from app.models.project import Project
 from app.models.requirement import Requirement
 from app.models.task import Task
 from app.models.test_case import TestCase
+from app.models.workflow_definition import WorkflowState, WorkflowTransition
 from app.services.lifecycle_service import project_lifecycle_phase
 from app.services.status_operation_service import create_status_operation, list_status_operations
 from app.services.workflow_state_query_service import is_terminal_state, non_terminal_state_clause
+from app.services.workflow_state_service import initial_system_workflow_values
 from app.views.iteration_view import DeferIterationWorkItemsRequest, IterationCreate, IterationUpdate
 from app.views.status_operation_view import StatusOperationCreate
 
@@ -29,6 +31,9 @@ def list_iterations(db: Session, project_id: int | None = None) -> list[dict]:
         project_ids = [ip.project_id for ip in ip_records]
         result.append({
             "id": it.id,
+            "workflow_definition_id": it.workflow_definition_id,
+            "current_state_id": it.current_state_id,
+            "status_name": it.status_name,
             "project_id": project_ids[0] if project_ids else None,
             "project_ids": project_ids,
             "name": it.name,
@@ -57,6 +62,7 @@ def create_iteration(db: Session, payload: IterationCreate) -> dict:
         project_ids = [project_id]
     _validate_iteration_projects(db, project_ids)
     data["lifecycle_phase"] = project_lifecycle_phase(db, project_ids[0] if project_ids else None)
+    data.update(initial_system_workflow_values(db, "iteration"))
 
     iteration = Iteration(**data)
     db.add(iteration)
@@ -69,6 +75,9 @@ def create_iteration(db: Session, payload: IterationCreate) -> dict:
 
     return {
         "id": iteration.id,
+        "workflow_definition_id": iteration.workflow_definition_id,
+        "current_state_id": iteration.current_state_id,
+        "status_name": iteration.status_name,
         "project_id": project_ids[0] if project_ids else None,
         "project_ids": project_ids,
         "name": iteration.name,
@@ -115,6 +124,9 @@ def update_iteration(db: Session, iteration_id: int, payload: IterationUpdate) -
 
     return {
         "id": iteration.id,
+        "workflow_definition_id": iteration.workflow_definition_id,
+        "current_state_id": iteration.current_state_id,
+        "status_name": iteration.status_name,
         "project_id": result_project_ids[0] if result_project_ids else None,
         "project_ids": result_project_ids,
         "name": iteration.name,
@@ -323,6 +335,9 @@ def _get_active_iteration(db: Session, iteration_id: int) -> Iteration:
 def _iteration_to_dict(iteration: Iteration, project_ids: list[int]) -> dict:
     return {
         "id": iteration.id,
+        "workflow_definition_id": iteration.workflow_definition_id,
+        "current_state_id": iteration.current_state_id,
+        "status_name": iteration.status_name,
         "project_id": project_ids[0] if project_ids else None,
         "project_ids": project_ids,
         "name": iteration.name,
@@ -353,7 +368,9 @@ def auto_start_due_iterations(db: Session, iteration_id: int | None = None) -> i
     today = date.today()
     query = db.query(Iteration).filter(
         Iteration.deleted == 0,
-        Iteration.status == "planning",
+        Iteration.current_state_id == WorkflowState.id,
+        WorkflowState.definition_id == Iteration.workflow_definition_id,
+        WorkflowState.category == "start",
         Iteration.start_date.isnot(None),
         Iteration.start_date <= today,
     )
@@ -456,8 +473,25 @@ def _start_iteration_record(
     remark: str | None = None,
     actor_id: int | None = None,
 ) -> None:
-    from_status = iteration.status
-    iteration.status = "active"
+    transition = (
+        db.query(WorkflowTransition)
+        .filter(
+            WorkflowTransition.definition_id == iteration.workflow_definition_id,
+            WorkflowTransition.from_state_id == iteration.current_state_id,
+            WorkflowTransition.action_key == "start",
+            WorkflowTransition.enabled.is_(True),
+        )
+        .one_or_none()
+    )
+    if not transition:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Iteration start transition is not available")
+    from_state = db.query(WorkflowState).filter(WorkflowState.id == iteration.current_state_id).one()
+    to_state = db.query(WorkflowState).filter(
+        WorkflowState.id == transition.to_state_id,
+        WorkflowState.definition_id == iteration.workflow_definition_id,
+    ).one()
+    iteration.current_state_id = to_state.id
+    iteration.status = to_state.status_key
     iteration.actual_start_date = effective_date
     payload = StatusOperationCreate(effective_time=datetime.combine(effective_date, datetime.min.time()), remark=remark)
     create_status_operation(
@@ -465,8 +499,13 @@ def _start_iteration_record(
         object_type="iteration",
         object_id=iteration.id,
         action="start",
-        from_status=from_status,
-        to_status=iteration.status,
+        from_status=from_state.status_name,
+        to_status=to_state.status_name,
+        workflow_definition_id=iteration.workflow_definition_id,
+        from_state_id=from_state.id,
+        to_state_id=to_state.id,
+        from_state_name=from_state.status_name,
+        to_state_name=to_state.status_name,
         payload=payload,
         actor_id=actor_id,
     )

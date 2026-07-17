@@ -63,7 +63,7 @@ SUPPORTED_VALIDATOR_TYPES = {
     "bug_close_gate", "requirement_terminal_gate", "iteration_terminal_gate", "project_close_gate",
 }
 SUPPORTED_AUTOMATION_TYPES = {"notification"}
-CORE_ID_OBJECT_TYPES = {"requirement", "task", "bug"}
+CORE_ID_OBJECT_TYPES = {"requirement", "task", "bug", "project", "iteration"}
 
 
 def list_available_transitions(
@@ -192,6 +192,8 @@ def execute_transition(
     if resolved_target_state is not None:
         item.workflow_definition_id = transition.definition_id
         item.current_state_id = resolved_target_state.id
+        if object_type in {"project", "iteration"}:
+            item.status = resolved_target_state.status_key
     else:
         setattr(item, "status", resolved_target_status)
     handler_routing = _next_owner_resolution(
@@ -1051,7 +1053,7 @@ def _require_project_items_complete(db: Session, project_id: int) -> None:
         .all()
     )
     blocking_messages: list[str] = []
-    if any(_normalized_status("iteration", item) not in {"completed", "canceled"} for item in iterations):
+    if any(not is_terminal_state(item) for item in iterations):
         blocking_messages.append("iteration")
     requirements = db.query(Requirement).filter(Requirement.project_id == project_id, Requirement.deleted == 0).all()
     if any(not is_terminal_state(item) for item in requirements):
@@ -1478,7 +1480,7 @@ def _ensure_iteration_scope(db: Session, project_id: int | None, iteration_id: i
     iteration = db.query(Iteration).filter(Iteration.id == iteration_id, Iteration.deleted == 0).first()
     if not iteration:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Iteration not found")
-    if iteration.status in {"completed", "canceled"}:
+    if is_terminal_state(iteration):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Iteration is completed or canceled")
     scoped_project_ids = {row.project_id for row in db.query(IterationProject).filter(IterationProject.iteration_id == iteration_id).all()}
     if project_id not in scoped_project_ids:

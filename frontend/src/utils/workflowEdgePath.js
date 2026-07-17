@@ -36,7 +36,6 @@ export function buildWorkflowEdgeViews(states, transitions, transitionKey = defa
   const verticalGroups = clusterVerticalGroups(resolved)
   const groupIndexes = new Map()
   const verticalGroupIndexes = new Map()
-  const verticalLabelReservations = new Map()
   const maximumNodeBottom = states.reduce((maximum, state) => (
     Math.max(maximum, state.y + NODE_HEIGHT)
   ), 0)
@@ -78,16 +77,13 @@ export function buildWorkflowEdgeViews(states, transitions, transitionKey = defa
 
       if (metadata.verticalGroupKey !== undefined) {
         const verticalGroupKey = metadata.verticalGroupKey
-        if (!verticalLabelReservations.has(verticalGroupKey)) {
-          verticalLabelReservations.set(verticalGroupKey, { labelRectangles: [], pathSegments: [] })
-        }
         view = buildVerticalView(
           edge.from,
           edge.to,
           states,
           metadata.verticalGroupIndex,
           verticalGroups.sizes.get(verticalGroupKey),
-          verticalLabelReservations.get(verticalGroupKey)
+          globalReservations
         )
       } else if (metadata.backwardLaneIndex !== undefined) {
         view = buildBackwardView(
@@ -110,7 +106,9 @@ export function buildWorkflowEdgeViews(states, transitions, transitionKey = defa
       }
 
       views.set(edge, view)
-      reserveEdgeViewGeometry(view, globalReservations)
+      if (metadata.verticalGroupKey === undefined) {
+        reserveEdgeViewGeometry(view, globalReservations)
+      }
     })
 
   globalReservations.outerBaseBounds = combinedRectangleBounds([
@@ -423,14 +421,17 @@ function leastCollidingOuterLabel(points, labelBounds, reservations) {
 }
 
 function reserveVerticalRoute(candidate, reservations) {
-  reservations.labelRectangles.push(candidate.labelRectangle)
-  reservations.pathSegments.push(...candidate.pathSegments)
+  reserveWorkflowLabelRectangle(reservations, candidate.labelRectangle)
+  reserveWorkflowPathSegments(reservations, candidate.pathSegments)
   return candidate.view
 }
 
 function reserveVerticalRouteGeometry(view, points, reservations) {
-  reservations.labelRectangles.push(edgeLabelRectangle(view))
-  reservations.pathSegments.push(...roundedPolylineSegments(normalizeOrthogonalPoints(points)))
+  reserveWorkflowLabelRectangle(reservations, edgeLabelRectangle(view))
+  reserveWorkflowPathSegments(
+    reservations,
+    roundedPolylineSegments(normalizeOrthogonalPoints(points))
+  )
 }
 
 function verticalRoutePoints(start, end, trackX) {

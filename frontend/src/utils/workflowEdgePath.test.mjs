@@ -1027,6 +1027,64 @@ assertVerticalColumnReservations(159, 159.001, 'exact-epsilon-boundary')
 
 {
   const states = [
+    { id: 1, x: 80, y: 140 },
+    { id: 2, x: 320, y: 80 },
+    { id: 4, x: 320, y: 200 },
+    { id: 5, x: 80, y: 680 },
+    { id: 6, x: 320, y: 680 }
+  ]
+  const transitions = [
+    { id: 1, from_state_id: 1, to_state_id: 2 },
+    { id: 5, from_state_id: 5, to_state_id: 2 },
+    { id: 3, from_state_id: 5, to_state_id: 6 },
+    { id: 2, from_state_id: 6, to_state_id: 2 }
+  ]
+  const first = buildWorkflowEdgeViews(states, transitions, transitionKey)
+  const second = buildWorkflowEdgeViews(states, transitions, transitionKey)
+  const labels = first.map((edge) => ({
+    left: edge.labelX - 40,
+    top: edge.labelY - 13,
+    right: edge.labelX + 40,
+    bottom: edge.labelY + 13
+  }))
+  const collisions = {
+    labelNode: 0,
+    labelLabel: 0,
+    pathOtherLabel: 0
+  }
+
+  assert.equal(first.length, transitions.length)
+  assert.deepEqual(first, second)
+  first.forEach((edge, index) => {
+    assertFiniteEdgeView(edge)
+    assertEdgeBoundsContainGeometry(edge)
+    states.forEach((state) => {
+      if (rectanglesIntersect(labels[index], nodeRectangle(state))) {
+        collisions.labelNode += 1
+      }
+    })
+    first.forEach((other, otherIndex) => {
+      if (index === otherIndex) return
+      if (index < otherIndex && rectanglesIntersect(labels[index], labels[otherIndex])) {
+        collisions.labelLabel += 1
+      }
+      if (pathSegments(edge.path).some((segment) => (
+        segmentIntersectsRectangle(segment, labels[otherIndex])
+      ))) {
+        collisions.pathOtherLabel += 1
+      }
+    })
+  })
+
+  assert.deepEqual(collisions, {
+    labelNode: 0,
+    labelLabel: 0,
+    pathOtherLabel: 0
+  })
+}
+
+{
+  const states = [
     { id: 1, x: 80, y: 80 },
     { id: 3, x: 560, y: 80 },
     { id: 4, x: 80, y: 560 },

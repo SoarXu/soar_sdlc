@@ -15,6 +15,7 @@ function functionBody(name, nextName) {
 
 assert.match(source, /import \{ layoutWorkflowNodes \} from '\.\.\/utils\/workflowAutoLayout'/)
 assert.match(source, /import \{ buildWorkflowEdgeViews \} from '\.\.\/utils\/workflowEdgePath'/)
+assert.match(source, /import \{ requestWorkflowOrganization \} from '\.\.\/utils\/workflowLayoutInteraction'/)
 assert.doesNotMatch(source, /\bbuildWorkflowEdgeView\b/)
 assert.match(
   source,
@@ -33,14 +34,18 @@ assert.match(
 )
 
 const organizeLayoutBody = functionBody('organizeLayout', 'applyGraph')
-assert.match(organizeLayoutBody, /if \(!states\.value\.length\)/)
-assert.match(organizeLayoutBody, /ElMessage\.info\('当前没有可整理的状态节点'\)/)
+assert.match(organizeLayoutBody, /const result = await requestWorkflowOrganization\(\{/)
+assert.match(organizeLayoutBody, /states: states\.value/)
+assert.match(organizeLayoutBody, /transitions: transitions\.value/)
+assert.match(organizeLayoutBody, /initialStateId: initialStateId\.value/)
 assert.match(
   organizeLayoutBody,
-  /await ElMessageBox\.confirm\('整理布局将重新排列全部节点，确认继续？', '整理布局', \{ type: 'warning' \}\)/
+  /confirm: \(\) => ElMessageBox\.confirm\('整理布局将重新排列全部节点，确认继续？', '整理布局', \{ type: 'warning' \}\)/
 )
-assert.match(organizeLayoutBody, /applyOrganizedLayout\(\)/)
-assert.match(organizeLayoutBody, /fitToContent\(\)/)
+assert.match(organizeLayoutBody, /notifyEmpty: \(\) => ElMessage\.info\('当前没有可整理的状态节点'\)/)
+assert.match(organizeLayoutBody, /if \(!result\.organized\) return/)
+assert.match(organizeLayoutBody, /states\.value = result\.states/)
+assert.match(organizeLayoutBody, /states\.value = result\.states[\s\S]*fitToContent\(\)/)
 assert.doesNotMatch(
   organizeLayoutBody,
   /\bsaveGraph\s*\(|\bsaveWorkflowDefinitionGraph\s*\(|\bapplyWorkflowDefinitionTemplate\s*\(|\bfetchWorkflowDefinitionGraph\s*\(/

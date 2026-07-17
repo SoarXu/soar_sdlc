@@ -186,6 +186,7 @@ import {
 } from '../api/workflowDefinitions'
 import { layoutWorkflowNodes } from '../utils/workflowAutoLayout'
 import { buildWorkflowEdgeViews } from '../utils/workflowEdgePath'
+import { requestWorkflowOrganization } from '../utils/workflowLayoutInteraction'
 import {
   normalizeWorkflowTransition as normalizeTransition,
   serializeWorkflowTransition as serializeTransition,
@@ -323,12 +324,15 @@ function applyOrganizedLayout() {
 }
 
 async function organizeLayout() {
-  if (!states.value.length) {
-    ElMessage.info('当前没有可整理的状态节点')
-    return
-  }
-  await ElMessageBox.confirm('整理布局将重新排列全部节点，确认继续？', '整理布局', { type: 'warning' })
-  applyOrganizedLayout()
+  const result = await requestWorkflowOrganization({
+    states: states.value,
+    transitions: transitions.value,
+    initialStateId: initialStateId.value,
+    confirm: () => ElMessageBox.confirm('整理布局将重新排列全部节点，确认继续？', '整理布局', { type: 'warning' }),
+    notifyEmpty: () => ElMessage.info('当前没有可整理的状态节点')
+  })
+  if (!result.organized) return
+  states.value = result.states
   fitToContent()
 }
 

@@ -8,6 +8,7 @@
 | 文档状态 | 已实现，待业务验收 |
 | 当前版本 | V1.0 |
 | 当前确认范围 | 工作流方案创建与生命周期、状态节点存储、初始状态及核心业务运行 |
+| 最新技术复核 | 2026-07-17，项目/迭代状态 ID 化收尾完成 |
 
 本文档用于逐步记录从工作流配置到业务流程运行的已确认产品需求。每完成一个功能环节的确认，就在本文档中追加对应章节。未经确认的功能不得提前写成正式需求。
 
@@ -279,13 +280,16 @@ workflow_definitions.initial_state_id
 
 ## 10. 实施记录
 
-本 PRD 的已确认范围已于 2026-07-16 完成实现和技术验证，逐项结果见：
+本 PRD FR-1 至 FR-13 的初始确认范围已于 2026-07-16 完成实现和技术验证；状态 ID 化收尾范围于 2026-07-17 完成实现和技术复核。逐项结果见：
 
 - [工作流 PRD 实施完成报告](../reports/2026-07-16-workflow-prd-completion-report.md)
+- [工作流状态 ID 化收尾报告](../reports/2026-07-17-workflow-id-finalization-report.md)
 
 实施边界说明：
 
-1. 需求、任务、Bug 已使用 `workflow_definition_id/current_state_id` 作为运行时状态身份，创建、流转、查询和展示不再依赖其旧 `status` 字符串列。
-2. 核心业务流转通过 `from_state_id/to_state_id` 和条件路由状态 ID 执行，状态中文名称仅作为展示及历史快照。
-3. `workflow_states.status_key` 与 `workflow_transitions.from_status/to_status` 暂时保留为项目、迭代等未迁移对象的兼容列；需求、任务、Bug 的仓库守卫禁止重新依赖这些字段。删除这些全局兼容列需要先单独确认并迁移项目、迭代的数据模型，不属于本 PRD 已确认范围。
-4. 第 9 章内容仍是待确认产品决策，不按实施缺陷统计。其中第 1 至 3 项已有保障当前功能可运行的临时实现，精确行为见完成报告，仍需业务验收；第 4 至 9 项未实现。
+1. 需求、任务、Bug、项目、迭代五类业务对象均使用非空 `workflow_definition_id/current_state_id` 作为运行时状态身份，创建、流转、查询和展示不再依赖旧状态字符串列。
+2. 核心业务流转通过非空 `from_state_id/to_state_id` 和条件路由状态 ID 执行，状态中文名称仅作为展示及历史快照；API 对五类对象返回 `status_name/state_category`，不返回状态编码。
+3. 2026-07-17 收尾迁移已物理删除 `projects.status`、`iterations.status`、`workflow_states.status_key`、`workflow_transitions.from_status/to_status`，并删除重复的 `handler_transition_rules` 表和旧接口。处理人规则只保存在 `workflow_transitions.handler_rule`。
+4. `Program.status` 明确保留且不接入本轮工作流改造；`workflow_transitions.action_key` 明确保留，用于标识业务动作，不作为状态身份。
+5. 项目、迭代当前状态的定义归属由应用写入/流转校验、迁移前置审计和持续审计共同保证；五类业务对象、定义、状态和流转共建立 15 个工作流身份外键，并具有对应查询索引。
+6. 第 9 章内容仍是待确认产品决策，不按实施缺陷统计。其中第 1 至 3 项已有保障当前功能可运行的临时实现，精确行为见完成报告，仍需业务验收；第 4 至 9 项未实现。

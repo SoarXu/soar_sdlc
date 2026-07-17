@@ -256,8 +256,19 @@ const transitionKey = (transition) => transition.id
   })
 }
 
+assertVerticalColumnClusterTracks(
+  [100, 100.0009, 100.0018],
+  [76, 124.0009, 100.0018],
+  'anchor-span'
+)
+assertVerticalColumnClusterTracks(
+  [100, 100.00101],
+  [100, 100.00101],
+  'clearly-over-epsilon'
+)
 assertVerticalColumnReservations(-0.0004, 0.0004, 'signed-zero-boundary')
 assertVerticalColumnReservations(100.00049, 100.00051, 'rounding-boundary')
+assertVerticalColumnReservations(159, 159.001, 'exact-epsilon-boundary')
 
 {
   const states = [
@@ -833,6 +844,32 @@ function assertVerticalColumnReservations(firstCenterX, secondCenterX, idPrefix)
       .forEach((state) => {
         assertPathClearsRectangle(edge.path, expandedNodeRectangle(state))
       })
+  })
+}
+
+function assertVerticalColumnClusterTracks(centerXs, expectedLabelXs, idPrefix) {
+  const states = centerXs.flatMap((centerX, index) => ([
+    { id: `${idPrefix}-${index}-from`, x: centerX - 59, y: index * 300 },
+    { id: `${idPrefix}-${index}-to`, x: centerX - 59, y: index * 300 + 120 }
+  ]))
+  const transitions = centerXs.map((_, index) => ({
+    id: `${idPrefix}-${index}`,
+    from_state_id: `${idPrefix}-${index}-from`,
+    to_state_id: `${idPrefix}-${index}-to`
+  }))
+  const edges = buildWorkflowEdgeViews(states, transitions, transitionKey)
+  const reorderedEdges = buildWorkflowEdgeViews(
+    states,
+    [...transitions].reverse(),
+    transitionKey
+  )
+
+  assert.deepEqual(edges, reorderedEdges)
+  edges.forEach((edge, index) => {
+    assert.ok(
+      Math.abs(edge.labelX - expectedLabelXs[index]) < 1e-9,
+      `${idPrefix} edge ${index} expected labelX ${expectedLabelXs[index]}, got ${edge.labelX}`
+    )
   })
 }
 

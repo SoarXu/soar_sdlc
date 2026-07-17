@@ -10,6 +10,7 @@ const OBSTACLE_CLEARANCE = 21
 const EDGE_LABEL_HALF_WIDTH = 40
 const EDGE_LABEL_GAP = 8
 const POSITION_EPSILON = 0.001
+const POSITION_CLUSTER_ULP_MULTIPLIER = 8
 
 export function buildWorkflowEdgeView(from, to) {
   const fromCenter = centerOf(from)
@@ -880,18 +881,24 @@ function clusterVerticalGroups(edges) {
       left.centerX - right.centerX || compareResolvedTransitions(left.edge, right.edge)
     ))
   let columnIndex = -1
-  let previousCenterX
+  let clusterAnchorX
 
   verticalEdges.forEach(({ edge, centerX }) => {
-    if (previousCenterX === undefined || centerX - previousCenterX > POSITION_EPSILON) {
+    if (clusterAnchorX === undefined || exceedsPositionEpsilon(clusterAnchorX, centerX)) {
       columnIndex += 1
+      clusterAnchorX = centerX
     }
     const key = `vertical-column-${columnIndex}`
     keys.set(edge, key)
     sizes.set(key, (sizes.get(key) || 0) + 1)
-    previousCenterX = centerX
   })
   return { keys, sizes }
+}
+
+function exceedsPositionEpsilon(anchor, candidate) {
+  const scale = Math.max(1, Math.abs(anchor), Math.abs(candidate))
+  const floatingTolerance = Number.EPSILON * scale * POSITION_CLUSTER_ULP_MULTIPLIER
+  return candidate - anchor > POSITION_EPSILON + floatingTolerance
 }
 
 function verticalColumnCenterX(from, to) {

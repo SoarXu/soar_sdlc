@@ -354,12 +354,13 @@ function leastCollidingRouteView(candidates, pathBounds, labelBounds, reservatio
 
     labels.forEach((label) => {
       const labelRectangle = edgeLabelRectangle(label)
+      if (labelBounds.some((rectangle) => rectanglesIntersect(labelRectangle, rectangle))) {
+        return
+      }
       const score = pathBounds.filter((rectangle) => (
         segmentsIntersectRectangles(pathSegments, [rectangle])
       )).length + pathLabelRectangles.filter((rectangle) => (
         segmentsIntersectRectangles(pathSegments, [rectangle])
-      )).length + labelBounds.filter((rectangle) => (
-        rectanglesIntersect(labelRectangle, rectangle)
       )).length + reservationLabelsForRectangle(reservations, labelRectangle)
         .filter((rectangle) => rectanglesIntersect(labelRectangle, rectangle)).length +
         reservationPathsForRectangle(reservations, labelRectangle)
@@ -375,14 +376,50 @@ function leastCollidingRouteView(candidates, pathBounds, labelBounds, reservatio
     })
   })
 
+  const fallbackPoints = normalizeOrthogonalPoints(candidates[0])
   const fallback = best ?? {
-    label: labelPointForPolyline(candidates[0]),
-    points: normalizeOrthogonalPoints(candidates[0])
+    label: leastCollidingOuterLabel(fallbackPoints, labelBounds, reservations),
+    points: fallbackPoints
   }
   return {
     ...edgeView(fallback.points, fallback.label.x, fallback.label.y),
     degraded: true
   }
+}
+
+function leastCollidingOuterLabel(points, labelBounds, reservations) {
+  const finiteBounds = labelBounds.filter((rectangle) => (
+    [rectangle.left, rectangle.top, rectangle.right, rectangle.bottom].every(Number.isFinite)
+  ))
+  if (!finiteBounds.length) return labelPointForPolyline(points)
+
+  const bounds = combinedRectangleBounds(finiteBounds)
+  const start = points[0]
+  const end = points[points.length - 1]
+  const centerX = (start.x + end.x) / 2
+  const centerY = (start.y + end.y) / 2
+  const candidates = [
+    { x: centerX, y: bounds.top - 13 - EDGE_LABEL_GAP },
+    { x: centerX, y: bounds.bottom + 13 + EDGE_LABEL_GAP },
+    { x: bounds.left - EDGE_LABEL_HALF_WIDTH - EDGE_LABEL_GAP, y: centerY },
+    { x: bounds.right + EDGE_LABEL_HALF_WIDTH + EDGE_LABEL_GAP, y: centerY }
+  ]
+  let best = null
+
+  candidates.forEach((label) => {
+    const rectangle = edgeLabelRectangle(label)
+    const score = reservationLabelsForRectangle(reservations, rectangle)
+      .filter((reserved) => rectanglesIntersect(rectangle, reserved)).length +
+      reservationPathsForRectangle(reservations, rectangle)
+        .filter((segment) => segmentIntersectsRectangle(
+          segment.from,
+          segment.to,
+          rectangle
+        )).length
+    if (!best || score < best.score) best = { label, score }
+  })
+
+  return best.label
 }
 
 function reserveVerticalRoute(candidate, reservations) {

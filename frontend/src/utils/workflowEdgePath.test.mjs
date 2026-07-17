@@ -1027,6 +1027,46 @@ assertVerticalColumnReservations(159, 159.001, 'exact-epsilon-boundary')
 
 {
   const states = [
+    { id: 1, x: 80, y: 80 },
+    { id: 3, x: 560, y: 80 },
+    { id: 4, x: 80, y: 560 },
+    { id: 5, x: 320, y: 560 },
+    { id: 6, x: 320, y: 80 },
+    { id: 7, x: 800, y: 80 }
+  ]
+  const transitions = [
+    { id: 2, from_state_id: 5, to_state_id: 3 },
+    { id: 4, from_state_id: 3, to_state_id: 1 },
+    { id: 7, from_state_id: 4, to_state_id: 7 },
+    { id: 8, from_state_id: 1, to_state_id: 7 },
+    { id: 9, from_state_id: 1, to_state_id: 6 },
+    { id: 10, from_state_id: 6, to_state_id: 3 }
+  ]
+  const first = buildWorkflowEdgeViews(states, transitions, transitionKey)
+  const second = buildWorkflowEdgeViews(states, transitions, transitionKey)
+  let labelNodeCollisions = 0
+
+  assert.equal(first.length, transitions.length)
+  assert.deepEqual(first, second)
+  first.forEach((edge) => {
+    assertFiniteEdgeView(edge)
+    assertEdgeBoundsContainGeometry(edge)
+    const label = {
+      left: edge.labelX - 40,
+      top: edge.labelY - 13,
+      right: edge.labelX + 40,
+      bottom: edge.labelY + 13
+    }
+    states.forEach((state) => {
+      if (rectanglesIntersect(label, nodeRectangle(state))) labelNodeCollisions += 1
+    })
+  })
+
+  assert.equal(labelNodeCollisions, 0)
+}
+
+{
+  const states = [
     { id: 10329, x: 80, y: 140 },
     { id: 10330, x: 320, y: 140 },
     { id: 10331, x: 80, y: 440 },

@@ -45,7 +45,7 @@ export function buildWorkflowEdgeViews(states, transitions, transitionKey = defa
     .filter(({ from, to }) => from && to)
     .sort(compareResolvedTransitions)
   const groupSizes = countEndpointGroups(resolved)
-  const verticalGroupSizes = countVerticalGroups(resolved)
+  const verticalGroups = clusterVerticalGroups(resolved)
   const groupIndexes = new Map()
   const verticalGroupIndexes = new Map()
   const selfLoopReservations = new Map()
@@ -74,7 +74,7 @@ export function buildWorkflowEdgeViews(states, transitions, transitionKey = defa
         selfLoopReservations.get(groupKey)
       )
     } else if (isVerticalConnection(edge.from, edge.to)) {
-      const verticalGroupKey = verticalColumnGroupKey(edge.from, edge.to)
+      const verticalGroupKey = verticalGroups.keys.get(edge)
       const verticalGroupIndex = verticalGroupIndexes.get(verticalGroupKey) || 0
       verticalGroupIndexes.set(verticalGroupKey, verticalGroupIndex + 1)
       if (!verticalLabelReservations.has(verticalGroupKey)) {
@@ -85,7 +85,7 @@ export function buildWorkflowEdgeViews(states, transitions, transitionKey = defa
         edge.to,
         states,
         verticalGroupIndex,
-        verticalGroupSizes.get(verticalGroupKey),
+        verticalGroups.sizes.get(verticalGroupKey),
         verticalLabelReservations.get(verticalGroupKey)
       )
     } else if (centerOf(edge.to).x < centerOf(edge.from).x) {
@@ -867,20 +867,35 @@ function countEndpointGroups(edges) {
   return sizes
 }
 
-function countVerticalGroups(edges) {
+function clusterVerticalGroups(edges) {
+  const keys = new Map()
   const sizes = new Map()
-  edges.forEach((edge) => {
-    if (edge.transition.from_state_id === edge.transition.to_state_id ||
-        !isVerticalConnection(edge.from, edge.to)) return
-    const key = verticalColumnGroupKey(edge.from, edge.to)
+  const verticalEdges = edges
+    .filter((edge) => (
+      edge.transition.from_state_id !== edge.transition.to_state_id &&
+      isVerticalConnection(edge.from, edge.to)
+    ))
+    .map((edge) => ({ edge, centerX: verticalColumnCenterX(edge.from, edge.to) }))
+    .sort((left, right) => (
+      left.centerX - right.centerX || compareResolvedTransitions(left.edge, right.edge)
+    ))
+  let columnIndex = -1
+  let previousCenterX
+
+  verticalEdges.forEach(({ edge, centerX }) => {
+    if (previousCenterX === undefined || centerX - previousCenterX > POSITION_EPSILON) {
+      columnIndex += 1
+    }
+    const key = `vertical-column-${columnIndex}`
+    keys.set(edge, key)
     sizes.set(key, (sizes.get(key) || 0) + 1)
+    previousCenterX = centerX
   })
-  return sizes
+  return { keys, sizes }
 }
 
-function verticalColumnGroupKey(from, to) {
-  const columnCenterX = (centerOf(from).x + centerOf(to).x) / 2
-  return columnCenterX.toFixed(3)
+function verticalColumnCenterX(from, to) {
+  return (centerOf(from).x + centerOf(to).x) / 2
 }
 
 function endpointGroupKey(transition) {

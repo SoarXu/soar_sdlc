@@ -256,6 +256,9 @@ const transitionKey = (transition) => transition.id
   })
 }
 
+assertVerticalColumnReservations(-0.0004, 0.0004, 'signed-zero-boundary')
+assertVerticalColumnReservations(100.00049, 100.00051, 'rounding-boundary')
+
 {
   const states = [
     { id: 'source', x: 100, y: 0 },
@@ -780,6 +783,57 @@ function nodeRectangle(node) {
 function rectanglesIntersect(left, right) {
   return left.right >= right.left && left.left <= right.right &&
     left.bottom >= right.top && left.top <= right.bottom
+}
+
+function assertVerticalColumnReservations(firstCenterX, secondCenterX, idPrefix) {
+  const states = [
+    { id: `${idPrefix}-a1`, x: firstCenterX - 59, y: 0 },
+    { id: `${idPrefix}-b1`, x: secondCenterX - 59, y: 300 },
+    { id: `${idPrefix}-left-bound`, x: -59, y: 600 },
+    { id: `${idPrefix}-obstacle`, x: (firstCenterX + secondCenterX) / 2 - 59, y: 600 },
+    { id: `${idPrefix}-right-bound`, x: 241, y: 600 },
+    { id: `${idPrefix}-b2`, x: secondCenterX - 59, y: 900 },
+    { id: `${idPrefix}-a2`, x: firstCenterX - 59, y: 1200 }
+  ]
+  const transitions = [
+    {
+      id: `${idPrefix}-a1-to-a2`,
+      from_state_id: `${idPrefix}-a1`,
+      to_state_id: `${idPrefix}-a2`
+    },
+    {
+      id: `${idPrefix}-b1-to-b2`,
+      from_state_id: `${idPrefix}-b1`,
+      to_state_id: `${idPrefix}-b2`
+    }
+  ]
+  const edges = buildWorkflowEdgeViews(states, transitions, transitionKey)
+  const reorderedEdges = buildWorkflowEdgeViews(
+    states,
+    [...transitions].reverse(),
+    transitionKey
+  )
+  const labelRectangles = edges.map((edge) => ({
+    left: edge.labelX - 40,
+    top: edge.labelY - 13,
+    right: edge.labelX + 40,
+    bottom: edge.labelY + 13
+  }))
+
+  assert.deepEqual(edges, reorderedEdges)
+  assert.equal(rectanglesIntersect(labelRectangles[0], labelRectangles[1]), false)
+  assertPathClearsRectangle(edges[0].path, labelRectangles[1])
+  assertPathClearsRectangle(edges[1].path, labelRectangles[0])
+  edges.forEach((edge) => {
+    states
+      .filter((state) => (
+        state.id !== edge.transition.from_state_id &&
+        state.id !== edge.transition.to_state_id
+      ))
+      .forEach((state) => {
+        assertPathClearsRectangle(edge.path, expandedNodeRectangle(state))
+      })
+  })
 }
 
 function segmentIntersectsRectangle({ from, to }, rectangle) {

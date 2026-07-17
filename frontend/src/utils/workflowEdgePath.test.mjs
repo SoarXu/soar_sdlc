@@ -476,6 +476,40 @@ const transitionKey = (transition) => transition.id
 }
 
 {
+  const states = [{ id: 'reserved-loop-node', x: 100, y: 100 }]
+  const transitions = Array.from({ length: 5 }, (_, index) => ({
+    id: `reserved-loop-${index + 1}`,
+    from_state_id: 'reserved-loop-node',
+    to_state_id: 'reserved-loop-node',
+    sort_order: index * 10
+  }))
+  const first = buildWorkflowEdgeViews(states, transitions, transitionKey)
+  const second = buildWorkflowEdgeViews(states, transitions, transitionKey)
+  const labelRectangles = first.map((edge) => ({
+    left: edge.labelX - 40,
+    top: edge.labelY - 13,
+    right: edge.labelX + 40,
+    bottom: edge.labelY + 13
+  }))
+
+  assert.deepEqual(first, second)
+  assert.equal(new Set(first.map((edge) => edge.path)).size, first.length)
+  assert.equal(
+    new Set(first.map((edge) => `${edge.labelX}:${edge.labelY}`)).size,
+    first.length
+  )
+  for (let left = 0; left < first.length; left += 1) {
+    for (let right = left + 1; right < first.length; right += 1) {
+      assert.equal(rectanglesIntersect(labelRectangles[left], labelRectangles[right]), false)
+    }
+    for (let other = 0; other < first.length; other += 1) {
+      if (left === other) continue
+      assertPathClearsRectangle(first[left].path, labelRectangles[other])
+    }
+  }
+}
+
+{
   const states = [
     { id: 'left-loop', x: 100, y: 100 },
     { id: 'right-loop', x: 500, y: 100 }

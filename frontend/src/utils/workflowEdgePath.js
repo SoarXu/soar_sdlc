@@ -45,6 +45,7 @@ export function buildWorkflowEdgeViews(states, transitions, transitionKey = defa
     .sort(compareResolvedTransitions)
   const groupSizes = countEndpointGroups(resolved)
   const groupIndexes = new Map()
+  const selfLoopReservations = new Map()
   const usedKeys = new Set()
   const maximumNodeBottom = states.reduce((maximum, state) => (
     Math.max(maximum, state.y + NODE_HEIGHT)
@@ -58,11 +59,15 @@ export function buildWorkflowEdgeViews(states, transitions, transitionKey = defa
 
     let view
     if (edge.transition.from_state_id === edge.transition.to_state_id) {
+      if (!selfLoopReservations.has(groupKey)) {
+        selfLoopReservations.set(groupKey, { labelRectangles: [], pathSegments: [] })
+      }
       view = buildSelfLoopView(
         edge.from,
         states,
         groupIndex,
-        groupSizes.get(groupKey)
+        groupSizes.get(groupKey),
+        selfLoopReservations.get(groupKey)
       )
     } else if (isVerticalConnection(edge.from, edge.to)) {
       view = buildVerticalView(
@@ -458,39 +463,49 @@ function firstClearPolyline(candidates, rectangles) {
   return null
 }
 
-function buildSelfLoopView(node, states, loopIndex, loopCount) {
+function buildSelfLoopView(node, states, loopIndex, loopCount, reservations) {
   const obstacles = states.filter((state) => state !== node)
   const clearCandidate = findSelfLoopCandidate(
     node,
     obstacles,
     loopIndex,
     loopCount,
-    OBSTACLE_CLEARANCE
+    OBSTACLE_CLEARANCE,
+    reservations
   )
-  if (clearCandidate) return selfLoopCandidateView(clearCandidate)
+  if (clearCandidate) return reservedSelfLoopView(clearCandidate, reservations)
 
   const nodeAvoidingCandidate = findSelfLoopCandidate(
     node,
     obstacles,
     loopIndex,
     loopCount,
-    0
+    0,
+    reservations
   )
   if (nodeAvoidingCandidate) {
-    return {
-      ...selfLoopCandidateView(nodeAvoidingCandidate),
-      degraded: true
-    }
+    return reservedSelfLoopView(nodeAvoidingCandidate, reservations, true)
+  }
+
+  const reservationOnlyCandidate = findSelfLoopCandidate(
+    node,
+    [],
+    loopIndex,
+    loopCount,
+    0,
+    reservations
+  )
+  if (reservationOnlyCandidate) {
+    return reservedSelfLoopView(reservationOnlyCandidate, reservations, true)
   }
 
   const fallback = rightSelfLoopCandidate(node, (loopIndex + 1) * PARALLEL_LANE_GAP)
-  return {
-    ...selfLoopCandidateView(fallback),
-    degraded: true
-  }
+  const points = normalizeOrthogonalPoints(fallback.points)
+  const fallbackWithGeometry = selfLoopCandidateGeometry({ ...fallback, points })
+  return reservedSelfLoopView(fallbackWithGeometry, reservations, true)
 }
 
-function findSelfLoopCandidate(node, obstacles, loopIndex, loopCount, clearance) {
+function findSelfLoopCandidate(node, obstacles, loopIndex, loopCount, clearance, reservations) {
   const pathRectangles = obstacles.map((state) => expandedRectangle(state, clearance))
   const nodeRectangles = obstacles.map((state) => expandedRectangle(state, 0))
 
@@ -507,11 +522,44 @@ function findSelfLoopCandidate(node, obstacles, loopIndex, loopCount, clearance)
       const points = normalizeOrthogonalPoints(candidate.points)
       if (!polylineClearsRectangles(points, pathRectangles)) continue
       if (!labelClearsRectangles(candidate, nodeRectangles)) continue
-      return { ...candidate, points }
+      const candidateWithGeometry = selfLoopCandidateGeometry({ ...candidate, points })
+      if (!selfLoopClearsReservations(candidateWithGeometry, reservations)) continue
+      return candidateWithGeometry
     }
   }
 
   return null
+}
+
+function selfLoopCandidateGeometry(candidate) {
+  return {
+    ...candidate,
+    labelRectangle: selfLoopLabelRectangle(candidate),
+    pathSegments: roundedPolylineSegments(candidate.points)
+  }
+}
+
+function selfLoopClearsReservations(candidate, reservations) {
+  if (reservations.labelRectangles.some((rectangle) => (
+    rectanglesIntersect(candidate.labelRectangle, rectangle)
+  ))) return false
+  if (segmentsIntersectRectangles(candidate.pathSegments, reservations.labelRectangles)) return false
+  return !segmentsIntersectRectangles(reservations.pathSegments, [candidate.labelRectangle])
+}
+
+function segmentsIntersectRectangles(segments, rectangles) {
+  return segments.some(({ from, to }) => (
+    rectangles.some((rectangle) => segmentIntersectsRectangle(from, to, rectangle))
+  ))
+}
+
+function selfLoopLabelRectangle(candidate) {
+  return {
+    left: candidate.labelX - EDGE_LABEL_HALF_WIDTH,
+    top: candidate.labelY - 13,
+    right: candidate.labelX + EDGE_LABEL_HALF_WIDTH,
+    bottom: candidate.labelY + 13
+  }
 }
 
 function rightSelfLoopCandidate(node, distance) {
@@ -591,12 +639,7 @@ function topSelfLoopCandidate(node, distance) {
 }
 
 function labelClearsRectangles(candidate, rectangles) {
-  const labelRectangle = {
-    left: candidate.labelX - EDGE_LABEL_HALF_WIDTH,
-    top: candidate.labelY - 13,
-    right: candidate.labelX + EDGE_LABEL_HALF_WIDTH,
-    bottom: candidate.labelY + 13
-  }
+  const labelRectangle = selfLoopLabelRectangle(candidate)
   return rectangles.every((rectangle) => !rectanglesIntersect(labelRectangle, rectangle))
 }
 
@@ -607,6 +650,13 @@ function rectanglesIntersect(left, right) {
 
 function selfLoopCandidateView(candidate) {
   return edgeView(candidate.points, candidate.labelX, candidate.labelY)
+}
+
+function reservedSelfLoopView(candidate, reservations, degraded = false) {
+  reservations.labelRectangles.push(candidate.labelRectangle)
+  reservations.pathSegments.push(...candidate.pathSegments)
+  const view = selfLoopCandidateView(candidate)
+  return degraded ? { ...view, degraded: true } : view
 }
 
 function edgeView(points, labelX, labelY) {

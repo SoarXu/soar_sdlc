@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { spawnSync } from 'node:child_process'
 import { readFileSync } from 'node:fs'
 import * as workflowEdgePath from './workflowEdgePath.js'
 
@@ -149,6 +150,37 @@ const source = { x: 100, y: 100 }
 }
 
 const transitionKey = (transition) => transition.id
+
+{
+  const childScript = `
+    import { buildWorkflowEdgeViews } from './src/utils/workflowEdgePath.js'
+
+    const states = [
+      { id: 1, x: 0, y: 0 },
+      { id: 2, x: 120, y: 0 }
+    ]
+    const transitions = [{ id: 'close-forward', from_state_id: 1, to_state_id: 2 }]
+    const build = () => buildWorkflowEdgeViews(states, transitions, (transition) => transition.id)
+    process.stdout.write(JSON.stringify([build(), build()]))
+  `
+  const child = spawnSync(process.execPath, ['--input-type=module', '-e', childScript], {
+    cwd: new URL('../..', import.meta.url),
+    encoding: 'utf8',
+    timeout: 5000
+  })
+
+  assert.notEqual(
+    child.error?.code,
+    'ETIMEDOUT',
+    'close forward routing must terminate for an empty obstacle set'
+  )
+  assert.equal(child.status, 0, child.stderr || child.error?.message)
+  const [first, second] = JSON.parse(child.stdout)
+  assert.equal(first.length, 1)
+  assert.deepEqual(first, second)
+  assertFiniteEdgeView(first[0])
+  assertEdgeBoundsContainGeometry(first[0])
+}
 
 {
   const stateCount = 50

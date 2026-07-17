@@ -595,11 +595,20 @@ function findForwardRouteCandidate(
   const routePadding = clearance + CORNER_RADIUS
   const rectangles = obstacles.map((node) => expandedRectangle(node, clearance))
   const routingBounds = obstacles.map((node) => expandedRectangle(node, routePadding))
-  const above = Math.min(...routingBounds.map((rectangle) => rectangle.top)) - 1
-  const below = Math.max(...routingBounds.map((rectangle) => rectangle.bottom)) + 1
-  const leftOuter = Math.min(...routingBounds.map((rectangle) => rectangle.left)) - 1
-  const rightOuter = Math.max(...routingBounds.map((rectangle) => rectangle.right)) + 1
-  const internalBoundaries = routingBounds.flatMap((rectangle) => (
+  const finiteRoutingBounds = routingBounds.filter((rectangle) => (
+    [rectangle.left, rectangle.top, rectangle.right, rectangle.bottom].every(Number.isFinite)
+  ))
+  const routeEnvelope = finiteRoutingBounds.length ? finiteRoutingBounds : [{
+    left: Math.min(start.x, end.x) - routePadding,
+    top: Math.min(start.y, end.y) - routePadding,
+    right: Math.max(start.x, end.x) + routePadding,
+    bottom: Math.max(start.y, end.y) + routePadding
+  }]
+  const above = Math.min(...routeEnvelope.map((rectangle) => rectangle.top)) - 1
+  const below = Math.max(...routeEnvelope.map((rectangle) => rectangle.bottom)) + 1
+  const leftOuter = Math.min(...routeEnvelope.map((rectangle) => rectangle.left)) - 1
+  const rightOuter = Math.max(...routeEnvelope.map((rectangle) => rectangle.right)) + 1
+  const internalBoundaries = finiteRoutingBounds.flatMap((rectangle) => (
     [rectangle.left - 1, rectangle.right + 1]
   ))
   const startChannels = channelCandidates(

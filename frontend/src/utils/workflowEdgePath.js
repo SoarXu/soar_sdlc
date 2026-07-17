@@ -114,8 +114,15 @@ function buildVerticalView(from, to, states, laneIndex, laneCount) {
     1 - laneIndex * PARALLEL_LANE_GAP
   const rightChannel = Math.max(...routingBounds.map((rectangle) => rectangle.right)) +
     1 + laneIndex * PARALLEL_LANE_GAP
-  const channels = [leftChannel, rightChannel]
-    .sort((left, right) => Math.abs(trackX - left) - Math.abs(trackX - right) || left - right)
+  const channels = channelCandidates(
+    trackX,
+    [
+      leftChannel,
+      rightChannel,
+      ...routingBounds.flatMap((rectangle) => [rectangle.left - 1, rectangle.right + 1])
+    ],
+    () => true
+  )
   const points = firstClearPolyline(
     channels.map((channel) => verticalRoutePoints(start, end, channel)),
     rectangles
@@ -179,22 +186,30 @@ function buildObstacleAvoidingForwardView(start, end, obstacles, laneIndex) {
   const below = Math.max(...routingBounds.map((rectangle) => rectangle.bottom)) + 1
   const leftOuter = Math.min(...routingBounds.map((rectangle) => rectangle.left)) - 1
   const rightOuter = Math.max(...routingBounds.map((rectangle) => rectangle.right)) + 1
+  const internalBoundaries = routingBounds.flatMap((rectangle) => (
+    [rectangle.left - 1, rectangle.right + 1]
+  ))
   const startChannels = channelCandidates(
     start.x + PARALLEL_LANE_GAP,
-    [start.x, leftOuter, rightOuter],
+    [start.x, leftOuter, rightOuter, ...internalBoundaries],
     (x) => x >= start.x && x < end.x
   )
   const endChannels = channelCandidates(
     end.x - PARALLEL_LANE_GAP,
-    [end.x, leftOuter, rightOuter],
+    [end.x, leftOuter, rightOuter, ...internalBoundaries],
     (x) => x > start.x && x <= end.x
   )
   const laneOffset = laneIndex * PARALLEL_LANE_GAP
   const tracks = [above - laneOffset, below + laneOffset]
     .sort((left, right) => routeDistance(start, end, left) - routeDistance(start, end, right) || left - right)
-  const candidates = tracks.flatMap((trackY) => (
-    startChannels.flatMap((startTrackX) => (
-      endChannels.map((endTrackX) => forwardRoutePoints(
+  const candidates = tracks.flatMap((trackY) => {
+    const safeStartChannels = startChannels
+      .filter((trackX) => forwardLegClears(start, trackX, trackY, 1, rectangles))
+    const safeEndChannels = endChannels
+      .filter((trackX) => forwardLegClears(end, trackX, trackY, -1, rectangles))
+
+    return safeStartChannels.flatMap((startTrackX) => (
+      safeEndChannels.map((endTrackX) => forwardRoutePoints(
         start,
         end,
         startTrackX,
@@ -202,7 +217,7 @@ function buildObstacleAvoidingForwardView(start, end, obstacles, laneIndex) {
         trackY
       ))
     ))
-  ))
+  })
   const points = firstClearPolyline(candidates, rectangles)
 
   if (!points) throw new Error('Unable to route workflow forward edge around nodes')
@@ -212,6 +227,24 @@ function buildObstacleAvoidingForwardView(start, end, obstacles, laneIndex) {
     (trackPoints[0].x + trackPoints[trackPoints.length - 1].x) / 2,
     trackPoints[0].y
   )
+}
+
+function forwardLegClears(anchor, trackX, trackY, direction, rectangles) {
+  const trackExtension = trackX + direction * PARALLEL_LANE_GAP
+  const points = direction > 0
+    ? [
+        anchor,
+        { x: trackX, y: anchor.y },
+        { x: trackX, y: trackY },
+        { x: trackExtension, y: trackY }
+      ]
+    : [
+        { x: trackExtension, y: trackY },
+        { x: trackX, y: trackY },
+        { x: trackX, y: anchor.y },
+        anchor
+      ]
+  return polylineClearsRectangles(normalizeOrthogonalPoints(points), rectangles)
 }
 
 function forwardRoutePoints(start, end, startTrackX, endTrackX, trackY) {

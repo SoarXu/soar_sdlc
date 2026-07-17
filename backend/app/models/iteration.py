@@ -16,17 +16,16 @@ class Iteration(Base):
     end_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     actual_start_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     actual_end_date: Mapped[date | None] = mapped_column(Date, nullable=True)
-    status: Mapped[str] = mapped_column(String(32), default="planning")
-    workflow_definition_id: Mapped[int | None] = mapped_column(
+    workflow_definition_id: Mapped[int] = mapped_column(
         BigInteger,
         ForeignKey("workflow_definitions.id", ondelete="RESTRICT"),
-        nullable=True,
+        nullable=False,
         index=True,
     )
-    current_state_id: Mapped[int | None] = mapped_column(
+    current_state_id: Mapped[int] = mapped_column(
         BigInteger,
         ForeignKey("workflow_states.id", ondelete="RESTRICT"),
-        nullable=True,
+        nullable=False,
         index=True,
     )
     lifecycle_phase: Mapped[str] = mapped_column(String(32), default="development")
@@ -42,7 +41,7 @@ class Iteration(Base):
     deleted: Mapped[int] = mapped_column(Integer, default=0)
     delete_time: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
-    current_state: Mapped["WorkflowState | None"] = relationship(foreign_keys=[current_state_id], lazy="joined")
+    current_state: Mapped["WorkflowState"] = relationship(foreign_keys=[current_state_id], lazy="joined")
 
     @property
     def status_name(self) -> str | None:

@@ -12,7 +12,7 @@ from app.models.requirement import Requirement
 from app.models.role import Role, UserRole
 from app.models.task import Task
 from app.models.user import User
-from app.models.workflow_definition import WorkflowState
+from app.models.workflow_definition import WorkflowState, WorkflowTransition
 from app.views.workflow_definition_view import WorkflowTemplateState, WorkflowTemplateTransition
 
 
@@ -64,12 +64,37 @@ def _add_project_member(project_id: int, user_id: int, project_role: str) -> Non
 
 
 def _state_id_for_status(db, item, status: str) -> int:
-    state_id = db.query(WorkflowState.id).filter(
-        WorkflowState.definition_id == item.workflow_definition_id,
-        WorkflowState.status_key == status,
-    ).scalar()
-    assert state_id is not None
-    return state_id
+    action_by_status = {
+        "in_processing": "claim",
+        "pending_confirmation": "submit_confirmation",
+        "completed": "complete",
+        "canceled": "cancel",
+        "fixing": "confirm_bug_type",
+        "pending_verification": "submit_verification",
+        "verified": "verification_passed",
+        "closed": "close",
+        "active": "start",
+        "paused": "suspend",
+    }
+    if status in {"pending_assignment", "pending_handling", "planning"}:
+        state_ids = {
+            value
+            for value, in db.query(WorkflowState.id).filter(
+                WorkflowState.definition_id == item.workflow_definition_id,
+                WorkflowState.category == "start",
+            ).all()
+        }
+    else:
+        action_key = action_by_status[status]
+        state_ids = {
+            value
+            for value, in db.query(WorkflowTransition.to_state_id).filter(
+                WorkflowTransition.definition_id == item.workflow_definition_id,
+                WorkflowTransition.action_key == action_key,
+            ).all()
+        }
+    assert len(state_ids) == 1
+    return next(iter(state_ids))
 
 
 def _create_project_with_config(client: TestClient) -> int:
@@ -124,6 +149,7 @@ def test_default_template_initialization_does_not_overwrite_persisted_state_edit
     db = SessionLocal()
     try:
         state = db.query(WorkflowState).filter(WorkflowState.id == state_id).one()
+        original_name = state.status_name
         state.status_name = custom_name
         db.commit()
     finally:
@@ -133,6 +159,13 @@ def test_default_template_initialization_does_not_overwrite_persisted_state_edit
     refreshed = client.get(f"/api/v1/workflow-definitions/{definition['id']}").json()
 
     assert next(item for item in refreshed["states"] if item["id"] == state_id)["status_name"] == custom_name
+    db = SessionLocal()
+    try:
+        state = db.query(WorkflowState).filter(WorkflowState.id == state_id).one()
+        state.status_name = original_name
+        db.commit()
+    finally:
+        db.close()
 
 
 def _set_requirement_status(requirement_id: int, status: str) -> None:
@@ -217,7 +250,7 @@ def _set_iteration_status(iteration_id: int, status: str) -> None:
     try:
         iteration = db.query(Iteration).filter(Iteration.id == iteration_id).first()
         assert iteration is not None
-        iteration.status = status
+        iteration.current_state_id = _state_id_for_status(db, iteration, status)
         db.commit()
     finally:
         db.close()
@@ -228,7 +261,7 @@ def _set_project_status(project_id: int, status: str) -> None:
     try:
         project = db.query(Project).filter(Project.id == project_id).first()
         assert project is not None
-        project.status = status
+        project.current_state_id = _state_id_for_status(db, project, status)
         db.commit()
     finally:
         db.close()
@@ -299,11 +332,14 @@ def test_task_branch_defaults_follow_confirmation_template(client: TestClient):
     )
 
     assert bug_fix_task.status_code == 200
-    assert bug_fix_task.json()["status_name"] == "待分派"
+    assert bug_fix_task.json()["status_name"]
+    assert bug_fix_task.json()["state_category"] == "start"
     assert requirement_task.status_code == 200
-    assert requirement_task.json()["status_name"] == "待分派"
+    assert requirement_task.json()["status_name"]
+    assert requirement_task.json()["state_category"] == "start"
     assert unassigned_task.status_code == 200
-    assert unassigned_task.json()["status_name"] == "待分派"
+    assert unassigned_task.json()["status_name"]
+    assert unassigned_task.json()["state_category"] == "start"
 
     for task_response in (bug_fix_task, requirement_task):
         claimed = client.post(
@@ -505,7 +541,8 @@ def test_reactivate_uses_handler_presence_and_completed_requirement_can_reactiva
         headers={"Authorization": f"Bearer {creator_token}"},
     )
     assert unassigned.status_code == 200, unassigned.text
-    assert unassigned.json()["status_name"] == "待分派"
+    assert unassigned.json()["status_name"]
+    assert unassigned.json()["state_category"] == "start"
     assert unassigned.json()["owner_id"] is None
 
     _set_requirement_owner_and_status(requirement["id"], None, "canceled")

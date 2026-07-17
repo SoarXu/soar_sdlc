@@ -43,7 +43,6 @@ def list_iterations(db: Session, project_id: int | None = None) -> list[dict]:
             "end_date": it.end_date,
             "actual_start_date": it.actual_start_date,
             "actual_end_date": it.actual_end_date,
-            "status": it.status,
             "lifecycle_phase": it.lifecycle_phase,
             "goal": it.goal,
             "creator_id": it.creator_id,
@@ -88,7 +87,6 @@ def create_iteration(db: Session, payload: IterationCreate) -> dict:
         "end_date": iteration.end_date,
         "actual_start_date": iteration.actual_start_date,
         "actual_end_date": iteration.actual_end_date,
-        "status": iteration.status,
         "lifecycle_phase": iteration.lifecycle_phase,
         "goal": iteration.goal,
         "creator_id": iteration.creator_id,
@@ -102,7 +100,6 @@ def create_iteration(db: Session, payload: IterationCreate) -> dict:
 def update_iteration(db: Session, iteration_id: int, payload: IterationUpdate) -> dict:
     iteration = _get_active_iteration(db, iteration_id)
     data = payload.model_dump(exclude_unset=True)
-    data.pop("status", None)
     project_id = data.pop("project_id", None)
     project_ids = data.pop("project_ids", None)
     if project_id and project_ids is None:
@@ -138,7 +135,6 @@ def update_iteration(db: Session, iteration_id: int, payload: IterationUpdate) -
         "end_date": iteration.end_date,
         "actual_start_date": iteration.actual_start_date,
         "actual_end_date": iteration.actual_end_date,
-        "status": iteration.status,
         "lifecycle_phase": iteration.lifecycle_phase,
         "goal": iteration.goal,
         "creator_id": iteration.creator_id,
@@ -350,7 +346,6 @@ def _iteration_to_dict(iteration: Iteration, project_ids: list[int]) -> dict:
         "end_date": iteration.end_date,
         "actual_start_date": iteration.actual_start_date,
         "actual_end_date": iteration.actual_end_date,
-        "status": iteration.status,
         "lifecycle_phase": iteration.lifecycle_phase,
         "goal": iteration.goal,
         "creator_id": iteration.creator_id,
@@ -495,7 +490,6 @@ def _start_iteration_record(
         WorkflowState.definition_id == iteration.workflow_definition_id,
     ).one()
     iteration.current_state_id = to_state.id
-    iteration.status = to_state.status_key
     iteration.actual_start_date = effective_date
     payload = StatusOperationCreate(effective_time=datetime.combine(effective_date, datetime.min.time()), remark=remark)
     create_status_operation(

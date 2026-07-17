@@ -22,7 +22,8 @@ from app.models.task import Task  # noqa: E402
 from app.models.test_case import TestCase  # noqa: E402
 from app.models.test_case_execution import TestCaseExecutionLog  # noqa: E402
 from app.models.user import User  # noqa: E402
-from app.models.workflow_definition import WorkflowState  # noqa: E402
+from app.models.workflow_definition import WorkflowDefinition, WorkflowState, WorkflowTransition  # noqa: E402
+from app.services.default_workflow_template_service import ensure_default_workflow_templates  # noqa: E402
 from app.services.user_service import seed_default_users  # noqa: E402
 from app.services.workflow_state_service import resolve_effective_workflow  # noqa: E402
 
@@ -40,12 +41,47 @@ ASCII_MARKERS = [
 ]
 
 
-def _workflow_values(db, object_type: str, project_id: int, state_key: str) -> dict[str, int]:
-    definition, _ = resolve_effective_workflow(db, object_type, project_id)
-    state = db.query(WorkflowState).filter(
-        WorkflowState.definition_id == definition.id,
-        WorkflowState.status_key == state_key,
-    ).one()
+def _workflow_values(
+    db,
+    object_type: str,
+    project_id: int | None = None,
+    *,
+    state_category: str | None = None,
+    target_action_key: str | None = None,
+) -> dict[str, int]:
+    ensure_default_workflow_templates(db)
+    if project_id is not None:
+        definition, _ = resolve_effective_workflow(db, object_type, project_id)
+    else:
+        definition = db.query(WorkflowDefinition).filter(
+            WorkflowDefinition.object_type == object_type,
+            WorkflowDefinition.scope_type == "system",
+            WorkflowDefinition.is_default_template.is_(True),
+            WorkflowDefinition.enabled.is_(True),
+        ).one()
+    if target_action_key:
+        target_ids = {
+            int(value)
+            for value, in db.query(WorkflowTransition.to_state_id)
+            .filter(
+                WorkflowTransition.definition_id == definition.id,
+                WorkflowTransition.action_key == target_action_key,
+                WorkflowTransition.enabled.is_(True),
+            )
+            .all()
+        }
+        if len(target_ids) != 1:
+            raise RuntimeError(
+                f"Expected one target state for {object_type}.{target_action_key}, found {sorted(target_ids)}"
+            )
+        state = db.query(WorkflowState).filter(WorkflowState.id == next(iter(target_ids))).one()
+    else:
+        category = state_category or "start"
+        state = db.query(WorkflowState).filter(
+            WorkflowState.definition_id == definition.id,
+            WorkflowState.category == category,
+            WorkflowState.enabled.is_(True),
+        ).one()
     return {"workflow_definition_id": definition.id, "current_state_id": state.id}
 
 
@@ -66,7 +102,7 @@ def main() -> None:
             owner_id=owner_pm.id,
             planned_start_date=date(2026, 6, 1),
             planned_end_date=date(2026, 12, 31),
-            **_workflow_values(db, "requirement", project_archive.id, "in_processing"),
+            status="active",
             description="用于验证项目集、项目、迭代和工作台联动的演示项目集。",
         )
         program_lab = Program(
@@ -87,8 +123,7 @@ def main() -> None:
             start_date=date(2026, 6, 10),
             end_date=date(2026, 9, 30),
             actual_start_date=date(2026, 6, 12),
-            status="active",
-            lifecycle_phase="development",
+            **_workflow_values(db, "project", target_action_key="start"),
             description="验证 QA 档案归档、检索和权限相关需求。",
         )
         project_bd = Project(
@@ -97,8 +132,7 @@ def main() -> None:
             owner_id=owner_dev.id,
             start_date=date(2026, 6, 20),
             end_date=date(2026, 10, 15),
-            status="active",
-            lifecycle_phase="development",
+            **_workflow_values(db, "project", target_action_key="start"),
             description="验证 BD 线索看板和商机流转场景。",
         )
         project_ops = Project(
@@ -107,8 +141,7 @@ def main() -> None:
             owner_id=owner_qa.id,
             start_date=date(2026, 7, 1),
             is_long_term=True,
-            status="active",
-            lifecycle_phase="maintenance",
+            **_workflow_values(db, "project", target_action_key="start"),
             description="验证长期运维项目和缺陷响应场景。",
         )
         db.add_all([project_archive, project_bd, project_ops])
@@ -120,7 +153,7 @@ def main() -> None:
             start_date=date(2026, 6, 15),
             end_date=date(2026, 7, 15),
             actual_start_date=date(2026, 6, 15),
-            status="active",
+            **_workflow_values(db, "iteration", target_action_key="start"),
             lifecycle_phase="development",
             goal="完成档案检索、权限校验和审计追踪主链路。",
         )
@@ -129,7 +162,7 @@ def main() -> None:
             owner_id=owner_pm.id,
             start_date=date(2026, 7, 1),
             end_date=date(2026, 7, 31),
-            status="planning",
+            **_workflow_values(db, "iteration", state_category="start"),
             lifecycle_phase="development",
             goal="验证 BD 看板字段、转化状态和提醒。",
         )
@@ -150,7 +183,7 @@ def main() -> None:
             priority="1",
             owner_id=owner_po.id,
             proposer_id=owner_pm.id,
-            status="active",
+            **_workflow_values(db, "requirement", project_archive.id, target_action_key="claim"),
             review_status="approved",
             lifecycle_phase="development",
             description="质控人员输入样本批号后，应快速定位原始记录、复核报告和签批记录。",
@@ -164,7 +197,7 @@ def main() -> None:
             priority="2",
             owner_id=owner_qa.id,
             proposer_id=owner_po.id,
-            **_workflow_values(db, "requirement", project_archive.id, "pending_assignment"),
+            **_workflow_values(db, "requirement", project_archive.id, state_category="start"),
             review_status="pending",
             lifecycle_phase="development",
             description="下载稳定性报告时记录下载人、时间、IP 和下载原因。",
@@ -178,7 +211,7 @@ def main() -> None:
             priority="3",
             owner_id=owner_dev.id,
             proposer_id=owner_pm.id,
-            **_workflow_values(db, "requirement", project_bd.id, "in_processing"),
+            **_workflow_values(db, "requirement", project_bd.id, target_action_key="claim"),
             review_status="approved",
             lifecycle_phase="development",
             description="当线索来自重点客户且预计金额超过阈值时自动标记为高价值。",
@@ -197,7 +230,7 @@ def main() -> None:
             owner_id=owner_dev.id,
             estimated_hours=Decimal("16.0"),
             due_date=date(2026, 6, 28),
-            **_workflow_values(db, "task", project_archive.id, "in_processing"),
+            **_workflow_values(db, "task", project_archive.id, target_action_key="claim"),
             lifecycle_phase="development",
             description="实现批号、项目编号和报告类型的组合索引查询接口。",
         )
@@ -211,7 +244,7 @@ def main() -> None:
             owner_id=owner_dev.id,
             estimated_hours=Decimal("10.0"),
             due_date=date(2026, 7, 5),
-            **_workflow_values(db, "task", project_archive.id, "pending_assignment"),
+            **_workflow_values(db, "task", project_archive.id, state_category="start"),
             lifecycle_phase="development",
             description="在报告下载接口写入审计日志并暴露查询条件。",
         )
@@ -225,7 +258,7 @@ def main() -> None:
             owner_id=owner_dev.id,
             estimated_hours=Decimal("8.0"),
             due_date=date(2026, 7, 12),
-            **_workflow_values(db, "task", project_bd.id, "pending_assignment"),
+            **_workflow_values(db, "task", project_bd.id, state_category="start"),
             lifecycle_phase="development",
             description="在 BD 看板列表中展示高价值线索角标和筛选入口。",
         )
@@ -328,7 +361,7 @@ def main() -> None:
             reproduce_steps="1. 登录质控账号\n2. 输入批号 BATCH-2026-A17 查询\n3. 观察报告列表\n实际只返回稳定性报告，缺少复核报告。",
             expected_result="稳定性报告和复核报告都应出现在结果列表。",
             actual_result="复核报告未返回，导致质控人员无法完成复核链路检查。",
-            **_workflow_values(db, "bug", project_archive.id, "fixing"),
+            **_workflow_values(db, "bug", project_archive.id, target_action_key="confirm_bug_type"),
             lifecycle_phase="development",
         )
         bug_download_blocked = Bug(
@@ -346,7 +379,7 @@ def main() -> None:
             reproduce_steps="1. 使用具备下载权限的账号打开敏感报告\n2. 填写下载原因\n3. 查看下载按钮状态\n按钮仍为灰显。",
             expected_result="具备权限且填写原因后允许下载，并生成审计记录。",
             actual_result="下载按钮不可点击，阻塞审计留痕验证。",
-            **_workflow_values(db, "bug", project_archive.id, "pending_handling"),
+            **_workflow_values(db, "bug", project_archive.id, state_category="start"),
             lifecycle_phase="development",
         )
         db.add_all([bug_missing_review, bug_download_blocked])

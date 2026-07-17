@@ -9,7 +9,7 @@ from app.models.requirement import Requirement
 from app.models.role import Role, UserRole
 from app.models.task import Task
 from app.models.user import User
-from app.models.workflow_definition import WorkflowState
+from app.models.workflow_definition import WorkflowState, WorkflowTransition
 
 
 def _create_user(full_name: str, role_key: str | None = None) -> tuple[int, str]:
@@ -84,12 +84,16 @@ def _set_task_status(task_id: int, status: str) -> None:
 
 
 def _state_id(db, definition_id: int, status: str) -> int:
-    state_id = db.query(WorkflowState.id).filter(
-        WorkflowState.definition_id == definition_id,
-        WorkflowState.status_key == status,
-    ).scalar()
-    assert state_id is not None
-    return state_id
+    action_key = {"completed": "complete", "canceled": "cancel"}[status]
+    state_ids = {
+        value
+        for value, in db.query(WorkflowTransition.to_state_id).filter(
+            WorkflowTransition.definition_id == definition_id,
+            WorkflowTransition.action_key == action_key,
+        ).all()
+    }
+    assert len(state_ids) == 1
+    return next(iter(state_ids))
 
 
 def _runtime_transition(

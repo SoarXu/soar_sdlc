@@ -51,20 +51,10 @@ MODEL_BY_TYPE = {
     "project": Project,
 }
 
-NORMALIZED_STATUS_SETS = {
-    "requirement": {"pending_assignment", "in_processing", "pending_confirmation", "completed", "canceled"},
-    "task": {"pending_assignment", "in_processing", "pending_confirmation", "completed", "canceled"},
-    "bug": {"pending_handling", "fixing", "pending_verification", "verified", "closed"},
-    "iteration": {"planning", "active", "completed", "canceled"},
-    "project": {"planning", "active", "paused", "closed"},
-}
 SUPPORTED_VALIDATOR_TYPES = {
     "bug_close_gate", "requirement_terminal_gate", "iteration_terminal_gate", "project_close_gate",
 }
 SUPPORTED_AUTOMATION_TYPES = {"notification"}
-CORE_ID_OBJECT_TYPES = {"requirement", "task", "bug", "project", "iteration"}
-
-
 def list_available_transitions(
     db: Session,
     object_type: str,
@@ -81,10 +71,7 @@ def list_available_transitions(
         WorkflowTransition.definition_id == definition.id,
         WorkflowTransition.enabled == True,  # noqa: E712
     )
-    if object_type in CORE_ID_OBJECT_TYPES:
-        query = query.filter(WorkflowTransition.from_state_id == current_state.id)
-    else:
-        query = query.filter(WorkflowTransition.from_status == current_state)
+    query = query.filter(WorkflowTransition.from_state_id == current_state.id)
     transitions = query.order_by(WorkflowTransition.sort_order.asc(), WorkflowTransition.id.asc()).all()
     result = []
     for transition in transitions:
@@ -126,12 +113,7 @@ def execute_transition(
     transition_context = _get_executable_transition(db, object_type, item, request.action_key)
     transition, current_state = transition_context
     _ensure_supported_runtime_configuration(transition)
-    if object_type in CORE_ID_OBJECT_TYPES:
-        from_status = current_state.status_name
-    else:
-        from_status = current_state
-        if from_status != item.status:
-            item.status = from_status
+    from_status = current_state.status_name
     _ensure_can_execute(db, object_type, item, transition, actor, request)
     if (transition.ui_config or {}).get("command_type"):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Non-status command must use its dedicated endpoint")
@@ -140,30 +122,17 @@ def execute_transition(
     delegated_owner = _owner_user(db, getattr(item, "owner_id", None)) if delegated else None
     original_owner_id = getattr(item, "owner_id", None)
     selected_values = _selected_values(request)
-    default_target_state = None
-    resolved_target_state = None
-    if object_type in CORE_ID_OBJECT_TYPES:
-        default_target_state, resolved_target_state = _resolve_target_states(
-            db,
-            object_type,
-            item,
-            transition,
-            request,
-            actor,
-            selected_values,
-        )
-        default_target_status = default_target_state.status_name
-        resolved_target_status = resolved_target_state.status_name
-    else:
-        default_target_status, resolved_target_status = _resolve_target_status(
-            db,
-            object_type,
-            item,
-            transition,
-            request,
-            actor,
-            selected_values,
-        )
+    default_target_state, resolved_target_state = _resolve_target_states(
+        db,
+        object_type,
+        item,
+        transition,
+        request,
+        actor,
+        selected_values,
+    )
+    default_target_status = default_target_state.status_name
+    resolved_target_status = resolved_target_state.status_name
     if object_type == "bug" and transition.action_key == "reclassify_bug_type":
         if not (request.payload.get("reason") or "").strip():
             raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Reclassification reason is required")
@@ -188,13 +157,8 @@ def execute_transition(
         None,
         transition,
     )
-    if resolved_target_state is not None:
-        item.workflow_definition_id = transition.definition_id
-        item.current_state_id = resolved_target_state.id
-        if object_type in {"project", "iteration"}:
-            item.status = resolved_target_state.status_key
-    else:
-        setattr(item, "status", resolved_target_status)
+    item.workflow_definition_id = transition.definition_id
+    item.current_state_id = resolved_target_state.id
     handler_routing = _next_owner_resolution(
         db,
         object_type,
@@ -237,11 +201,11 @@ def execute_transition(
         action=transition.action_key,
         from_status=from_status,
         to_status=resolved_target_status,
-        workflow_definition_id=transition.definition_id if object_type in CORE_ID_OBJECT_TYPES else None,
-        from_state_id=current_state.id if object_type in CORE_ID_OBJECT_TYPES else None,
-        to_state_id=resolved_target_state.id if resolved_target_state else None,
-        from_state_name=current_state.status_name if object_type in CORE_ID_OBJECT_TYPES else from_status,
-        to_state_name=resolved_target_state.status_name if resolved_target_state else resolved_target_status,
+        workflow_definition_id=transition.definition_id,
+        from_state_id=current_state.id,
+        to_state_id=resolved_target_state.id,
+        from_state_name=current_state.status_name,
+        to_state_name=resolved_target_state.status_name,
         payload=_status_payload(request),
         actor_id=actor.id if actor else None,
         actor_name=actor.full_name if actor else None,
@@ -268,11 +232,10 @@ def execute_transition(
     return WorkflowTransitionExecuteRead(
         object_type=object_type,
         id=item.id,
-        status=getattr(item, "status", None),
-        workflow_definition_id=getattr(item, "workflow_definition_id", None),
-        current_state_id=getattr(item, "current_state_id", None),
-        status_name=resolved_target_state.status_name if resolved_target_state else item.status,
-        state_category=resolved_target_state.category if resolved_target_state else None,
+        workflow_definition_id=item.workflow_definition_id,
+        current_state_id=item.current_state_id,
+        status_name=resolved_target_state.status_name,
+        state_category=resolved_target_state.category,
         owner_id=getattr(item, "owner_id", None),
         default_target_status=default_target_status,
         resolved_target_status=resolved_target_status,
@@ -293,138 +256,39 @@ def _get_item(db: Session, object_type: str, object_id: int):
     return item
 
 
-def _definition_candidates_for_item(db: Session, object_type: str, item) -> list[WorkflowDefinition]:
-    project_id = _project_id_for_item(db, object_type, item)
-    project = db.query(Project).filter(Project.id == project_id, Project.deleted == 0).first() if project_id else None
-    candidates: list[WorkflowDefinition] = []
-    if object_type in CORE_ID_OBJECT_TYPES and project and project.assignee_rule_config_id:
-        scoped_definition = (
-            db.query(WorkflowDefinition)
-            .filter(
-                WorkflowDefinition.object_type == object_type,
-                WorkflowDefinition.scope_type == "assignee_rule_config",
-                WorkflowDefinition.scope_id == project.assignee_rule_config_id,
-                WorkflowDefinition.enabled == True,  # noqa: E712
-            )
-            .order_by(WorkflowDefinition.id.desc())
-            .first()
-        )
-        if scoped_definition:
-            return [scoped_definition]
-        return []
-    default_definition = (
-        db.query(WorkflowDefinition)
-        .filter(
-            WorkflowDefinition.object_type == object_type,
-            WorkflowDefinition.scope_type == "system",
-            WorkflowDefinition.is_default_template == True,  # noqa: E712
-            WorkflowDefinition.enabled == True,  # noqa: E712
-        )
-        .order_by(WorkflowDefinition.id.desc())
-        .first()
-    )
-    if default_definition:
-        candidates.append(default_definition)
-    return candidates
-
-
 def _resolve_definition_context(db: Session, object_type: str, item):
-    if object_type in CORE_ID_OBJECT_TYPES and item.workflow_definition_id and item.current_state_id:
-        definition = (
-            db.query(WorkflowDefinition)
-            .filter(WorkflowDefinition.id == item.workflow_definition_id)
-            .first()
+    definition = db.query(WorkflowDefinition).filter(
+        WorkflowDefinition.id == item.workflow_definition_id,
+        WorkflowDefinition.object_type == object_type,
+    ).first()
+    state_record = db.query(WorkflowState).filter(
+        WorkflowState.id == item.current_state_id,
+        WorkflowState.definition_id == item.workflow_definition_id,
+    ).first()
+    if not definition or not state_record:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"{object_type} {item.id} has invalid workflow state references",
         )
-        state_record = (
-            db.query(WorkflowState)
-            .filter(
-                WorkflowState.id == item.current_state_id,
-                WorkflowState.definition_id == item.workflow_definition_id,
-            )
-            .first()
-        )
-        if not definition or not state_record:
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail=f"{object_type} {item.id} has invalid workflow state references",
-            )
-        return definition, state_record
-    if object_type in CORE_ID_OBJECT_TYPES:
-        definitions = _definition_candidates_for_item(db, object_type, item)
-        for definition in definitions:
-            for status_key in _status_candidates(object_type, item):
-                state_record = (
-                    db.query(WorkflowState)
-                    .filter(
-                        WorkflowState.definition_id == definition.id,
-                        WorkflowState.status_key == status_key,
-                    )
-                    .first()
-                )
-                if state_record:
-                    item.workflow_definition_id = definition.id
-                    item.current_state_id = state_record.id
-                    return definition, state_record
-        if definitions:
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail=f"{object_type} {item.id} status cannot be mapped to its workflow definition",
-            )
-        return None
-    for definition in _definition_candidates_for_item(db, object_type, item):
-        for status_key in _status_candidates(object_type, item):
-            transition_exists = (
-                db.query(WorkflowTransition.id)
-                .filter(
-                    WorkflowTransition.definition_id == definition.id,
-                    WorkflowTransition.from_status == status_key,
-                    WorkflowTransition.enabled == True,  # noqa: E712
-                )
-                .first()
-                is not None
-            )
-            if transition_exists:
-                return definition, status_key
-    return None
+    return definition, state_record
 
 
 def _get_executable_transition(db: Session, object_type: str, item, action_key: str):
-    if object_type in CORE_ID_OBJECT_TYPES and item.workflow_definition_id and item.current_state_id:
-        definition_context = _resolve_definition_context(db, object_type, item)
-        definition, current_state = definition_context
-        transitions = (
-            db.query(WorkflowTransition)
-            .filter(
-                WorkflowTransition.definition_id == definition.id,
-                WorkflowTransition.from_state_id == current_state.id,
-                WorkflowTransition.action_key == action_key,
-                WorkflowTransition.enabled == True,  # noqa: E712
-            )
-            .order_by(WorkflowTransition.sort_order.asc(), WorkflowTransition.id.asc())
-            .all()
+    definition, current_state = _resolve_definition_context(db, object_type, item)
+    transitions = (
+        db.query(WorkflowTransition)
+        .filter(
+            WorkflowTransition.definition_id == definition.id,
+            WorkflowTransition.from_state_id == current_state.id,
+            WorkflowTransition.action_key == action_key,
+            WorkflowTransition.enabled == True,  # noqa: E712
         )
-        for transition in transitions:
-            if _matches_transition_condition(item, transition):
-                return transition, current_state
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Workflow transition not available")
-    for definition in _definition_candidates_for_item(db, object_type, item):
-        for status_key in _status_candidates(object_type, item):
-            transitions = (
-                db.query(WorkflowTransition)
-                .filter(
-                    WorkflowTransition.definition_id == definition.id,
-                    WorkflowTransition.from_status == status_key,
-                    WorkflowTransition.action_key == action_key,
-                    WorkflowTransition.enabled == True,  # noqa: E712
-                )
-                .order_by(WorkflowTransition.sort_order.asc(), WorkflowTransition.id.asc())
-                .all()
-            )
-            for transition in transitions:
-                if _matches_transition_condition(item, transition):
-                    return transition, status_key
-    if not _definition_candidates_for_item(db, object_type, item):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Workflow definition not found")
+        .order_by(WorkflowTransition.sort_order.asc(), WorkflowTransition.id.asc())
+        .all()
+    )
+    for transition in transitions:
+        if _matches_transition_condition(item, transition):
+            return transition, current_state
     raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Workflow transition not available")
 
 
@@ -625,22 +489,6 @@ def _selected_values(request: WorkflowTransitionExecuteRequest) -> dict[str, Any
     return dict(request.payload.get("selected_values") or {})
 
 
-def _status_candidates(object_type: str, item) -> list[str]:
-    status_key = getattr(item, "status", None)
-    return [status_key] if status_key else []
-
-
-def _normalized_status(object_type: str, item) -> str | None:
-    candidates = _status_candidates(object_type, item)
-    if not candidates:
-        return getattr(item, "status", None)
-    normalized_statuses = NORMALIZED_STATUS_SETS.get(object_type, set())
-    for candidate in candidates:
-        if candidate in normalized_statuses:
-            return candidate
-    return candidates[0]
-
-
 def _resolve_target_states(
     db: Session,
     object_type: str,
@@ -750,69 +598,6 @@ def _bug_dictionary_target_state_ids(db: Session, definition_id: int) -> dict[bo
         True: int(action_sources["submit_verification"]),
         False: int(action_sources["verification_passed"]),
     }
-
-
-def _resolve_target_status(
-    db: Session,
-    object_type: str,
-    item,
-    transition: WorkflowTransition,
-    request: WorkflowTransitionExecuteRequest,
-    actor: User | None,
-    selected_values: dict[str, Any],
-) -> tuple[str, str]:
-    default_target_status = transition.to_status
-    resolved_target_status = transition.to_status
-    condition_config = transition.condition_config or {}
-    owner_targets = condition_config.get("target_status_by_owner") or {}
-    if owner_targets:
-        target_owner_id = request.next_owner_id if request.next_owner_id is not None else getattr(item, "owner_id", None)
-        default_target_status = owner_targets.get("with_owner" if target_owner_id else "without_owner", transition.to_status)
-        resolved_target_status = default_target_status
-    routes = condition_config.get("routes") or {}
-    route_dictionary = condition_config.get("route_dictionary")
-    if routes or route_dictionary:
-        field_name = condition_config.get("field")
-        selected_value = selected_values.get(field_name) if field_name else None
-        if selected_value is None and field_name:
-            selected_value = request.payload.get(field_name)
-            if selected_value is not None:
-                selected_values[field_name] = selected_value
-        if field_name and selected_value is None:
-            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=f"{field_name} is required")
-        if route_dictionary == "bug_type":
-            dictionary_item = get_enabled_bug_type(db, str(selected_value))
-            mapped_status = dictionary_item.default_target_status
-            selected_values["bug_type_name"] = dictionary_item.display_name
-            selected_values["is_real_bug"] = dictionary_item.is_real_bug
-            selected_values["dictionary_default_target_status"] = dictionary_item.default_target_status
-            allowed_statuses = {"fixing", "pending_verification"}
-        else:
-            mapped_status = routes.get(selected_value)
-            allowed_statuses = set(routes.values())
-        if not mapped_status:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Workflow routing configuration missing for selected value")
-        default_target_status = mapped_status
-        resolved_target_status = mapped_status
-        selected_target_status = request.payload.get("selected_target_status")
-        routing_mode = condition_config.get("routing_mode", "automatic")
-        if routing_mode == "automatic" and selected_target_status:
-            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Automatic routing does not allow a selected target status")
-        if routing_mode == "manual_allowed" and not selected_target_status:
-            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Selected target status is required")
-        if selected_target_status:
-            if selected_target_status not in allowed_statuses:
-                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Selected target status is not allowed")
-            if routing_mode == "automatic_with_override" and selected_target_status != mapped_status:
-                override_roles = set(condition_config.get("allow_override_roles") or [])
-                identities = _actor_identities(db, object_type, item, actor)
-                if not (override_roles & identities):
-                    raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Target status override is not allowed")
-                override_reason = request.override_reason or request.payload.get("override_reason")
-                if not (override_reason or "").strip():
-                    raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Target status override reason is required")
-            resolved_target_status = selected_target_status
-    return default_target_status, resolved_target_status
 
 
 def _apply_domain_payload(

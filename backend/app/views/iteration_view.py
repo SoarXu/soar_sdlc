@@ -1,10 +1,5 @@
 from datetime import date, datetime
-from typing import Literal
-
 from pydantic import BaseModel, ConfigDict
-
-
-IterationStatus = Literal["planning", "active", "completed", "canceled"]
 
 
 class IterationBase(BaseModel):
@@ -16,7 +11,6 @@ class IterationBase(BaseModel):
     end_date: date | None = None
     actual_start_date: date | None = None
     actual_end_date: date | None = None
-    status: IterationStatus = "planning"
     lifecycle_phase: str | None = None
     goal: str | None = None
 
@@ -34,7 +28,6 @@ class IterationUpdate(BaseModel):
     end_date: date | None = None
     actual_start_date: date | None = None
     actual_end_date: date | None = None
-    status: IterationStatus | None = None
     lifecycle_phase: str | None = None
     goal: str | None = None
     updater_id: int | None = None
@@ -44,10 +37,10 @@ class IterationRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: int
-    workflow_definition_id: int | None = None
-    current_state_id: int | None = None
-    status_name: str | None = None
-    state_category: str | None = None
+    workflow_definition_id: int
+    current_state_id: int
+    status_name: str
+    state_category: str
     project_id: int | None = None
     project_ids: list[int] = []
     name: str
@@ -56,7 +49,6 @@ class IterationRead(BaseModel):
     end_date: date | None = None
     actual_start_date: date | None = None
     actual_end_date: date | None = None
-    status: IterationStatus = "planning"
     lifecycle_phase: str | None = None
     goal: str | None = None
     creator_id: int | None = None

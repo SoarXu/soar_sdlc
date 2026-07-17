@@ -10,7 +10,7 @@ from app.models.relation import ObjectRelation
 from app.models.role import Role, UserRole
 from app.models.task import Task
 from app.models.user import User
-from app.models.workflow_definition import WorkflowState
+from app.models.workflow_definition import WorkflowState, WorkflowTransition
 
 
 def _create_user(full_name: str, role_key: str | None = None) -> tuple[int, str]:
@@ -59,12 +59,20 @@ def _auth(token: str) -> dict[str, str]:
 
 def _set_task_status(db, task_id: int, status: str) -> None:
     task = db.query(Task).filter(Task.id == task_id).one()
-    state_id = db.query(WorkflowState.id).filter(
-        WorkflowState.definition_id == task.workflow_definition_id,
-        WorkflowState.status_key == status,
-    ).scalar()
-    assert state_id is not None
-    task.current_state_id = state_id
+    action_key = {
+        "in_processing": "claim",
+        "completed": "complete",
+        "canceled": "cancel",
+    }[status]
+    state_ids = {
+        value
+        for value, in db.query(WorkflowTransition.to_state_id).filter(
+            WorkflowTransition.definition_id == task.workflow_definition_id,
+            WorkflowTransition.action_key == action_key,
+        ).all()
+    }
+    assert len(state_ids) == 1
+    task.current_state_id = next(iter(state_ids))
 
 
 def test_linked_task_creation_supports_all_sources_and_records_relation_and_audit(client: TestClient):
@@ -115,7 +123,8 @@ def test_linked_task_creation_supports_all_sources_and_records_relation_and_audi
         data = response.json()
         assert data["task_type"] == expected_type
         assert data["owner_id"] == handler_id
-        assert data["status_name"] == "待分派"
+        assert data["status_name"]
+        assert data["state_category"] == "start"
         assert data["creator_id"] == handler_id
         assert data["source_relations"] == [
             {"source_type": source_type, "source_id": source_id, "relation_type": "linked_task"}

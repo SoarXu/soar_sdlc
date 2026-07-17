@@ -1,7 +1,5 @@
 from copy import deepcopy
 from datetime import datetime
-from uuid import uuid4
-
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 
@@ -132,10 +130,9 @@ def _save_graph(
     db: Session,
     definition: WorkflowDefinition,
     payload: WorkflowGraphSave,
-    internal_keys: dict[int, str] | None = None,
 ) -> None:
     _validate_graph(db, definition, payload)
-    _persist_graph(db, definition, payload, internal_keys or {})
+    _persist_graph(db, definition, payload)
     definition.version = (definition.version or 1) + 1
     definition.update_time = datetime.now()
     db.commit()
@@ -144,12 +141,12 @@ def _save_graph(
 
 def apply_template(db: Session, definition_id: int) -> dict:
     definition = _get_definition(db, definition_id)
-    payload, internal_keys = _template_graph_payload(
+    payload = _template_graph_payload(
         db,
         definition,
         graph_for_object_type(definition.object_type),
     )
-    _save_graph(db, definition, payload, internal_keys)
+    _save_graph(db, definition, payload)
     return _graph_response(db, definition)
 
 
@@ -319,7 +316,6 @@ def _persist_graph(
     db: Session,
     definition: WorkflowDefinition,
     payload: WorkflowGraphSave,
-    internal_keys: dict[int, str],
 ) -> list[WorkflowTransition]:
     existing_states = {
         item.id: item
@@ -344,12 +340,10 @@ def _persist_graph(
         else:
             state = WorkflowState(
                 definition_id=definition.id,
-                status_key=f"pending_{uuid4().hex}",
                 **data,
             )
             db.add(state)
             db.flush()
-            state.status_key = internal_keys.get(item.id) or f"state_{state.id}"
         state_id_map[item.id] = state.id
         persisted_states[state.id] = state
     db.flush()
@@ -388,8 +382,6 @@ def _persist_graph(
             db.add(transition)
         transition.from_state_id = from_state_id
         transition.to_state_id = to_state_id
-        transition.from_status = persisted_states[from_state_id].status_key
-        transition.to_status = persisted_states[to_state_id].status_key
         persisted_transitions.append(transition)
     db.flush()
 
@@ -447,15 +439,13 @@ def _remap_condition_state_ids(config: dict | list | None, state_id_map: dict[in
     return remapped
 
 
-def _template_graph_payload(db: Session, definition: WorkflowDefinition, template) -> tuple[WorkflowGraphSave, dict[int, str]]:
+def _template_graph_payload(db: Session, definition: WorkflowDefinition, template) -> WorkflowGraphSave:
     ref_to_input_id: dict[str, int] = {}
-    internal_keys: dict[int, str] = {}
     states = []
     next_temp_id = -1
     for item in template.states:
         input_id = next_temp_id
         next_temp_id -= 1
-        internal_keys[input_id] = f"s_{uuid4().hex[:24]}"
         ref_to_input_id[item.ref] = input_id
         states.append({"id": input_id, **item.model_dump(exclude={"ref"})})
 
@@ -481,13 +471,10 @@ def _template_graph_payload(db: Session, definition: WorkflowDefinition, templat
         data["condition_config"] = condition
         transitions.append(data)
     initial = next((item for item in template.states if item.category == "start"), None)
-    return (
-        WorkflowGraphSave(
-            initial_state_id=ref_to_input_id[initial.ref] if initial else None,
-            states=states,
-            transitions=transitions,
-        ),
-        internal_keys,
+    return WorkflowGraphSave(
+        initial_state_id=ref_to_input_id[initial.ref] if initial else None,
+        states=states,
+        transitions=transitions,
     )
 
 

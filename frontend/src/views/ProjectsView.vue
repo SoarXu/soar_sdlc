@@ -213,7 +213,7 @@ const {
   total: projectTotal,
   pagedItems: pagedProjectTree
 } = usePagination(projectTree)
-const form = reactive({ parent_id: null, program_id: null, name: '', owner_id: null, assignee_rule_config_id: null, start_date: null, end_date: null, is_long_term: false, status: 'planning', description: '' })
+const form = reactive({ parent_id: null, program_id: null, name: '', owner_id: null, assignee_rule_config_id: null, start_date: null, end_date: null, is_long_term: false, description: '' })
 const statusActionOptions = {
   start: '启动',
   suspend: '挂起',
@@ -240,7 +240,7 @@ function canManageProjectRow(row) { return canManageProject(row, currentUser.val
 function hasProjectAction(row, actionKey) { return Boolean(row && (workflowTransitions.value[row.id] || []).some((item) => item.action_key === actionKey)) }
 
 function resetForm() {
-  Object.assign(form, { parent_id: null, program_id: null, name: '', owner_id: null, assignee_rule_config_id: null, start_date: null, end_date: null, is_long_term: false, status: 'planning', description: '' })
+  Object.assign(form, { parent_id: null, program_id: null, name: '', owner_id: null, assignee_rule_config_id: null, start_date: null, end_date: null, is_long_term: false, description: '' })
 }
 
 function buildProjectTree(items) {
@@ -358,7 +358,6 @@ async function submitProject() {
   saving.value = true
   try {
     const payload = { ...form, program_id: form.program_id || null, owner_id: form.owner_id || null, assignee_rule_config_id: form.assignee_rule_config_id || null, end_date: form.is_long_term ? null : form.end_date }
-    delete payload.status
     if (editingId.value) await updateProject(editingId.value, payload)
     else await createProject(payload)
     dialogVisible.value = false

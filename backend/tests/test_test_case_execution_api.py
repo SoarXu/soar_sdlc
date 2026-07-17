@@ -241,7 +241,6 @@ def test_validation_case_open_bug_count_uses_current_state_category(client: Test
         stored = db.query(Bug).filter(Bug.id == bug["id"]).first()
         terminal = WorkflowState(
             definition_id=stored.workflow_definition_id,
-            status_key=f"test_terminal_{uuid4().hex[:8]}",
             status_name="已结束测试节点",
             category="terminal",
             enabled=True,
@@ -249,7 +248,6 @@ def test_validation_case_open_bug_count_uses_current_state_category(client: Test
         db.add(terminal)
         db.flush()
         stored.current_state_id = terminal.id
-        stored.status = "pending_handling"
         db.commit()
     finally:
         db.close()

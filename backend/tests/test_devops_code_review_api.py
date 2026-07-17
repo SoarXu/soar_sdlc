@@ -6,14 +6,17 @@ from app.models.requirement import Requirement
 from app.models.role import Role, UserRole
 from app.models.task import Task
 from app.models.user import User
-from app.services.workflow_state_service import initial_workflow_values
+from app.services.workflow_state_service import initial_system_workflow_values, initial_workflow_values
 from app.core.security import get_password_hash
 
 
 def test_commit_ingest_links_objects_and_creates_review_task(client):
     db = SessionLocal()
     try:
-        project = Project(name="DevOps 链接验证项目", status="active")
+        project = Project(
+            name="DevOps 链接验证项目",
+            **initial_system_workflow_values(db, "project"),
+        )
         db.add(project)
         db.flush()
         requirement = Requirement(
@@ -179,7 +182,10 @@ def test_development_lead_commit_is_assigned_to_another_reviewer(client):
         db.add_all([author, reviewer])
         db.flush()
         db.add_all([UserRole(user_id=author.id, role_id=role.id), UserRole(user_id=reviewer.id, role_id=role.id)])
-        project = Project(name="Lead Self Review Project", status="active")
+        project = Project(
+            name="Lead Self Review Project",
+            **initial_system_workflow_values(db, "project"),
+        )
         db.add(project)
         db.flush()
         task = Task(

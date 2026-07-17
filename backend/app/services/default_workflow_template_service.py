@@ -1,5 +1,3 @@
-from uuid import uuid4
-
 from sqlalchemy.orm import Session
 
 from app.models.workflow_definition import WorkflowDefinition, WorkflowState, WorkflowTransition
@@ -75,7 +73,6 @@ def _create_graph(db: Session, definition: WorkflowDefinition, graph: WorkflowGr
         data = item.model_dump(exclude={"ref"})
         state = WorkflowState(
             definition_id=definition.id,
-            status_key=f"s_{uuid4().hex[:24]}",
             **data,
         )
         db.add(state)
@@ -89,8 +86,6 @@ def _create_graph(db: Session, definition: WorkflowDefinition, graph: WorkflowGr
         data = item.model_dump(exclude={"from_ref", "to_ref", "condition_config"})
         data.update(
             {
-                "from_status": from_state.status_key,
-                "to_status": to_state.status_key,
                 "from_state_id": from_state.id,
                 "to_state_id": to_state.id,
                 "condition_config": condition_config,

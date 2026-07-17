@@ -56,10 +56,20 @@ def test_bug_create_and_update_reject_closed_iteration(client: TestClient):
     project_id = _create_project(client)
     iteration = client.post(
         "/api/v1/iterations",
-        json={"project_ids": [project_id], "name": f"Completed Iteration {uuid4().hex[:8]}", "status": "completed"},
+        json={"project_ids": [project_id], "name": f"Completed Iteration {uuid4().hex[:8]}"},
     )
     assert iteration.status_code == 200
     iteration_id = iteration.json()["id"]
+    started = client.post(
+        f"/api/v1/workflow-runtime/iteration/{iteration_id}/transition",
+        json={"action_key": "start"},
+    )
+    completed = client.post(
+        f"/api/v1/workflow-runtime/iteration/{iteration_id}/transition",
+        json={"action_key": "complete"},
+    )
+    assert started.status_code == 200
+    assert completed.status_code == 200
 
     created_with_finished_iteration = client.post(
         "/api/v1/bugs",

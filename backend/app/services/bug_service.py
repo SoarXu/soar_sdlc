@@ -19,6 +19,7 @@ from app.services.lifecycle_service import (
 from app.services.status_operation_service import list_status_operations
 from app.services.task_service import linked_task_summaries
 from app.services.workflow_state_service import initial_workflow_values
+from app.services.workflow_state_query_service import is_terminal_state
 from app.views.bug_view import BugCreate, BugFromTestRunCaseRequest, BugUpdate
 
 
@@ -140,7 +141,7 @@ def _ensure_iteration_can_accept_bug(db: Session, iteration_id: int, bug_project
     iteration = db.query(Iteration).filter(Iteration.id == iteration_id, Iteration.deleted == 0).first()
     if not iteration:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Iteration not found")
-    if iteration.status in {"completed", "canceled"}:
+    if is_terminal_state(iteration):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Closed iteration cannot accept bugs")
     project_ids = {item.project_id for item in db.query(IterationProject).filter(IterationProject.iteration_id == iteration_id).all()}
     scoped_project_ids = set(project_ids)

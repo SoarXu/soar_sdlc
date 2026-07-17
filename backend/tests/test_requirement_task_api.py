@@ -98,7 +98,8 @@ def test_requirement_and_task_create_default_to_template_statuses_and_prd_fields
     )
     assert requirement.status_code == 200
     assert requirement.json()["priority"] == "3"
-    assert requirement.json()["status_name"] == "待分派"
+    assert requirement.json()["status_name"]
+    assert requirement.json()["state_category"] == "start"
 
     default_priority_requirement = client.post(
         "/api/v1/requirements",
@@ -106,7 +107,8 @@ def test_requirement_and_task_create_default_to_template_statuses_and_prd_fields
     )
     assert default_priority_requirement.status_code == 200
     assert default_priority_requirement.json()["priority"] == "3"
-    assert default_priority_requirement.json()["status_name"] == "待分派"
+    assert default_priority_requirement.json()["status_name"]
+    assert default_priority_requirement.json()["state_category"] == "start"
 
     task = client.post(
         "/api/v1/tasks",
@@ -114,7 +116,8 @@ def test_requirement_and_task_create_default_to_template_statuses_and_prd_fields
     )
     assert task.status_code == 200
     assert task.json()["requirement_id"] == requirement.json()["id"]
-    assert task.json()["status_name"] == "待分派"
+    assert task.json()["status_name"]
+    assert task.json()["state_category"] == "start"
 
     updated = client.patch(f"/api/v1/tasks/{task.json()['id']}", json={"actual_hours": 1.5})
     assert updated.status_code == 200
@@ -174,7 +177,8 @@ def test_generated_task_inherits_requirement_current_handler_by_default(client: 
     assert data["requirement_id"] == requirement.json()["id"]
     assert data["project_id"] == project_id
     assert data["owner_id"] == owner_id
-    assert data["status_name"] == "待分派"
+    assert data["status_name"]
+    assert data["state_category"] == "start"
     assert data["source_requirement_review_status"] == "not_required"
 
 
@@ -397,7 +401,7 @@ def test_requirement_close_blocks_on_open_linked_tasks_and_does_not_cancel_them(
 
     assert blocked.status_code == 400
     assert client.get(f"/api/v1/requirements/{requirement['id']}").json()["status_name"] == "处理中"
-    assert client.get(f"/api/v1/tasks/{task['id']}").json()["status_name"] == "待分派"
+    assert client.get(f"/api/v1/tasks/{task['id']}").json()["state_category"] == "start"
 
 def test_requirement_complete_goes_directly_to_completed_and_blocks_on_open_tasks(client: TestClient):
     project_id = _create_project(client)
@@ -440,7 +444,8 @@ def test_task_claim_and_cancel_follow_default_statuses(client: TestClient):
         json={"project_id": project_id, "title": f"Task status flow {uuid4().hex[:8]}"},
     )
     assert task.status_code == 200
-    assert task.json()["status_name"] == "待分派"
+    assert task.json()["status_name"]
+    assert task.json()["state_category"] == "start"
 
     claimed = _runtime_transition(client, "task", task.json()["id"], "claim", token)
     assert claimed.status_code == 200
@@ -501,7 +506,7 @@ def test_project_close_is_blocked_by_open_requirement_and_task(client: TestClien
     closed_project = client.post(f"/api/v1/projects/{project_id}/close", json={"effective_time": "2026-06-10T18:00:00"})
 
     assert closed_project.status_code == 400
-    assert client.get(f"/api/v1/projects/{project_id}").json()["status"] == "active"
+    assert client.get(f"/api/v1/projects/{project_id}").json()["state_category"] == "normal"
 
 
 def test_project_close_is_blocked_by_open_test_run(client: TestClient):
@@ -519,7 +524,7 @@ def test_project_close_is_blocked_by_open_test_run(client: TestClient):
     )
 
     assert closed_project.status_code == 400
-    assert client.get(f"/api/v1/projects/{project_id}").json()["status"] == "active"
+    assert client.get(f"/api/v1/projects/{project_id}").json()["state_category"] == "normal"
 def test_requirement_status_cannot_be_changed_by_form_save(client: TestClient):
     project_id = _create_project(client)
     rejected = client.post(
@@ -532,7 +537,7 @@ def test_requirement_status_cannot_be_changed_by_form_save(client: TestClient):
         json={"project_id": project_id, "title": f"表单状态保护-{uuid4().hex[:8]}"},
     )
     assert requirement.status_code == 200
-    assert requirement.json()["status_name"] == "待分派"
+    assert requirement.json()["state_category"] == "start"
 
     updated = client.patch(
         f"/api/v1/requirements/{requirement.json()['id']}",
@@ -541,7 +546,7 @@ def test_requirement_status_cannot_be_changed_by_form_save(client: TestClient):
     assert updated.status_code == 422
     unchanged = client.get(f"/api/v1/requirements/{requirement.json()['id']}").json()
     assert unchanged["title"] == requirement.json()["title"]
-    assert unchanged["status_name"] == "待分派"
+    assert unchanged["state_category"] == "start"
 
 
 def test_task_status_cannot_be_changed_by_form_save(client: TestClient):
@@ -559,7 +564,7 @@ def test_task_status_cannot_be_changed_by_form_save(client: TestClient):
     assert updated.status_code == 422
     unchanged = client.get(f"/api/v1/tasks/{task['id']}").json()
     assert unchanged["title"] == task["title"]
-    assert unchanged["status_name"] == "待分派"
+    assert unchanged["state_category"] == "start"
 
 
 def test_requirement_update_rejects_iteration_outside_project_scope(client: TestClient):

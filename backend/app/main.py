@@ -9,8 +9,8 @@ from app.db.schema import ensure_runtime_schema
 
 
 def create_app() -> FastAPI:
-    ensure_runtime_schema(engine)
     Base.metadata.create_all(bind=engine)
+    ensure_runtime_schema(engine)
 
     app = FastAPI(title=settings.app_name, lifespan=scheduler_lifespan)
     app.add_middleware(

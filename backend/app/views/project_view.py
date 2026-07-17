@@ -20,7 +20,6 @@ class ProjectBase(BaseModel):
     actual_start_date: date | None = None
     actual_end_date: date | None = None
     is_long_term: bool = False
-    status: str = "planning"
     description: str | None = None
     assignee_rule_config_id: int | None = None
 
@@ -49,10 +48,10 @@ class ProjectRead(ProjectBase):
     model_config = ConfigDict(from_attributes=True)
 
     id: int
-    workflow_definition_id: int | None = None
-    current_state_id: int | None = None
-    status_name: str | None = None
-    state_category: str | None = None
+    workflow_definition_id: int
+    current_state_id: int
+    status_name: str
+    state_category: str
     workflow_config_id: int | None = None
     assignee_rule_config_id: int | None = None
     creator_id: int | None = None

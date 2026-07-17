@@ -11,7 +11,7 @@ from app.models.project_member import ProjectMember
 from app.models.role import Role, UserRole
 from app.models.task import Task
 from app.models.user import User
-from app.models.workflow_definition import WorkflowState
+from app.models.workflow_definition import WorkflowState, WorkflowTransition
 from app.models.work_item_comment import WorkItemComment
 
 
@@ -145,8 +145,15 @@ def test_workbench_queue_uses_state_category_and_status_name(client: TestClient)
     try:
         stored = db.query(Task).filter(Task.id == task["id"]).first()
         state = db.query(WorkflowState).filter(WorkflowState.id == stored.current_state_id).first()
-        state.status_name = "等待本人处理"
-        stored.status = "completed"
+        renamed_state = WorkflowState(
+            definition_id=state.definition_id,
+            status_name="等待本人处理",
+            category=state.category,
+            enabled=True,
+        )
+        db.add(renamed_state)
+        db.flush()
+        stored.current_state_id = renamed_state.id
         db.commit()
     finally:
         db.close()
@@ -222,9 +229,9 @@ def test_workbench_returns_created_watched_mentioned_and_exception_center(client
                 is_workbench_participant=True,
             )
         )
-        verified_state_id = db.query(WorkflowState.id).filter(
-            WorkflowState.definition_id == verified_bug["workflow_definition_id"],
-            WorkflowState.status_key == "verified",
+        verified_state_id = db.query(WorkflowTransition.to_state_id).filter(
+            WorkflowTransition.definition_id == verified_bug["workflow_definition_id"],
+            WorkflowTransition.action_key == "verification_passed",
         ).scalar()
         assert verified_state_id is not None
         db.query(Bug).filter(Bug.id == verified_bug["id"]).update(

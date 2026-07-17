@@ -205,11 +205,9 @@ def _clone_graph(db: Session, source: WorkflowDefinition, target: WorkflowDefini
         .all()
     )
     state_id_map: dict[int, int] = {}
-    target_states: dict[int, WorkflowState] = {}
     for item in source_states:
         cloned = WorkflowState(
             definition_id=target.id,
-            status_key=item.status_key,
             status_name=item.status_name,
             category=item.category,
             color=item.color,
@@ -221,7 +219,6 @@ def _clone_graph(db: Session, source: WorkflowDefinition, target: WorkflowDefini
         db.add(cloned)
         db.flush()
         state_id_map[item.id] = cloned.id
-        target_states[cloned.id] = cloned
 
     target.initial_state_id = state_id_map.get(source.initial_state_id)
     source_transitions = (
@@ -238,8 +235,6 @@ def _clone_graph(db: Session, source: WorkflowDefinition, target: WorkflowDefini
                 definition_id=target.id,
                 action_key=item.action_key,
                 action_name=item.action_name,
-                from_status=target_states[from_state_id].status_key,
-                to_status=target_states[to_state_id].status_key,
                 from_state_id=from_state_id,
                 to_state_id=to_state_id,
                 allowed_roles=item.allowed_roles,

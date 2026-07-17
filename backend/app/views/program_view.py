@@ -54,11 +54,10 @@ class ProgramProjectRead(BaseModel):
     program_id: int | None = None
     name: str
     owner_id: int | None = None
-    status: str
-    workflow_definition_id: int | None = None
-    current_state_id: int | None = None
-    status_name: str | None = None
-    state_category: str | None = None
+    workflow_definition_id: int
+    current_state_id: int
+    status_name: str
+    state_category: str
     start_date: date | None = None
     end_date: date | None = None
     actual_start_date: date | None = None

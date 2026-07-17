@@ -23,6 +23,7 @@ from app.services.project_permission_service import (
 from app.services.lifecycle_service import project_lifecycle_phase, requirement_lifecycle_phase
 from app.services.status_operation_service import list_status_operations
 from app.services.workflow_state_service import initial_workflow_values
+from app.services.workflow_state_query_service import is_terminal_state
 from app.views.task_view import LinkedTaskCreate, TaskCreate, TaskUpdate
 
 
@@ -78,7 +79,7 @@ def create_linked_task(db: Session, payload: LinkedTaskCreate, actor: User | Non
     project = db.query(Project).filter(Project.id == project_id, Project.deleted == 0).first()
     if not project:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Linked source project not found")
-    if project.status == "closed":
+    if is_terminal_state(project):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Project is closed")
 
     inherited_owner_id = _linked_source_owner_id(payload.source_type, source)
@@ -341,5 +342,5 @@ def _audit_logs_with_actor_names(db: Session, logs: list[AuditLog]) -> list[dict
 
 def _ensure_project_editable_for_task(db: Session, task: Task) -> None:
     project = db.query(Project).filter(Project.id == task.project_id, Project.deleted == 0).first()
-    if project and project.status == "closed":
+    if project and is_terminal_state(project):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Project is closed")

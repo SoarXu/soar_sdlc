@@ -16,6 +16,7 @@ from app.services.lifecycle_service import project_lifecycle_phase
 from app.services.status_operation_service import list_status_operations
 from app.services.task_service import linked_task_summaries
 from app.services.workflow_state_service import initial_workflow_values
+from app.services.workflow_state_query_service import is_terminal_state
 from app.views.requirement_view import RequirementCreate, RequirementUpdate
 
 
@@ -133,7 +134,7 @@ def _get_active_requirement(db: Session, requirement_id: int) -> Requirement:
 
 def _ensure_project_editable_for_requirement(db: Session, requirement: Requirement) -> None:
     project = db.query(Project).filter(Project.id == requirement.project_id, Project.deleted == 0).first()
-    if project and project.status == "closed":
+    if project and is_terminal_state(project):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Project is closed")
 
 

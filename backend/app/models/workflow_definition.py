@@ -42,7 +42,6 @@ class WorkflowState(Base):
         ForeignKey("workflow_definitions.id", ondelete="CASCADE"),
         index=True,
     )
-    status_key: Mapped[str] = mapped_column(String(64))
     status_name: Mapped[str] = mapped_column(String(100))
     category: Mapped[str] = mapped_column(String(32), default="normal")
     color: Mapped[str] = mapped_column(String(32), default="#2563eb")
@@ -69,18 +68,16 @@ class WorkflowTransition(Base):
     )
     action_key: Mapped[str] = mapped_column(String(64))
     action_name: Mapped[str] = mapped_column(String(100))
-    from_status: Mapped[str] = mapped_column(String(64))
-    to_status: Mapped[str] = mapped_column(String(64))
-    from_state_id: Mapped[int | None] = mapped_column(
+    from_state_id: Mapped[int] = mapped_column(
         BigInteger,
         ForeignKey("workflow_states.id", ondelete="RESTRICT"),
-        nullable=True,
+        nullable=False,
         index=True,
     )
-    to_state_id: Mapped[int | None] = mapped_column(
+    to_state_id: Mapped[int] = mapped_column(
         BigInteger,
         ForeignKey("workflow_states.id", ondelete="RESTRICT"),
-        nullable=True,
+        nullable=False,
         index=True,
     )
     allowed_roles: Mapped[str] = mapped_column(String(255), default="")

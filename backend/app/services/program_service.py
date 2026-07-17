@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 from app.models.program import Program
 from app.models.project import Project
 from app.services.status_operation_service import create_status_operation, list_status_operations
+from app.services.workflow_state_query_service import non_terminal_state_clause
 from app.views.program_view import ProgramCreate, ProgramUpdate
 from app.views.status_operation_view import StatusOperationCreate
 
@@ -63,7 +64,6 @@ def list_program_tree(db: Session) -> list[dict]:
                     "program_id": project.program_id,
                     "name": project.name,
                     "owner_id": project.owner_id,
-                    "status": project.status,
                     "workflow_definition_id": project.workflow_definition_id,
                     "current_state_id": project.current_state_id,
                     "status_name": project.status_name,
@@ -95,7 +95,6 @@ def _project_tree_node(project: Project) -> dict:
         "node_type": "project",
         "name": project.name,
         "owner_id": project.owner_id,
-        "status": project.status,
         "workflow_definition_id": project.workflow_definition_id,
         "current_state_id": project.current_state_id,
         "status_name": project.status_name,
@@ -308,7 +307,11 @@ def _has_unclosed_children(db: Session, program_id: int) -> bool:
 
     return (
         db.query(Project)
-        .filter(Project.program_id == program_id, Project.deleted == 0, Project.status != "closed")
+        .filter(
+            Project.program_id == program_id,
+            Project.deleted == 0,
+            non_terminal_state_clause(Project),
+        )
         .first()
         is not None
     )

@@ -85,11 +85,11 @@ def get_project_iterations(
     page: int = 1,
     page_size: int = 10,
     keyword: str | None = None,
-    status: str | None = None,
+    current_state_id: int | None = None,
     owner_id: int | None = None,
     db: Session = Depends(get_db),
 ):
-    return list_project_iterations_page(db, project_id, page, page_size, keyword, status, owner_id)
+    return list_project_iterations_page(db, project_id, page, page_size, keyword, current_state_id, owner_id)
 
 
 @router.get("/{project_id}/requirements", response_model=ProjectRequirementPage)

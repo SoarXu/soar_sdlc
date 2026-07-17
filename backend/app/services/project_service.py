@@ -39,7 +39,7 @@ def list_project_iterations_page(
     page: int = 1,
     page_size: int = 10,
     keyword: str | None = None,
-    status: str | None = None,
+    current_state_id: int | None = None,
     owner_id: int | None = None,
 ) -> dict:
     _get_active_project(db, project_id)
@@ -50,8 +50,8 @@ def list_project_iterations_page(
     )
     if keyword:
         query = query.filter(Iteration.name.like(f"%{keyword}%"))
-    if status:
-        query = query.filter(Iteration.status == status)
+    if current_state_id is not None:
+        query = query.filter(Iteration.current_state_id == current_state_id)
     if owner_id:
         query = query.filter(Iteration.owner_id == owner_id)
     page_data = _paginate(query.order_by(Iteration.id.desc()), page, page_size)
@@ -186,7 +186,6 @@ def create_project(db: Session, payload: ProjectCreate) -> Project:
             data["program_id"] = parent.program_id
     if data.get("is_long_term"):
         data["end_date"] = None
-    data["status"] = "planning"
     data.update(initial_system_workflow_values(db, "project"))
     project = Project(**data)
     db.add(project)
@@ -211,7 +210,6 @@ def update_project(db: Session, project_id: int, payload: ProjectUpdate, actor_i
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="项目不能选择下级项目作为上级项目")
     if data.get("is_long_term"):
         data["end_date"] = None
-    data.pop("status", None)
     before_data, after_data = _project_change_data(project, data)
     for field, value in data.items():
         setattr(project, field, value)
@@ -329,7 +327,6 @@ def start_project(db: Session, project_id: int, payload: StatusOperationCreate |
         ),
         _actor_user(db, actor_id),
     )
-    project.status = "active"
     _activate_program_tree(db, project.program_id, actual_start_date=project.actual_start_date)
     db.commit()
     db.refresh(project)
@@ -345,7 +342,6 @@ def suspend_project(db: Session, project_id: int, payload: StatusOperationCreate
         WorkflowTransitionExecuteRequest(action_key="suspend", payload=_status_payload_dict(payload)),
         _actor_user(db, actor_id),
     )
-    project.status = "paused"
     db.commit()
     db.refresh(project)
     return project
@@ -364,7 +360,6 @@ def close_project(db: Session, project_id: int, payload: StatusOperationCreate |
         ),
         _actor_user(db, actor_id),
     )
-    project.status = "closed"
     project.actual_end_date = _effective_date(payload)
     db.commit()
     db.refresh(project)
@@ -380,7 +375,6 @@ def activate_project(db: Session, project_id: int, payload: StatusOperationCreat
         WorkflowTransitionExecuteRequest(action_key="activate", payload=_status_payload_dict(payload)),
         _actor_user(db, actor_id),
     )
-    project.status = "active"
     project.actual_end_date = None
     _activate_program_tree(db, project.program_id)
     db.commit()
@@ -518,7 +512,6 @@ def _iteration_to_dict(db: Session, iteration: Iteration) -> dict:
         "end_date": iteration.end_date,
         "actual_start_date": iteration.actual_start_date,
         "actual_end_date": iteration.actual_end_date,
-        "status": iteration.status,
         "workflow_definition_id": iteration.workflow_definition_id,
         "current_state_id": iteration.current_state_id,
         "status_name": iteration.status_name,

@@ -1151,7 +1151,7 @@ async function submitProjectMembers() {
     saving.value = false
   }
 }
-function resetIterationForm() { Object.assign(iterationForm, { project_ids: [projectId.value], name: '', owner_id: null, start_date: null, end_date: null, goal: '' }); delete iterationForm.status }
+function resetIterationForm() { Object.assign(iterationForm, { project_ids: [projectId.value], name: '', owner_id: null, start_date: null, end_date: null, goal: '' }) }
 function resetRequirementForm() { Object.assign(requirementForm, { project_id: projectId.value, iteration_id: null, title: '', requirement_type: '功能', priority: '3', owner_id: null, proposer_id: currentUserId(users.value), description: '', acceptance_criteria: '' }) }
 function resetTaskForm() { Object.assign(taskForm, { project_id: projectId.value, requirement_id: null, title: '', task_type: 'standalone_operation', priority: 'medium', owner_id: null, due_date: null, description: '' }) }
 function resetCaseForm() { Object.assign(caseForm, { project_id: projectId.value, requirement_id: null, title: '', case_type: 'functional', test_scope: 'functional_test', default_tester_id: defaultTesterByRule('test_case_tester_roles', ['tester', 'test_lead']), precondition: '', steps_json: [{ step: '', expected: '' }], expected_result: '' }) }
@@ -1349,8 +1349,7 @@ async function submitIteration() {
   if (!iterationForm.name.trim()) return ElMessage.warning('请填写迭代名称')
   saving.value = true
   try {
-    const { status: _status, ...iterationData } = iterationForm
-    const payload = { ...iterationData, project_ids: iterationForm.project_ids.length ? iterationForm.project_ids : [projectId.value], owner_id: iterationForm.owner_id || null }
+    const payload = { ...iterationForm, project_ids: iterationForm.project_ids.length ? iterationForm.project_ids : [projectId.value], owner_id: iterationForm.owner_id || null }
     if (editingIterationId.value) await updateIteration(editingIterationId.value, payload)
     else await createIteration(payload)
     iterationDialogVisible.value = false

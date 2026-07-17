@@ -2,6 +2,38 @@ from sqlalchemy import inspect, text
 from sqlalchemy.engine import Engine
 
 
+WORKFLOW_FOREIGN_KEYS = (
+    ("workflow_definitions", "initial_state_id", "workflow_states", "id", "fk_workflow_definitions_initial_state", "RESTRICT"),
+    ("workflow_states", "definition_id", "workflow_definitions", "id", "fk_workflow_states_definition", "CASCADE"),
+    ("workflow_transitions", "definition_id", "workflow_definitions", "id", "fk_workflow_transitions_definition", "CASCADE"),
+    ("workflow_transitions", "from_state_id", "workflow_states", "id", "fk_workflow_transitions_from_state_id", "RESTRICT"),
+    ("workflow_transitions", "to_state_id", "workflow_states", "id", "fk_workflow_transitions_to_state_id", "RESTRICT"),
+    ("requirements", "workflow_definition_id", "workflow_definitions", "id", "fk_requirements_workflow_definition", "RESTRICT"),
+    ("requirements", "current_state_id", "workflow_states", "id", "fk_requirements_current_state", "RESTRICT"),
+    ("tasks", "workflow_definition_id", "workflow_definitions", "id", "fk_tasks_workflow_definition", "RESTRICT"),
+    ("tasks", "current_state_id", "workflow_states", "id", "fk_tasks_current_state", "RESTRICT"),
+    ("bugs", "workflow_definition_id", "workflow_definitions", "id", "fk_bugs_workflow_definition", "RESTRICT"),
+    ("bugs", "current_state_id", "workflow_states", "id", "fk_bugs_current_state", "RESTRICT"),
+    ("projects", "workflow_definition_id", "workflow_definitions", "id", "fk_projects_workflow_definition", "RESTRICT"),
+    ("projects", "current_state_id", "workflow_states", "id", "fk_projects_current_state", "RESTRICT"),
+    ("iterations", "workflow_definition_id", "workflow_definitions", "id", "fk_iterations_workflow_definition", "RESTRICT"),
+    ("iterations", "current_state_id", "workflow_states", "id", "fk_iterations_current_state", "RESTRICT"),
+)
+FINAL_WORKFLOW_ID_COLUMNS = {
+    **{
+        table_name: ("workflow_definition_id", "current_state_id")
+        for table_name in ("requirements", "tasks", "bugs", "projects", "iterations")
+    },
+    "workflow_transitions": ("from_state_id", "to_state_id"),
+}
+LEGACY_WORKFLOW_COLUMNS = {
+    "projects": ("status",),
+    "iterations": ("status",),
+    "workflow_states": ("status_key",),
+    "workflow_transitions": ("from_status", "to_status"),
+}
+
+
 def _ensure_column(engine: Engine, table: str, col: str, ddl: str, index_ddl: str | None = None) -> None:
     inspector = inspect(engine)
     if table not in inspector.get_table_names():
@@ -24,7 +56,93 @@ def _ensure_varchar_length(engine: Engine, table: str, col: str, minimum_length:
             conn.execute(text(ddl))
 
 
+def _ensure_foreign_key(
+    engine: Engine,
+    table_name: str,
+    column_name: str,
+    target_table: str,
+    target_column: str,
+    constraint_name: str,
+    on_delete: str,
+) -> None:
+    inspector = inspect(engine)
+    table_names = set(inspector.get_table_names())
+    if table_name not in table_names or target_table not in table_names:
+        return
+    columns = {column["name"] for column in inspector.get_columns(table_name)}
+    target_columns = {column["name"] for column in inspector.get_columns(target_table)}
+    if column_name not in columns or target_column not in target_columns:
+        return
+
+    for foreign_key in inspector.get_foreign_keys(table_name):
+        matches_relation = (
+            foreign_key["constrained_columns"] == [column_name]
+            and foreign_key["referred_table"] == target_table
+            and foreign_key["referred_columns"] == [target_column]
+        )
+        if matches_relation:
+            actual_on_delete = str(
+                (foreign_key.get("options") or {}).get("ondelete") or "RESTRICT"
+            ).upper()
+            expected_on_delete = on_delete.upper()
+            if actual_on_delete != expected_on_delete:
+                raise RuntimeError(
+                    f"Foreign key {foreign_key.get('name') or constraint_name} uses "
+                    f"ON DELETE {actual_on_delete}; expected {expected_on_delete}"
+                )
+            return
+        if foreign_key.get("name") == constraint_name:
+            raise RuntimeError(
+                f"Foreign key {constraint_name} exists with a different relationship"
+            )
+
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                f"ALTER TABLE {table_name} ADD CONSTRAINT {constraint_name} "
+                f"FOREIGN KEY ({column_name}) REFERENCES {target_table} ({target_column}) "
+                f"ON DELETE {on_delete}"
+            )
+        )
+
+
+def _validate_final_workflow_schema(engine: Engine) -> None:
+    inspector = inspect(engine)
+    table_names = set(inspector.get_table_names())
+    issues: list[str] = []
+
+    for table_name, column_names in FINAL_WORKFLOW_ID_COLUMNS.items():
+        if table_name not in table_names:
+            issues.append(f"missing table {table_name}")
+            continue
+        columns = {column["name"]: column for column in inspector.get_columns(table_name)}
+        for column_name in column_names:
+            column = columns.get(column_name)
+            if column is None:
+                issues.append(f"missing column {table_name}.{column_name}")
+            elif column.get("nullable", True):
+                issues.append(f"nullable column {table_name}.{column_name}")
+
+    for table_name, legacy_columns in LEGACY_WORKFLOW_COLUMNS.items():
+        if table_name not in table_names:
+            issues.append(f"missing table {table_name}")
+            continue
+        columns = {column["name"] for column in inspector.get_columns(table_name)}
+        for column_name in legacy_columns:
+            if column_name in columns:
+                issues.append(f"legacy column {table_name}.{column_name}")
+    if "handler_transition_rules" in table_names:
+        issues.append("legacy table handler_transition_rules")
+
+    if issues:
+        raise RuntimeError(
+            "Runtime workflow schema is not finalized; run `alembic upgrade head`: "
+            + "; ".join(sorted(set(issues)))
+        )
+
+
 def ensure_runtime_schema(engine: Engine) -> None:
+    _validate_final_workflow_schema(engine)
     inspector0 = inspect(engine)
     if "workflow_component_registry" not in inspector0.get_table_names():
         with engine.begin() as conn:
@@ -48,47 +166,6 @@ def ensure_runtime_schema(engine: Engine) -> None:
                 ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='工作流组件注册表'"
             ))
 
-    if "handler_transition_rules" not in inspector0.get_table_names():
-        with engine.begin() as conn:
-            conn.execute(text(
-                "CREATE TABLE handler_transition_rules ("
-                "id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,"
-                "config_id BIGINT UNSIGNED NOT NULL COMMENT 'assignee config id',"
-                "rule_type VARCHAR(32) NOT NULL DEFAULT 'advanced' COMMENT 'rule type',"
-                "object_type VARCHAR(32) NOT NULL COMMENT 'object type',"
-                "action VARCHAR(64) NOT NULL COMMENT 'workflow action',"
-                "from_status VARCHAR(32) NULL COMMENT 'from status',"
-                "to_status VARCHAR(32) NULL COMMENT 'to status',"
-                "target_type VARCHAR(64) NOT NULL DEFAULT 'keep_current' COMMENT 'target type',"
-                "target_roles VARCHAR(255) NOT NULL DEFAULT '' COMMENT 'project roles',"
-                "fallback_type VARCHAR(64) NOT NULL DEFAULT 'keep_current' COMMENT 'fallback type',"
-                "fallback_roles VARCHAR(255) NOT NULL DEFAULT '' COMMENT 'fallback roles',"
-                "enabled TINYINT(1) NOT NULL DEFAULT 1 COMMENT 'enabled',"
-                "create_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT 'create time',"
-                "update_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT 'update time',"
-                "KEY idx_htr_config (config_id),"
-                "KEY idx_htr_match (config_id, rule_type, object_type, action, enabled)"
-                ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='handler transition rules'"
-            ))
-    _ensure_column(engine, "handler_transition_rules", "rule_type",
-                   "ALTER TABLE handler_transition_rules ADD COLUMN rule_type VARCHAR(32) NOT NULL DEFAULT 'advanced' COMMENT 'rule type' AFTER config_id",
-                   "CREATE INDEX idx_htr_rule_type ON handler_transition_rules (config_id, rule_type, object_type, enabled)")
-    _ensure_column(engine, "handler_transition_rules", "fallback_roles",
-                   "ALTER TABLE handler_transition_rules ADD COLUMN fallback_roles VARCHAR(255) NOT NULL DEFAULT '' COMMENT 'fallback roles' AFTER fallback_type")
-    _ensure_varchar_length(
-        engine,
-        "handler_transition_rules",
-        "target_type",
-        64,
-        "ALTER TABLE handler_transition_rules MODIFY COLUMN target_type VARCHAR(64) NOT NULL DEFAULT 'keep_current' COMMENT 'target type'",
-    )
-    _ensure_varchar_length(
-        engine,
-        "handler_transition_rules",
-        "fallback_type",
-        64,
-        "ALTER TABLE handler_transition_rules MODIFY COLUMN fallback_type VARCHAR(64) NOT NULL DEFAULT 'keep_current' COMMENT 'fallback type'",
-    )
     _ensure_column(engine, "status_operation_log", "actor_name",
                    "ALTER TABLE status_operation_log ADD COLUMN actor_name VARCHAR(100) NULL COMMENT 'actor name snapshot' AFTER actor_id")
     _ensure_column(engine, "status_operation_log", "is_delegated",
@@ -168,7 +245,6 @@ def ensure_runtime_schema(engine: Engine) -> None:
                 "CREATE TABLE workflow_states ("
                 "id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,"
                 "definition_id BIGINT UNSIGNED NOT NULL COMMENT 'workflow definition id',"
-                "status_key VARCHAR(64) NOT NULL COMMENT 'status key',"
                 "status_name VARCHAR(100) NOT NULL COMMENT 'status name',"
                 "category VARCHAR(32) NOT NULL DEFAULT 'normal' COMMENT 'status category',"
                 "color VARCHAR(32) NOT NULL DEFAULT '#2563eb' COMMENT 'node color',"
@@ -178,8 +254,7 @@ def ensure_runtime_schema(engine: Engine) -> None:
                 "enabled TINYINT(1) NOT NULL DEFAULT 1 COMMENT 'enabled',"
                 "create_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT 'create time',"
                 "update_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT 'update time',"
-                "KEY idx_wfs_definition (definition_id),"
-                "KEY idx_wfs_status (definition_id, status_key)"
+                "KEY idx_wfs_definition (definition_id)"
                 ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='visual workflow states'"
             ))
 
@@ -191,10 +266,8 @@ def ensure_runtime_schema(engine: Engine) -> None:
                 "definition_id BIGINT UNSIGNED NOT NULL COMMENT 'workflow definition id',"
                 "action_key VARCHAR(64) NOT NULL COMMENT 'action key',"
                 "action_name VARCHAR(100) NOT NULL COMMENT 'action name',"
-                "from_status VARCHAR(64) NOT NULL COMMENT 'from status',"
-                "to_status VARCHAR(64) NOT NULL COMMENT 'to status',"
-                "from_state_id BIGINT UNSIGNED NULL COMMENT 'from workflow state id',"
-                "to_state_id BIGINT UNSIGNED NULL COMMENT 'to workflow state id',"
+                "from_state_id BIGINT UNSIGNED NOT NULL COMMENT 'from workflow state id',"
+                "to_state_id BIGINT UNSIGNED NOT NULL COMMENT 'to workflow state id',"
                 "allowed_roles VARCHAR(255) NOT NULL DEFAULT '' COMMENT 'allowed roles',"
                 "handler_rule JSON NULL COMMENT 'handler rule',"
                 "trigger_config JSON NULL COMMENT 'trigger config',"
@@ -208,7 +281,7 @@ def ensure_runtime_schema(engine: Engine) -> None:
                 "create_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT 'create time',"
                 "update_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT 'update time',"
                 "KEY idx_wft_definition (definition_id),"
-                "KEY idx_wft_action (definition_id, action_key, from_status, to_status)"
+                "KEY idx_wft_action_state (definition_id, action_key, from_state_id, to_state_id)"
                 ",KEY ix_workflow_transitions_from_state_id (from_state_id)"
                 ",KEY ix_workflow_transitions_to_state_id (to_state_id)"
                 ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='visual workflow transitions'"
@@ -217,12 +290,6 @@ def ensure_runtime_schema(engine: Engine) -> None:
                    "ALTER TABLE workflow_transitions ADD COLUMN ui_config JSON NULL COMMENT 'ui config' AFTER post_action_config")
     _ensure_column(engine, "workflow_transitions", "form_config",
                    "ALTER TABLE workflow_transitions ADD COLUMN form_config JSON NULL COMMENT 'form config' AFTER ui_config")
-    _ensure_column(engine, "workflow_transitions", "from_state_id",
-                   "ALTER TABLE workflow_transitions ADD COLUMN from_state_id BIGINT UNSIGNED NULL COMMENT 'from workflow state id' AFTER to_status",
-                   "CREATE INDEX ix_workflow_transitions_from_state_id ON workflow_transitions (from_state_id)")
-    _ensure_column(engine, "workflow_transitions", "to_state_id",
-                   "ALTER TABLE workflow_transitions ADD COLUMN to_state_id BIGINT UNSIGNED NULL COMMENT 'to workflow state id' AFTER from_state_id",
-                   "CREATE INDEX ix_workflow_transitions_to_state_id ON workflow_transitions (to_state_id)")
 
     _ensure_column(engine, "assignee_rule_configs", "lifecycle_status",
                    "ALTER TABLE assignee_rule_configs ADD COLUMN lifecycle_status VARCHAR(16) NOT NULL DEFAULT 'draft' COMMENT 'draft/enabled/disabled' AFTER description",
@@ -409,7 +476,7 @@ def ensure_runtime_schema(engine: Engine) -> None:
     _ensure_column(engine, "iterations", "actual_end_date",
                    "ALTER TABLE iterations ADD COLUMN actual_end_date DATE NULL COMMENT '实际结束日期' AFTER actual_start_date")
     _ensure_column(engine, "iterations", "lifecycle_phase",
-                   "ALTER TABLE iterations ADD COLUMN lifecycle_phase VARCHAR(32) NOT NULL DEFAULT 'development' COMMENT '生命周期阶段' AFTER status")
+                   "ALTER TABLE iterations ADD COLUMN lifecycle_phase VARCHAR(32) NOT NULL DEFAULT 'development' COMMENT '生命周期阶段' AFTER current_state_id")
     # Make legacy project_id column nullable (replaced by iteration_projects table)
     inspector2 = inspect(engine)
     if "iterations" in inspector2.get_table_names():
@@ -441,3 +508,6 @@ def ensure_runtime_schema(engine: Engine) -> None:
                    "ALTER TABLE users ADD COLUMN deleted TINYINT(1) NOT NULL DEFAULT 0 COMMENT '是否删除 0否1是' AFTER delete_time")
     _ensure_column(engine, "users", "must_change_password",
                    "ALTER TABLE users ADD COLUMN must_change_password TINYINT(1) NOT NULL DEFAULT 0 COMMENT '是否需要修改密码' AFTER is_active")
+
+    for relationship in WORKFLOW_FOREIGN_KEYS:
+        _ensure_foreign_key(engine, *relationship)

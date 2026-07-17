@@ -88,8 +88,15 @@ def test_unassigned_list_uses_state_category_and_displays_renamed_state(client: 
     try:
         stored = db.query(Task).filter(Task.id == task["id"]).first()
         state = db.query(WorkflowState).filter(WorkflowState.id == stored.current_state_id).first()
-        state.status_name = "等待团队认领"
-        stored.status = "closed"
+        renamed_state = WorkflowState(
+            definition_id=state.definition_id,
+            status_name="等待团队认领",
+            category=state.category,
+            enabled=True,
+        )
+        db.add(renamed_state)
+        db.flush()
+        stored.current_state_id = renamed_state.id
         db.commit()
     finally:
         db.close()
@@ -101,7 +108,7 @@ def test_unassigned_list_uses_state_category_and_displays_renamed_state(client: 
     assert listed["status"] == "等待团队认领"
 
 
-def test_unassigned_list_excludes_terminal_state_even_when_legacy_status_is_open(client: TestClient):
+def test_unassigned_list_excludes_terminal_state(client: TestClient):
     _, project_id = _create_project(client)
     task = client.post(
         "/api/v1/tasks",
@@ -112,8 +119,15 @@ def test_unassigned_list_excludes_terminal_state_even_when_legacy_status_is_open
     try:
         stored = db.query(Task).filter(Task.id == task["id"]).first()
         state = db.query(WorkflowState).filter(WorkflowState.id == stored.current_state_id).first()
-        state.category = "terminal"
-        stored.status = "pending_assignment"
+        terminal_state = WorkflowState(
+            definition_id=state.definition_id,
+            status_name="测试终态",
+            category="terminal",
+            enabled=True,
+        )
+        db.add(terminal_state)
+        db.flush()
+        stored.current_state_id = terminal_state.id
         db.commit()
     finally:
         db.close()

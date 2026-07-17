@@ -59,11 +59,10 @@ class WorkflowTransitionBatchRead(BaseModel):
 class WorkflowTransitionExecuteRead(BaseModel):
     object_type: str
     id: int
-    status: str | None = None
-    workflow_definition_id: int | None = None
-    current_state_id: int | None = None
-    status_name: str | None = None
-    state_category: str | None = None
+    workflow_definition_id: int
+    current_state_id: int
+    status_name: str
+    state_category: str
     owner_id: int | None = None
     default_target_status: str | None = None
     resolved_target_status: str | None = None

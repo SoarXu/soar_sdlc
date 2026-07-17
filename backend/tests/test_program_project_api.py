@@ -33,7 +33,7 @@ def test_project_creation_uses_system_workflow_initial_state(client: TestClient)
         db.close()
 
 
-def test_project_runtime_uses_current_state_id_even_when_legacy_status_disagrees(client: TestClient):
+def test_project_runtime_uses_current_state_id_without_legacy_status_column(client: TestClient):
     project = client.post("/api/v1/projects", json={"name": f"ID runtime-{uuid4().hex[:8]}"}).json()
     initial_state_id = project["current_state_id"]
 
@@ -41,8 +41,8 @@ def test_project_runtime_uses_current_state_id_even_when_legacy_status_disagrees
     try:
         stored = db.execute(text("select id from projects where id = :id"), {"id": project["id"]}).one()
         assert stored.id == project["id"]
-        db.execute(text("update projects set status = 'closed' where id = :id"), {"id": project["id"]})
-        db.commit()
+        columns = {row.Field for row in db.execute(text("SHOW COLUMNS FROM projects")).all()}
+        assert "status" not in columns
     finally:
         db.close()
 
@@ -177,7 +177,8 @@ def test_project_crud_uses_prd_fields(client: TestClient):
     assert created.json()["actual_start_date"] == "2026-07-01"
     assert created.json()["actual_end_date"] == "2026-11-30"
     assert created.json()["is_long_term"] is False
-    assert created.json()["status"] == "planning"
+    assert "status" not in created.json()
+    assert created.json()["state_category"] == "start"
     assert "owner_id" in created.json()
 
     detail = client.get(f"/api/v1/projects/{project_id}")
@@ -197,33 +198,39 @@ def test_project_crud_uses_prd_fields(client: TestClient):
         json={"effective_time": "2026-07-01T09:00:00"},
     )
     assert started.status_code == 200
-    assert started.json()["status"] == "active"
+    assert "status" not in started.json()
+    assert started.json()["state_category"] == "normal"
 
     suspended = client.post(
         f"/api/v1/projects/{project_id}/suspend",
         json={"effective_time": "2026-06-10T11:32:50", "remark": "阶段性挂起"},
     )
     assert suspended.status_code == 200
-    assert suspended.json()["status"] == "paused"
+    assert "status" not in suspended.json()
+    assert suspended.json()["state_category"] == "normal"
 
     restarted = client.post(f"/api/v1/projects/{project_id}/start")
     assert restarted.status_code == 200
-    assert restarted.json()["status"] == "active"
+    assert "status" not in restarted.json()
+    assert restarted.json()["state_category"] == "normal"
 
     paused_again = client.post(f"/api/v1/projects/{project_id}/suspend")
     assert paused_again.status_code == 200
-    assert paused_again.json()["status"] == "paused"
+    assert "status" not in paused_again.json()
+    assert paused_again.json()["state_category"] == "normal"
 
     closed = client.post(
         f"/api/v1/projects/{project_id}/close",
         json={"effective_time": "2026-07-10T18:00:00"},
     )
     assert closed.status_code == 200
-    assert closed.json()["status"] == "closed"
+    assert "status" not in closed.json()
+    assert closed.json()["state_category"] == "terminal"
 
     activated = client.post(f"/api/v1/projects/{project_id}/activate")
     assert activated.status_code == 200
-    assert activated.json()["status"] == "active"
+    assert "status" not in activated.json()
+    assert activated.json()["state_category"] == "normal"
 
     history = client.get(f"/api/v1/projects/{project_id}/status-operations")
     assert history.status_code == 200
@@ -620,7 +627,8 @@ def test_open_project_move_only_changes_parent(client: TestClient):
 
     assert moved.status_code == 200
     assert moved.json()["parent_id"] == parent["id"]
-    assert moved.json()["status"] == "active"
+    assert "status" not in moved.json()
+    assert moved.json()["state_category"] == "normal"
 
 
 def test_closed_project_move_only_changes_parent_after_phase_removed(client: TestClient):
@@ -649,7 +657,8 @@ def test_closed_project_move_only_changes_parent_after_phase_removed(client: Tes
 
     assert moved.status_code == 200
     assert moved.json()["parent_id"] == parent["id"]
-    assert moved.json()["status"] == "active"
+    assert "status" not in moved.json()
+    assert moved.json()["state_category"] == "normal"
     assert "lifecycle_phase" not in moved.json()
     assert "maintenance_start_time" not in moved.json()
     assert client.get(f"/api/v1/requirements/{development_requirement['id']}").status_code == 200
@@ -701,7 +710,6 @@ def test_project_close_gate_uses_work_item_state_category(client: TestClient):
         stored = db.query(Requirement).filter(Requirement.id == requirement["id"]).first()
         terminal = WorkflowState(
             definition_id=stored.workflow_definition_id,
-            status_key=f"test_terminal_{uuid4().hex[:8]}",
             status_name="业务已结束",
             category="terminal",
             enabled=True,
@@ -709,7 +717,6 @@ def test_project_close_gate_uses_work_item_state_category(client: TestClient):
         db.add(terminal)
         db.flush()
         stored.current_state_id = terminal.id
-        stored.status = "pending_assignment"
         db.commit()
     finally:
         db.close()
@@ -798,7 +805,8 @@ def test_project_start_activates_parent_program(client: TestClient):
     )
 
     assert response.status_code == 200
-    assert response.json()["status"] == "active"
+    assert "status" not in response.json()
+    assert response.json()["state_category"] == "normal"
     programs = client.get("/api/v1/programs").json()
     synced_program = next(item for item in programs if item["id"] == program["id"])
     synced_parent_program = next(item for item in programs if item["id"] == parent_program["id"])

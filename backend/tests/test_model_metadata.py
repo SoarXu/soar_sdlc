@@ -85,11 +85,25 @@ def test_workflow_state_identity_columns_have_foreign_keys_and_indexes():
         assert column.index is True
 
 
-def test_project_and_iteration_workflow_identity_is_transitional_nullable():
+def test_project_and_iteration_workflow_identity_is_required():
     for table_name in ("projects", "iterations"):
         table = Base.metadata.tables[table_name]
-        assert table.columns["workflow_definition_id"].nullable is True
-        assert table.columns["current_state_id"].nullable is True
+        assert table.columns["workflow_definition_id"].nullable is False
+        assert table.columns["current_state_id"].nullable is False
+
+
+def test_workflow_identity_has_no_legacy_string_columns():
+    assert "status" not in Base.metadata.tables["projects"].columns
+    assert "status" not in Base.metadata.tables["iterations"].columns
+    assert "status_key" not in Base.metadata.tables["workflow_states"].columns
+    assert "from_status" not in Base.metadata.tables["workflow_transitions"].columns
+    assert "to_status" not in Base.metadata.tables["workflow_transitions"].columns
+
+
+def test_transition_state_identity_is_required():
+    transition = Base.metadata.tables["workflow_transitions"]
+    assert transition.columns["from_state_id"].nullable is False
+    assert transition.columns["to_state_id"].nullable is False
 
 
 def test_workflow_scheme_lifecycle_column_defaults_to_draft():

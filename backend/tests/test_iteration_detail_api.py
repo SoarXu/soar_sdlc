@@ -6,7 +6,7 @@ from app.db.session import SessionLocal
 from app.jobs.iteration_jobs import run_auto_start_due_iterations
 from app.models.requirement import Requirement
 from app.models.task import Task
-from app.models.workflow_definition import WorkflowState
+from app.models.workflow_definition import WorkflowState, WorkflowTransition
 
 
 def test_iteration_creation_uses_system_workflow_initial_state(client: TestClient):
@@ -108,12 +108,7 @@ def _set_requirement_status(requirement_id: int, status: str) -> None:
     db = SessionLocal()
     try:
         requirement = db.query(Requirement).filter(Requirement.id == requirement_id).first()
-        state_id = db.query(WorkflowState.id).filter(
-            WorkflowState.definition_id == requirement.workflow_definition_id,
-            WorkflowState.status_key == status,
-        ).scalar()
-        assert state_id is not None
-        requirement.current_state_id = state_id
+        requirement.current_state_id = _state_id_for_status(db, requirement, status)
         db.commit()
     finally:
         db.close()
@@ -123,24 +118,44 @@ def _set_task_status(task_id: int, status: str) -> None:
     db = SessionLocal()
     try:
         task = db.query(Task).filter(Task.id == task_id).first()
-        state_id = db.query(WorkflowState.id).filter(
-            WorkflowState.definition_id == task.workflow_definition_id,
-            WorkflowState.status_key == status,
-        ).scalar()
-        assert state_id is not None
-        task.current_state_id = state_id
+        task.current_state_id = _state_id_for_status(db, task, status)
         db.commit()
     finally:
         db.close()
 
 
-def _set_item_state_category(model, item_id: int, category: str, legacy_status: str) -> None:
+def _state_id_for_status(db, item, status: str) -> int:
+    action_by_status = {
+        "in_processing": "claim",
+        "completed": "complete",
+        "canceled": "cancel",
+    }
+    if status == "pending_assignment":
+        state_ids = {
+            value
+            for value, in db.query(WorkflowState.id).filter(
+                WorkflowState.definition_id == item.workflow_definition_id,
+                WorkflowState.category == "start",
+            ).all()
+        }
+    else:
+        state_ids = {
+            value
+            for value, in db.query(WorkflowTransition.to_state_id).filter(
+                WorkflowTransition.definition_id == item.workflow_definition_id,
+                WorkflowTransition.action_key == action_by_status[status],
+            ).all()
+        }
+    assert len(state_ids) == 1
+    return next(iter(state_ids))
+
+
+def _set_item_state_category(model, item_id: int, category: str) -> None:
     db = SessionLocal()
     try:
         item = db.query(model).filter(model.id == item_id).first()
         state = WorkflowState(
             definition_id=item.workflow_definition_id,
-            status_key=f"test_{category}_{uuid4().hex[:8]}",
             status_name="测试终态" if category == "terminal" else "测试处理中",
             category=category,
             enabled=True,
@@ -158,7 +173,7 @@ def test_iteration_crud_persists_to_database(client: TestClient):
 
     created = client.post(
         "/api/v1/iterations",
-        json={"project_id": project_id, "name": "MVP 迭代", "status": "planning", "goal": "完成主链路"},
+        json={"project_id": project_id, "name": "MVP 迭代", "goal": "完成主链路"},
     )
     assert created.status_code == 200
     iteration_id = created.json()["id"]
@@ -166,10 +181,11 @@ def test_iteration_crud_persists_to_database(client: TestClient):
 
     updated = client.patch(
         f"/api/v1/iterations/{iteration_id}",
-        json={"status": "active", "goal": "Updated goal"},
+        json={"goal": "Updated goal"},
     )
     assert updated.status_code == 200
-    assert updated.json()["status"] == "planning"
+    assert "status" not in updated.json()
+    assert updated.json()["state_category"] == "start"
     assert updated.json()["goal"] == "Updated goal"
 
     deleted = client.delete(f"/api/v1/iterations/{iteration_id}")
@@ -235,10 +251,11 @@ def test_iteration_job_auto_starts_without_changing_child_item_statuses(client: 
 
     assert started_count == 1
     assert detail.status_code == 200
-    assert detail.json()["iteration"]["status"] == "active"
+    assert "status" not in detail.json()["iteration"]
+    assert detail.json()["iteration"]["state_category"] == "normal"
     assert detail.json()["iteration"]["actual_start_date"] == "2026-06-01"
-    assert client.get(f"/api/v1/requirements/{requirement_id}").json()["status_name"] == "待分派"
-    assert client.get(f"/api/v1/tasks/{task_id}").json()["status_name"] == "待分派"
+    assert client.get(f"/api/v1/requirements/{requirement_id}").json()["state_category"] == "start"
+    assert client.get(f"/api/v1/tasks/{task_id}").json()["state_category"] == "start"
 
 
 def test_iteration_start_keeps_child_work_items_on_their_own_workflows(client: TestClient):
@@ -268,10 +285,10 @@ def test_iteration_start_keeps_child_work_items_on_their_own_workflows(client: T
     )
 
     assert started.status_code == 200
-    assert client.get(f"/api/v1/requirements/{requirement_id}").json()["status_name"] == "待分派"
+    assert client.get(f"/api/v1/requirements/{requirement_id}").json()["state_category"] == "start"
     assert client.get(f"/api/v1/requirements/{canceled_requirement_id}").json()["status_name"] == "已取消"
-    assert client.get(f"/api/v1/tasks/{requirement_task_id}").json()["status_name"] == "待分派"
-    assert client.get(f"/api/v1/tasks/{standalone_task_id}").json()["status_name"] == "待分派"
+    assert client.get(f"/api/v1/tasks/{requirement_task_id}").json()["state_category"] == "start"
+    assert client.get(f"/api/v1/tasks/{standalone_task_id}").json()["state_category"] == "start"
     assert client.get(f"/api/v1/tasks/{canceled_task_id}").json()["status_name"] == "已取消"
 
 
@@ -290,7 +307,7 @@ def test_iteration_finish_is_blocked_by_unfinished_direct_items(client: TestClie
     )
 
     assert finished.status_code == 400
-    assert client.get(f"/api/v1/iterations/{iteration_id}/detail").json()["iteration"]["status"] == "active"
+    assert client.get(f"/api/v1/iterations/{iteration_id}/detail").json()["iteration"]["state_category"] == "normal"
 
 
 def test_iteration_cancel_uses_runtime_and_complete_gate(client: TestClient):
@@ -307,7 +324,7 @@ def test_iteration_cancel_uses_runtime_and_complete_gate(client: TestClient):
         json={"action_key": "cancel", "payload": {"remark": "cancel blocked"}},
     )
     assert blocked.status_code == 400
-    assert client.get(f"/api/v1/iterations/{iteration_id}/detail").json()["iteration"]["status"] == "active"
+    assert client.get(f"/api/v1/iterations/{iteration_id}/detail").json()["iteration"]["state_category"] == "normal"
 
     _set_requirement_status(requirement_id, "completed")
     canceled = client.post(
@@ -316,7 +333,8 @@ def test_iteration_cancel_uses_runtime_and_complete_gate(client: TestClient):
     )
 
     assert canceled.status_code == 200
-    assert canceled.json()["status"] == "canceled"
+    assert "status" not in canceled.json()
+    assert canceled.json()["state_category"] == "terminal"
 
 
 def test_iteration_finish_is_blocked_by_open_bug_without_other_work_items(client: TestClient):
@@ -330,7 +348,7 @@ def test_iteration_finish_is_blocked_by_open_bug_without_other_work_items(client
     )
 
     assert finished.status_code == 400
-    assert client.get(f"/api/v1/iterations/{iteration_id}/detail").json()["iteration"]["status"] == "active"
+    assert client.get(f"/api/v1/iterations/{iteration_id}/detail").json()["iteration"]["state_category"] == "normal"
 
 
 def test_iteration_finish_is_blocked_by_open_test_run(client: TestClient):
@@ -377,7 +395,7 @@ def test_iteration_finish_checks_only_directly_included_tasks(client: TestClient
     )
 
     assert finished.status_code == 200
-    assert client.get(f"/api/v1/tasks/{linked_task_id}").json()["status_name"] == "待分派"
+    assert client.get(f"/api/v1/tasks/{linked_task_id}").json()["state_category"] == "start"
 
 
 def test_iteration_defer_moves_selected_unfinished_items(client: TestClient):
@@ -444,7 +462,7 @@ def test_iteration_progress_counts_default_template_terminal_requirements(client
     assert detail.json()["metrics"]["progress_rate"] == 1.0
 
 
-def test_iteration_progress_uses_current_state_category_when_legacy_status_conflicts(client: TestClient):
+def test_iteration_progress_uses_current_state_category(client: TestClient):
     project_id = _create_project(client)
     iteration_id = _create_iteration(client, [project_id])
     requirement_id = _create_requirement(client, project_id, "State category progress requirement")
@@ -452,7 +470,7 @@ def test_iteration_progress_uses_current_state_category_when_legacy_status_confl
         f"/api/v1/iterations/{iteration_id}/requirements",
         json={"requirement_ids": [requirement_id]},
     ).status_code == 200
-    _set_item_state_category(Requirement, requirement_id, "terminal", "pending_assignment")
+    _set_item_state_category(Requirement, requirement_id, "terminal")
 
     detail = client.get(f"/api/v1/iterations/{iteration_id}/detail")
 

@@ -48,6 +48,10 @@ assert.equal(Object.isFrozen(WORKFLOW_LAYOUT), true)
   assert.equal(byId(result, 1).x, WORKFLOW_LAYOUT.marginX)
   assert.equal(byId(result, 2).x, byId(result, 3).x)
   assert.equal(byId(result, 4).x - byId(result, 2).x, WORKFLOW_LAYOUT.layerGap)
+  assert.equal(byId(result, 2).y, 80)
+  assert.equal(byId(result, 3).y, 200)
+  assert.equal(byId(result, 1).y, 140)
+  assert.equal(byId(result, 4).y, 140)
   assert.ok(Math.abs(byId(result, 2).y - byId(result, 3).y) >= WORKFLOW_LAYOUT.rowGap)
 }
 

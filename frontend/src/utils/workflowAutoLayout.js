@@ -59,14 +59,14 @@ export function layoutWorkflowNodes(states, transitions, initialStateId) {
       incoming,
       nodesById
     )
-    let maximumRows = 1
+    const maximumRows = Math.max(1, ...layers.map(([, ids]) => ids.length))
 
     for (const [layer, ids] of layers) {
-      maximumRows = Math.max(maximumRows, ids.length)
+      const layerOffset = (maximumRows - ids.length) * WORKFLOW_LAYOUT.rowGap / 2
       ids.forEach((id, row) => {
         coordinates.set(id, {
           x: WORKFLOW_LAYOUT.marginX + layer * WORKFLOW_LAYOUT.layerGap,
-          y: regionTop + row * WORKFLOW_LAYOUT.rowGap
+          y: regionTop + layerOffset + row * WORKFLOW_LAYOUT.rowGap
         })
       })
     }

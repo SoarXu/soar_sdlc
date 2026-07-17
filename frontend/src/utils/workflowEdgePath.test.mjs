@@ -183,6 +183,41 @@ const transitionKey = (transition) => transition.id
 }
 
 {
+  const stateCount = 25
+  const states = Array.from({ length: stateCount }, (_, index) => ({
+    id: index,
+    x: (index % 5) * 240,
+    y: Math.floor(index / 5) * 120
+  }))
+  const transitions = []
+  for (let from = 0; from < stateCount; from += 1) {
+    for (let to = from + 1; to < stateCount; to += 1) {
+      transitions.push({
+        id: `dense-${from}-${to}`,
+        from_state_id: from,
+        to_state_id: to
+      })
+    }
+  }
+
+  const startedAt = performance.now()
+  const first = buildWorkflowEdgeViews(states, transitions, transitionKey)
+  const elapsedMs = performance.now() - startedAt
+  assert.ok(
+    elapsedMs < 4000,
+    `25/300 dense DAG routing took ${elapsedMs.toFixed(1)}ms`
+  )
+
+  const second = buildWorkflowEdgeViews(states, transitions, transitionKey)
+  assert.equal(first.length, 300)
+  assert.deepEqual(first, second)
+  first.forEach((edge) => {
+    assertFiniteEdgeView(edge)
+    assertEdgeBoundsContainGeometry(edge)
+  })
+}
+
+{
   const stateCount = 50
   const states = Array.from({ length: stateCount }, (_, index) => ({
     id: index,

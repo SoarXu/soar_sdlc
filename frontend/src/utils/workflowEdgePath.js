@@ -11,6 +11,9 @@ const EDGE_LABEL_HALF_WIDTH = 40
 const EDGE_LABEL_GAP = 8
 const POSITION_EPSILON = 0.001
 const POSITION_CLUSTER_ULP_MULTIPLIER = 8
+const DEGRADED_ROUTE_CANDIDATE_LIMIT = 12
+const DEGRADED_LABEL_CANDIDATE_LIMIT = 8
+const DEGRADED_LABEL_OFFSET_STEPS = 2
 
 export function buildWorkflowEdgeView(from, to) {
   const fromCenter = centerOf(from)
@@ -340,17 +343,16 @@ function reservationPathsForRectangle(reservations, rectangle) {
 function leastCollidingRouteView(candidates, pathBounds, labelBounds, reservations) {
   let best = null
 
-  candidates.forEach((candidate, candidateIndex) => {
+  candidates.slice(0, DEGRADED_ROUTE_CANDIDATE_LIMIT).forEach((candidate) => {
     const points = normalizeOrthogonalPoints(candidate)
     if (points.length < 2) return
     const pathSegments = roundedPolylineSegments(points)
     const pathLabelRectangles = reservationLabelsForSegments(reservations, pathSegments)
-    const labelSearchLimit = labelBounds.length + reservations.labelRectangles.length +
-      points.length + 4
-    const labels = labelPointsForPolyline(points, labelSearchLimit)
+    const labels = labelPointsForPolyline(points, DEGRADED_LABEL_OFFSET_STEPS)
+      .slice(0, DEGRADED_LABEL_CANDIDATE_LIMIT)
     if (!labels.length) labels.push(labelPointForPolyline(points))
 
-    labels.forEach((label, labelIndex) => {
+    labels.forEach((label) => {
       const labelRectangle = edgeLabelRectangle(label)
       const score = pathBounds.filter((rectangle) => (
         segmentsIntersectRectangles(pathSegments, [rectangle])
@@ -368,7 +370,7 @@ function leastCollidingRouteView(candidates, pathBounds, labelBounds, reservatio
           )).length
 
       if (!best || score < best.score) {
-        best = { candidateIndex, labelIndex, label, points, score }
+        best = { label, points, score }
       }
     })
   })
@@ -578,7 +580,7 @@ function collectForwardRouteCandidates(start, end, obstacles, laneIndex, clearan
     clearance,
     (points) => {
       candidates.push(points)
-      return null
+      return candidates.length >= DEGRADED_ROUTE_CANDIDATE_LIMIT
     }
   )
   return candidates

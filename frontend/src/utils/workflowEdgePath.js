@@ -70,7 +70,11 @@ export function buildWorkflowEdgeViews(states, transitions, transitionKey = defa
     routingMetadata.set(edge, metadata)
   })
 
-  const globalReservations = { labelRectangles: [], pathSegments: [] }
+  const globalReservations = {
+    labelRectangles: [],
+    pathSegments: [],
+    spatialIndex: createWorkflowReservationIndex()
+  }
   const views = new Map()
 
   resolved
@@ -138,11 +142,14 @@ export function buildWorkflowEdgeViews(states, transitions, transitionKey = defa
 }
 
 function reserveEdgeViewGeometry(view, reservations) {
-  reservations.labelRectangles.push(edgeLabelRectangle(view))
+  reserveWorkflowLabelRectangle(reservations, edgeLabelRectangle(view))
   const points = Array.isArray(view.points) && view.points.length >= 2
     ? view.points
     : [view.start, view.end]
-  reservations.pathSegments.push(...roundedPolylineSegments(normalizeOrthogonalPoints(points)))
+  reserveWorkflowPathSegments(
+    reservations,
+    roundedPolylineSegments(normalizeOrthogonalPoints(points))
+  )
 }
 
 function buildVerticalView(from, to, states, laneIndex, laneCount, reservations) {
@@ -459,6 +466,7 @@ function polylineClearsRectangles(points, rectangles) {
 }
 
 function segmentIntersectsRectangle(from, to, rectangle) {
+  if (!segmentBoundsIntersectRectangle(from, to, rectangle)) return false
   let minimum = 0
   let maximum = 1
   const dx = to.x - from.x
@@ -480,6 +488,13 @@ function segmentIntersectsRectangle(from, to, rectangle) {
   }
 
   return true
+}
+
+function segmentBoundsIntersectRectangle(from, to, rectangle) {
+  return Math.max(from.x, to.x) >= rectangle.left &&
+    Math.min(from.x, to.x) <= rectangle.right &&
+    Math.max(from.y, to.y) >= rectangle.top &&
+    Math.min(from.y, to.y) <= rectangle.bottom
 }
 
 function roundedPolylineSegments(points) {
@@ -507,6 +522,82 @@ function roundedPolylineSegments(points) {
 
   segments.push({ from: cursor, to: points[points.length - 1] })
   return segments
+}
+
+export function createWorkflowReservationIndex(cellSize = 128) {
+  return {
+    cellSize,
+    buckets: {
+      labelRectangles: new Map(),
+      pathSegments: new Map()
+    },
+    boundsByItem: new Map(),
+    orderByItem: new Map(),
+    nextOrder: 0
+  }
+}
+
+export function addWorkflowReservation(index, type, item) {
+  const buckets = index.buckets[type]
+  if (!buckets || index.boundsByItem.has(item)) return
+  const bounds = type === 'pathSegments'
+    ? segmentBounds(item.from, item.to)
+    : item
+  index.boundsByItem.set(item, bounds)
+  index.orderByItem.set(item, index.nextOrder)
+  index.nextOrder += 1
+  forEachSpatialCell(bounds, index.cellSize, (key) => {
+    if (!buckets.has(key)) buckets.set(key, [])
+    buckets.get(key).push(item)
+  })
+}
+
+export function queryWorkflowReservations(index, type, bounds) {
+  const buckets = index.buckets[type]
+  if (!buckets) return []
+  const found = new Set()
+  forEachSpatialCell(bounds, index.cellSize, (key) => {
+    ;(buckets.get(key) || []).forEach((item) => found.add(item))
+  })
+  return [...found]
+    .filter((item) => rectanglesIntersect(index.boundsByItem.get(item), bounds))
+    .sort((left, right) => index.orderByItem.get(left) - index.orderByItem.get(right))
+}
+
+function forEachSpatialCell(bounds, cellSize, visit) {
+  const left = Math.floor(bounds.left / cellSize)
+  const right = Math.floor(bounds.right / cellSize)
+  const top = Math.floor(bounds.top / cellSize)
+  const bottom = Math.floor(bounds.bottom / cellSize)
+  for (let x = left; x <= right; x += 1) {
+    for (let y = top; y <= bottom; y += 1) visit(`${x}:${y}`)
+  }
+}
+
+function segmentBounds(from, to) {
+  return {
+    left: Math.min(from.x, to.x),
+    top: Math.min(from.y, to.y),
+    right: Math.max(from.x, to.x),
+    bottom: Math.max(from.y, to.y)
+  }
+}
+
+function segmentCollectionBounds(segments) {
+  return segments.reduce((bounds, segment) => {
+    const current = segmentBounds(segment.from, segment.to)
+    return {
+      left: Math.min(bounds.left, current.left),
+      top: Math.min(bounds.top, current.top),
+      right: Math.max(bounds.right, current.right),
+      bottom: Math.max(bounds.bottom, current.bottom)
+    }
+  }, {
+    left: Infinity,
+    top: Infinity,
+    right: -Infinity,
+    bottom: -Infinity
+  })
 }
 
 function quadraticPoint(start, control, end, ratio) {
@@ -674,11 +765,32 @@ function selfLoopCandidateGeometry(candidate) {
 }
 
 function selfLoopClearsReservations(candidate, reservations) {
-  if (reservations.labelRectangles.some((rectangle) => (
+  const labelRectangles = reservations.spatialIndex
+    ? queryWorkflowReservations(
+        reservations.spatialIndex,
+        'labelRectangles',
+        candidate.labelRectangle
+      )
+    : reservations.labelRectangles
+  if (labelRectangles.some((rectangle) => (
     rectanglesIntersect(candidate.labelRectangle, rectangle)
   ))) return false
-  if (segmentsIntersectRectangles(candidate.pathSegments, reservations.labelRectangles)) return false
-  return !segmentsIntersectRectangles(reservations.pathSegments, [candidate.labelRectangle])
+  const pathLabelRectangles = reservations.spatialIndex
+    ? queryWorkflowReservations(
+        reservations.spatialIndex,
+        'labelRectangles',
+        segmentCollectionBounds(candidate.pathSegments)
+      )
+    : reservations.labelRectangles
+  if (segmentsIntersectRectangles(candidate.pathSegments, pathLabelRectangles)) return false
+  const pathSegments = reservations.spatialIndex
+    ? queryWorkflowReservations(
+        reservations.spatialIndex,
+        'pathSegments',
+        candidate.labelRectangle
+      )
+    : reservations.pathSegments
+  return !segmentsIntersectRectangles(pathSegments, [candidate.labelRectangle])
 }
 
 function segmentsIntersectRectangles(segments, rectangles) {
@@ -787,10 +899,26 @@ function selfLoopCandidateView(candidate) {
 }
 
 function reservedSelfLoopView(candidate, reservations, degraded = false) {
-  reservations.labelRectangles.push(candidate.labelRectangle)
-  reservations.pathSegments.push(...candidate.pathSegments)
+  reserveWorkflowLabelRectangle(reservations, candidate.labelRectangle)
+  reserveWorkflowPathSegments(reservations, candidate.pathSegments)
   const view = selfLoopCandidateView(candidate)
   return degraded ? { ...view, degraded: true } : view
+}
+
+function reserveWorkflowLabelRectangle(reservations, rectangle) {
+  reservations.labelRectangles.push(rectangle)
+  if (reservations.spatialIndex) {
+    addWorkflowReservation(reservations.spatialIndex, 'labelRectangles', rectangle)
+  }
+}
+
+function reserveWorkflowPathSegments(reservations, segments) {
+  reservations.pathSegments.push(...segments)
+  if (reservations.spatialIndex) {
+    segments.forEach((segment) => {
+      addWorkflowReservation(reservations.spatialIndex, 'pathSegments', segment)
+    })
+  }
 }
 
 function edgeView(points, labelX, labelY) {

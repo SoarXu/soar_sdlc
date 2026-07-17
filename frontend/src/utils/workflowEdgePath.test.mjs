@@ -1,6 +1,53 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
-import { buildWorkflowEdgeView, buildWorkflowEdgeViews } from './workflowEdgePath.js'
+import * as workflowEdgePath from './workflowEdgePath.js'
+
+const {
+  addWorkflowReservation,
+  buildWorkflowEdgeView,
+  buildWorkflowEdgeViews,
+  createWorkflowReservationIndex,
+  queryWorkflowReservations
+} = workflowEdgePath
+
+assert.equal(typeof createWorkflowReservationIndex, 'function')
+assert.equal(typeof addWorkflowReservation, 'function')
+assert.equal(typeof queryWorkflowReservations, 'function')
+
+{
+  const index = createWorkflowReservationIndex(128)
+  const longSegment = { id: 'long', from: { x: 0, y: 64 }, to: { x: 400, y: 64 } }
+  const boundarySegment = { id: 'boundary', from: { x: 128, y: 0 }, to: { x: 128, y: 128 } }
+  const farSegment = { id: 'far', from: { x: 800, y: 800 }, to: { x: 900, y: 800 } }
+  const crossingLabel = { id: 'crossing', left: 120, top: 120, right: 136, bottom: 136 }
+  const farLabel = { id: 'far-label', left: 800, top: 800, right: 820, bottom: 820 }
+
+  ;[longSegment, boundarySegment, farSegment].forEach((segment) => {
+    addWorkflowReservation(index, 'pathSegments', segment)
+  })
+  ;[crossingLabel, farLabel].forEach((rectangle) => {
+    addWorkflowReservation(index, 'labelRectangles', rectangle)
+  })
+
+  assert.deepEqual(
+    queryWorkflowReservations(index, 'pathSegments', {
+      left: 300, top: 60, right: 310, bottom: 70
+    }),
+    [longSegment]
+  )
+  assert.deepEqual(
+    queryWorkflowReservations(index, 'pathSegments', {
+      left: 128, top: 60, right: 128, bottom: 70
+    }),
+    [longSegment, boundarySegment]
+  )
+  assert.deepEqual(
+    queryWorkflowReservations(index, 'labelRectangles', {
+      left: 128, top: 128, right: 128, bottom: 128
+    }),
+    [crossingLabel]
+  )
+}
 
 const source = { x: 100, y: 100 }
 
@@ -558,6 +605,10 @@ assertVerticalColumnReservations(159, 159.001, 'exact-epsilon-boundary')
 {
   const sourceCode = readFileSync(new URL('./workflowEdgePath.js', import.meta.url), 'utf8')
   assert.doesNotMatch(sourceCode, /safeStartChannels\.flatMap/)
+  assert.match(
+    sourceCode,
+    /function segmentIntersectsRectangle[\s\S]*?segmentBoundsIntersectRectangle\(from, to, rectangle\)/
+  )
 }
 
 {

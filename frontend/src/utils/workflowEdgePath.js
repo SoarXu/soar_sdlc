@@ -131,7 +131,9 @@ function buildVerticalView(from, to, states, laneIndex, laneCount) {
     rectangles
   )
 
-  if (!points) throw new Error('Unable to route workflow vertical edge around nodes')
+  if (!points) {
+    return degradedEdgeView(direct, trackX, (start.y + end.y) / 2)
+  }
   return edgeView(points, points[1].x, (start.y + end.y) / 2)
 }
 
@@ -205,30 +207,35 @@ function buildObstacleAvoidingForwardView(start, end, obstacles, laneIndex) {
   const laneOffset = laneIndex * PARALLEL_LANE_GAP
   const tracks = [above - laneOffset, below + laneOffset]
     .sort((left, right) => routeDistance(start, end, left) - routeDistance(start, end, right) || left - right)
-  const candidates = tracks.flatMap((trackY) => {
+  for (const trackY of tracks) {
     const safeStartChannels = startChannels
       .filter((trackX) => forwardLegClears(start, trackX, trackY, 1, rectangles))
     const safeEndChannels = endChannels
       .filter((trackX) => forwardLegClears(end, trackX, trackY, -1, rectangles))
 
-    return safeStartChannels.flatMap((startTrackX) => (
-      safeEndChannels.map((endTrackX) => forwardRoutePoints(
-        start,
-        end,
-        startTrackX,
-        endTrackX,
-        trackY
-      ))
-    ))
-  })
-  const points = firstClearPolyline(candidates, rectangles)
+    for (const startTrackX of safeStartChannels) {
+      for (const endTrackX of safeEndChannels) {
+        const points = firstClearPolyline([
+          forwardRoutePoints(start, end, startTrackX, endTrackX, trackY)
+        ], rectangles)
+        if (!points) continue
+        const trackPoints = points.filter((point) => point.y === trackY)
+        return edgeView(
+          points,
+          (trackPoints[0].x + trackPoints[trackPoints.length - 1].x) / 2,
+          trackY
+        )
+      }
+    }
+  }
 
-  if (!points) throw new Error('Unable to route workflow forward edge around nodes')
-  const trackPoints = points.filter((point) => tracks.includes(point.y))
-  return edgeView(
-    points,
-    (trackPoints[0].x + trackPoints[trackPoints.length - 1].x) / 2,
-    trackPoints[0].y
+  const fallbackTrackY = tracks[0]
+  const fallbackStartX = start.x + PARALLEL_LANE_GAP
+  const fallbackEndX = end.x - PARALLEL_LANE_GAP
+  return degradedEdgeView(
+    forwardRoutePoints(start, end, fallbackStartX, fallbackEndX, fallbackTrackY),
+    (fallbackStartX + fallbackEndX) / 2,
+    fallbackTrackY
   )
 }
 
@@ -396,7 +403,13 @@ function buildBackwardView(from, to, states, maximumNodeBottom, laneIndex) {
   ]
   const points = firstClearPolyline(candidates, rectangles)
 
-  if (!points) throw new Error('Unable to route workflow backward edge around nodes')
+  if (!points) {
+    return degradedEdgeView(
+      backwardRoutePoints(start, end, start.x, end.x, trackY),
+      (start.x + end.x) / 2,
+      trackY
+    )
+  }
   const trackPoints = points.filter((point) => point.y === trackY)
   return edgeView(
     points,
@@ -446,6 +459,13 @@ function edgeView(points, labelX, labelY) {
     labelY,
     start: points[0],
     end: points[points.length - 1]
+  }
+}
+
+function degradedEdgeView(points, labelX, labelY) {
+  return {
+    ...edgeView(normalizeOrthogonalPoints(points), labelX, labelY),
+    degraded: true
   }
 }
 

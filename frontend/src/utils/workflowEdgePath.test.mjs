@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 import { buildWorkflowEdgeView, buildWorkflowEdgeViews } from './workflowEdgePath.js'
 
 const source = { x: 100, y: 100 }
@@ -295,6 +296,64 @@ const transitionKey = (transition) => transition.id
   states.slice(1, 5).forEach((state) => {
     assertPathClearsRectangle(edge.path, expandedNodeRectangle(state))
   })
+}
+
+{
+  const states = [
+    { id: 'source', x: 0, y: 0 },
+    { id: 'near', x: 130, y: 0 },
+    { id: 'target', x: 500, y: 0 }
+  ]
+  const transitions = [
+    { id: 'insufficient-clearance', from_state_id: 'source', to_state_id: 'target' },
+    { id: 'unaffected-edge', from_state_id: 'near', to_state_id: 'target' }
+  ]
+  const first = buildWorkflowEdgeViews(states, transitions, transitionKey)
+  const second = buildWorkflowEdgeViews(states, transitions, transitionKey)
+
+  assert.equal(first.length, transitions.length)
+  assert.ok(first.every((edge) => edge.path.length > 0))
+  assert.deepEqual(first, second)
+}
+
+{
+  const states = [
+    { id: 'source', x: 0, y: 0 },
+    { id: 'overlap', x: 100, y: 0 },
+    { id: 'target', x: 500, y: 0 }
+  ]
+  const transitions = [
+    { id: 'overlapping-clearance', from_state_id: 'source', to_state_id: 'target' },
+    { id: 'overlap-unaffected-edge', from_state_id: 'overlap', to_state_id: 'target' }
+  ]
+  const edges = buildWorkflowEdgeViews(states, transitions, transitionKey)
+
+  assert.equal(edges.length, transitions.length)
+  assert.ok(edges.every((edge) => edge.path.length > 0))
+}
+
+{
+  const obstacles = Array.from({ length: 150 }, (_, index) => ({
+    id: `obstacle-${index}`,
+    x: 200 + index * 50,
+    y: index % 2 === 0 ? -100 : 100
+  }))
+  const states = [
+    { id: 'source', x: 0, y: 0 },
+    ...obstacles,
+    { id: 'target', x: 8000, y: 0 }
+  ]
+  const edges = buildWorkflowEdgeViews(states, [
+    { id: 'large-obstacle-route', from_state_id: 'source', to_state_id: 'target' }
+  ], transitionKey)
+
+  assert.equal(edges.length, 1)
+  assert.ok(edges[0].path.length > 0)
+}
+
+{
+  const sourceCode = readFileSync(new URL('./workflowEdgePath.js', import.meta.url), 'utf8')
+  assert.doesNotMatch(sourceCode, /safeStartChannels\.flatMap/)
 }
 
 {

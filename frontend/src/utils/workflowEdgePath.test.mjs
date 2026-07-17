@@ -87,6 +87,22 @@ const transitionKey = (transition) => transition.id
 
 {
   const states = [
+    { id: 'target', x: 80, y: 140 },
+    { id: 'source', x: 320, y: 80 },
+    { id: 'sibling', x: 320, y: 200 }
+  ]
+  const [edge] = buildWorkflowEdgeViews(states, [
+    { id: 'sibling-return', from_state_id: 'source', to_state_id: 'target' }
+  ], transitionKey)
+
+  assert.deepEqual(edge.start, { x: 379, y: 122 })
+  assert.deepEqual(edge.end, { x: 139, y: 182 })
+  assert.ok(Math.max(...pathPoints(edge.path).map(({ y }) => y)) > 242)
+  assertPathClearsRectangle(edge.path, expandedNodeRectangle(states[2]))
+}
+
+{
+  const states = [
     { id: 'source', x: 40, y: 100 },
     { id: 'target', x: 360, y: 500 }
   ]
@@ -112,6 +128,21 @@ const transitionKey = (transition) => transition.id
   assert.deepEqual(edge.end, { x: 159, y: 300 })
   assert.ok(segments.every(({ from, to }) => to.y >= from.y))
   assert.ok(segments.every(({ from, to }) => from.x !== to.x || from.y !== to.y))
+}
+
+{
+  const states = [
+    { id: 'source', x: 100, y: 0 },
+    { id: 'middle', x: 100, y: 140 },
+    { id: 'target', x: 100, y: 300 }
+  ]
+  const [edge] = buildWorkflowEdgeViews(states, [
+    { id: 'vertical-around-middle', from_state_id: 'source', to_state_id: 'target' }
+  ], transitionKey)
+
+  assert.deepEqual(edge.start, { x: 159, y: 42 })
+  assert.deepEqual(edge.end, { x: 159, y: 300 })
+  assertPathClearsRectangle(edge.path, expandedNodeRectangle(states[1]))
 }
 
 {

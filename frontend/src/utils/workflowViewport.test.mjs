@@ -14,9 +14,23 @@ const viewport = { width: 900, height: 540 }
 {
   const nodes = [{ id: 1, x: 80, y: 80 }]
   const originalNodes = structuredClone(nodes)
-  assert.deepEqual(workflowCanvasSize(nodes), canvas)
+  assert.deepEqual(workflowCanvasSize(nodes), {
+    left: 0,
+    top: 0,
+    right: 2400,
+    bottom: 1400,
+    width: 2400,
+    height: 1400
+  })
   assert.deepEqual(nodes, originalNodes)
-  assert.deepEqual(workflowCanvasSize([]), canvas)
+  assert.deepEqual(workflowCanvasSize([]), {
+    left: 0,
+    top: 0,
+    right: 2400,
+    bottom: 1400,
+    width: 2400,
+    height: 1400
+  })
 }
 
 {
@@ -151,7 +165,14 @@ const viewport = { width: 900, height: 540 }
   const contentFit = fitViewportToNodes(nodes, expandedCanvas, viewport, edgeViews)
 
   assert.ok(edgeBottom > 1602, `expected label bounds below the 1602 path, got ${edgeBottom}`)
-  assert.deepEqual(draggingCanvas, canvas)
+  assert.deepEqual(draggingCanvas, {
+    left: 0,
+    top: 0,
+    right: 2400,
+    bottom: 1400,
+    width: 2400,
+    height: 1400
+  })
   assert.ok(expandedCanvas.height > draggingCanvas.height)
   assert.ok(expandedCanvas.height >= edgeBottom + 120)
   assert.ok(edgeBottom + bottomOffset.y <= viewport.height - 120)
@@ -165,6 +186,52 @@ const viewport = { width: 900, height: 540 }
     fitViewportToNodes([], canvas, viewport, edgeViews),
     { x: 0, y: 0 }
   )
+}
+
+{
+  const nodes = [{ id: 'loop', x: 80, y: 80 }]
+  const transitions = Array.from({ length: 20 }, (_, index) => ({
+    id: `loop-${index + 1}`,
+    from_state_id: 'loop',
+    to_state_id: 'loop',
+    sort_order: index
+  }))
+  const edgeViews = buildWorkflowEdgeViews(nodes, transitions, (transition) => transition.id)
+  const edgeBounds = edgeViews.reduce((bounds, edge) => ({
+    left: Math.min(bounds.left, edge.bounds.left),
+    top: Math.min(bounds.top, edge.bounds.top),
+    right: Math.max(bounds.right, edge.bounds.right),
+    bottom: Math.max(bounds.bottom, edge.bounds.bottom)
+  }), { left: Infinity, top: Infinity, right: -Infinity, bottom: -Infinity })
+  const expandedCanvas = workflowCanvasSize(nodes, undefined, undefined, edgeViews)
+  const rightmostOffset = clampViewport({ x: Infinity, y: Infinity }, expandedCanvas, viewport)
+  const leftmostOffset = clampViewport({ x: -Infinity, y: -Infinity }, expandedCanvas, viewport)
+
+  assert.deepEqual(edgeBounds, { left: -540, top: -452, right: 762, bottom: 716 })
+  assert.ok(expandedCanvas.left <= edgeBounds.left - 160)
+  assert.ok(expandedCanvas.top <= edgeBounds.top - 120)
+  assert.ok(expandedCanvas.right >= edgeBounds.right + 160)
+  assert.ok(expandedCanvas.bottom >= edgeBounds.bottom + 120)
+  assert.equal(expandedCanvas.width, expandedCanvas.right - expandedCanvas.left)
+  assert.equal(expandedCanvas.height, expandedCanvas.bottom - expandedCanvas.top)
+  assert.ok(edgeBounds.left + rightmostOffset.x >= 160)
+  assert.ok(edgeBounds.top + rightmostOffset.y >= 120)
+  assert.ok(edgeBounds.right + leftmostOffset.x <= viewport.width - 160)
+  assert.ok(edgeBounds.bottom + leftmostOffset.y <= viewport.height - 120)
+}
+
+{
+  const negativeEdgeViews = [{
+    bounds: { left: -540, top: -452, right: 100, bottom: 0 }
+  }]
+  const expandedCanvas = workflowCanvasSize([], undefined, undefined, negativeEdgeViews)
+  const fitted = fitViewportToNodes([], expandedCanvas, viewport, negativeEdgeViews)
+
+  assert.ok(-540 + fitted.x > 0)
+  assert.ok(-452 + fitted.y > 0)
+  assert.ok(100 + fitted.x < viewport.width)
+  assert.ok(fitted.y < viewport.height)
+  assert.deepEqual(fitted, clampViewport(fitted, expandedCanvas, viewport))
 }
 
 console.log('workflowViewport tests passed')

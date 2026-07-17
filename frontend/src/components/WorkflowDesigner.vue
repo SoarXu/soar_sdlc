@@ -536,8 +536,8 @@ function startDrag(state, event) {
 
 function onDrag(event) {
   if (!dragging.state) return
-  dragging.state.x = Math.max(20, Math.min(canvasSize.value.width - 140, dragging.originX + event.clientX - dragging.startX))
-  dragging.state.y = Math.max(20, Math.min(canvasSize.value.height - 70, dragging.originY + event.clientY - dragging.startY))
+  dragging.state.x = Math.max(20, Math.min(canvasSize.value.right - 140, dragging.originX + event.clientX - dragging.startX))
+  dragging.state.y = Math.max(20, Math.min(canvasSize.value.bottom - 70, dragging.originY + event.clientY - dragging.startY))
 }
 
 function clampCurrentViewport(nextCanvas = canvasSize.value) {

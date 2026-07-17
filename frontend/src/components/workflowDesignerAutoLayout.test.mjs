@@ -78,6 +78,11 @@ assert.match(clampCurrentViewportBody, /viewportOffset\.x = next\.x[\s\S]*viewpo
 const stopDragBody = functionBody('stopDrag', 'startViewportDrag')
 assert.match(stopDragBody, /dragging\.state = null[\s\S]*clampCurrentViewport\(\)/)
 
+const onDragBody = functionBody('onDrag', 'clampCurrentViewport')
+assert.match(onDragBody, /canvasSize\.value\.right - 140/)
+assert.match(onDragBody, /canvasSize\.value\.bottom - 70/)
+assert.doesNotMatch(onDragBody, /canvasSize\.value\.(?:width|height)/)
+
 assert.match(
   source,
   /<el-button size="small" @click="addTransition">新增流转<\/el-button>\s*<el-button size="small" @click="organizeLayout">整理布局<\/el-button>\s*<el-button size="small" @click="fitToContent">适应视图<\/el-button>/

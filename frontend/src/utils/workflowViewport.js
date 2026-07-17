@@ -4,22 +4,38 @@ const NODE_HEIGHT = 42
 export function workflowCanvasSize(
   nodes,
   minimumCanvas = { width: 2400, height: 1400 },
-  padding = { right: 160, bottom: 120 },
+  padding = { left: 160, top: 120, right: 160, bottom: 120 },
   edgeViews = []
 ) {
   const nodeBounds = nodes.map((node) => ({
+    left: node.x,
+    top: node.y,
     right: node.x + NODE_WIDTH,
     bottom: node.y + NODE_HEIGHT
   }))
   const contentBounds = [...nodeBounds, ...edgeViews.map((edge) => edge.bounds)]
     .reduce((bounds, item) => ({
+      left: Math.min(bounds.left, item.left),
+      top: Math.min(bounds.top, item.top),
       right: Math.max(bounds.right, item.right),
       bottom: Math.max(bounds.bottom, item.bottom)
-    }), { right: 0, bottom: 0 })
+    }), { left: Infinity, top: Infinity, right: 0, bottom: 0 })
+  const left = contentBounds.left < 0
+    ? contentBounds.left - (padding.left ?? 0)
+    : 0
+  const top = contentBounds.top < 0
+    ? contentBounds.top - (padding.top ?? 0)
+    : 0
+  const right = Math.max(minimumCanvas.width, contentBounds.right + padding.right)
+  const bottom = Math.max(minimumCanvas.height, contentBounds.bottom + padding.bottom)
 
   return {
-    width: Math.max(minimumCanvas.width, contentBounds.right + padding.right),
-    height: Math.max(minimumCanvas.height, contentBounds.bottom + padding.bottom)
+    left,
+    top,
+    right,
+    bottom,
+    width: right - left,
+    height: bottom - top
   }
 }
 
@@ -35,9 +51,14 @@ export function applyPanDelta(offset, delta, canvas, viewport) {
 }
 
 export function clampViewport(offset, canvas, viewport) {
+  const left = canvas.left ?? 0
+  const top = canvas.top ?? 0
+  const right = canvas.right ?? left + canvas.width
+  const bottom = canvas.bottom ?? top + canvas.height
+
   return {
-    x: clamp(offset.x, viewport.width - canvas.width, viewport.width / 2),
-    y: clamp(offset.y, viewport.height - canvas.height, viewport.height / 2)
+    x: clamp(offset.x, viewport.width - right, viewport.width / 2 - left),
+    y: clamp(offset.y, viewport.height - bottom, viewport.height / 2 - top)
   }
 }
 

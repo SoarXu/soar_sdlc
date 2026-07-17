@@ -14,8 +14,11 @@ export async function requestWorkflowOrganization({
 
   try {
     await confirm()
-  } catch {
-    return { organized: false, states }
+  } catch (error) {
+    if (error === 'cancel' || error === 'close') {
+      return { organized: false, states }
+    }
+    throw error
   }
 
   return {

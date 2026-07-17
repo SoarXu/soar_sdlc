@@ -24,7 +24,7 @@ function workflowFixture() {
     states,
     transitions,
     initialStateId: 2,
-    confirm: async () => { throw new Error('cancel') },
+    confirm: async () => { throw 'cancel' },
     notifyEmpty: () => assert.fail('non-empty workflow must not notify')
   })
 
@@ -32,6 +32,39 @@ function workflowFixture() {
   assert.strictEqual(result.states, states)
   assert.deepEqual(states, originalStates)
   assert.deepEqual(transitions, originalTransitions)
+}
+
+{
+  const { states, transitions } = workflowFixture()
+  const originalStates = structuredClone(states)
+
+  const result = await requestWorkflowOrganization({
+    states,
+    transitions,
+    initialStateId: 2,
+    confirm: async () => { throw 'close' },
+    notifyEmpty: () => assert.fail('non-empty workflow must not notify')
+  })
+
+  assert.equal(result.organized, false)
+  assert.strictEqual(result.states, states)
+  assert.deepEqual(states, originalStates)
+}
+
+{
+  const { states, transitions } = workflowFixture()
+  const confirmationError = new Error('message box failed')
+
+  await assert.rejects(
+    requestWorkflowOrganization({
+      states,
+      transitions,
+      initialStateId: 2,
+      confirm: async () => { throw confirmationError },
+      notifyEmpty: () => assert.fail('non-empty workflow must not notify')
+    }),
+    (error) => error === confirmationError
+  )
 }
 
 {

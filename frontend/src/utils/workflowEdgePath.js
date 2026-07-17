@@ -58,7 +58,12 @@ export function buildWorkflowEdgeViews(states, transitions, transitionKey = defa
 
     let view
     if (edge.transition.from_state_id === edge.transition.to_state_id) {
-      view = buildSelfLoopView(edge.from, groupIndex)
+      view = buildSelfLoopView(
+        edge.from,
+        states,
+        groupIndex,
+        groupSizes.get(groupKey)
+      )
     } else if (isVerticalConnection(edge.from, edge.to)) {
       view = buildVerticalView(
         edge.from,
@@ -453,19 +458,155 @@ function firstClearPolyline(candidates, rectangles) {
   return null
 }
 
-function buildSelfLoopView(node, loopIndex) {
+function buildSelfLoopView(node, states, loopIndex, loopCount) {
+  const obstacles = states.filter((state) => state !== node)
+  const clearCandidate = findSelfLoopCandidate(
+    node,
+    obstacles,
+    loopIndex,
+    loopCount,
+    OBSTACLE_CLEARANCE
+  )
+  if (clearCandidate) return selfLoopCandidateView(clearCandidate)
+
+  const nodeAvoidingCandidate = findSelfLoopCandidate(
+    node,
+    obstacles,
+    loopIndex,
+    loopCount,
+    0
+  )
+  if (nodeAvoidingCandidate) {
+    return {
+      ...selfLoopCandidateView(nodeAvoidingCandidate),
+      degraded: true
+    }
+  }
+
+  const fallback = rightSelfLoopCandidate(node, (loopIndex + 1) * PARALLEL_LANE_GAP)
+  return {
+    ...selfLoopCandidateView(fallback),
+    degraded: true
+  }
+}
+
+function findSelfLoopCandidate(node, obstacles, loopIndex, loopCount, clearance) {
+  const pathRectangles = obstacles.map((state) => expandedRectangle(state, clearance))
+  const nodeRectangles = obstacles.map((state) => expandedRectangle(state, 0))
+
+  for (let expansion = 0; expansion < obstacles.length + 4; expansion += 1) {
+    const distance = (loopIndex + 1 + expansion * loopCount) * PARALLEL_LANE_GAP
+    const candidates = [
+      rightSelfLoopCandidate(node, distance),
+      bottomSelfLoopCandidate(node, distance),
+      leftSelfLoopCandidate(node, distance),
+      topSelfLoopCandidate(node, distance)
+    ]
+
+    for (const candidate of candidates) {
+      const points = normalizeOrthogonalPoints(candidate.points)
+      if (!polylineClearsRectangles(points, pathRectangles)) continue
+      if (!labelClearsRectangles(candidate, nodeRectangles)) continue
+      return { ...candidate, points }
+    }
+  }
+
+  return null
+}
+
+function rightSelfLoopCandidate(node, distance) {
   const start = anchorPoint(node, 'right')
   const end = anchorPoint(node, 'bottom')
-  const loopRight = node.x + NODE_WIDTH + (loopIndex + 1) * PARALLEL_LANE_GAP
-  const loopBottom = node.y + NODE_HEIGHT + (loopIndex + 1) * BACKWARD_LANE_GAP
+  const loopRight = node.x + NODE_WIDTH + distance
+  const loopBottom = node.y + NODE_HEIGHT + distance
 
-  return edgeView([
-    start,
-    { x: loopRight, y: start.y },
-    { x: loopRight, y: loopBottom },
-    { x: end.x, y: loopBottom },
-    end
-  ], loopRight + EDGE_LABEL_HALF_WIDTH + EDGE_LABEL_GAP, (start.y + loopBottom) / 2)
+  return {
+    points: [
+      start,
+      { x: loopRight, y: start.y },
+      { x: loopRight, y: loopBottom },
+      { x: end.x, y: loopBottom },
+      end
+    ],
+    labelX: loopRight + EDGE_LABEL_HALF_WIDTH + EDGE_LABEL_GAP,
+    labelY: (start.y + loopBottom) / 2
+  }
+}
+
+function bottomSelfLoopCandidate(node, distance) {
+  const start = anchorPoint(node, 'bottom')
+  const end = anchorPoint(node, 'left')
+  const loopBottom = node.y + NODE_HEIGHT + distance
+  const loopLeft = node.x - distance
+
+  return {
+    points: [
+      start,
+      { x: start.x, y: loopBottom },
+      { x: loopLeft, y: loopBottom },
+      { x: loopLeft, y: end.y },
+      end
+    ],
+    labelX: (start.x + loopLeft) / 2,
+    labelY: loopBottom + 13 + EDGE_LABEL_GAP
+  }
+}
+
+function leftSelfLoopCandidate(node, distance) {
+  const start = anchorPoint(node, 'left')
+  const end = anchorPoint(node, 'top')
+  const loopLeft = node.x - distance
+  const loopTop = node.y - distance
+
+  return {
+    points: [
+      start,
+      { x: loopLeft, y: start.y },
+      { x: loopLeft, y: loopTop },
+      { x: end.x, y: loopTop },
+      end
+    ],
+    labelX: loopLeft - EDGE_LABEL_HALF_WIDTH - EDGE_LABEL_GAP,
+    labelY: (start.y + loopTop) / 2
+  }
+}
+
+function topSelfLoopCandidate(node, distance) {
+  const start = anchorPoint(node, 'top')
+  const end = anchorPoint(node, 'right')
+  const loopTop = node.y - distance
+  const loopRight = node.x + NODE_WIDTH + distance
+
+  return {
+    points: [
+      start,
+      { x: start.x, y: loopTop },
+      { x: loopRight, y: loopTop },
+      { x: loopRight, y: end.y },
+      end
+    ],
+    labelX: (start.x + loopRight) / 2,
+    labelY: loopTop - 13 - EDGE_LABEL_GAP
+  }
+}
+
+function labelClearsRectangles(candidate, rectangles) {
+  const labelRectangle = {
+    left: candidate.labelX - EDGE_LABEL_HALF_WIDTH,
+    top: candidate.labelY - 13,
+    right: candidate.labelX + EDGE_LABEL_HALF_WIDTH,
+    bottom: candidate.labelY + 13
+  }
+  return rectangles.every((rectangle) => !rectanglesIntersect(labelRectangle, rectangle))
+}
+
+function rectanglesIntersect(left, right) {
+  return left.right >= right.left && left.left <= right.right &&
+    left.bottom >= right.top && left.top <= right.bottom
+}
+
+function selfLoopCandidateView(candidate) {
+  return edgeView(candidate.points, candidate.labelX, candidate.labelY)
 }
 
 function edgeView(points, labelX, labelY) {

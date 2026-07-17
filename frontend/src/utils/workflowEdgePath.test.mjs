@@ -447,6 +447,36 @@ const transitionKey = (transition) => transition.id
 
 {
   const states = [
+    { id: 1, x: 320, y: 140 },
+    { id: 2, x: 560, y: 200 }
+  ]
+  const transitions = Array.from({ length: 3 }, (_, index) => ({
+    id: `obstructed-loop-${index + 1}`,
+    from_state_id: 1,
+    to_state_id: 1,
+    sort_order: index * 10
+  }))
+  const edges = buildWorkflowEdgeViews(states, transitions, transitionKey)
+
+  assert.equal(new Set(edges.map((edge) => edge.path)).size, edges.length)
+  assert.equal(
+    new Set(edges.map((edge) => `${edge.labelX}:${edge.labelY}`)).size,
+    edges.length
+  )
+  edges.forEach((edge) => {
+    assertPathClearsRectangle(edge.path, expandedNodeRectangle(states[1]))
+    const labelRectangle = {
+      left: edge.labelX - 40,
+      top: edge.labelY - 13,
+      right: edge.labelX + 40,
+      bottom: edge.labelY + 13
+    }
+    assert.equal(rectanglesIntersect(labelRectangle, nodeRectangle(states[1])), false)
+  })
+}
+
+{
+  const states = [
     { id: 'left-loop', x: 100, y: 100 },
     { id: 'right-loop', x: 500, y: 100 }
   ]

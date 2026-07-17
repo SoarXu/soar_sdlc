@@ -164,21 +164,9 @@ def test_system_and_existing_scheme_templates_create_independent_full_copies(cli
         assert copied_graph["definition"]["template_key"] is None
         assert _normalized_graph(copied_graph) == _normalized_graph(source_graph)
 
-    source_rules = client.get(
+    assert client.get(
         f"/api/v1/handler-transition-rules?config_id={source_scheme['id']}"
-    ).json()
-    copied_rules = client.get(
-        f"/api/v1/handler-transition-rules?config_id={copied_scheme['id']}"
-    ).json()
-    assert source_rules
-    assert len(copied_rules) == len(source_rules), (len(source_rules), len(copied_rules))
-    assert [
-        {key: value for key, value in item.items() if key not in {"id", "config_id", "create_time", "update_time"}}
-        for item in copied_rules
-    ] == [
-        {key: value for key, value in item.items() if key not in {"id", "config_id", "create_time", "update_time"}}
-        for item in source_rules
-    ]
+    ).status_code == 404
 
 
 def test_duplicate_scheme_name_returns_conflict(client: TestClient):

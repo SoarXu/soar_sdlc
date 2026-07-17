@@ -30,7 +30,6 @@ EXPECTED_TABLES = {
     "notification_delivery_log",
     "audit_log",
     "external_integration_mapping",
-    "handler_transition_rules",
 }
 
 

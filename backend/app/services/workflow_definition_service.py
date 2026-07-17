@@ -7,7 +7,6 @@ from sqlalchemy.orm import Session
 
 from app.models.assignee_rule_config import AssigneeRuleConfig
 from app.models.bug import Bug
-from app.models.handler_transition_rule import HandlerTransitionRule
 from app.models.requirement import Requirement
 from app.models.role import Role
 from app.models.status_operation import StatusOperationLog
@@ -136,8 +135,7 @@ def _save_graph(
     internal_keys: dict[int, str] | None = None,
 ) -> None:
     _validate_graph(db, definition, payload)
-    persisted_transitions = _persist_graph(db, definition, payload, internal_keys or {})
-    _sync_handler_rules(db, definition, persisted_transitions)
+    _persist_graph(db, definition, payload, internal_keys or {})
     definition.version = (definition.version or 1) + 1
     definition.update_time = datetime.now()
     db.commit()
@@ -491,46 +489,6 @@ def _template_graph_payload(db: Session, definition: WorkflowDefinition, templat
         ),
         internal_keys,
     )
-
-
-def _sync_handler_rules(db: Session, definition: WorkflowDefinition, transitions: list[WorkflowTransition]) -> None:
-    if definition.scope_type != "assignee_rule_config" or not definition.scope_id:
-        return
-    for transition in transitions:
-        handler_rule = transition.handler_rule or {}
-        if not handler_rule:
-            continue
-        rule = (
-            db.query(HandlerTransitionRule)
-            .filter(
-                HandlerTransitionRule.config_id == definition.scope_id,
-                HandlerTransitionRule.rule_type == "advanced",
-                HandlerTransitionRule.object_type == definition.object_type,
-                HandlerTransitionRule.action == transition.action_key,
-                HandlerTransitionRule.from_status == transition.from_status,
-                HandlerTransitionRule.to_status == transition.to_status,
-            )
-            .first()
-        )
-        data = {
-            "config_id": definition.scope_id,
-            "rule_type": "advanced",
-            "object_type": definition.object_type,
-            "action": transition.action_key,
-            "from_status": transition.from_status,
-            "to_status": transition.to_status,
-            "target_type": handler_rule.get("target_type", "keep_current"),
-            "target_roles": _csv(handler_rule.get("target_roles")),
-            "fallback_type": handler_rule.get("fallback_type", "keep_current"),
-            "fallback_roles": _csv(handler_rule.get("fallback_roles")),
-            "enabled": transition.enabled,
-        }
-        if rule:
-            for field, value in data.items():
-                setattr(rule, field, value)
-            rule.update_time = datetime.now()
-        else:
-            db.add(HandlerTransitionRule(**data))
 
 
 def _graph_response(db: Session, definition: WorkflowDefinition) -> dict:

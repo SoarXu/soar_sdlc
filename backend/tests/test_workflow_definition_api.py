@@ -290,7 +290,7 @@ def test_save_graph_preserves_layout_and_validates_duplicates(client: TestClient
     assert failed.status_code == 422
 
 
-def test_transition_handler_rule_syncs_to_handler_transition_rules(client: TestClient):
+def test_transition_handler_rule_is_persisted_only_on_transition(client: TestClient):
     config_id = _create_config(client)
     definition = client.post(
         "/api/v1/workflow-definitions",
@@ -329,12 +329,12 @@ def test_transition_handler_rule_syncs_to_handler_transition_rules(client: TestC
 
     assert saved.status_code == 200, saved.text
     state_ids = {item["status_name"]: item["id"] for item in saved.json()["states"]}
-    rules = client.get(f"/api/v1/handler-transition-rules?config_id={config_id}").json()
-    rule = next(item for item in rules if item["object_type"] == "task" and item["action"] == "activate")
-    assert rule["rule_type"] == "advanced"
-    assert rule["from_status"] == f"state_{state_ids['Todo']}"
-    assert rule["to_status"] == f"state_{state_ids['Doing']}"
-    assert rule["target_roles"] == "project_member"
+    transition = saved.json()["transitions"][0]
+    assert transition["from_state_id"] == state_ids["Todo"]
+    assert transition["to_state_id"] == state_ids["Doing"]
+    assert transition["handler_rule"]["target_type"] == "project_role"
+    assert transition["handler_rule"]["target_roles"] == "project_member"
+    assert client.get(f"/api/v1/handler-transition-rules?config_id={config_id}").status_code == 404
 
 
 def test_save_graph_preserves_transition_ui_and_form_config(client: TestClient):

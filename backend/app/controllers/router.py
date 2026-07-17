@@ -8,7 +8,6 @@ from app.controllers import (
     dashboard_controller,
     devops_controller,
     exception_rule_controller,
-    handler_transition_rule_controller,
     health_controller,
     iteration_controller,
     notification_controller,
@@ -59,8 +58,3 @@ api_router.include_router(workflow_definition_controller.router, prefix="/workfl
 api_router.include_router(workflow_runtime_controller.router, prefix="/workflow-runtime", tags=["workflow-runtime"])
 api_router.include_router(workflow_component_controller.component_router, prefix="/workflow-components", tags=["workflow-components"])
 api_router.include_router(workflow_component_controller.handler_router, prefix="/workflow-handlers", tags=["workflow-handlers"])
-api_router.include_router(
-    handler_transition_rule_controller.router,
-    prefix="/handler-transition-rules",
-    tags=["handler-transition-rules"],
-)

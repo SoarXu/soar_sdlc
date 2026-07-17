@@ -6,7 +6,6 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.models.assignee_rule_config import AssigneeRuleConfig
-from app.models.handler_transition_rule import HandlerTransitionRule
 from app.models.project import Project
 from app.models.workflow_definition import WorkflowDefinition, WorkflowState, WorkflowTransition
 from app.services.default_workflow_template_service import ensure_default_workflow_templates
@@ -161,27 +160,6 @@ def _copy_template_source(db: Session, config_id: int, source) -> None:
     for object_type in ("requirement", "task", "bug"):
         _clone_graph(db, source_definitions[object_type], target_definitions[object_type])
 
-    from app.services.workflow_definition_service import _sync_handler_rules
-
-    target_transitions = (
-        db.query(WorkflowTransition)
-        .join(WorkflowDefinition, WorkflowDefinition.id == WorkflowTransition.definition_id)
-        .filter(
-            WorkflowDefinition.scope_type == "assignee_rule_config",
-            WorkflowDefinition.scope_id == config_id,
-        )
-        .all()
-    )
-    definitions_by_id = {item.id: item for item in target_definitions.values()}
-    for definition_id, definition in definitions_by_id.items():
-        _sync_handler_rules(
-            db,
-            definition,
-            [item for item in target_transitions if item.definition_id == definition_id],
-        )
-
-    if source.source_type == "scheme":
-        _clone_additional_handler_rules(db, int(source.source_id), config_id)
 
 
 def _source_definitions(db: Session, source) -> dict[str, WorkflowDefinition]:
@@ -290,63 +268,6 @@ def _remap_state_ids(config, state_id_map: dict[int, int]):
                 for key, value in remapped[field].items()
             }
     return remapped
-
-
-def _clone_additional_handler_rules(db: Session, source_config_id: int, target_config_id: int) -> None:
-    graph_rule_keys = {
-        (definition.object_type, transition.action_key, transition.from_status, transition.to_status)
-        for transition, definition in db.query(WorkflowTransition, WorkflowDefinition)
-        .join(WorkflowDefinition, WorkflowDefinition.id == WorkflowTransition.definition_id)
-        .filter(
-            WorkflowDefinition.scope_type == "assignee_rule_config",
-            WorkflowDefinition.scope_id == source_config_id,
-        )
-        .all()
-    }
-    source_rules = (
-        db.query(HandlerTransitionRule)
-        .filter(HandlerTransitionRule.config_id == source_config_id)
-        .order_by(HandlerTransitionRule.id.asc())
-        .all()
-    )
-    for item in source_rules:
-        if (item.object_type, item.action, item.from_status, item.to_status) in graph_rule_keys:
-            continue
-        existing = (
-            db.query(HandlerTransitionRule)
-            .filter(
-                HandlerTransitionRule.config_id == target_config_id,
-                HandlerTransitionRule.rule_type == item.rule_type,
-                HandlerTransitionRule.object_type == item.object_type,
-                HandlerTransitionRule.action == item.action,
-                HandlerTransitionRule.from_status == item.from_status,
-                HandlerTransitionRule.to_status == item.to_status,
-            )
-            .first()
-        )
-        data = {
-            "target_type": item.target_type,
-            "target_roles": item.target_roles,
-            "fallback_type": item.fallback_type,
-            "fallback_roles": item.fallback_roles,
-            "enabled": item.enabled,
-        }
-        if existing:
-            for field, value in data.items():
-                setattr(existing, field, value)
-        else:
-            db.add(
-                HandlerTransitionRule(
-                    config_id=target_config_id,
-                    rule_type=item.rule_type,
-                    object_type=item.object_type,
-                    action=item.action,
-                    from_status=item.from_status,
-                    to_status=item.to_status,
-                    **data,
-                )
-            )
-    db.flush()
 
 
 def update_config(db: Session, config_id: int, payload: AssigneeRuleConfigUpdate) -> AssigneeRuleConfig:

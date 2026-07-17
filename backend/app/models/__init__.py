@@ -4,7 +4,6 @@ from app.models.bug import Attachment, Bug, ObjectTag, Tag
 from app.models.bug_type import BugType
 from app.models.exception_rule import ExceptionRule
 from app.models.field_registry import CustomFieldValue, FormFieldRegistry, FormLayoutConfig
-from app.models.handler_transition_rule import HandlerTransitionRule
 from app.models.integration_mapping import ExternalIntegrationMapping
 from app.models.iteration import Iteration, IterationProject
 from app.models.notification import Notification, NotificationChannelConfig, NotificationDeliveryLog
@@ -36,7 +35,6 @@ __all__ = [
     "ExternalIntegrationMapping",
     "FormFieldRegistry",
     "FormLayoutConfig",
-    "HandlerTransitionRule",
     "Iteration",
     "IterationProject",
     "Notification",

@@ -69,7 +69,6 @@ TRACKED_TABLES = [
     "iterations",
     "project_members",
     "projects",
-    "handler_transition_rules",
     "assignee_rule_configs",
     "programs",
     "user_roles",

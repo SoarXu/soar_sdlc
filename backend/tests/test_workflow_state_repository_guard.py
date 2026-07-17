@@ -46,3 +46,21 @@ def test_migration_audit_script_exists_and_checks_cross_definition_references():
     assert "invalid_current_state_definition" in source
     assert "invalid_transition_definition" in source
     assert "invalid_initial_state_definition" in source
+
+
+def test_transition_handler_rule_is_the_only_assignee_routing_source():
+    assert "handler_transition_rules" not in Base.metadata.tables
+    for relative_path in (
+        "app/models/handler_transition_rule.py",
+        "app/views/handler_transition_rule_view.py",
+        "app/services/handler_transition_rule_service.py",
+        "app/controllers/handler_transition_rule_controller.py",
+    ):
+        assert not (BACKEND_ROOT / relative_path).exists()
+
+    router_source = (BACKEND_ROOT / "app/controllers/router.py").read_text(encoding="utf-8")
+    definition_source = (BACKEND_ROOT / "app/services/workflow_definition_service.py").read_text(encoding="utf-8")
+    scheme_source = (BACKEND_ROOT / "app/services/assignee_rule_config_service.py").read_text(encoding="utf-8")
+    assert "handler_transition_rule_controller" not in router_source
+    assert "_sync_handler_rules" not in definition_source
+    assert "_clone_additional_handler_rules" not in scheme_source

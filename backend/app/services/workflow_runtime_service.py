@@ -22,7 +22,6 @@ from app.models.user import User
 from app.models.workflow_definition import WorkflowDefinition, WorkflowState, WorkflowTransition
 from app.services.default_workflow_template_service import ensure_default_workflow_templates
 from app.services.bug_type_service import bug_type_options, get_enabled_bug_type
-from app.services.handler_transition_rule_service import _last_bug_resolver_id, _split_csv
 from app.services.project_permission_service import (
     actor_role_keys,
     can_admin_action,
@@ -1507,6 +1506,27 @@ def _owner_user(db: Session, owner_id: int | None) -> User | None:
     if not owner_id:
         return None
     return db.query(User).filter(User.id == owner_id).first()
+
+
+def _last_bug_resolver_id(db: Session, item) -> int | None:
+    if getattr(item, "resolved_by", None):
+        return item.resolved_by
+    operation = (
+        db.query(StatusOperationLog)
+        .filter(
+            StatusOperationLog.object_type == "bug",
+            StatusOperationLog.object_id == getattr(item, "id", None),
+            StatusOperationLog.action == "resolve",
+            StatusOperationLog.actor_id.isnot(None),
+        )
+        .order_by(StatusOperationLog.effective_time.desc(), StatusOperationLog.id.desc())
+        .first()
+    )
+    return operation.actor_id if operation else None
+
+
+def _split_csv(value: str | None) -> list[str]:
+    return [item.strip() for item in (value or "").split(",") if item.strip()]
 
 
 def _status_payload(request: WorkflowTransitionExecuteRequest) -> StatusOperationCreate:

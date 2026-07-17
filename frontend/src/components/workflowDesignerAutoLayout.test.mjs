@@ -1,0 +1,65 @@
+import assert from 'node:assert/strict'
+import { readFile } from 'node:fs/promises'
+import { fileURLToPath } from 'node:url'
+
+const componentPath = fileURLToPath(new URL('./WorkflowDesigner.vue', import.meta.url))
+const source = await readFile(componentPath, 'utf8')
+
+function functionBody(name, nextName) {
+  const start = source.indexOf(`function ${name}`)
+  assert.notEqual(start, -1, `missing function ${name}`)
+  const end = nextName ? source.indexOf(`function ${nextName}`, start) : source.length
+  assert.notEqual(end, -1, `missing boundary function ${nextName}`)
+  return source.slice(start, end)
+}
+
+assert.match(source, /import \{ layoutWorkflowNodes \} from '\.\.\/utils\/workflowAutoLayout'/)
+assert.match(source, /import \{ buildWorkflowEdgeViews \} from '\.\.\/utils\/workflowEdgePath'/)
+assert.doesNotMatch(source, /\bbuildWorkflowEdgeView\b/)
+assert.match(
+  source,
+  /const transitionViews = computed\(\(\) => buildWorkflowEdgeViews\(states\.value, transitions\.value, transitionKey\)\)/
+)
+
+assert.match(
+  source,
+  /<el-button size="small" @click="addTransition">新增流转<\/el-button>\s*<el-button size="small" @click="organizeLayout">整理布局<\/el-button>\s*<el-button size="small" @click="fitToContent">适应视图<\/el-button>/
+)
+
+const applyOrganizedLayoutBody = functionBody('applyOrganizedLayout', 'organizeLayout')
+assert.match(
+  applyOrganizedLayoutBody,
+  /states\.value = layoutWorkflowNodes\(states\.value, transitions\.value, initialStateId\.value\)/
+)
+
+const organizeLayoutBody = functionBody('organizeLayout', 'applyGraph')
+assert.match(organizeLayoutBody, /if \(!states\.value\.length\)/)
+assert.match(organizeLayoutBody, /ElMessage\.info\('当前没有可整理的状态节点'\)/)
+assert.match(
+  organizeLayoutBody,
+  /await ElMessageBox\.confirm\('整理布局将重新排列全部节点，确认继续？', '整理布局', \{ type: 'warning' \}\)/
+)
+assert.match(organizeLayoutBody, /applyOrganizedLayout\(\)/)
+assert.match(organizeLayoutBody, /fitToContent\(\)/)
+assert.doesNotMatch(
+  organizeLayoutBody,
+  /\bsaveGraph\s*\(|\bsaveWorkflowDefinitionGraph\s*\(|\bapplyWorkflowDefinitionTemplate\s*\(|\bfetchWorkflowDefinitionGraph\s*\(/
+)
+
+const applyGraphBody = functionBody('applyGraph', 'applyTemplate')
+assert.match(source, /function applyGraph\(graph, \{ organize = false \} = \{\}\)/)
+assert.match(applyGraphBody, /if \(organize\) applyOrganizedLayout\(\)/)
+assert.match(applyGraphBody, /fitToContent\(\)/)
+
+const loadDefinitionBody = functionBody('loadDefinition', 'applyOrganizedLayout')
+assert.match(loadDefinitionBody, /applyGraph\(graph\.data\)/)
+assert.doesNotMatch(loadDefinitionBody, /applyGraph\(graph\.data, \{ organize: true \}\)/)
+
+const applyTemplateBody = functionBody('applyTemplate', 'changeObjectType')
+assert.match(applyTemplateBody, /applyGraph\(graph\.data, \{ organize: true \}\)/)
+
+const saveGraphBody = functionBody('saveGraph', 'addState')
+assert.match(saveGraphBody, /applyGraph\(graph\.data\)/)
+assert.doesNotMatch(saveGraphBody, /applyGraph\(graph\.data, \{ organize: true \}\)/)
+
+console.log('workflow designer auto layout source contract passed')

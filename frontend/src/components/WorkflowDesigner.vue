@@ -24,6 +24,7 @@
         </el-select>
         <el-button size="small" @click="addState">新增状态</el-button>
         <el-button size="small" @click="addTransition">新增流转</el-button>
+        <el-button size="small" @click="organizeLayout">整理布局</el-button>
         <el-button size="small" @click="fitToContent">适应视图</el-button>
         <el-button size="small" @click="resetViewport">回到原点</el-button>
         <el-button size="small" :loading="loading" @click="applyTemplate">套用模板</el-button>
@@ -183,7 +184,8 @@ import {
   fetchWorkflowDefinitions,
   saveWorkflowDefinitionGraph
 } from '../api/workflowDefinitions'
-import { buildWorkflowEdgeView } from '../utils/workflowEdgePath'
+import { layoutWorkflowNodes } from '../utils/workflowAutoLayout'
+import { buildWorkflowEdgeViews } from '../utils/workflowEdgePath'
 import {
   normalizeWorkflowTransition as normalizeTransition,
   serializeWorkflowTransition as serializeTransition,
@@ -264,14 +266,7 @@ const selectedUnsupportedSections = computed(() => (
 const canvasGridStyle = computed(() => ({
   backgroundPosition: `${viewportOffset.x}px ${viewportOffset.y}px`
 }))
-const transitionViews = computed(() => transitions.value
-  .map((transition) => {
-    const from = states.value.find((item) => item.id === transition.from_state_id)
-    const to = states.value.find((item) => item.id === transition.to_state_id)
-    if (!from || !to) return null
-    return { key: transitionKey(transition), transition, ...buildWorkflowEdgeView(from, to) }
-  })
-  .filter(Boolean))
+const transitionViews = computed(() => buildWorkflowEdgeViews(states.value, transitions.value, transitionKey))
 
 watch(() => props.configId, () => loadDefinition())
 
@@ -323,7 +318,21 @@ async function loadDefinition({ discardPendingDraft = true } = {}) {
   }
 }
 
-function applyGraph(graph) {
+function applyOrganizedLayout() {
+  states.value = layoutWorkflowNodes(states.value, transitions.value, initialStateId.value)
+}
+
+async function organizeLayout() {
+  if (!states.value.length) {
+    ElMessage.info('当前没有可整理的状态节点')
+    return
+  }
+  await ElMessageBox.confirm('整理布局将重新排列全部节点，确认继续？', '整理布局', { type: 'warning' })
+  applyOrganizedLayout()
+  fitToContent()
+}
+
+function applyGraph(graph, { organize = false } = {}) {
   definition.value = graph.definition || definition.value
   states.value = (graph.states || []).map((item) => ({ ...item }))
   transitions.value = (graph.transitions || []).map((item) => normalizeTransition({
@@ -331,6 +340,7 @@ function applyGraph(graph) {
     _client_id: `transition-${item.id}`
   }))
   initialStateId.value = graph.definition?.initial_state_id ?? null
+  if (organize) applyOrganizedLayout()
   if (!states.value.length) {
     selectedKind.value = ''
     selectedKey.value = ''
@@ -345,7 +355,7 @@ async function applyTemplate() {
   loading.value = true
   try {
     const graph = await applyWorkflowDefinitionTemplate(definition.value.id)
-    applyGraph(graph.data)
+    applyGraph(graph.data, { organize: true })
     ElMessage.success('模板已套用')
   } finally {
     loading.value = false

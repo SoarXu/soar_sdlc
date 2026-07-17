@@ -374,6 +374,7 @@ const transitionKey = (transition) => transition.id
   })
   assert.equal(edges.length, 1)
   assertFiniteEdgeView(edges[0])
+  assert.ok(labelDistanceToPath(edges[0]) <= 1)
 }
 
 {
@@ -559,6 +560,27 @@ function assertFiniteEdgeView(edge) {
     edge.end.y,
     ...pathPoints(edge.path).flatMap((point) => [point.x, point.y])
   ].every(Number.isFinite))
+}
+
+function labelDistanceToPath(edge) {
+  const label = { x: edge.labelX, y: edge.labelY }
+  return Math.min(...pathSegments(edge.path).map((segment) => (
+    pointToSegmentDistance(label, segment)
+  )))
+}
+
+function pointToSegmentDistance(point, { from, to }) {
+  const dx = to.x - from.x
+  const dy = to.y - from.y
+  const lengthSquared = dx * dx + dy * dy
+  if (!lengthSquared) return Math.hypot(point.x - from.x, point.y - from.y)
+  const ratio = Math.max(0, Math.min(1, (
+    (point.x - from.x) * dx + (point.y - from.y) * dy
+  ) / lengthSquared))
+  return Math.hypot(
+    point.x - (from.x + ratio * dx),
+    point.y - (from.y + ratio * dy)
+  )
 }
 
 function expandedNodeRectangle(node) {

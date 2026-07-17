@@ -108,7 +108,7 @@ function buildVerticalView(from, to, states, laneIndex, laneCount) {
     .map((state) => expandedRectangle(state, OBSTACLE_CLEARANCE + CORNER_RADIUS))
   const direct = verticalRoutePoints(start, end, trackX)
   const directPoints = firstClearPolyline([direct], rectangles)
-  if (directPoints) return edgeView(directPoints, trackX, (start.y + end.y) / 2)
+  if (directPoints) return routedEdgeView(directPoints)
 
   const laneOffset = laneIndex * PARALLEL_LANE_GAP
   const leftChannel = Math.min(...routingBounds.map((rectangle) => rectangle.left)) -
@@ -132,9 +132,9 @@ function buildVerticalView(from, to, states, laneIndex, laneCount) {
   )
 
   if (!points) {
-    return degradedEdgeView(direct, trackX, (start.y + end.y) / 2)
+    return degradedEdgeView(direct)
   }
-  return edgeView(points, points[1]?.x ?? trackX, (start.y + end.y) / 2)
+  return routedEdgeView(points)
 }
 
 function verticalRoutePoints(start, end, trackX) {
@@ -173,14 +173,14 @@ function buildForwardView(from, to, states, laneIndex, laneCount) {
   const startTrackX = start.x + stubLength
   const endTrackX = end.x - stubLength
 
-  return edgeView([
+  return routedEdgeView([
     start,
     { x: startTrackX, y: start.y },
     { x: startTrackX, y: trackY },
     { x: endTrackX, y: trackY },
     { x: endTrackX, y: end.y },
     end
-  ], (startTrackX + endTrackX) / 2, trackY)
+  ])
 }
 
 function buildObstacleAvoidingForwardView(start, end, obstacles, laneIndex) {
@@ -201,9 +201,7 @@ function buildObstacleAvoidingForwardView(start, end, obstacles, laneIndex) {
   const fallbackStartX = start.x + PARALLEL_LANE_GAP
   const fallbackEndX = end.x - PARALLEL_LANE_GAP
   return degradedEdgeView(
-    forwardRoutePoints(start, end, fallbackStartX, fallbackEndX, fallbackTrackY),
-    (fallbackStartX + fallbackEndX) / 2,
-    fallbackTrackY
+    forwardRoutePoints(start, end, fallbackStartX, fallbackEndX, fallbackTrackY)
   )
 }
 
@@ -256,12 +254,8 @@ function findForwardRoute(start, end, obstacles, laneIndex, clearance) {
   return null
 }
 
-function forwardRouteView({ points, startTrackX, endTrackX, trackY }) {
-  return edgeView(
-    points,
-    (startTrackX + endTrackX) / 2,
-    trackY
-  )
+function forwardRouteView({ points }) {
+  return routedEdgeView(points)
 }
 
 function forwardLegClears(anchor, trackX, trackY, direction, rectangles) {
@@ -430,19 +424,10 @@ function buildBackwardView(from, to, states, maximumNodeBottom, laneIndex) {
 
   if (!points) {
     return degradedEdgeView(
-      backwardRoutePoints(start, end, start.x, end.x, trackY),
-      (start.x + end.x) / 2,
-      trackY
+      backwardRoutePoints(start, end, start.x, end.x, trackY)
     )
   }
-  const trackPoints = points.filter((point) => point.y === trackY)
-  return edgeView(
-    points,
-    trackPoints.length
-      ? (trackPoints[0].x + trackPoints[trackPoints.length - 1].x) / 2
-      : (start.x + end.x) / 2,
-    trackY
-  )
+  return routedEdgeView(points)
 }
 
 function backwardRoutePoints(start, end, startTrackX, endTrackX, trackY) {
@@ -489,9 +474,43 @@ function edgeView(points, labelX, labelY) {
   }
 }
 
-function degradedEdgeView(points, labelX, labelY) {
+function routedEdgeView(points) {
+  const normalized = normalizeOrthogonalPoints(points)
+  const label = labelPointForPolyline(normalized)
+  return edgeView(normalized, label.x, label.y)
+}
+
+function labelPointForPolyline(points) {
+  let longestHorizontal
+  let longestVertical
+
+  for (let index = 1; index < points.length; index += 1) {
+    const from = points[index - 1]
+    const to = points[index]
+    const horizontal = from.y === to.y
+    const vertical = from.x === to.x
+    const length = Math.hypot(to.x - from.x, to.y - from.y)
+    if (!length || (!horizontal && !vertical)) continue
+    const candidate = {
+      length,
+      point: { x: (from.x + to.x) / 2, y: (from.y + to.y) / 2 }
+    }
+    if (horizontal && (!longestHorizontal || length > longestHorizontal.length)) {
+      longestHorizontal = candidate
+    } else if (vertical && (!longestVertical || length > longestVertical.length)) {
+      longestVertical = candidate
+    }
+  }
+
+  return longestHorizontal?.point ?? longestVertical?.point ?? {
+    x: (points[0].x + points[points.length - 1].x) / 2,
+    y: (points[0].y + points[points.length - 1].y) / 2
+  }
+}
+
+function degradedEdgeView(points) {
   return {
-    ...edgeView(normalizeOrthogonalPoints(points), labelX, labelY),
+    ...routedEdgeView(points),
     degraded: true
   }
 }

@@ -74,7 +74,7 @@ export function buildWorkflowEdgeViews(states, transitions, transitionKey = defa
         selfLoopReservations.get(groupKey)
       )
     } else if (isVerticalConnection(edge.from, edge.to)) {
-      const verticalGroupKey = verticalEndpointGroupKey(edge.transition)
+      const verticalGroupKey = verticalColumnGroupKey(edge.from, edge.to)
       const verticalGroupIndex = verticalGroupIndexes.get(verticalGroupKey) || 0
       verticalGroupIndexes.set(verticalGroupKey, verticalGroupIndex + 1)
       if (!verticalLabelReservations.has(verticalGroupKey)) {
@@ -872,17 +872,15 @@ function countVerticalGroups(edges) {
   edges.forEach((edge) => {
     if (edge.transition.from_state_id === edge.transition.to_state_id ||
         !isVerticalConnection(edge.from, edge.to)) return
-    const key = verticalEndpointGroupKey(edge.transition)
+    const key = verticalColumnGroupKey(edge.from, edge.to)
     sizes.set(key, (sizes.get(key) || 0) + 1)
   })
   return sizes
 }
 
-function verticalEndpointGroupKey(transition) {
-  const fromId = transition.from_state_id
-  const toId = transition.to_state_id
-  const [first, second] = compareIds(fromId, toId) <= 0 ? [fromId, toId] : [toId, fromId]
-  return `${typedId(first)}<>${typedId(second)}`
+function verticalColumnGroupKey(from, to) {
+  const columnCenterX = (centerOf(from).x + centerOf(to).x) / 2
+  return columnCenterX.toFixed(3)
 }
 
 function endpointGroupKey(transition) {

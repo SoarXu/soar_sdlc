@@ -219,6 +219,45 @@ const transitionKey = (transition) => transition.id
 
 {
   const states = [
+    { id: 'a1', x: 100, y: 0 },
+    { id: 'b1', x: 100, y: 300 },
+    { id: 'obstacle', x: 100, y: 600 },
+    { id: 'b2', x: 100, y: 900 },
+    { id: 'a2', x: 100, y: 1200 }
+  ]
+  const edges = buildWorkflowEdgeViews(states, [
+    { id: 'a1-to-a2', from_state_id: 'a1', to_state_id: 'a2' },
+    { id: 'b1-to-b2', from_state_id: 'b1', to_state_id: 'b2' }
+  ], transitionKey)
+  const labelRectangles = edges.map((edge) => ({
+    left: edge.labelX - 40,
+    top: edge.labelY - 13,
+    right: edge.labelX + 40,
+    bottom: edge.labelY + 13
+  }))
+
+  assert.notEqual(edges[0].path, edges[1].path)
+  assert.notDeepEqual(
+    [edges[0].labelX, edges[0].labelY],
+    [edges[1].labelX, edges[1].labelY]
+  )
+  assert.equal(rectanglesIntersect(labelRectangles[0], labelRectangles[1]), false)
+  assertPathClearsRectangle(edges[0].path, labelRectangles[1])
+  assertPathClearsRectangle(edges[1].path, labelRectangles[0])
+  edges.forEach((edge) => {
+    states
+      .filter((state) => (
+        state.id !== edge.transition.from_state_id &&
+        state.id !== edge.transition.to_state_id
+      ))
+      .forEach((state) => {
+        assertPathClearsRectangle(edge.path, expandedNodeRectangle(state))
+      })
+  })
+}
+
+{
+  const states = [
     { id: 'source', x: 100, y: 0 },
     { id: 'middle', x: 100, y: 140 },
     { id: 'left-wall', x: -100, y: 20 },

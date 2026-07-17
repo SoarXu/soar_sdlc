@@ -28,17 +28,7 @@ export function buildWorkflowEdgeView(from, to) {
 }
 
 export function buildWorkflowEdgeViews(states, transitions, transitionKey = defaultTransitionKey) {
-  const nodesById = new Map(states.map((state) => [state.id, state]))
-  const resolved = transitions
-    .map((transition, originalIndex) => ({
-      transition,
-      originalIndex,
-      from: nodesById.get(transition.from_state_id),
-      to: nodesById.get(transition.to_state_id),
-      rawKey: transitionKey(transition)
-    }))
-    .filter(({ from, to }) => from && to)
-    .sort(compareResolvedTransitions)
+  const resolved = resolveWorkflowEdges(states, transitions, transitionKey)
   const groupSizes = countEndpointGroups(resolved)
   const verticalGroups = clusterVerticalGroups(resolved)
   const groupIndexes = new Map()
@@ -131,12 +121,43 @@ export function buildWorkflowEdgeViews(states, transitions, transitionKey = defa
       ))
     })
 
+  return resolvedEdgeViews(resolved, (edge) => views.get(edge))
+}
+
+export function buildWorkflowEdgePreviewViews(
+  states,
+  transitions,
+  transitionKey = defaultTransitionKey
+) {
+  const resolved = resolveWorkflowEdges(states, transitions, transitionKey)
+  return resolvedEdgeViews(resolved, (edge) => (
+    edge.transition.from_state_id === edge.transition.to_state_id
+      ? selfLoopCandidateView(rightSelfLoopCandidate(edge.from, PARALLEL_LANE_GAP))
+      : buildWorkflowEdgeView(edge.from, edge.to)
+  ))
+}
+
+function resolveWorkflowEdges(states, transitions, transitionKey) {
+  const nodesById = new Map(states.map((state) => [state.id, state]))
+  return transitions
+    .map((transition, originalIndex) => ({
+      transition,
+      originalIndex,
+      from: nodesById.get(transition.from_state_id),
+      to: nodesById.get(transition.to_state_id),
+      rawKey: transitionKey(transition)
+    }))
+    .filter(({ from, to }) => from && to)
+    .sort(compareResolvedTransitions)
+}
+
+function resolvedEdgeViews(resolved, buildView) {
   const usedKeys = new Set()
   return resolved.map((edge) => {
     return {
       key: uniqueTransitionKey(edge, usedKeys),
       transition: edge.transition,
-      ...views.get(edge)
+      ...buildView(edge)
     }
   })
 }

@@ -14,25 +14,38 @@ function functionBody(name, nextName) {
 }
 
 assert.match(source, /import \{ layoutWorkflowNodes \} from '\.\.\/utils\/workflowAutoLayout'/)
-assert.match(source, /import \{ buildWorkflowEdgeViews \} from '\.\.\/utils\/workflowEdgePath'/)
+assert.match(
+  source,
+  /import \{ buildWorkflowEdgePreviewViews, buildWorkflowEdgeViews \} from '\.\.\/utils\/workflowEdgePath'/
+)
 assert.match(source, /import \{ requestWorkflowOrganization \} from '\.\.\/utils\/workflowLayoutInteraction'/)
 assert.match(source, /workflowCanvasSize/)
 assert.doesNotMatch(source, /\bbuildWorkflowEdgeView\b/)
 assert.match(
   source,
-  /const transitionViews = computed\(\(\) => buildWorkflowEdgeViews\(states\.value, transitions\.value, transitionKey\)\)/
+  /const fullTransitionViews = computed\(\(\) => buildWorkflowEdgeViews\(states\.value, transitions\.value, transitionKey\)\)/
+)
+assert.match(
+  source,
+  /const previewTransitionViews = computed\(\(\) => buildWorkflowEdgePreviewViews\(states\.value, transitions\.value, transitionKey\)\)/
+)
+assert.match(
+  source,
+  /const transitionViews = computed\(\(\) => dragging\.state \? previewTransitionViews\.value : fullTransitionViews\.value\)/
 )
 assert.match(source, /const minimumCanvas = \{ width: 2400, height: 1400 \}/)
 assert.match(
   source,
-  /const canvasEdgeViews = computed\(\(\) => dragging\.state \? \[\] : transitionViews\.value\)/
+  /const canvasEdgeViews = computed\(\(\) => dragging\.state \? \[\] : fullTransitionViews\.value\)/
 )
 assert.match(
   source,
   /const canvasSize = computed\(\(\) => workflowCanvasSize\(states\.value, minimumCanvas, undefined, canvasEdgeViews\.value\)\)/
 )
 assert.ok(
-  source.indexOf('const transitionViews = computed') < source.indexOf('const canvasEdgeViews = computed') &&
+  source.indexOf('const fullTransitionViews = computed') < source.indexOf('const previewTransitionViews = computed') &&
+    source.indexOf('const previewTransitionViews = computed') < source.indexOf('const transitionViews = computed') &&
+    source.indexOf('const transitionViews = computed') < source.indexOf('const canvasEdgeViews = computed') &&
     source.indexOf('const canvasEdgeViews = computed') < source.indexOf('const canvasSize = computed'),
   'drag-aware edge views must sit between routed edges and canvas size'
 )
@@ -41,7 +54,7 @@ assert.doesNotMatch(source, /\b(?:applyPanDelta|clampViewport|fitViewportToNodes
 assert.match(source, /applyPanDelta\([\s\S]{0,180}canvasSize\.value/)
 assert.match(
   source,
-  /fitViewportToNodes\(states\.value, canvasSize\.value, viewportSize, transitionViews\.value\)/
+  /fitViewportToNodes\(states\.value, canvasSize\.value, viewportSize, fullTransitionViews\.value\)/
 )
 assert.match(source, /clampViewport\(\{ x: 0, y: 0 \}, canvasSize\.value, viewportSize\)/)
 

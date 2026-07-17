@@ -5,6 +5,7 @@ import * as workflowEdgePath from './workflowEdgePath.js'
 const {
   addWorkflowReservation,
   buildWorkflowEdgeView,
+  buildWorkflowEdgePreviewViews,
   buildWorkflowEdgeViews,
   createWorkflowReservationIndex,
   filterRectanglesBySegmentBounds,
@@ -17,6 +18,7 @@ assert.equal(typeof addWorkflowReservation, 'function')
 assert.equal(typeof queryWorkflowReservations, 'function')
 assert.equal(typeof queryWorkflowReservationsForSegments, 'function')
 assert.equal(typeof filterRectanglesBySegmentBounds, 'function')
+assert.equal(typeof buildWorkflowEdgePreviewViews, 'function')
 
 {
   const segments = [
@@ -147,6 +149,48 @@ const source = { x: 100, y: 100 }
 }
 
 const transitionKey = (transition) => transition.id
+
+{
+  const stateCount = 50
+  const states = Array.from({ length: stateCount }, (_, index) => ({
+    id: index,
+    x: (index % 10) * 240,
+    y: Math.floor(index / 10) * 120
+  }))
+  const ordinary = Array.from({ length: stateCount - 1 }, (_, index) => ({
+    id: `preview-edge-${index}`,
+    from_state_id: index,
+    to_state_id: index + 1,
+    sort_order: index
+  }))
+  const selfLoops = Array.from({ length: stateCount }, (_, index) => ({
+    id: `preview-loop-${index}`,
+    from_state_id: index,
+    to_state_id: index,
+    sort_order: stateCount + index
+  }))
+  const transitions = [
+    ...ordinary,
+    ...selfLoops,
+    { id: 'missing-preview-endpoint', from_state_id: -1, to_state_id: 0 }
+  ]
+  const preview = buildWorkflowEdgePreviewViews(states, transitions, transitionKey)
+  const full = buildWorkflowEdgeViews(states, transitions, transitionKey)
+
+  assert.equal(preview.length, 99)
+  assert.deepEqual(preview.map((edge) => edge.key), full.map((edge) => edge.key))
+  assert.deepEqual(preview.map((edge) => edge.transition), full.map((edge) => edge.transition))
+  preview.forEach((edge) => {
+    assertFiniteEdgeView(edge)
+    assertEdgeBoundsContainGeometry(edge)
+  })
+  preview
+    .filter((edge) => edge.transition.from_state_id === edge.transition.to_state_id)
+    .forEach((edge) => {
+      assert.notDeepEqual(edge.start, edge.end)
+      assert.ok(new Set(pathPoints(edge.path).map(({ x, y }) => `${x}:${y}`)).size >= 4)
+    })
+}
 
 {
   const states = [

@@ -185,7 +185,7 @@ import {
   saveWorkflowDefinitionGraph
 } from '../api/workflowDefinitions'
 import { layoutWorkflowNodes } from '../utils/workflowAutoLayout'
-import { buildWorkflowEdgeViews } from '../utils/workflowEdgePath'
+import { buildWorkflowEdgePreviewViews, buildWorkflowEdgeViews } from '../utils/workflowEdgePath'
 import { requestWorkflowOrganization } from '../utils/workflowLayoutInteraction'
 import {
   normalizeWorkflowTransition as normalizeTransition,
@@ -251,8 +251,10 @@ const viewportOffset = reactive({ x: 0, y: 0 })
 const dragging = reactive({ state: null, startX: 0, startY: 0, originX: 0, originY: 0 })
 const viewportDrag = reactive({ active: false, startX: 0, startY: 0, originX: 0, originY: 0 })
 const enabledStates = computed(() => states.value.filter((state) => state.enabled))
-const transitionViews = computed(() => buildWorkflowEdgeViews(states.value, transitions.value, transitionKey))
-const canvasEdgeViews = computed(() => dragging.state ? [] : transitionViews.value)
+const fullTransitionViews = computed(() => buildWorkflowEdgeViews(states.value, transitions.value, transitionKey))
+const previewTransitionViews = computed(() => buildWorkflowEdgePreviewViews(states.value, transitions.value, transitionKey))
+const transitionViews = computed(() => dragging.state ? previewTransitionViews.value : fullTransitionViews.value)
+const canvasEdgeViews = computed(() => dragging.state ? [] : fullTransitionViews.value)
 const canvasSize = computed(() => workflowCanvasSize(states.value, minimumCanvas, undefined, canvasEdgeViews.value))
 
 const selectedState = computed(() => (
@@ -574,7 +576,7 @@ function stopViewportDrag() {
 }
 
 function fitToContent() {
-  const next = fitViewportToNodes(states.value, canvasSize.value, viewportSize, transitionViews.value)
+  const next = fitViewportToNodes(states.value, canvasSize.value, viewportSize, fullTransitionViews.value)
   viewportOffset.x = next.x
   viewportOffset.y = next.y
 }

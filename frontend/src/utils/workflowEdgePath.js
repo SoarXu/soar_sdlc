@@ -783,9 +783,13 @@ function buildSelfLoopView(node, states, loopIndex, loopCount, reservations) {
     return reservedSelfLoopView(reservationOnlyCandidate, reservations, true)
   }
 
-  const fallback = rightSelfLoopCandidate(node, (loopIndex + 1) * PARALLEL_LANE_GAP)
-  const points = normalizeOrthogonalPoints(fallback.points)
-  const fallbackWithGeometry = selfLoopCandidateGeometry({ ...fallback, points })
+  const fallbackWithGeometry = leastCollidingOuterSelfLoopCandidate(
+    node,
+    obstacles,
+    loopIndex,
+    loopCount,
+    reservations
+  )
   return reservedSelfLoopView(fallbackWithGeometry, reservations, true)
 }
 
@@ -803,16 +807,119 @@ function findSelfLoopCandidate(node, obstacles, loopIndex, loopCount, clearance,
     ]
 
     for (const candidate of candidates) {
-      const points = normalizeOrthogonalPoints(candidate.points)
-      if (!polylineClearsRectangles(points, pathRectangles)) continue
-      if (!labelClearsRectangles(candidate, nodeRectangles)) continue
-      const candidateWithGeometry = selfLoopCandidateGeometry({ ...candidate, points })
-      if (!selfLoopClearsReservations(candidateWithGeometry, reservations)) continue
-      return candidateWithGeometry
+      const accepted = acceptedSelfLoopCandidate(
+        candidate,
+        pathRectangles,
+        nodeRectangles,
+        reservations
+      )
+      if (accepted) return accepted
     }
   }
 
+  for (const candidate of outerSelfLoopCandidates(
+    node,
+    pathRectangles,
+    reservations,
+    (loopIndex + 1) * PARALLEL_LANE_GAP
+  )) {
+    const accepted = acceptedSelfLoopCandidate(
+      candidate,
+      pathRectangles,
+      nodeRectangles,
+      reservations
+    )
+    if (accepted) return accepted
+  }
+
   return null
+}
+
+function acceptedSelfLoopCandidate(candidate, pathRectangles, nodeRectangles, reservations) {
+  const points = normalizeOrthogonalPoints(candidate.points)
+  if (!polylineClearsRectangles(points, pathRectangles)) return null
+  if (!labelClearsRectangles(candidate, nodeRectangles)) return null
+  const candidateWithGeometry = selfLoopCandidateGeometry({ ...candidate, points })
+  return selfLoopClearsReservations(candidateWithGeometry, reservations)
+    ? candidateWithGeometry
+    : null
+}
+
+function outerSelfLoopCandidates(node, pathRectangles, reservations, minimumDistance) {
+  const bounds = combinedRectangleBounds([
+    ...pathRectangles,
+    ...reservations.labelRectangles,
+    ...reservations.pathSegments.map((segment) => segmentBounds(segment.from, segment.to))
+  ])
+  if (!bounds) {
+    return [
+      rightSelfLoopCandidate(node, minimumDistance),
+      bottomSelfLoopCandidate(node, minimumDistance),
+      leftSelfLoopCandidate(node, minimumDistance),
+      topSelfLoopCandidate(node, minimumDistance)
+    ]
+  }
+  const nodeRight = node.x + NODE_WIDTH
+  const nodeBottom = node.y + NODE_HEIGHT
+  const margin = CORNER_RADIUS + 1
+  const outerLeft = Math.min(node.x - minimumDistance, bounds.left) - margin
+  const outerTop = Math.min(node.y - minimumDistance, bounds.top) - margin
+  const outerRight = Math.max(nodeRight + minimumDistance, bounds.right) + margin
+  const outerBottom = Math.max(nodeBottom + minimumDistance, bounds.bottom) + margin
+  return [
+    rightWrappingSelfLoopCandidate(node, outerRight, outerTop, outerBottom),
+    bottomWrappingSelfLoopCandidate(node, outerBottom, outerLeft, outerRight),
+    leftWrappingSelfLoopCandidate(node, outerLeft, outerTop, outerBottom),
+    topWrappingSelfLoopCandidate(node, outerTop, outerLeft, outerRight)
+  ]
+}
+
+function combinedRectangleBounds(rectangles) {
+  if (!rectangles.length) return null
+  return rectangles.reduce((bounds, rectangle) => ({
+    left: Math.min(bounds.left, rectangle.left),
+    top: Math.min(bounds.top, rectangle.top),
+    right: Math.max(bounds.right, rectangle.right),
+    bottom: Math.max(bounds.bottom, rectangle.bottom)
+  }), { ...rectangles[0] })
+}
+
+function leastCollidingOuterSelfLoopCandidate(node, obstacles, loopIndex, loopCount, reservations) {
+  const nodeRectangles = obstacles.map((state) => expandedRectangle(state, 0))
+  const minimumDistance = (
+    loopIndex + 1 + obstacles.length + reservations.labelRectangles.length
+  ) * Math.max(1, loopCount) * PARALLEL_LANE_GAP
+  const candidates = outerSelfLoopCandidates(
+    node,
+    nodeRectangles,
+    reservations,
+    minimumDistance
+  )
+    .map((candidate) => {
+      const points = normalizeOrthogonalPoints(candidate.points)
+      return selfLoopCandidateGeometry({ ...candidate, points })
+    })
+    .filter((candidate) => labelClearsRectangles(candidate, nodeRectangles))
+  const score = (candidate) => (
+    nodeRectangles.filter((rectangle) => (
+      segmentsIntersectRectangles(candidate.pathSegments, [rectangle])
+    )).length +
+    reservations.labelRectangles.filter((rectangle) => (
+      rectanglesIntersect(candidate.labelRectangle, rectangle) ||
+      segmentsIntersectRectangles(candidate.pathSegments, [rectangle])
+    )).length +
+    reservations.pathSegments.filter((segment) => (
+      segmentIntersectsRectangle(segment.from, segment.to, candidate.labelRectangle)
+    )).length
+  )
+  candidates.sort((left, right) => score(left) - score(right))
+  if (candidates[0]) return candidates[0]
+
+  const fallback = rightOuterSelfLoopCandidate(node, minimumDistance + PARALLEL_LANE_GAP)
+  return selfLoopCandidateGeometry({
+    ...fallback,
+    points: normalizeOrthogonalPoints(fallback.points)
+  })
 }
 
 function selfLoopCandidateGeometry(candidate) {
@@ -864,6 +971,97 @@ function selfLoopLabelRectangle(candidate) {
     top: candidate.labelY - 13,
     right: candidate.labelX + EDGE_LABEL_HALF_WIDTH,
     bottom: candidate.labelY + 13
+  }
+}
+
+function rightWrappingSelfLoopCandidate(node, outerX, outerTop, outerBottom) {
+  const start = { x: node.x + NODE_WIDTH, y: node.y + NODE_HEIGHT / 3 }
+  const end = { x: node.x + NODE_WIDTH, y: node.y + NODE_HEIGHT * 2 / 3 }
+  const stubX = node.x + NODE_WIDTH + 1
+  return {
+    points: [
+      start,
+      { x: stubX, y: start.y },
+      { x: stubX, y: outerTop },
+      { x: outerX, y: outerTop },
+      { x: outerX, y: outerBottom },
+      { x: stubX, y: outerBottom },
+      { x: stubX, y: end.y },
+      end
+    ],
+    labelX: outerX + EDGE_LABEL_HALF_WIDTH + EDGE_LABEL_GAP,
+    labelY: (outerTop + outerBottom) / 2
+  }
+}
+
+function bottomWrappingSelfLoopCandidate(node, outerY, outerLeft, outerRight) {
+  const start = { x: node.x + NODE_WIDTH * 2 / 3, y: node.y + NODE_HEIGHT }
+  const end = { x: node.x + NODE_WIDTH / 3, y: node.y + NODE_HEIGHT }
+  const stubY = node.y + NODE_HEIGHT + 1
+  return {
+    points: [
+      start,
+      { x: start.x, y: stubY },
+      { x: outerRight, y: stubY },
+      { x: outerRight, y: outerY },
+      { x: outerLeft, y: outerY },
+      { x: outerLeft, y: stubY },
+      { x: end.x, y: stubY },
+      end
+    ],
+    labelX: (outerLeft + outerRight) / 2,
+    labelY: outerY + 13 + EDGE_LABEL_GAP
+  }
+}
+
+function leftWrappingSelfLoopCandidate(node, outerX, outerTop, outerBottom) {
+  const start = { x: node.x, y: node.y + NODE_HEIGHT * 2 / 3 }
+  const end = { x: node.x, y: node.y + NODE_HEIGHT / 3 }
+  const stubX = node.x - 1
+  return {
+    points: [
+      start,
+      { x: stubX, y: start.y },
+      { x: stubX, y: outerBottom },
+      { x: outerX, y: outerBottom },
+      { x: outerX, y: outerTop },
+      { x: stubX, y: outerTop },
+      { x: stubX, y: end.y },
+      end
+    ],
+    labelX: outerX - EDGE_LABEL_HALF_WIDTH - EDGE_LABEL_GAP,
+    labelY: (outerTop + outerBottom) / 2
+  }
+}
+
+function topWrappingSelfLoopCandidate(node, outerY, outerLeft, outerRight) {
+  const start = { x: node.x + NODE_WIDTH / 3, y: node.y }
+  const end = { x: node.x + NODE_WIDTH * 2 / 3, y: node.y }
+  const stubY = node.y - 1
+  return {
+    points: [
+      start,
+      { x: start.x, y: stubY },
+      { x: outerLeft, y: stubY },
+      { x: outerLeft, y: outerY },
+      { x: outerRight, y: outerY },
+      { x: outerRight, y: stubY },
+      { x: end.x, y: stubY },
+      end
+    ],
+    labelX: (outerLeft + outerRight) / 2,
+    labelY: outerY - 13 - EDGE_LABEL_GAP
+  }
+}
+
+function rightOuterSelfLoopCandidate(node, distance) {
+  const start = { x: node.x + NODE_WIDTH, y: node.y + NODE_HEIGHT / 3 }
+  const end = { x: node.x + NODE_WIDTH, y: node.y + NODE_HEIGHT * 2 / 3 }
+  const outerX = node.x + NODE_WIDTH + distance
+  return {
+    points: [start, { x: outerX, y: start.y }, { x: outerX, y: end.y }, end],
+    labelX: outerX + EDGE_LABEL_HALF_WIDTH + EDGE_LABEL_GAP,
+    labelY: (start.y + end.y) / 2
   }
 }
 

@@ -876,6 +876,81 @@ assertVerticalColumnReservations(159, 159.001, 'exact-epsilon-boundary')
 
 {
   const states = [
+    { id: 10329, x: 80, y: 140 },
+    { id: 10330, x: 320, y: 140 },
+    { id: 10331, x: 80, y: 440 },
+    { id: 10332, x: 560, y: 80 },
+    { id: 10333, x: 560, y: 200 }
+  ]
+  const transition = (id, action_name, from_state_id, to_state_id) => ({
+    id,
+    action_name,
+    from_state_id,
+    to_state_id,
+    sort_order: 100
+  })
+  const transitions = [
+    transition(20150, 'claim', 10329, 10330),
+    transition(20151, 'assign', 10329, 10330),
+    transition(20152, 'edit', 10329, 10329),
+    transition(20153, 'add pending information', 10329, 10329),
+    transition(20154, 'complete', 10330, 10332),
+    transition(20155, 'transfer', 10330, 10330),
+    transition(20156, 'change handler', 10330, 10330),
+    transition(20157, 'transfer confirmation', 10331, 10331),
+    transition(20158, 'change confirmation handler', 10331, 10331),
+    transition(20159, 'add processing information', 10330, 10330),
+    transition(20160, 'add confirmation information', 10331, 10331),
+    transition(20161, 'cancel pending', 10329, 10333),
+    transition(20162, 'cancel processing', 10330, 10333),
+    transition(20163, 'cancel confirmation', 10331, 10333),
+    transition(20164, 'reactivate canceled', 10333, 10329),
+    transition(20165, 'reactivate completed', 10332, 10329),
+    transition(20166, 'view canceled history', 10333, 10333),
+    transition(20167, 'add canceled information', 10333, 10333),
+    transition(20168, 'view completed history', 10332, 10332)
+  ]
+  const edges = buildWorkflowEdgeViews(states, transitions, transitionKey)
+  const labelRectangles = edges.map((edge) => ({
+    left: edge.labelX - 40,
+    top: edge.labelY - 13,
+    right: edge.labelX + 40,
+    bottom: edge.labelY + 13
+  }))
+
+  assert.equal(edges.length, 19)
+  edges.forEach((edge, index) => {
+    states.forEach((state) => {
+      assert.equal(
+        rectanglesIntersect(labelRectangles[index], nodeRectangle(state)),
+        false,
+        `${edge.transition.action_name} label overlaps node ${state.id}`
+      )
+    })
+    edges.forEach((other, otherIndex) => {
+      if (index === otherIndex) return
+      assert.equal(
+        rectanglesIntersect(labelRectangles[index], labelRectangles[otherIndex]),
+        false,
+        `${edge.transition.action_name} label overlaps ${other.transition.action_name} label`
+      )
+      if (edge.transition.from_state_id === edge.transition.to_state_id) {
+        assertPathClearsRectangle(
+          edge.path,
+          labelRectangles[otherIndex],
+          `${edge.transition.action_name} path crosses ${other.transition.action_name} label`
+        )
+      }
+    })
+  })
+  assert.equal(edges[6].transition.id, 20156)
+  assert.equal(edges[7].transition.id, 20159)
+  assert.equal(Boolean(edges[6].degraded), false)
+  assert.equal(Boolean(edges[7].degraded), false)
+}
+
+{
+  const states = [
     { id: 'left-loop', x: 100, y: 100 },
     { id: 'right-loop', x: 500, y: 100 }
   ]
@@ -996,10 +1071,10 @@ function quadraticPoint(start, control, end, ratio) {
   }
 }
 
-function assertPathClearsRectangle(path, rectangle) {
+function assertPathClearsRectangle(path, rectangle, message) {
   assert.ok(pathSegments(path).every((segment) => (
     !segmentIntersectsRectangle(segment, rectangle)
-  )))
+  )), message)
 }
 
 function assertFiniteEdgeView(edge) {

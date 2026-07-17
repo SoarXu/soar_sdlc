@@ -271,6 +271,12 @@ const canvasGridStyle = computed(() => ({
 }))
 const transitionViews = computed(() => buildWorkflowEdgeViews(states.value, transitions.value, transitionKey))
 
+watch(canvasSize, (nextCanvas) => {
+  const next = clampViewport({ x: viewportOffset.x, y: viewportOffset.y }, nextCanvas, viewportSize)
+  viewportOffset.x = next.x
+  viewportOffset.y = next.y
+}, { flush: 'sync' })
+
 watch(() => props.configId, () => loadDefinition())
 
 onBeforeRouteLeave(async () => confirmDiscardAdvancedDraft())

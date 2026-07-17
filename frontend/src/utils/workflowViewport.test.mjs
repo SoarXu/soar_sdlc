@@ -70,6 +70,25 @@ const viewport = { width: 900, height: 540 }
 }
 
 {
+  const shrunk = clampViewport(
+    { x: -4298, y: -2000 },
+    { width: 2400, height: 1400 },
+    { width: 980, height: 540 }
+  )
+  assert.deepEqual(shrunk, { x: -1420, y: -860 })
+}
+
+{
+  const currentOffset = { x: -500, y: -300 }
+  const expanded = clampViewport(
+    currentOffset,
+    { width: 5278, height: 4802 },
+    { width: 980, height: 540 }
+  )
+  assert.deepEqual(expanded, currentOffset)
+}
+
+{
   const next = fitViewportToNodes(
     [
       { x: 300, y: 200 },

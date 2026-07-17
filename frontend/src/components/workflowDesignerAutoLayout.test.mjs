@@ -29,6 +29,19 @@ assert.match(source, /applyPanDelta\([\s\S]{0,180}canvasSize\.value/)
 assert.match(source, /fitViewportToNodes\(states\.value, canvasSize\.value, viewportSize\)/)
 assert.match(source, /clampViewport\(\{ x: 0, y: 0 \}, canvasSize\.value, viewportSize\)/)
 
+const canvasSizeWatchStart = source.indexOf('watch(canvasSize')
+const configWatchStart = source.indexOf('watch(() => props.configId')
+assert.ok(canvasSizeWatchStart >= 0, 'canvas size changes must clamp the current viewport')
+assert.ok(configWatchStart > canvasSizeWatchStart, 'canvas size watcher must be defined before config loading watcher')
+const canvasSizeWatch = source.slice(canvasSizeWatchStart, configWatchStart)
+assert.match(
+  canvasSizeWatch,
+  /const next = clampViewport\(\{ x: viewportOffset\.x, y: viewportOffset\.y \}, nextCanvas, viewportSize\)/
+)
+assert.match(canvasSizeWatch, /viewportOffset\.x = next\.x[\s\S]*viewportOffset\.y = next\.y/)
+assert.match(canvasSizeWatch, /\{ flush: 'sync' \}/)
+assert.doesNotMatch(canvasSizeWatch, /saveGraph|saveWorkflowDefinitionGraph|fetchWorkflowDefinitionGraph|applyWorkflowDefinitionTemplate/)
+
 assert.match(
   source,
   /<el-button size="small" @click="addTransition">新增流转<\/el-button>\s*<el-button size="small" @click="organizeLayout">整理布局<\/el-button>\s*<el-button size="small" @click="fitToContent">适应视图<\/el-button>/

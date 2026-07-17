@@ -233,8 +233,13 @@ function buildVerticalView(from, to, states, laneIndex, laneCount, reservations)
       degraded: true
     }
   }
-  const fallbackView = degradedEdgeView(direct)
-  reserveVerticalRouteGeometry(fallbackView, direct, reservations)
+  const fallbackView = leastCollidingRouteView(
+    [direct],
+    obstacles.map((state) => expandedRectangle(state, 0)),
+    labelBounds,
+    reservations
+  )
+  reserveVerticalRouteGeometry(fallbackView, fallbackView.points, reservations)
   return fallbackView
 }
 
@@ -436,7 +441,7 @@ function firstClearOuterLabel(points, labelBounds, reservations) {
   const centerX = (start.x + end.x) / 2
   const centerY = (start.y + end.y) / 2
 
-  for (let lane = 0; lane < DEGRADED_OUTER_LANE_LIMIT; lane += 1) {
+  for (let lane = 0; ; lane += 1) {
     const verticalDistance = 13 + EDGE_LABEL_GAP + lane * PARALLEL_LANE_GAP
     const horizontalDistance = EDGE_LABEL_HALF_WIDTH + EDGE_LABEL_GAP +
       lane * PARALLEL_LANE_GAP
@@ -446,6 +451,9 @@ function firstClearOuterLabel(points, labelBounds, reservations) {
       { x: bounds.left - horizontalDistance, y: centerY },
       { x: bounds.right + horizontalDistance, y: centerY }
     ]
+    if (!candidates.every((label) => Number.isFinite(label.x) && Number.isFinite(label.y))) {
+      throw new RangeError('Workflow outer label search exceeded finite coordinates')
+    }
     for (const label of candidates) {
       const rectangle = edgeLabelRectangle(label)
       if (labelBounds.some((node) => rectanglesIntersect(rectangle, node))) continue
@@ -460,8 +468,6 @@ function firstClearOuterLabel(points, labelBounds, reservations) {
       return label
     }
   }
-
-  return { x: centerX, y: bounds.top - 13 - EDGE_LABEL_GAP }
 }
 
 function outerReservationBounds(labelBounds, reservations) {
@@ -473,7 +479,12 @@ function outerReservationBounds(labelBounds, reservations) {
   const finiteBounds = rectangles.filter((rectangle) => (
     [rectangle.left, rectangle.top, rectangle.right, rectangle.bottom].every(Number.isFinite)
   ))
-  return combinedRectangleBounds(finiteBounds)
+  return combinedRectangleBounds(finiteBounds) ?? {
+    left: 0,
+    top: 0,
+    right: 0,
+    bottom: 0
+  }
 }
 
 function reserveVerticalRoute(candidate, reservations) {

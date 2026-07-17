@@ -211,10 +211,28 @@ const transitionKey = (transition) => transition.id
   const second = buildWorkflowEdgeViews(states, transitions, transitionKey)
   assert.equal(first.length, 300)
   assert.deepEqual(first, second)
-  first.forEach((edge) => {
+  const labels = first.map((edge) => ({
+    left: edge.labelX - 40,
+    top: edge.labelY - 13,
+    right: edge.labelX + 40,
+    bottom: edge.labelY + 13
+  }))
+  const collisions = { labelNode: 0, labelLabel: 0 }
+  first.forEach((edge, index) => {
     assertFiniteEdgeView(edge)
     assertEdgeBoundsContainGeometry(edge)
+    states.forEach((state) => {
+      if (rectanglesIntersect(labels[index], nodeRectangle(state))) {
+        collisions.labelNode += 1
+      }
+    })
+    for (let other = index + 1; other < first.length; other += 1) {
+      if (rectanglesIntersect(labels[index], labels[other])) {
+        collisions.labelLabel += 1
+      }
+    }
   })
+  assert.deepEqual(collisions, { labelNode: 0, labelLabel: 0 })
 }
 
 {

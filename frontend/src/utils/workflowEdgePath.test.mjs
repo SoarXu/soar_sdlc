@@ -7,12 +7,37 @@ const {
   buildWorkflowEdgeView,
   buildWorkflowEdgeViews,
   createWorkflowReservationIndex,
-  queryWorkflowReservations
+  filterRectanglesBySegmentBounds,
+  queryWorkflowReservations,
+  queryWorkflowReservationsForSegments
 } = workflowEdgePath
 
 assert.equal(typeof createWorkflowReservationIndex, 'function')
 assert.equal(typeof addWorkflowReservation, 'function')
 assert.equal(typeof queryWorkflowReservations, 'function')
+assert.equal(typeof queryWorkflowReservationsForSegments, 'function')
+assert.equal(typeof filterRectanglesBySegmentBounds, 'function')
+
+{
+  const segments = [
+    { from: { x: 0, y: 0 }, to: { x: 100, y: 0 } },
+    { from: { x: 100, y: 0 }, to: { x: 100, y: 100 } }
+  ]
+  const near = { id: 'near', left: 90, top: 90, right: 110, bottom: 110 }
+  const conservativeCenter = { id: 'center', left: 40, top: 40, right: 60, bottom: 60 }
+  const far = { id: 'far', left: 200, top: 200, right: 220, bottom: 220 }
+  assert.deepEqual(
+    filterRectanglesBySegmentBounds(segments, [near, conservativeCenter, far]),
+    [near, conservativeCenter]
+  )
+}
+
+for (const invalidCellSize of [0, -1, NaN, Infinity]) {
+  assert.throws(
+    () => createWorkflowReservationIndex(invalidCellSize),
+    RangeError
+  )
+}
 
 {
   const index = createWorkflowReservationIndex(128)
@@ -47,6 +72,53 @@ assert.equal(typeof queryWorkflowReservations, 'function')
     }),
     [crossingLabel]
   )
+}
+
+{
+  const index = createWorkflowReservationIndex(128)
+  const verticalLabel = { id: 'vertical', left: 250, top: 110, right: 262, bottom: 130 }
+  const emptyCenterLabel = { id: 'empty-center', left: 110, top: 110, right: 130, bottom: 130 }
+  const cornerLabel = { id: 'corner', left: 250, top: -5, right: 262, bottom: 5 }
+  const horizontalLabel = { id: 'horizontal', left: 110, top: -5, right: 130, bottom: 5 }
+  const segments = [
+    { from: { x: 0, y: 0 }, to: { x: 256, y: 0 } },
+    { from: { x: 256, y: 0 }, to: { x: 256, y: 256 } }
+  ]
+
+  ;[verticalLabel, emptyCenterLabel, cornerLabel, horizontalLabel].forEach((rectangle) => {
+    addWorkflowReservation(index, 'labelRectangles', rectangle)
+  })
+
+  const expected = [verticalLabel, cornerLabel, horizontalLabel]
+  assert.deepEqual(
+    queryWorkflowReservationsForSegments(index, 'labelRectangles', segments),
+    expected
+  )
+  assert.deepEqual(
+    queryWorkflowReservationsForSegments(index, 'labelRectangles', [...segments].reverse()),
+    expected
+  )
+}
+
+{
+  const index = createWorkflowReservationIndex(128)
+  const shared = {
+    id: 'shared',
+    left: 0,
+    top: 0,
+    right: 10,
+    bottom: 10,
+    from: { x: 0, y: 0 },
+    to: { x: 10, y: 0 }
+  }
+  const laterPath = { id: 'later', from: { x: 0, y: 5 }, to: { x: 10, y: 5 } }
+  addWorkflowReservation(index, 'pathSegments', shared)
+  addWorkflowReservation(index, 'pathSegments', laterPath)
+  addWorkflowReservation(index, 'labelRectangles', shared)
+
+  const bounds = { left: 0, top: 0, right: 10, bottom: 10 }
+  assert.deepEqual(queryWorkflowReservations(index, 'pathSegments', bounds), [shared, laterPath])
+  assert.deepEqual(queryWorkflowReservations(index, 'labelRectangles', bounds), [shared])
 }
 
 const source = { x: 100, y: 100 }

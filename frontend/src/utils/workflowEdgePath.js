@@ -457,8 +457,10 @@ function expandedRectangle(node, padding) {
 }
 
 function polylineClearsRectangles(points, rectangles) {
-  for (const { from, to } of roundedPolylineSegments(points)) {
-    if (rectangles.some((rectangle) => segmentIntersectsRectangle(from, to, rectangle))) {
+  const segments = roundedPolylineSegments(points)
+  const nearbyRectangles = filterRectanglesBySegmentBounds(segments, rectangles)
+  for (const { from, to } of segments) {
+    if (nearbyRectangles.some((rectangle) => segmentIntersectsRectangle(from, to, rectangle))) {
       return false
     }
   }
@@ -525,27 +527,40 @@ function roundedPolylineSegments(points) {
 }
 
 export function createWorkflowReservationIndex(cellSize = 128) {
+  if (!Number.isFinite(cellSize) || cellSize <= 0) {
+    throw new RangeError('Workflow reservation cell size must be a positive finite number')
+  }
   return {
     cellSize,
     buckets: {
       labelRectangles: new Map(),
       pathSegments: new Map()
     },
-    boundsByItem: new Map(),
-    orderByItem: new Map(),
-    nextOrder: 0
+    boundsByType: {
+      labelRectangles: new Map(),
+      pathSegments: new Map()
+    },
+    orderByType: {
+      labelRectangles: new Map(),
+      pathSegments: new Map()
+    },
+    nextOrderByType: {
+      labelRectangles: 0,
+      pathSegments: 0
+    }
   }
 }
 
 export function addWorkflowReservation(index, type, item) {
   const buckets = index.buckets[type]
-  if (!buckets || index.boundsByItem.has(item)) return
+  const boundsByItem = index.boundsByType[type]
+  if (!buckets || boundsByItem.has(item)) return
   const bounds = type === 'pathSegments'
     ? segmentBounds(item.from, item.to)
     : item
-  index.boundsByItem.set(item, bounds)
-  index.orderByItem.set(item, index.nextOrder)
-  index.nextOrder += 1
+  boundsByItem.set(item, bounds)
+  index.orderByType[type].set(item, index.nextOrderByType[type])
+  index.nextOrderByType[type] += 1
   forEachSpatialCell(bounds, index.cellSize, (key) => {
     if (!buckets.has(key)) buckets.set(key, [])
     buckets.get(key).push(item)
@@ -560,8 +575,34 @@ export function queryWorkflowReservations(index, type, bounds) {
     ;(buckets.get(key) || []).forEach((item) => found.add(item))
   })
   return [...found]
-    .filter((item) => rectanglesIntersect(index.boundsByItem.get(item), bounds))
-    .sort((left, right) => index.orderByItem.get(left) - index.orderByItem.get(right))
+    .filter((item) => rectanglesIntersect(index.boundsByType[type].get(item), bounds))
+    .sort((left, right) => (
+      index.orderByType[type].get(left) - index.orderByType[type].get(right)
+    ))
+}
+
+export function queryWorkflowReservationsForSegments(index, type, segments) {
+  const buckets = index.buckets[type]
+  if (!buckets) return []
+  const segmentBoundsByCell = new Map()
+  segments.forEach((segment) => {
+    const bounds = segmentBounds(segment.from, segment.to)
+    forEachSpatialCell(bounds, index.cellSize, (key) => {
+      if (!segmentBoundsByCell.has(key)) segmentBoundsByCell.set(key, [])
+      segmentBoundsByCell.get(key).push(bounds)
+    })
+  })
+  const found = new Set()
+  segmentBoundsByCell.forEach((boundsList, key) => {
+    ;(buckets.get(key) || []).forEach((item) => {
+      const itemBounds = index.boundsByType[type].get(item)
+      if (boundsList.some((bounds) => rectanglesIntersect(itemBounds, bounds))) found.add(item)
+    })
+  })
+  return [...found]
+    .sort((left, right) => (
+      index.orderByType[type].get(left) - index.orderByType[type].get(right)
+    ))
 }
 
 function forEachSpatialCell(bounds, cellSize, visit) {
@@ -583,21 +624,18 @@ function segmentBounds(from, to) {
   }
 }
 
-function segmentCollectionBounds(segments) {
-  return segments.reduce((bounds, segment) => {
+export function filterRectanglesBySegmentBounds(segments, rectangles) {
+  if (!segments.length) return []
+  const bounds = segments.reduce((combined, segment) => {
     const current = segmentBounds(segment.from, segment.to)
     return {
-      left: Math.min(bounds.left, current.left),
-      top: Math.min(bounds.top, current.top),
-      right: Math.max(bounds.right, current.right),
-      bottom: Math.max(bounds.bottom, current.bottom)
+      left: Math.min(combined.left, current.left),
+      top: Math.min(combined.top, current.top),
+      right: Math.max(combined.right, current.right),
+      bottom: Math.max(combined.bottom, current.bottom)
     }
-  }, {
-    left: Infinity,
-    top: Infinity,
-    right: -Infinity,
-    bottom: -Infinity
-  })
+  }, segmentBounds(segments[0].from, segments[0].to))
+  return rectangles.filter((rectangle) => rectanglesIntersect(bounds, rectangle))
 }
 
 function quadraticPoint(start, control, end, ratio) {
@@ -776,10 +814,10 @@ function selfLoopClearsReservations(candidate, reservations) {
     rectanglesIntersect(candidate.labelRectangle, rectangle)
   ))) return false
   const pathLabelRectangles = reservations.spatialIndex
-    ? queryWorkflowReservations(
+    ? queryWorkflowReservationsForSegments(
         reservations.spatialIndex,
         'labelRectangles',
-        segmentCollectionBounds(candidate.pathSegments)
+        candidate.pathSegments
       )
     : reservations.labelRectangles
   if (segmentsIntersectRectangles(candidate.pathSegments, pathLabelRectangles)) return false

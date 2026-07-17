@@ -103,9 +103,13 @@ function buildVerticalView(from, to, states, laneIndex, laneCount) {
   const rectangles = states
     .filter((state) => state !== from && state !== to)
     .map((state) => expandedRectangle(state, OBSTACLE_CLEARANCE))
+  const verticalRoutePadding = Math.max(
+    OBSTACLE_CLEARANCE + CORNER_RADIUS,
+    EDGE_LABEL_HALF_WIDTH + EDGE_LABEL_GAP
+  )
   const routingBounds = states
     .filter((state) => state !== from && state !== to)
-    .map((state) => expandedRectangle(state, OBSTACLE_CLEARANCE + CORNER_RADIUS))
+    .map((state) => expandedRectangle(state, verticalRoutePadding))
   const direct = verticalRoutePoints(start, end, trackX)
   const directPoints = firstClearPolyline([direct], rectangles)
   if (directPoints) return routedEdgeView(directPoints)
@@ -481,8 +485,7 @@ function routedEdgeView(points) {
 }
 
 function labelPointForPolyline(points) {
-  let longestHorizontal
-  let longestVertical
+  let longest
 
   for (let index = 1; index < points.length; index += 1) {
     const from = points[index - 1]
@@ -492,17 +495,17 @@ function labelPointForPolyline(points) {
     const length = Math.hypot(to.x - from.x, to.y - from.y)
     if (!length || (!horizontal && !vertical)) continue
     const candidate = {
+      horizontal,
       length,
       point: { x: (from.x + to.x) / 2, y: (from.y + to.y) / 2 }
     }
-    if (horizontal && (!longestHorizontal || length > longestHorizontal.length)) {
-      longestHorizontal = candidate
-    } else if (vertical && (!longestVertical || length > longestVertical.length)) {
-      longestVertical = candidate
+    if (!longest || length > longest.length ||
+        (length === longest.length && horizontal && !longest.horizontal)) {
+      longest = candidate
     }
   }
 
-  return longestHorizontal?.point ?? longestVertical?.point ?? {
+  return longest?.point ?? {
     x: (points[0].x + points[points.length - 1].x) / 2,
     y: (points[0].y + points[points.length - 1].y) / 2
   }

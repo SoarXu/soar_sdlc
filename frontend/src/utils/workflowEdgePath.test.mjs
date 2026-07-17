@@ -167,6 +167,16 @@ const transitionKey = (transition) => transition.id
   )
   edges.forEach((edge) => {
     assertPathClearsRectangle(edge.path, expandedNodeRectangle(states[1]))
+    assert.ok(labelDistanceToPath(edge) <= 1)
+    const labelRectangle = {
+      left: edge.labelX - 40,
+      top: edge.labelY - 13,
+      right: edge.labelX + 40,
+      bottom: edge.labelY + 13
+    }
+    states.forEach((state) => {
+      assert.equal(rectanglesIntersect(labelRectangle, nodeRectangle(state)), false)
+    })
   })
 }
 
@@ -590,6 +600,20 @@ function expandedNodeRectangle(node) {
     right: node.x + 138,
     bottom: node.y + 62
   }
+}
+
+function nodeRectangle(node) {
+  return {
+    left: node.x,
+    top: node.y,
+    right: node.x + 118,
+    bottom: node.y + 42
+  }
+}
+
+function rectanglesIntersect(left, right) {
+  return left.right >= right.left && left.left <= right.right &&
+    left.bottom >= right.top && left.top <= right.bottom
 }
 
 function segmentIntersectsRectangle({ from, to }, rectangle) {

@@ -25,12 +25,18 @@ assert.match(
 assert.match(source, /const minimumCanvas = \{ width: 2400, height: 1400 \}/)
 assert.match(
   source,
-  /const canvasSize = computed\(\(\) => workflowCanvasSize\(states\.value, minimumCanvas, undefined, transitionViews\.value\)\)/
+  /const canvasEdgeViews = computed\(\(\) => dragging\.state \? \[\] : transitionViews\.value\)/
+)
+assert.match(
+  source,
+  /const canvasSize = computed\(\(\) => workflowCanvasSize\(states\.value, minimumCanvas, undefined, canvasEdgeViews\.value\)\)/
 )
 assert.ok(
-  source.indexOf('const transitionViews = computed') < source.indexOf('const canvasSize = computed'),
-  'transition views must be available before the edge-aware canvas size'
+  source.indexOf('const transitionViews = computed') < source.indexOf('const canvasEdgeViews = computed') &&
+    source.indexOf('const canvasEdgeViews = computed') < source.indexOf('const canvasSize = computed'),
+  'drag-aware edge views must sit between routed edges and canvas size'
 )
+assert.match(source, /v-for="edge in transitionViews"/)
 assert.doesNotMatch(source, /\b(?:applyPanDelta|clampViewport|fitViewportToNodes)\([\s\S]{0,180}\bminimumCanvas\b/)
 assert.match(source, /applyPanDelta\([\s\S]{0,180}canvasSize\.value/)
 assert.match(

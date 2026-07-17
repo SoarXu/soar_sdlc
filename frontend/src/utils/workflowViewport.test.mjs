@@ -140,6 +140,7 @@ const viewport = { width: 900, height: 540 }
   }))
   const edgeViews = buildWorkflowEdgeViews(nodes, transitions, (transition) => transition.id)
   const edgeBottom = Math.max(...edgeViews.map((edge) => edge.bounds.bottom))
+  const draggingCanvas = workflowCanvasSize(nodes)
   const expandedCanvas = workflowCanvasSize(nodes, undefined, undefined, edgeViews)
   const bottomOffset = clampViewport(
     { x: 0, y: -Infinity },
@@ -150,6 +151,8 @@ const viewport = { width: 900, height: 540 }
   const contentFit = fitViewportToNodes(nodes, expandedCanvas, viewport, edgeViews)
 
   assert.ok(edgeBottom > 1602, `expected label bounds below the 1602 path, got ${edgeBottom}`)
+  assert.deepEqual(draggingCanvas, canvas)
+  assert.ok(expandedCanvas.height > draggingCanvas.height)
   assert.ok(expandedCanvas.height >= edgeBottom + 120)
   assert.ok(edgeBottom + bottomOffset.y <= viewport.height - 120)
   assert.notDeepEqual(contentFit, nodeOnlyFit)

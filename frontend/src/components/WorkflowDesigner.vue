@@ -252,7 +252,8 @@ const dragging = reactive({ state: null, startX: 0, startY: 0, originX: 0, origi
 const viewportDrag = reactive({ active: false, startX: 0, startY: 0, originX: 0, originY: 0 })
 const enabledStates = computed(() => states.value.filter((state) => state.enabled))
 const transitionViews = computed(() => buildWorkflowEdgeViews(states.value, transitions.value, transitionKey))
-const canvasSize = computed(() => workflowCanvasSize(states.value, minimumCanvas, undefined, transitionViews.value))
+const canvasEdgeViews = computed(() => dragging.state ? [] : transitionViews.value)
+const canvasSize = computed(() => workflowCanvasSize(states.value, minimumCanvas, undefined, canvasEdgeViews.value))
 
 const selectedState = computed(() => (
   selectedKind.value === 'state'

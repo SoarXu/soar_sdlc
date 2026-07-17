@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import { layoutWorkflowNodes } from './workflowAutoLayout.js'
+import { buildWorkflowEdgeViews } from './workflowEdgePath.js'
 import {
   applyPanDelta,
   clampViewport,
@@ -124,6 +125,43 @@ const viewport = { width: 900, height: 540 }
 {
   const next = fitViewportToNodes([], canvas, viewport)
   assert.deepEqual(next, { x: 0, y: 0 })
+}
+
+{
+  const nodes = [
+    { id: 'target', x: 80, y: 1200 },
+    { id: 'source', x: 520, y: 1200 }
+  ]
+  const transitions = Array.from({ length: 10 }, (_, index) => ({
+    id: `return-${index + 1}`,
+    from_state_id: 'source',
+    to_state_id: 'target',
+    sort_order: index
+  }))
+  const edgeViews = buildWorkflowEdgeViews(nodes, transitions, (transition) => transition.id)
+  const edgeBottom = Math.max(...edgeViews.map((edge) => edge.bounds.bottom))
+  const expandedCanvas = workflowCanvasSize(nodes, undefined, undefined, edgeViews)
+  const bottomOffset = clampViewport(
+    { x: 0, y: -Infinity },
+    expandedCanvas,
+    viewport
+  )
+  const nodeOnlyFit = fitViewportToNodes(nodes, expandedCanvas, viewport)
+  const contentFit = fitViewportToNodes(nodes, expandedCanvas, viewport, edgeViews)
+
+  assert.ok(edgeBottom > 1602, `expected label bounds below the 1602 path, got ${edgeBottom}`)
+  assert.ok(expandedCanvas.height >= edgeBottom + 120)
+  assert.ok(edgeBottom + bottomOffset.y <= viewport.height - 120)
+  assert.notDeepEqual(contentFit, nodeOnlyFit)
+  assert.deepEqual(contentFit, clampViewport(contentFit, expandedCanvas, viewport))
+}
+
+{
+  const edgeViews = [{ bounds: { left: 400, top: 300, right: 600, bottom: 500 } }]
+  assert.notDeepEqual(
+    fitViewportToNodes([], canvas, viewport, edgeViews),
+    { x: 0, y: 0 }
+  )
 }
 
 console.log('workflowViewport tests passed')

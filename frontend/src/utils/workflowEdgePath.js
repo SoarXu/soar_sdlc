@@ -24,13 +24,7 @@ export function buildWorkflowEdgeView(from, to) {
   const end = anchorPoint(to, targetSide)
   const points = vertical ? verticalRoute(start, end) : horizontalRoute(start, end)
 
-  return {
-    path: roundedPolylinePath(points),
-    labelX: (start.x + end.x) / 2,
-    labelY: (start.y + end.y) / 2,
-    start,
-    end
-  }
+  return edgeView(points, (start.x + end.x) / 2, (start.y + end.y) / 2)
 }
 
 export function buildWorkflowEdgeViews(states, transitions, transitionKey = defaultTransitionKey) {
@@ -770,8 +764,19 @@ function edgeView(points, labelX, labelY) {
     labelX,
     labelY,
     start: points[0],
-    end: points[points.length - 1]
+    end: points[points.length - 1],
+    bounds: edgeViewBounds(points, labelX, labelY)
   }
+}
+
+function edgeViewBounds(points, labelX, labelY) {
+  const labelRectangle = edgeLabelRectangle({ labelX, labelY })
+  return points.reduce((bounds, point) => ({
+    left: Math.min(bounds.left, point.x),
+    top: Math.min(bounds.top, point.y),
+    right: Math.max(bounds.right, point.x),
+    bottom: Math.max(bounds.bottom, point.y)
+  }), labelRectangle)
 }
 
 function routedEdgeView(points) {

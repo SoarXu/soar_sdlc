@@ -4,12 +4,18 @@ const NODE_HEIGHT = 42
 export function workflowCanvasSize(
   nodes,
   minimumCanvas = { width: 2400, height: 1400 },
-  padding = { right: 160, bottom: 120 }
+  padding = { right: 160, bottom: 120 },
+  edgeViews = []
 ) {
-  const contentBounds = nodes.reduce((bounds, node) => ({
-    right: Math.max(bounds.right, node.x + NODE_WIDTH),
-    bottom: Math.max(bounds.bottom, node.y + NODE_HEIGHT)
-  }), { right: 0, bottom: 0 })
+  const nodeBounds = nodes.map((node) => ({
+    right: node.x + NODE_WIDTH,
+    bottom: node.y + NODE_HEIGHT
+  }))
+  const contentBounds = [...nodeBounds, ...edgeViews.map((edge) => edge.bounds)]
+    .reduce((bounds, item) => ({
+      right: Math.max(bounds.right, item.right),
+      bottom: Math.max(bounds.bottom, item.bottom)
+    }), { right: 0, bottom: 0 })
 
   return {
     width: Math.max(minimumCanvas.width, contentBounds.right + padding.right),
@@ -35,18 +41,22 @@ export function clampViewport(offset, canvas, viewport) {
   }
 }
 
-export function fitViewportToNodes(nodes, canvas, viewport) {
-  if (!nodes.length) return { x: 0, y: 0 }
+export function fitViewportToNodes(nodes, canvas, viewport, edgeViews = []) {
+  if (!nodes.length && !edgeViews.length) return { x: 0, y: 0 }
 
-  const bounds = nodes.reduce(
-    (result, node) => ({
-      left: Math.min(result.left, node.x),
-      top: Math.min(result.top, node.y),
-      right: Math.max(result.right, node.x + NODE_WIDTH),
-      bottom: Math.max(result.bottom, node.y + NODE_HEIGHT)
-    }),
-    { left: Infinity, top: Infinity, right: -Infinity, bottom: -Infinity }
-  )
+  const nodeBounds = nodes.map((node) => ({
+    left: node.x,
+    top: node.y,
+    right: node.x + NODE_WIDTH,
+    bottom: node.y + NODE_HEIGHT
+  }))
+  const bounds = [...nodeBounds, ...edgeViews.map((edge) => edge.bounds)]
+    .reduce((result, item) => ({
+      left: Math.min(result.left, item.left),
+      top: Math.min(result.top, item.top),
+      right: Math.max(result.right, item.right),
+      bottom: Math.max(result.bottom, item.bottom)
+    }), { left: Infinity, top: Infinity, right: -Infinity, bottom: -Infinity })
   const contentCenter = {
     x: (bounds.left + bounds.right) / 2,
     y: (bounds.top + bounds.bottom) / 2

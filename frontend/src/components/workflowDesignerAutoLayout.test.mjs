@@ -23,10 +23,20 @@ assert.match(
   /const transitionViews = computed\(\(\) => buildWorkflowEdgeViews\(states\.value, transitions\.value, transitionKey\)\)/
 )
 assert.match(source, /const minimumCanvas = \{ width: 2400, height: 1400 \}/)
-assert.match(source, /const canvasSize = computed\(\(\) => workflowCanvasSize\(states\.value, minimumCanvas\)\)/)
+assert.match(
+  source,
+  /const canvasSize = computed\(\(\) => workflowCanvasSize\(states\.value, minimumCanvas, undefined, transitionViews\.value\)\)/
+)
+assert.ok(
+  source.indexOf('const transitionViews = computed') < source.indexOf('const canvasSize = computed'),
+  'transition views must be available before the edge-aware canvas size'
+)
 assert.doesNotMatch(source, /\b(?:applyPanDelta|clampViewport|fitViewportToNodes)\([\s\S]{0,180}\bminimumCanvas\b/)
 assert.match(source, /applyPanDelta\([\s\S]{0,180}canvasSize\.value/)
-assert.match(source, /fitViewportToNodes\(states\.value, canvasSize\.value, viewportSize\)/)
+assert.match(
+  source,
+  /fitViewportToNodes\(states\.value, canvasSize\.value, viewportSize, transitionViews\.value\)/
+)
 assert.match(source, /clampViewport\(\{ x: 0, y: 0 \}, canvasSize\.value, viewportSize\)/)
 
 const canvasSizeWatchStart = source.indexOf('watch(canvasSize')

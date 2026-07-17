@@ -251,7 +251,8 @@ const viewportOffset = reactive({ x: 0, y: 0 })
 const dragging = reactive({ state: null, startX: 0, startY: 0, originX: 0, originY: 0 })
 const viewportDrag = reactive({ active: false, startX: 0, startY: 0, originX: 0, originY: 0 })
 const enabledStates = computed(() => states.value.filter((state) => state.enabled))
-const canvasSize = computed(() => workflowCanvasSize(states.value, minimumCanvas))
+const transitionViews = computed(() => buildWorkflowEdgeViews(states.value, transitions.value, transitionKey))
+const canvasSize = computed(() => workflowCanvasSize(states.value, minimumCanvas, undefined, transitionViews.value))
 
 const selectedState = computed(() => (
   selectedKind.value === 'state'
@@ -269,7 +270,6 @@ const selectedUnsupportedSections = computed(() => (
 const canvasGridStyle = computed(() => ({
   backgroundPosition: `${viewportOffset.x}px ${viewportOffset.y}px`
 }))
-const transitionViews = computed(() => buildWorkflowEdgeViews(states.value, transitions.value, transitionKey))
 
 watch(canvasSize, (nextCanvas) => {
   if (dragging.state) return
@@ -573,7 +573,7 @@ function stopViewportDrag() {
 }
 
 function fitToContent() {
-  const next = fitViewportToNodes(states.value, canvasSize.value, viewportSize)
+  const next = fitViewportToNodes(states.value, canvasSize.value, viewportSize, transitionViews.value)
   viewportOffset.x = next.x
   viewportOffset.y = next.y
 }

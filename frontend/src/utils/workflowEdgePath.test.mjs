@@ -31,6 +31,25 @@ const transitionKey = (transition) => transition.id
 
 {
   const states = [
+    { id: 'left', x: 80, y: 120 },
+    { id: 'right', x: 420, y: 120 },
+    { id: 'lower', x: 80, y: 420 }
+  ]
+  const views = [
+    buildWorkflowEdgeView(states[0], states[1]),
+    ...buildWorkflowEdgeViews(states, [
+      { id: 'forward-bounds', from_state_id: 'left', to_state_id: 'right' },
+      { id: 'backward-bounds', from_state_id: 'right', to_state_id: 'left' },
+      { id: 'vertical-bounds', from_state_id: 'left', to_state_id: 'lower' },
+      { id: 'self-loop-bounds', from_state_id: 'lower', to_state_id: 'lower' }
+    ], transitionKey)
+  ]
+
+  views.forEach(assertEdgeBoundsContainGeometry)
+}
+
+{
+  const states = [
     { id: 'source', x: 40, y: 100 },
     { id: 'target', x: 360, y: 100 }
   ]
@@ -692,6 +711,21 @@ function pathPoints(path) {
   }
 
   return points
+}
+
+function assertEdgeBoundsContainGeometry(edge) {
+  assert.ok(edge.bounds, 'edge view must expose bounds')
+  const geometry = [
+    ...pathPoints(edge.path),
+    { x: edge.labelX - 40, y: edge.labelY - 13 },
+    { x: edge.labelX + 40, y: edge.labelY + 13 }
+  ]
+  geometry.forEach((point) => {
+    assert.ok(edge.bounds.left <= point.x, `left bound excludes ${point.x}`)
+    assert.ok(edge.bounds.top <= point.y, `top bound excludes ${point.y}`)
+    assert.ok(edge.bounds.right >= point.x, `right bound excludes ${point.x}`)
+    assert.ok(edge.bounds.bottom >= point.y, `bottom bound excludes ${point.y}`)
+  })
 }
 
 function pathSegments(path) {

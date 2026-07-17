@@ -646,6 +646,69 @@ assertVerticalColumnReservations(159, 159.001, 'exact-epsilon-boundary')
 
 {
   const states = [
+    { id: 'pending-assignment', x: 80, y: 140 },
+    { id: 'in-processing', x: 320, y: 140 },
+    { id: 'canceled', x: 560, y: 200 }
+  ]
+  const transitions = [
+    {
+      id: 'claim',
+      from_state_id: 'pending-assignment',
+      to_state_id: 'in-processing',
+      sort_order: 10
+    },
+    {
+      id: 'assign',
+      from_state_id: 'pending-assignment',
+      to_state_id: 'in-processing',
+      sort_order: 20
+    },
+    ...Array.from({ length: 3 }, (_, index) => ({
+      id: `pending-command-${index + 1}`,
+      from_state_id: 'pending-assignment',
+      to_state_id: 'pending-assignment',
+      sort_order: (index + 1) * 10
+    })),
+    {
+      id: 'cancel',
+      from_state_id: 'in-processing',
+      to_state_id: 'canceled',
+      sort_order: 10
+    },
+    {
+      id: 'transfer',
+      from_state_id: 'in-processing',
+      to_state_id: 'in-processing',
+      sort_order: 10
+    }
+  ]
+  const edges = buildWorkflowEdgeViews(states, transitions, transitionKey)
+  const labelRectangles = edges.map((edge) => ({
+    left: edge.labelX - 40,
+    top: edge.labelY - 13,
+    right: edge.labelX + 40,
+    bottom: edge.labelY + 13
+  }))
+
+  for (let left = 0; left < edges.length; left += 1) {
+    for (let right = left + 1; right < edges.length; right += 1) {
+      assert.equal(rectanglesIntersect(labelRectangles[left], labelRectangles[right]), false)
+    }
+    for (let other = 0; other < edges.length; other += 1) {
+      if (left === other) continue
+      assertPathClearsRectangle(edges[left].path, labelRectangles[other])
+    }
+    states.forEach((state) => {
+      if (state.id === edges[left].transition.from_state_id ||
+        state.id === edges[left].transition.to_state_id) return
+      assertPathClearsRectangle(edges[left].path, expandedNodeRectangle(state))
+      assert.equal(rectanglesIntersect(labelRectangles[left], nodeRectangle(state)), false)
+    })
+  }
+}
+
+{
+  const states = [
     { id: 'left-loop', x: 100, y: 100 },
     { id: 'right-loop', x: 500, y: 100 }
   ]

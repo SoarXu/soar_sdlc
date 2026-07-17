@@ -43,71 +43,106 @@ export function buildWorkflowEdgeViews(states, transitions, transitionKey = defa
   const verticalGroups = clusterVerticalGroups(resolved)
   const groupIndexes = new Map()
   const verticalGroupIndexes = new Map()
-  const selfLoopReservations = new Map()
   const verticalLabelReservations = new Map()
-  const usedKeys = new Set()
   const maximumNodeBottom = states.reduce((maximum, state) => (
     Math.max(maximum, state.y + NODE_HEIGHT)
   ), 0)
+  const routingMetadata = new Map()
   let backwardLaneIndex = 0
 
-  return resolved.map((edge) => {
+  resolved.forEach((edge) => {
     const groupKey = endpointGroupKey(edge.transition)
     const groupIndex = groupIndexes.get(groupKey) || 0
     groupIndexes.set(groupKey, groupIndex + 1)
+    const metadata = { groupKey, groupIndex }
 
-    let view
-    if (edge.transition.from_state_id === edge.transition.to_state_id) {
-      if (!selfLoopReservations.has(groupKey)) {
-        selfLoopReservations.set(groupKey, { labelRectangles: [], pathSegments: [] })
-      }
-      view = buildSelfLoopView(
-        edge.from,
-        states,
-        groupIndex,
-        groupSizes.get(groupKey),
-        selfLoopReservations.get(groupKey)
-      )
-    } else if (isVerticalConnection(edge.from, edge.to)) {
+    if (edge.transition.from_state_id !== edge.transition.to_state_id &&
+      isVerticalConnection(edge.from, edge.to)) {
       const verticalGroupKey = verticalGroups.keys.get(edge)
-      const verticalGroupIndex = verticalGroupIndexes.get(verticalGroupKey) || 0
-      verticalGroupIndexes.set(verticalGroupKey, verticalGroupIndex + 1)
-      if (!verticalLabelReservations.has(verticalGroupKey)) {
-        verticalLabelReservations.set(verticalGroupKey, { labelRectangles: [], pathSegments: [] })
-      }
-      view = buildVerticalView(
-        edge.from,
-        edge.to,
-        states,
-        verticalGroupIndex,
-        verticalGroups.sizes.get(verticalGroupKey),
-        verticalLabelReservations.get(verticalGroupKey)
-      )
-    } else if (centerOf(edge.to).x < centerOf(edge.from).x) {
-      view = buildBackwardView(
-        edge.from,
-        edge.to,
-        states,
-        maximumNodeBottom,
-        backwardLaneIndex
-      )
+      metadata.verticalGroupKey = verticalGroupKey
+      metadata.verticalGroupIndex = verticalGroupIndexes.get(verticalGroupKey) || 0
+      verticalGroupIndexes.set(verticalGroupKey, metadata.verticalGroupIndex + 1)
+    } else if (edge.transition.from_state_id !== edge.transition.to_state_id &&
+      centerOf(edge.to).x < centerOf(edge.from).x) {
+      metadata.backwardLaneIndex = backwardLaneIndex
       backwardLaneIndex += 1
-    } else {
-      view = buildForwardView(
-        edge.from,
-        edge.to,
-        states,
-        groupIndex,
-        groupSizes.get(groupKey)
-      )
     }
+    routingMetadata.set(edge, metadata)
+  })
 
+  const globalReservations = { labelRectangles: [], pathSegments: [] }
+  const views = new Map()
+
+  resolved
+    .filter((edge) => edge.transition.from_state_id !== edge.transition.to_state_id)
+    .forEach((edge) => {
+      const metadata = routingMetadata.get(edge)
+      let view
+
+      if (metadata.verticalGroupKey !== undefined) {
+        const verticalGroupKey = metadata.verticalGroupKey
+        if (!verticalLabelReservations.has(verticalGroupKey)) {
+          verticalLabelReservations.set(verticalGroupKey, { labelRectangles: [], pathSegments: [] })
+        }
+        view = buildVerticalView(
+          edge.from,
+          edge.to,
+          states,
+          metadata.verticalGroupIndex,
+          verticalGroups.sizes.get(verticalGroupKey),
+          verticalLabelReservations.get(verticalGroupKey)
+        )
+      } else if (metadata.backwardLaneIndex !== undefined) {
+        view = buildBackwardView(
+          edge.from,
+          edge.to,
+          states,
+          maximumNodeBottom,
+          metadata.backwardLaneIndex
+        )
+      } else {
+        view = buildForwardView(
+          edge.from,
+          edge.to,
+          states,
+          metadata.groupIndex,
+          groupSizes.get(metadata.groupKey)
+        )
+      }
+
+      views.set(edge, view)
+      reserveEdgeViewGeometry(view, globalReservations)
+    })
+
+  resolved
+    .filter((edge) => edge.transition.from_state_id === edge.transition.to_state_id)
+    .forEach((edge) => {
+      const metadata = routingMetadata.get(edge)
+      views.set(edge, buildSelfLoopView(
+        edge.from,
+        states,
+        metadata.groupIndex,
+        groupSizes.get(metadata.groupKey),
+        globalReservations
+      ))
+    })
+
+  const usedKeys = new Set()
+  return resolved.map((edge) => {
     return {
       key: uniqueTransitionKey(edge, usedKeys),
       transition: edge.transition,
-      ...view
+      ...views.get(edge)
     }
   })
+}
+
+function reserveEdgeViewGeometry(view, reservations) {
+  reservations.labelRectangles.push(edgeLabelRectangle(view))
+  const points = Array.isArray(view.points) && view.points.length >= 2
+    ? view.points
+    : [view.start, view.end]
+  reservations.pathSegments.push(...roundedPolylineSegments(normalizeOrthogonalPoints(points)))
 }
 
 function buildVerticalView(from, to, states, laneIndex, laneCount, reservations) {
@@ -761,6 +796,7 @@ function reservedSelfLoopView(candidate, reservations, degraded = false) {
 function edgeView(points, labelX, labelY) {
   return {
     path: roundedPolylinePath(points),
+    points,
     labelX,
     labelY,
     start: points[0],

@@ -73,6 +73,33 @@ const transitionKey = (transition) => transition.id
 
 {
   const states = [
+    { id: 'target', x: 40, y: 500 },
+    { id: 'source', x: 360, y: 100 }
+  ]
+  const [edge] = buildWorkflowEdgeViews(states, [
+    { id: 'steep-return', from_state_id: 'source', to_state_id: 'target' }
+  ], transitionKey)
+
+  assert.deepEqual(edge.start, { x: 419, y: 142 })
+  assert.deepEqual(edge.end, { x: 99, y: 542 })
+  assert.ok(Math.max(...pathPoints(edge.path).map(({ y }) => y)) > 542)
+}
+
+{
+  const states = [
+    { id: 'source', x: 40, y: 100 },
+    { id: 'target', x: 360, y: 500 }
+  ]
+  const [edge] = buildWorkflowEdgeViews(states, [
+    { id: 'steep-forward', from_state_id: 'source', to_state_id: 'target' }
+  ], transitionKey)
+
+  assert.deepEqual(edge.start, { x: 158, y: 121 })
+  assert.deepEqual(edge.end, { x: 360, y: 521 })
+}
+
+{
+  const states = [
     { id: 'upper', x: 100, y: 100 },
     { id: 'lower', x: 100, y: 300 }
   ]

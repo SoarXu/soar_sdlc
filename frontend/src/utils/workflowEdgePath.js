@@ -8,6 +8,7 @@ const BACKWARD_LANE_GAP = 36
 const OBSTACLE_CLEARANCE = 21
 const EDGE_LABEL_HALF_WIDTH = 40
 const EDGE_LABEL_GAP = 8
+const POSITION_EPSILON = 0.001
 
 export function buildWorkflowEdgeView(from, to) {
   const fromCenter = centerOf(from)
@@ -106,11 +107,7 @@ function buildVerticalView(from, to, laneIndex, laneCount) {
 }
 
 function isVerticalConnection(from, to) {
-  const fromCenter = centerOf(from)
-  const toCenter = centerOf(to)
-  const dx = toCenter.x - fromCenter.x
-  const dy = toCenter.y - fromCenter.y
-  return Math.abs(dy) > Math.abs(dx) * 0.8
+  return Math.abs(centerOf(to).x - centerOf(from).x) <= POSITION_EPSILON
 }
 
 function buildForwardView(from, to, states, laneIndex, laneCount) {

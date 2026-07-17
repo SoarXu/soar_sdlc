@@ -46,6 +46,7 @@ export function buildWorkflowEdgeViews(states, transitions, transitionKey = defa
   const groupSizes = countEndpointGroups(resolved)
   const groupIndexes = new Map()
   const selfLoopReservations = new Map()
+  const verticalLabelReservations = new Map()
   const usedKeys = new Set()
   const maximumNodeBottom = states.reduce((maximum, state) => (
     Math.max(maximum, state.y + NODE_HEIGHT)
@@ -70,12 +71,16 @@ export function buildWorkflowEdgeViews(states, transitions, transitionKey = defa
         selfLoopReservations.get(groupKey)
       )
     } else if (isVerticalConnection(edge.from, edge.to)) {
+      if (!verticalLabelReservations.has(groupKey)) {
+        verticalLabelReservations.set(groupKey, [])
+      }
       view = buildVerticalView(
         edge.from,
         edge.to,
         states,
         groupIndex,
-        groupSizes.get(groupKey)
+        groupSizes.get(groupKey),
+        verticalLabelReservations.get(groupKey)
       )
     } else if (centerOf(edge.to).x < centerOf(edge.from).x) {
       view = buildBackwardView(
@@ -104,51 +109,125 @@ export function buildWorkflowEdgeViews(states, transitions, transitionKey = defa
   })
 }
 
-function buildVerticalView(from, to, states, laneIndex, laneCount) {
+function buildVerticalView(from, to, states, laneIndex, laneCount, reservedLabels) {
   const downward = centerOf(to).y > centerOf(from).y
   const start = anchorPoint(from, downward ? 'bottom' : 'top')
   const end = anchorPoint(to, downward ? 'top' : 'bottom')
+  const obstacles = states.filter((state) => state !== from && state !== to)
+  const labelBounds = states.map((state) => expandedRectangle(state, 0))
+  const clearView = findVerticalRouteView(
+    start,
+    end,
+    obstacles,
+    laneIndex,
+    laneCount,
+    OBSTACLE_CLEARANCE,
+    labelBounds,
+    reservedLabels
+  )
+  if (clearView) return reserveVerticalLabel(clearView, reservedLabels)
+
+  const nodeAvoidingView = findVerticalRouteView(
+    start,
+    end,
+    obstacles,
+    laneIndex,
+    laneCount,
+    0,
+    labelBounds,
+    reservedLabels
+  )
+  if (nodeAvoidingView) {
+    return {
+      ...reserveVerticalLabel(nodeAvoidingView, reservedLabels),
+      degraded: true
+    }
+  }
+
   const centeredLaneIndex = laneIndex - (laneCount - 1) / 2
   const trackX = start.x + centeredLaneIndex * PARALLEL_LANE_GAP
-  const rectangles = states
-    .filter((state) => state !== from && state !== to)
-    .map((state) => expandedRectangle(state, OBSTACLE_CLEARANCE))
+  const direct = verticalRoutePoints(start, end, trackX)
+  const labelAvoidingFallback = routeViewWithClearLabel(
+    direct,
+    labelBounds,
+    reservedLabels
+  )
+  if (labelAvoidingFallback) {
+    return {
+      ...reserveVerticalLabel(labelAvoidingFallback, reservedLabels),
+      degraded: true
+    }
+  }
+  return degradedEdgeView(direct)
+}
+
+function findVerticalRouteView(
+  start,
+  end,
+  obstacles,
+  laneIndex,
+  laneCount,
+  clearance,
+  labelBounds,
+  reservedLabels
+) {
+  const centeredLaneIndex = laneIndex - (laneCount - 1) / 2
+  const trackX = start.x + centeredLaneIndex * PARALLEL_LANE_GAP
+  const pathBounds = obstacles.map((state) => expandedRectangle(state, clearance))
   const verticalRoutePadding = Math.max(
-    OBSTACLE_CLEARANCE + CORNER_RADIUS,
+    clearance + CORNER_RADIUS,
     EDGE_LABEL_HALF_WIDTH + EDGE_LABEL_GAP
   )
-  const routingBounds = states
-    .filter((state) => state !== from && state !== to)
-    .map((state) => expandedRectangle(state, verticalRoutePadding))
-  const direct = verticalRoutePoints(start, end, trackX)
-  const directPoints = firstClearPolyline([direct], rectangles)
-  if (directPoints) return routedEdgeView(directPoints)
+  const routingBounds = obstacles.map((state) => expandedRectangle(state, verticalRoutePadding))
+  const candidates = [verticalRoutePoints(start, end, trackX)]
 
-  const laneOffset = laneIndex * PARALLEL_LANE_GAP
-  const leftChannel = Math.min(...routingBounds.map((rectangle) => rectangle.left)) -
-    1 - laneOffset
-  const rightChannel = Math.max(...routingBounds.map((rectangle) => rectangle.right)) +
-    1 + laneOffset
-  const channels = channelCandidates(
-    trackX,
-    [
-      leftChannel,
-      rightChannel,
-      ...routingBounds.flatMap((rectangle) => (
-        [rectangle.left - 1 - laneOffset, rectangle.right + 1 + laneOffset]
-      ))
-    ],
-    () => true
-  )
-  const points = firstClearPolyline(
-    channels.map((channel) => verticalRoutePoints(start, end, channel)),
-    rectangles
-  )
-
-  if (!points) {
-    return degradedEdgeView(direct)
+  if (routingBounds.length) {
+    const laneOffset = laneIndex * PARALLEL_LANE_GAP
+    const leftChannel = Math.min(...routingBounds.map((rectangle) => rectangle.left)) -
+      1 - laneOffset
+    const rightChannel = Math.max(...routingBounds.map((rectangle) => rectangle.right)) +
+      1 + laneOffset
+    const channels = channelCandidates(
+      trackX,
+      [
+        leftChannel,
+        rightChannel,
+        ...routingBounds.flatMap((rectangle) => (
+          [rectangle.left - 1 - laneOffset, rectangle.right + 1 + laneOffset]
+        ))
+      ],
+      () => true
+    )
+    candidates.push(...channels.map((channel) => verticalRoutePoints(start, end, channel)))
   }
-  return routedEdgeView(points)
+
+  return firstClearRouteView(candidates, pathBounds, labelBounds, reservedLabels)
+}
+
+function firstClearRouteView(candidates, pathBounds, labelBounds, reservedLabels) {
+  for (const candidate of candidates) {
+    const points = normalizeOrthogonalPoints(candidate)
+    if (!polylineClearsRectangles(points, pathBounds)) continue
+    const view = routeViewWithClearLabel(points, labelBounds, reservedLabels)
+    if (view) return view
+  }
+  return null
+}
+
+function routeViewWithClearLabel(points, labelBounds, reservedLabels) {
+  const normalized = normalizeOrthogonalPoints(points)
+  for (const label of labelPointsForPolyline(normalized)) {
+    const labelRectangle = edgeLabelRectangle(label)
+    if (labelBounds.some((rectangle) => rectanglesIntersect(labelRectangle, rectangle))) continue
+    if (reservedLabels.some((rectangle) => rectanglesIntersect(labelRectangle, rectangle))) continue
+    return edgeView(normalized, label.x, label.y)
+  }
+  return null
+}
+
+function reserveVerticalLabel(view, reservedLabels) {
+  reservedLabels.push(edgeLabelRectangle(view))
+  return view
 }
 
 function verticalRoutePoints(start, end, trackX) {
@@ -676,7 +755,14 @@ function routedEdgeView(points) {
 }
 
 function labelPointForPolyline(points) {
-  let longest
+  return labelPointsForPolyline(points)[0] ?? {
+    x: (points[0].x + points[points.length - 1].x) / 2,
+    y: (points[0].y + points[points.length - 1].y) / 2
+  }
+}
+
+function labelPointsForPolyline(points) {
+  const segments = []
 
   for (let index = 1; index < points.length; index += 1) {
     const from = points[index - 1]
@@ -685,20 +771,52 @@ function labelPointForPolyline(points) {
     const vertical = from.x === to.x
     const length = Math.hypot(to.x - from.x, to.y - from.y)
     if (!length || (!horizontal && !vertical)) continue
-    const candidate = {
+    segments.push({
       horizontal,
+      index,
       length,
-      point: { x: (from.x + to.x) / 2, y: (from.y + to.y) / 2 }
-    }
-    if (!longest || length > longest.length ||
-        (length === longest.length && horizontal && !longest.horizontal)) {
-      longest = candidate
-    }
+      from,
+      to
+    })
   }
 
-  return longest?.point ?? {
-    x: (points[0].x + points[points.length - 1].x) / 2,
-    y: (points[0].y + points[points.length - 1].y) / 2
+  segments.sort((left, right) => (
+    right.length - left.length ||
+    Number(right.horizontal) - Number(left.horizontal) ||
+    left.index - right.index
+  ))
+  const labels = []
+  const used = new Set()
+  segments.forEach((segment) => {
+    const step = segment.horizontal
+      ? EDGE_LABEL_HALF_WIDTH * 2 + EDGE_LABEL_GAP
+      : 26 + EDGE_LABEL_GAP
+    const maximumOffset = segment.length / 2
+    const offsets = [0]
+    for (let offset = step; offset <= maximumOffset; offset += step) {
+      offsets.push(-offset, offset)
+    }
+    offsets.forEach((offset) => {
+      const label = segment.horizontal
+        ? { x: (segment.from.x + segment.to.x) / 2 + offset, y: segment.from.y }
+        : { x: segment.from.x, y: (segment.from.y + segment.to.y) / 2 + offset }
+      const key = `${label.x}:${label.y}`
+      if (used.has(key)) return
+      used.add(key)
+      labels.push(label)
+    })
+  })
+  return labels
+}
+
+function edgeLabelRectangle(point) {
+  const x = point.labelX ?? point.x
+  const y = point.labelY ?? point.y
+  return {
+    left: x - EDGE_LABEL_HALF_WIDTH,
+    top: y - 13,
+    right: x + EDGE_LABEL_HALF_WIDTH,
+    bottom: y + 13
   }
 }
 

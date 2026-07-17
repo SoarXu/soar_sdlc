@@ -148,6 +148,28 @@ const transitionKey = (transition) => transition.id
 
 {
   const states = [
+    { id: 1, x: 100, y: 0 },
+    { id: 2, x: 100, y: 400 },
+    { id: 3, x: 181, y: 200 }
+  ]
+  const [edge] = buildWorkflowEdgeViews(states, [
+    { id: 'vertical-label-obstacle', from_state_id: 1, to_state_id: 2 }
+  ], transitionKey)
+  const labelRectangle = {
+    left: edge.labelX - 40,
+    top: edge.labelY - 13,
+    right: edge.labelX + 40,
+    bottom: edge.labelY + 13
+  }
+
+  assert.deepEqual(edge.start, { x: 159, y: 42 })
+  assert.deepEqual(edge.end, { x: 159, y: 400 })
+  assertPathClearsRectangle(edge.path, expandedNodeRectangle(states[2]))
+  assert.equal(rectanglesIntersect(labelRectangle, nodeRectangle(states[2])), false)
+}
+
+{
+  const states = [
     { id: 'source', x: 100, y: 0 },
     { id: 'middle', x: 100, y: 140 },
     { id: 'target', x: 100, y: 300 }
@@ -165,6 +187,17 @@ const transitionKey = (transition) => transition.id
     new Set(edges.map((edge) => `${edge.labelX}:${edge.labelY}`)).size,
     edges.length
   )
+  const labelRectangles = edges.map((edge) => ({
+    left: edge.labelX - 40,
+    top: edge.labelY - 13,
+    right: edge.labelX + 40,
+    bottom: edge.labelY + 13
+  }))
+  for (let left = 0; left < labelRectangles.length; left += 1) {
+    for (let right = left + 1; right < labelRectangles.length; right += 1) {
+      assert.equal(rectanglesIntersect(labelRectangles[left], labelRectangles[right]), false)
+    }
+  }
   edges.forEach((edge) => {
     assertPathClearsRectangle(edge.path, expandedNodeRectangle(states[1]))
     assert.ok(labelDistanceToPath(edge) <= 1)

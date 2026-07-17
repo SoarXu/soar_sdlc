@@ -180,6 +180,7 @@ const transitionKey = (transition) => transition.id
   assert.equal(preview.length, 99)
   assert.deepEqual(preview.map((edge) => edge.key), full.map((edge) => edge.key))
   assert.deepEqual(preview.map((edge) => edge.transition), full.map((edge) => edge.transition))
+  assertWorkflowEdgeBoundsNearNodes(states, full, 1000, '50/99')
   preview.forEach((edge) => {
     assertFiniteEdgeView(edge)
     assertEdgeBoundsContainGeometry(edge)
@@ -190,6 +191,35 @@ const transitionKey = (transition) => transition.id
       assert.notDeepEqual(edge.start, edge.end)
       assert.ok(new Set(pathPoints(edge.path).map(({ x, y }) => `${x}:${y}`)).size >= 4)
     })
+}
+
+{
+  const stateCount = 20
+  const states = Array.from({ length: stateCount }, (_, index) => ({
+    id: index,
+    x: (index % 10) * 240,
+    y: Math.floor(index / 10) * 120
+  }))
+  const transitions = [
+    ...Array.from({ length: stateCount - 1 }, (_, index) => ({
+      id: `bounded-edge-${index}`,
+      from_state_id: index,
+      to_state_id: index + 1,
+      sort_order: index
+    })),
+    ...Array.from({ length: stateCount }, (_, index) => ({
+      id: `bounded-loop-${index}`,
+      from_state_id: index,
+      to_state_id: index,
+      sort_order: stateCount + index
+    }))
+  ]
+  assertWorkflowEdgeBoundsNearNodes(
+    states,
+    buildWorkflowEdgeViews(states, transitions, transitionKey),
+    1000,
+    '20/39'
+  )
 }
 
 {
@@ -1003,6 +1033,22 @@ assertVerticalColumnReservations(159, 159.001, 'exact-epsilon-boundary')
     `${transition.from_state_id}-${transition.to_state_id}`
   )), ['a-b', 'a-c', 'b-c'])
   assert.equal(new Set(edges.map((edge) => edge.key)).size, edges.length)
+}
+
+function assertWorkflowEdgeBoundsNearNodes(states, edges, margin, graphName) {
+  const nodeBounds = {
+    left: Math.min(...states.map((state) => state.x)),
+    top: Math.min(...states.map((state) => state.y)),
+    right: Math.max(...states.map((state) => state.x + 118)),
+    bottom: Math.max(...states.map((state) => state.y + 42))
+  }
+  edges.forEach((edge) => {
+    const edgeName = edge.transition.id
+    assert.ok(edge.bounds.left >= nodeBounds.left - margin, `${graphName} ${edgeName} left bound ${edge.bounds.left}`)
+    assert.ok(edge.bounds.top >= nodeBounds.top - margin, `${graphName} ${edgeName} top bound ${edge.bounds.top}`)
+    assert.ok(edge.bounds.right <= nodeBounds.right + margin, `${graphName} ${edgeName} right bound ${edge.bounds.right}`)
+    assert.ok(edge.bounds.bottom <= nodeBounds.bottom + margin, `${graphName} ${edgeName} bottom bound ${edge.bounds.bottom}`)
+  })
 }
 
 function pathPoints(path) {

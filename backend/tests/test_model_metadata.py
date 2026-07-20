@@ -106,6 +106,11 @@ def test_transition_state_identity_is_required():
     assert transition.columns["to_state_id"].nullable is False
 
 
+def test_workflow_transition_diagram_config_column_is_registered():
+    column = Base.metadata.tables["workflow_transitions"].columns["diagram_config"]
+    assert column.nullable is True
+
+
 def test_workflow_scheme_lifecycle_column_defaults_to_draft():
     column = Base.metadata.tables["assignee_rule_configs"].columns["lifecycle_status"]
     assert column.default.arg == "draft"

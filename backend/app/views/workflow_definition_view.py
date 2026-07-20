@@ -72,6 +72,7 @@ class WorkflowTransitionBase(BaseModel):
     post_action_config: dict[str, Any] | list[Any] | None = None
     ui_config: dict[str, Any] | None = None
     form_config: dict[str, Any] | None = None
+    diagram_config: dict[str, Any] | None = None
     enabled: bool = True
     sort_order: int = 100
 
@@ -128,6 +129,7 @@ class WorkflowTemplateTransition(BaseModel):
     post_action_config: dict[str, Any] | list[Any] | None = None
     ui_config: dict[str, Any] | None = None
     form_config: dict[str, Any] | None = None
+    diagram_config: dict[str, Any] | None = None
     enabled: bool = True
     sort_order: int = 100
 

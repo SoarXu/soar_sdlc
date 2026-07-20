@@ -88,6 +88,7 @@ class WorkflowTransition(Base):
     post_action_config: Mapped[dict | list | None] = mapped_column(JSON, nullable=True)
     ui_config: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     form_config: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    diagram_config: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     sort_order: Mapped[int] = mapped_column(Integer, default=100)
     create_time: Mapped[datetime] = mapped_column(DateTime, server_default=text("CURRENT_TIMESTAMP"))

@@ -24,6 +24,7 @@
         </el-select>
         <el-button size="small" @click="addState">新增状态</el-button>
         <el-button size="small" @click="addTransition">新增流转</el-button>
+        <el-button size="small" @click="organizeLayout">整理布局</el-button>
         <el-button size="small" @click="fitToContent">适应视图</el-button>
         <el-button size="small" @click="resetViewport">回到原点</el-button>
         <el-button size="small" :loading="loading" @click="applyTemplate">套用模板</el-button>
@@ -183,7 +184,9 @@ import {
   fetchWorkflowDefinitions,
   saveWorkflowDefinitionGraph
 } from '../api/workflowDefinitions'
-import { buildWorkflowEdgeView } from '../utils/workflowEdgePath'
+import { layoutWorkflowNodes } from '../utils/workflowAutoLayout'
+import { buildWorkflowEdgePreviewViews, buildWorkflowEdgeViews } from '../utils/workflowEdgePath'
+import { requestWorkflowOrganization } from '../utils/workflowLayoutInteraction'
 import {
   normalizeWorkflowTransition as normalizeTransition,
   serializeWorkflowTransition as serializeTransition,
@@ -196,7 +199,8 @@ import {
 import {
   applyPanDelta,
   clampViewport,
-  fitViewportToNodes
+  fitViewportToNodes,
+  workflowCanvasSize
 } from '../utils/workflowViewport'
 
 const props = defineProps({
@@ -230,7 +234,7 @@ const targetTypes = [
   { label: '上次修复人', value: 'last_resolver' },
   { label: '无处理人', value: 'none' }
 ]
-const canvas = { width: 2400, height: 1400 }
+const minimumCanvas = { width: 2400, height: 1400 }
 const viewportSize = { width: 980, height: 540 }
 const activeObjectType = ref('requirement')
 const definition = ref(null)
@@ -247,6 +251,11 @@ const viewportOffset = reactive({ x: 0, y: 0 })
 const dragging = reactive({ state: null, startX: 0, startY: 0, originX: 0, originY: 0 })
 const viewportDrag = reactive({ active: false, startX: 0, startY: 0, originX: 0, originY: 0 })
 const enabledStates = computed(() => states.value.filter((state) => state.enabled))
+const fullTransitionViews = computed(() => buildWorkflowEdgeViews(states.value, transitions.value, transitionKey))
+const previewTransitionViews = computed(() => buildWorkflowEdgePreviewViews(states.value, transitions.value, transitionKey))
+const transitionViews = computed(() => dragging.state ? previewTransitionViews.value : fullTransitionViews.value)
+const canvasEdgeViews = computed(() => dragging.state ? [] : fullTransitionViews.value)
+const canvasSize = computed(() => workflowCanvasSize(states.value, minimumCanvas, undefined, canvasEdgeViews.value))
 
 const selectedState = computed(() => (
   selectedKind.value === 'state'
@@ -264,14 +273,11 @@ const selectedUnsupportedSections = computed(() => (
 const canvasGridStyle = computed(() => ({
   backgroundPosition: `${viewportOffset.x}px ${viewportOffset.y}px`
 }))
-const transitionViews = computed(() => transitions.value
-  .map((transition) => {
-    const from = states.value.find((item) => item.id === transition.from_state_id)
-    const to = states.value.find((item) => item.id === transition.to_state_id)
-    if (!from || !to) return null
-    return { key: transitionKey(transition), transition, ...buildWorkflowEdgeView(from, to) }
-  })
-  .filter(Boolean))
+
+watch(canvasSize, (nextCanvas) => {
+  if (dragging.state) return
+  clampCurrentViewport(nextCanvas)
+}, { flush: 'sync' })
 
 watch(() => props.configId, () => loadDefinition())
 
@@ -323,7 +329,24 @@ async function loadDefinition({ discardPendingDraft = true } = {}) {
   }
 }
 
-function applyGraph(graph) {
+function applyOrganizedLayout() {
+  states.value = layoutWorkflowNodes(states.value, transitions.value, initialStateId.value)
+}
+
+async function organizeLayout() {
+  const result = await requestWorkflowOrganization({
+    states: states.value,
+    transitions: transitions.value,
+    initialStateId: initialStateId.value,
+    confirm: () => ElMessageBox.confirm('整理布局将重新排列全部节点，确认继续？', '整理布局', { type: 'warning' }),
+    notifyEmpty: () => ElMessage.info('当前没有可整理的状态节点')
+  })
+  if (!result.organized) return
+  states.value = result.states
+  fitToContent()
+}
+
+function applyGraph(graph, { organize = false } = {}) {
   definition.value = graph.definition || definition.value
   states.value = (graph.states || []).map((item) => ({ ...item }))
   transitions.value = (graph.transitions || []).map((item) => normalizeTransition({
@@ -331,6 +354,7 @@ function applyGraph(graph) {
     _client_id: `transition-${item.id}`
   }))
   initialStateId.value = graph.definition?.initial_state_id ?? null
+  if (organize) applyOrganizedLayout()
   if (!states.value.length) {
     selectedKind.value = ''
     selectedKey.value = ''
@@ -345,7 +369,7 @@ async function applyTemplate() {
   loading.value = true
   try {
     const graph = await applyWorkflowDefinitionTemplate(definition.value.id)
-    applyGraph(graph.data)
+    applyGraph(graph.data, { organize: true })
     ElMessage.success('模板已套用')
   } finally {
     loading.value = false
@@ -512,12 +536,19 @@ function startDrag(state, event) {
 
 function onDrag(event) {
   if (!dragging.state) return
-  dragging.state.x = Math.max(20, Math.min(canvas.width - 140, dragging.originX + event.clientX - dragging.startX))
-  dragging.state.y = Math.max(20, Math.min(canvas.height - 70, dragging.originY + event.clientY - dragging.startY))
+  dragging.state.x = Math.max(20, Math.min(canvasSize.value.right - 140, dragging.originX + event.clientX - dragging.startX))
+  dragging.state.y = Math.max(20, Math.min(canvasSize.value.bottom - 70, dragging.originY + event.clientY - dragging.startY))
+}
+
+function clampCurrentViewport(nextCanvas = canvasSize.value) {
+  const next = clampViewport({ x: viewportOffset.x, y: viewportOffset.y }, nextCanvas, viewportSize)
+  viewportOffset.x = next.x
+  viewportOffset.y = next.y
 }
 
 function stopDrag() {
   dragging.state = null
+  clampCurrentViewport()
 }
 
 function startViewportDrag(event) {
@@ -533,7 +564,7 @@ function onViewportDrag(event) {
   const next = applyPanDelta(
     { x: viewportDrag.originX, y: viewportDrag.originY },
     { dx: event.clientX - viewportDrag.startX, dy: event.clientY - viewportDrag.startY },
-    canvas,
+    canvasSize.value,
     viewportSize
   )
   viewportOffset.x = next.x
@@ -545,13 +576,13 @@ function stopViewportDrag() {
 }
 
 function fitToContent() {
-  const next = fitViewportToNodes(states.value, canvas, viewportSize)
+  const next = fitViewportToNodes(states.value, canvasSize.value, viewportSize, fullTransitionViews.value)
   viewportOffset.x = next.x
   viewportOffset.y = next.y
 }
 
 function resetViewport() {
-  const next = clampViewport({ x: 0, y: 0 }, canvas, viewportSize)
+  const next = clampViewport({ x: 0, y: 0 }, canvasSize.value, viewportSize)
   viewportOffset.x = next.x
   viewportOffset.y = next.y
 }

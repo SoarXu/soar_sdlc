@@ -39,6 +39,7 @@
         :style="canvasGridStyle"
       >
         <svg
+          ref="workflowSvgElement"
           class="workflow-svg"
           :viewBox="`0 0 ${viewportSize.width} ${viewportSize.height}`"
           @mousedown.self.prevent="startViewportDrag"
@@ -65,9 +66,33 @@
               :class="{ selected: isSelectedTransition(edge.transition), disabled: !edge.transition.enabled }"
               @click.stop="selectTransition(edge.transition)"
             >
-              <path :d="edge.path" />
+              <path class="workflow-edge-path" :d="edge.path" />
               <rect :x="edge.labelX - 40" :y="edge.labelY - 13" width="80" height="26" rx="5" />
               <text :x="edge.labelX" :y="edge.labelY + 4">{{ edge.transition.action_name }}</text>
+              <template v-if="isSelectedTransition(edge.transition) && edge.transition.from_state_id !== edge.transition.to_state_id">
+                <path
+                  v-for="segment in editableSegments(edge)"
+                  :key="`${edge.key}-segment-${segment.index}`"
+                  class="workflow-edge-segment-hit"
+                  :class="segment.orientation"
+                  :d="segment.path"
+                  @mousedown.stop.prevent="startSegmentDrag(edge, segment.index, $event)"
+                />
+                <circle
+                  class="workflow-edge-endpoint"
+                  :cx="edge.start.x"
+                  :cy="edge.start.y"
+                  r="4"
+                  @mousedown.stop.prevent="startEndpointDrag(edge, 'source', $event)"
+                />
+                <circle
+                  class="workflow-edge-endpoint"
+                  :cx="edge.end.x"
+                  :cy="edge.end.y"
+                  r="4"
+                  @mousedown.stop.prevent="startEndpointDrag(edge, 'target', $event)"
+                />
+              </template>
             </g>
             <g
               v-for="state in states"
@@ -85,22 +110,24 @@
               <rect :fill="state.enabled === false ? '#ffffff' : (state.color || '#2563eb')" width="118" height="42" rx="6" />
               <text x="59" :y="state.enabled === false ? 19 : 26">{{ state.status_name }}</text>
               <text v-if="state.enabled === false" class="workflow-node-status" x="59" y="34">已停用</text>
-            </g>
-            <g
-              v-for="trigger in nodeActionTriggers"
-              :key="trigger.stateId"
-              class="workflow-node-action-trigger"
-              :class="{ selected: activeNodeActionStateId === trigger.stateId }"
-              :transform="`translate(${trigger.x}, ${trigger.y})`"
-              role="button"
-              tabindex="0"
-              @click.stop="toggleNodeActionMenu(trigger, $event)"
-              @keydown.enter.prevent="toggleNodeActionMenu(trigger, $event)"
-              @keydown.space.prevent="toggleNodeActionMenu(trigger, $event)"
-              @keydown.esc.stop.prevent="closeNodeActionMenu"
-            >
-              <rect :width="trigger.width" :height="trigger.height" rx="4" />
-              <text :x="trigger.width / 2" :y="trigger.height / 2 + 4">操作 {{ trigger.actions.length }}</text>
+              <g
+                v-if="nodeActionForState(state)"
+                class="workflow-node-action-badge"
+                :class="{ selected: activeNodeActionStateId === state.id }"
+                transform="translate(106, 7)"
+                role="button"
+                tabindex="0"
+                :aria-label="nodeActionAriaLabel(state)"
+                @mousedown.stop
+                @click.stop="toggleNodeActionMenu(nodeActionForState(state), $event)"
+                @keydown.enter.prevent="toggleNodeActionMenu(nodeActionForState(state), $event)"
+                @keydown.space.prevent="toggleNodeActionMenu(nodeActionForState(state), $event)"
+                @keydown.esc.stop.prevent="closeNodeActionMenu"
+              >
+                <title>{{ nodeActionAriaLabel(state) }}</title>
+                <circle r="10" />
+                <text y="4">{{ nodeActionForState(state).actions.length }}</text>
+              </g>
             </g>
           </g>
         </svg>
@@ -142,6 +169,7 @@
       @move-transition="moveTransition"
       @add-transition="addTransition"
       @remove-transition="removeSelectedTransition"
+      @reset-diagram-route="resetSelectedDiagramRoute"
       @back="returnToStateActions"
     />
   </div>
@@ -163,6 +191,11 @@ import {
 import { layoutWorkflowNodes } from '../utils/workflowAutoLayout'
 import { projectWorkflowCanvas } from '../utils/workflowCanvasProjection'
 import { buildWorkflowEdgeViews } from '../utils/workflowEdgePath'
+import {
+  createManualDiagramConfig,
+  moveManualAnchor,
+  moveManualSegment
+} from '../utils/workflowManualRoute'
 import { requestWorkflowOrganization } from '../utils/workflowLayoutInteraction'
 import {
   normalizeWorkflowTransition as normalizeTransition,
@@ -224,6 +257,7 @@ const advancedDrawer = ref(null)
 const advancedDrawerVisible = ref(false)
 const suppressCanvasClamp = ref(false)
 const workflowCanvasElement = ref(null)
+const workflowSvgElement = ref(null)
 const canvasRenderedSize = reactive({ ...viewportSize })
 const activeNodeActionStateId = ref(null)
 const activeNodeActionAnchor = reactive({ left: 0, top: 0, bottom: 0 })
@@ -239,6 +273,13 @@ const dragging = reactive({
   frame: 0
 })
 const viewportDrag = reactive({ active: false, startX: 0, startY: 0, originX: 0, originY: 0 })
+const routeDrag = reactive({
+  kind: '',
+  transition: null,
+  endpoint: '',
+  segmentIndex: -1,
+  originalConfig: null
+})
 const enabledStates = computed(() => states.value.filter((state) => state.enabled))
 const canvasProjection = computed(() => projectWorkflowCanvas(states.value, transitions.value))
 const fullTransitionViews = computed(() => (
@@ -246,29 +287,15 @@ const fullTransitionViews = computed(() => (
 ))
 const transitionViews = computed(() => fullTransitionViews.value)
 const canvasEdgeViews = computed(() => fullTransitionViews.value)
-const nodeActionTriggers = computed(() => states.value.flatMap((state) => {
+const nodeActionsByStateId = computed(() => new Map(states.value.flatMap((state) => {
   const actions = canvasProjection.value.stateActionsByStateId.get(state.id) || []
-  if (!actions.length) return []
-  return [{
-    stateId: state.id,
-    actions,
-    x: state.x + 19,
-    y: state.y + 50,
-    width: 80,
-    height: 24
-  }]
-}))
-const nodeActionTriggerBounds = computed(() => nodeActionTriggers.value.map((trigger) => ({
-  left: trigger.x,
-  top: trigger.y,
-  right: trigger.x + trigger.width,
-  bottom: trigger.y + trigger.height
+  return actions.length ? [[state.id, { stateId: state.id, actions }]] : []
 })))
 const canvasSize = computed(() => (
-  workflowCanvasSize(states.value, minimumCanvas, undefined, canvasEdgeViews.value, nodeActionTriggerBounds.value)
+  workflowCanvasSize(states.value, minimumCanvas, undefined, canvasEdgeViews.value)
 ))
 const activeNodeActionMenu = computed(() => (
-  nodeActionTriggers.value.find((trigger) => trigger.stateId === activeNodeActionStateId.value) || null
+  nodeActionsByStateId.value.get(activeNodeActionStateId.value) || null
 ))
 const nodeActionMenuStyle = computed(() => {
   const menu = activeNodeActionMenu.value
@@ -326,8 +353,11 @@ let workflowCanvasResizeObserver = null
 onMounted(() => {
   window.addEventListener('mousemove', onDrag)
   window.addEventListener('mouseup', stopDrag)
+  window.addEventListener('mousemove', onRouteDrag)
+  window.addEventListener('mouseup', stopRouteDrag)
   window.addEventListener('mousemove', onViewportDrag)
   window.addEventListener('mouseup', stopViewportDrag)
+  window.addEventListener('keydown', onDesignerKeydown)
   window.addEventListener('beforeunload', onBeforeUnload)
   nextTick(() => {
     syncCanvasRenderedSize()
@@ -342,8 +372,11 @@ onMounted(() => {
 onBeforeUnmount(() => {
   window.removeEventListener('mousemove', onDrag)
   window.removeEventListener('mouseup', stopDrag)
+  window.removeEventListener('mousemove', onRouteDrag)
+  window.removeEventListener('mouseup', stopRouteDrag)
   window.removeEventListener('mousemove', onViewportDrag)
   window.removeEventListener('mouseup', stopViewportDrag)
+  window.removeEventListener('keydown', onDesignerKeydown)
   window.removeEventListener('beforeunload', onBeforeUnload)
   if (dragging.frame) cancelAnimationFrame(dragging.frame)
   workflowCanvasResizeObserver?.disconnect()
@@ -394,16 +427,18 @@ async function organizeLayout() {
     states: states.value,
     transitions: transitions.value,
     initialStateId: initialStateId.value,
-    confirm: () => ElMessageBox.confirm('整理布局将重新排列全部节点，确认继续？', '整理布局', { type: 'warning' }),
+    confirm: () => ElMessageBox.confirm('整理布局将重新排列全部节点并清除手工布线，确认继续？', '整理布局', { type: 'warning' }),
     notifyEmpty: () => ElMessage.info('当前没有可整理的状态节点')
   })
   if (!result.organized) return
   closeNodeActionMenu()
+  transitions.value.forEach((transition) => { transition.diagram_config = null })
   states.value = result.states
   fitToContent()
 }
 
 function applyGraph(graph, { organize = false } = {}) {
+  stopRouteDrag()
   closeNodeActionMenu()
   definition.value = graph.definition || definition.value
   states.value = (graph.states || []).map((item) => ({ ...item }))
@@ -412,7 +447,10 @@ function applyGraph(graph, { organize = false } = {}) {
     _client_id: `transition-${item.id}`
   }))
   initialStateId.value = graph.definition?.initial_state_id ?? null
-  if (organize) applyOrganizedLayout()
+  if (organize) {
+    transitions.value.forEach((transition) => { transition.diagram_config = null })
+    applyOrganizedLayout()
+  }
   if (!states.value.length) {
     selectedKind.value = ''
     selectedKey.value = ''
@@ -511,6 +549,7 @@ function addTransition(group = 'more') {
 }
 
 function selectState(state) {
+  stopRouteDrag()
   closeNodeActionMenu()
   selectedKind.value = 'state'
   selectedKey.value = state.id
@@ -519,6 +558,7 @@ function selectState(state) {
 }
 
 function selectTransition(transition) {
+  stopRouteDrag()
   closeNodeActionMenu()
   selectedKind.value = 'transition'
   selectedKey.value = transitionKey(transition)
@@ -537,6 +577,7 @@ function returnToStateActions() {
 }
 
 function clearSelection() {
+  stopRouteDrag()
   closeNodeActionMenu()
   selectedKind.value = ''
   selectedKey.value = ''
@@ -569,6 +610,11 @@ function removeSelectedTransition() {
 function applyAdvancedDraft(draft) {
   if (!selectedTransition.value || selectedUnsupportedSections.value.length) return
   applyAdvancedConfigDraft(selectedTransition.value, draft)
+}
+
+function resetSelectedDiagramRoute() {
+  if (!selectedTransition.value) return
+  selectedTransition.value.diagram_config = null
 }
 
 async function confirmDiscardAdvancedDraft() {
@@ -619,12 +665,116 @@ function closeNodeActionMenu() {
   activeNodeActionStateId.value = null
 }
 
+function nodeActionForState(state) {
+  return nodeActionsByStateId.value.get(state.id) || null
+}
+
+function nodeActionAriaLabel(state) {
+  const count = nodeActionForState(state)?.actions.length || 0
+  return `${state.status_name}：${count} 个同状态操作`
+}
+
 function selectNodeAction(transition) {
   closeNodeActionMenu()
   selectTransition(transition)
 }
 
+function editableSegments(edge) {
+  const points = edge.points || []
+  const segments = []
+  for (let index = 1; index < points.length - 2; index += 1) {
+    const from = points[index]
+    const to = points[index + 1]
+    const orientation = from.y === to.y ? 'horizontal' : (from.x === to.x ? 'vertical' : '')
+    if (!orientation) continue
+    segments.push({
+      index,
+      orientation,
+      path: `M ${from.x} ${from.y} L ${to.x} ${to.y}`
+    })
+  }
+  return segments
+}
+
+function startEndpointDrag(edge, endpoint, event) {
+  if (!beginRouteDrag(edge)) return
+  routeDrag.kind = 'endpoint'
+  routeDrag.endpoint = endpoint
+}
+
+function startSegmentDrag(edge, segmentIndex, event) {
+  if (!beginRouteDrag(edge)) return
+  routeDrag.kind = 'segment'
+  routeDrag.segmentIndex = segmentIndex
+}
+
+function beginRouteDrag(edge) {
+  if (dragging.state || viewportDrag.active || routeDrag.kind) return false
+  const transition = edge.transition
+  const from = stateById(transition.from_state_id)
+  const to = stateById(transition.to_state_id)
+  if (!from || !to || from.id === to.id) return false
+  closeNodeActionMenu()
+  routeDrag.transition = transition
+  routeDrag.originalConfig = transition.diagram_config
+    ? structuredClone(transition.diagram_config)
+    : null
+  if (!transition.diagram_config) {
+    transition.diagram_config = createManualDiagramConfig(edge, from, to)
+  }
+  return Boolean(transition.diagram_config)
+}
+
+function onRouteDrag(event) {
+  if (!routeDrag.kind || !routeDrag.transition) return
+  const from = stateById(routeDrag.transition.from_state_id)
+  const to = stateById(routeDrag.transition.to_state_id)
+  const point = eventToCanvasPoint(event)
+  const next = routeDrag.kind === 'endpoint'
+    ? moveManualAnchor(routeDrag.transition.diagram_config, routeDrag.endpoint, point, from, to)
+    : moveManualSegment(routeDrag.transition.diagram_config, routeDrag.segmentIndex, point, from, to)
+  if (next) routeDrag.transition.diagram_config = next
+}
+
+function stopRouteDrag() {
+  routeDrag.kind = ''
+  routeDrag.transition = null
+  routeDrag.endpoint = ''
+  routeDrag.segmentIndex = -1
+  routeDrag.originalConfig = null
+}
+
+function cancelRouteDrag() {
+  if (!routeDrag.kind || !routeDrag.transition) return
+  routeDrag.transition.diagram_config = routeDrag.originalConfig
+    ? structuredClone(routeDrag.originalConfig)
+    : null
+  stopRouteDrag()
+}
+
+function onDesignerKeydown(event) {
+  if (event.key !== 'Escape' || !routeDrag.kind) return
+  event.preventDefault()
+  cancelRouteDrag()
+}
+
+function eventToCanvasPoint(event) {
+  const bounds = workflowSvgElement.value.getBoundingClientRect()
+  const scale = Math.min(bounds.width / viewportSize.width, bounds.height / viewportSize.height) || 1
+  const offsetX = (bounds.width - viewportSize.width * scale) / 2
+  const offsetY = (bounds.height - viewportSize.height * scale) / 2
+  return {
+    x: (event.clientX - bounds.left - offsetX) / scale - viewportOffset.x,
+    y: (event.clientY - bounds.top - offsetY) / scale - viewportOffset.y
+  }
+}
+
+function stateById(stateId) {
+  return states.value.find((state) => state.id === stateId) || null
+}
+
 function startDrag(state, event) {
+  if (routeDrag.kind) return
   closeNodeActionMenu()
   dragging.state = state
   dragging.startX = event.clientX
@@ -670,6 +820,7 @@ function stopDrag() {
 }
 
 function startViewportDrag(event) {
+  if (routeDrag.kind) return
   closeNodeActionMenu()
   viewportDrag.active = true
   viewportDrag.startX = event.clientX
@@ -797,7 +948,7 @@ function transitionKey(transition) {
   cursor: pointer;
 }
 
-.workflow-edge path {
+.workflow-edge-path {
   fill: none;
   stroke: #94a3b8;
   stroke-width: 2;
@@ -816,7 +967,7 @@ function transitionKey(transition) {
   user-select: none;
 }
 
-.workflow-edge.selected path {
+.workflow-edge.selected .workflow-edge-path {
   stroke: #1d4ed8;
   stroke-width: 3;
 }
@@ -825,7 +976,7 @@ function transitionKey(transition) {
   stroke: #1d4ed8;
 }
 
-.workflow-edge.disabled path {
+.workflow-edge.disabled .workflow-edge-path {
   stroke: #a8b0bc;
   stroke-dasharray: 7 5;
 }
@@ -836,6 +987,24 @@ function transitionKey(transition) {
 }
 
 .workflow-edge.disabled text { fill: #7a8595; }
+
+.workflow-edge-segment-hit {
+  fill: none;
+  stroke: transparent;
+  stroke-width: 12;
+  pointer-events: stroke;
+  marker-end: none;
+}
+
+.workflow-edge-segment-hit.horizontal { cursor: row-resize; }
+.workflow-edge-segment-hit.vertical { cursor: col-resize; }
+
+.workflow-edge-endpoint {
+  fill: #ffffff;
+  stroke: #1d4ed8;
+  stroke-width: 2;
+  cursor: crosshair;
+}
 
 .workflow-node {
   cursor: move;
@@ -881,29 +1050,31 @@ function transitionKey(transition) {
   font-weight: 500;
 }
 
-.workflow-node-action-trigger {
+.workflow-node-action-badge {
   cursor: pointer;
   outline: none;
 }
 
-.workflow-node-action-trigger rect {
+.workflow-node-action-badge circle {
   fill: #ffffff;
-  stroke: #94a3b8;
-  stroke-width: 1;
+  stroke: #2563eb;
+  stroke-width: 1.5;
+  filter: none;
 }
 
-.workflow-node-action-trigger text {
-  fill: #334155;
-  font-size: 12px;
+.workflow-node .workflow-node-action-badge text {
+  fill: #1e40af;
+  font-size: 10px;
+  font-weight: 600;
   text-anchor: middle;
   user-select: none;
 }
 
-.workflow-node-action-trigger:hover rect,
-.workflow-node-action-trigger:focus-visible rect,
-.workflow-node-action-trigger.selected rect {
+.workflow-node-action-badge:hover circle,
+.workflow-node-action-badge:focus-visible circle,
+.workflow-node-action-badge.selected circle {
   fill: #eff6ff;
-  stroke: #2563eb;
+  stroke: #0f172a;
   stroke-width: 2;
 }
 

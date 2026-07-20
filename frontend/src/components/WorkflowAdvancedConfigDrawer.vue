@@ -105,6 +105,15 @@
               </el-form-item>
               <el-form-item label="启用"><el-switch v-model="transition.enabled" /></el-form-item>
             </div>
+            <div class="diagram-routing-row">
+              <div>
+                <span>画布布线</span>
+                <strong>{{ transition.diagram_config ? '手工布线' : '自动布线' }}</strong>
+              </div>
+              <el-button v-if="transition.diagram_config" type="primary" link @click="resetDiagramRoute">
+                恢复自动布线
+              </el-button>
+            </div>
             <el-button v-if="!transition.id" type="danger" plain @click="emit('remove-transition')">删除未保存流转</el-button>
           </section>
 
@@ -363,7 +372,7 @@ const props = defineProps({
 
 const emit = defineEmits([
   'update:modelValue', 'apply', 'back', 'select-transition', 'move-transition',
-  'add-transition', 'remove-transition'
+  'add-transition', 'remove-transition', 'reset-diagram-route'
 ])
 
 const drawerSize = 'clamp(520px, 42vw, 640px)'
@@ -524,6 +533,15 @@ function apply() {
 
 async function requestBack() {
   if (await confirmDiscardPendingChanges()) emit('back')
+}
+
+async function resetDiagramRoute() {
+  try {
+    await ElMessageBox.confirm('恢复自动布线后将清除当前手工路径，确认继续？', '恢复自动布线', { type: 'warning' })
+    emit('reset-diagram-route')
+  } catch {
+    // Keep the current manual path when the user cancels.
+  }
 }
 
 function errorFor(field) {
@@ -836,6 +854,21 @@ defineExpose({ open, hasPendingChanges, confirmDiscardPendingChanges })
 .field-editor-actions :deep(.el-button + .el-button) { margin-left: 0; }
 .notification-block + .notification-block { margin-top: 12px; }
 .notification-heading { margin-bottom: 12px; }
+
+.diagram-routing-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 16px;
+  padding: 10px 0;
+  border-top: 1px solid #e8edf3;
+  border-bottom: 1px solid #e8edf3;
+}
+
+.diagram-routing-row > div { display: grid; gap: 2px; }
+.diagram-routing-row span { color: #7a8595; font-size: 12px; }
+.diagram-routing-row strong { color: #344054; font-size: 13px; }
 
 .drawer-footer {
   display: flex;

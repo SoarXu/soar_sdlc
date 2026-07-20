@@ -49,6 +49,9 @@ assert.match(source, /v-for="edge in transitionViews"/)
 assert.match(source, /v-for="trigger in nodeActionTriggers"/)
 assert.match(source, /class="workflow-node-action-trigger"/)
 assert.match(source, /操作 \{\{ trigger\.actions\.length \}\}/)
+assert.match(source, /@click\.stop="toggleNodeActionMenu\(trigger, \$event\)"/)
+assert.match(source, /event\.currentTarget\.getBoundingClientRect\(\)/)
+assert.match(source, /workflowCanvasElement\.value\.getBoundingClientRect\(\)/)
 assert.match(
   source,
   /class="workflow-node-action-trigger"[\s\S]{0,650}@keydown\.esc\.stop\.prevent="closeNodeActionMenu"/

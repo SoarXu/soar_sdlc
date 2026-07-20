@@ -94,9 +94,9 @@
               :transform="`translate(${trigger.x}, ${trigger.y})`"
               role="button"
               tabindex="0"
-              @click.stop="toggleNodeActionMenu(trigger)"
-              @keydown.enter.prevent="toggleNodeActionMenu(trigger)"
-              @keydown.space.prevent="toggleNodeActionMenu(trigger)"
+              @click.stop="toggleNodeActionMenu(trigger, $event)"
+              @keydown.enter.prevent="toggleNodeActionMenu(trigger, $event)"
+              @keydown.space.prevent="toggleNodeActionMenu(trigger, $event)"
               @keydown.esc.stop.prevent="closeNodeActionMenu"
             >
               <rect :width="trigger.width" :height="trigger.height" rx="4" />
@@ -227,6 +227,7 @@ const suppressCanvasClamp = ref(false)
 const workflowCanvasElement = ref(null)
 const canvasRenderedSize = reactive({ ...viewportSize })
 const activeNodeActionStateId = ref(null)
+const activeNodeActionAnchor = reactive({ left: 0, top: 0, bottom: 0 })
 const viewportOffset = reactive({ x: 0, y: 0 })
 const dragging = reactive({
   state: null,
@@ -279,17 +280,13 @@ const nodeActionMenuStyle = computed(() => {
   if (!menu) return {}
   const renderedWidth = Math.max(240, canvasRenderedSize.width)
   const renderedHeight = Math.max(240, canvasRenderedSize.height)
-  const scaleX = renderedWidth / viewportSize.width
-  const scaleY = renderedHeight / viewportSize.height
   const width = Math.min(200, renderedWidth - 16)
   const height = Math.min(12 + menu.actions.length * 36, renderedHeight - 16)
-  const triggerLeft = (menu.x + viewportOffset.x) * scaleX
-  const triggerTop = (menu.y + viewportOffset.y) * scaleY
-  const belowTop = triggerTop + menu.height * scaleY + 6
+  const belowTop = activeNodeActionAnchor.bottom + 6
   const top = belowTop + height <= renderedHeight - 8
     ? belowTop
-    : Math.max(8, triggerTop - height - 6)
-  const left = Math.max(8, Math.min(renderedWidth - width - 8, triggerLeft))
+    : Math.max(8, activeNodeActionAnchor.top - height - 6)
+  const left = Math.max(8, Math.min(renderedWidth - width - 8, activeNodeActionAnchor.left))
   return {
     left: `${left}px`,
     top: `${top}px`,
@@ -608,10 +605,18 @@ function handlerTypeSummary(type, roles) {
   return type === 'project_role' ? `${label}（${roleSummary(roles)}）` : label
 }
 
-function toggleNodeActionMenu(trigger) {
-  activeNodeActionStateId.value = activeNodeActionStateId.value === trigger.stateId
-    ? null
-    : trigger.stateId
+function toggleNodeActionMenu(trigger, event) {
+  if (activeNodeActionStateId.value === trigger.stateId) {
+    closeNodeActionMenu()
+    return
+  }
+  syncCanvasRenderedSize()
+  const triggerBounds = event.currentTarget.getBoundingClientRect()
+  const canvasBounds = workflowCanvasElement.value.getBoundingClientRect()
+  activeNodeActionAnchor.left = triggerBounds.left - canvasBounds.left
+  activeNodeActionAnchor.top = triggerBounds.top - canvasBounds.top
+  activeNodeActionAnchor.bottom = triggerBounds.bottom - canvasBounds.top
+  activeNodeActionStateId.value = trigger.stateId
 }
 
 function closeNodeActionMenu() {

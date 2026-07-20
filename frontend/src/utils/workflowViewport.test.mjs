@@ -34,6 +34,23 @@ const viewport = { width: 900, height: 540 }
 }
 
 {
+  const nodes = [{ id: 1, x: 80, y: 80 }]
+  const actionBounds = [
+    { left: 99, top: 130, right: 179, bottom: 454 }
+  ]
+  const expanded = workflowCanvasSize(
+    nodes,
+    { width: 500, height: 300 },
+    { left: 40, top: 40, right: 40, bottom: 60 },
+    [],
+    actionBounds
+  )
+
+  assert.equal(expanded.bottom, 514)
+  assert.equal(expanded.height, 514)
+}
+
+{
   const states = Array.from({ length: 20 }, (_, index) => ({
     id: index + 1,
     status_name: `状态${index + 1}`,

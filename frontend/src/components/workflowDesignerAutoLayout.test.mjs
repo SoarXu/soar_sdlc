@@ -19,37 +19,45 @@ assert.match(
   /import \{ buildWorkflowEdgePreviewViews, buildWorkflowEdgeViews \} from '\.\.\/utils\/workflowEdgePath'/
 )
 assert.match(source, /import \{ requestWorkflowOrganization \} from '\.\.\/utils\/workflowLayoutInteraction'/)
+assert.match(source, /import \{ projectWorkflowCanvas \} from '\.\.\/utils\/workflowCanvasProjection'/)
+assert.match(source, /import \{ combineWorkflowDragViews \} from '\.\.\/utils\/workflowDragViews'/)
 assert.match(source, /workflowCanvasSize/)
 assert.doesNotMatch(source, /\bbuildWorkflowEdgeView\b/)
 assert.match(
   source,
-  /const fullTransitionViews = computed\(\(\) => buildWorkflowEdgeViews\(states\.value, transitions\.value, transitionKey\)\)/
+  /const canvasProjection = computed\(\(\) => projectWorkflowCanvas\(states\.value, transitions\.value\)\)/
 )
 assert.match(
   source,
-  /const previewTransitionViews = computed\(\(\) => buildWorkflowEdgePreviewViews\(states\.value, transitions\.value, transitionKey\)\)/
+  /buildWorkflowEdgeViews\(states\.value, canvasProjection\.value\.routedTransitions, transitionKey\)/
 )
 assert.match(
   source,
-  /const transitionViews = computed\(\(\) => dragging\.state \? previewTransitionViews\.value : fullTransitionViews\.value\)/
+  /buildWorkflowEdgePreviewViews\(states\.value, canvasProjection\.value\.routedTransitions, transitionKey\)/
 )
+assert.match(source, /combineWorkflowDragViews\(dragging\.edgeViews, previewTransitionViews\.value, dragging\.state\.id\)/)
 assert.match(source, /const minimumCanvas = \{ width: 2400, height: 1400 \}/)
 assert.match(
   source,
-  /const canvasEdgeViews = computed\(\(\) => dragging\.state \? \[\] : fullTransitionViews\.value\)/
+  /const canvasEdgeViews = computed\(\(\) => dragging\.state \? dragging\.canvasEdges : fullTransitionViews\.value\)/
 )
 assert.match(
   source,
-  /const canvasSize = computed\(\(\) => workflowCanvasSize\(states\.value, minimumCanvas, undefined, canvasEdgeViews\.value\)\)/
-)
-assert.ok(
-  source.indexOf('const fullTransitionViews = computed') < source.indexOf('const previewTransitionViews = computed') &&
-    source.indexOf('const previewTransitionViews = computed') < source.indexOf('const transitionViews = computed') &&
-    source.indexOf('const transitionViews = computed') < source.indexOf('const canvasEdgeViews = computed') &&
-    source.indexOf('const canvasEdgeViews = computed') < source.indexOf('const canvasSize = computed'),
-  'drag-aware edge views must sit between routed edges and canvas size'
+  /workflowCanvasSize\(states\.value, minimumCanvas, undefined, canvasEdgeViews\.value, nodeActionBounds\.value\)/
 )
 assert.match(source, /v-for="edge in transitionViews"/)
+assert.match(source, /v-for="action in nodeActionViews"/)
+assert.match(source, /@click\.stop="selectTransition\(action\.transition\)"/)
+assert.match(source, /class="workflow-node-action"/)
+assert.doesNotMatch(source, /<aside class="workflow-config-panel">/)
+assert.match(source, /<el-drawer[\s\S]*class="workflow-details-drawer"/)
+assert.match(source, /@closed="onDetailsDrawerClosed"/)
+const detailsClosedBody = functionBody('onDetailsDrawerClosed', 'removeSelectedState')
+assert.match(detailsClosedBody, /if \(preserveSelectionOnDetailsClose\.value\)/)
+assert.match(detailsClosedBody, /preserveSelectionOnDetailsClose\.value = false[\s\S]*return/)
+assert.match(detailsClosedBody, /clearSelection\(\)/)
+const advancedDrawerBody = functionBody('openAdvancedDrawer', 'applyAdvancedDraft')
+assert.match(advancedDrawerBody, /preserveSelectionOnDetailsClose\.value = true[\s\S]*detailsDrawerVisible\.value = false/)
 assert.doesNotMatch(source, /\b(?:applyPanDelta|clampViewport|fitViewportToNodes)\([\s\S]{0,180}\bminimumCanvas\b/)
 assert.match(source, /applyPanDelta\([\s\S]{0,180}canvasSize\.value/)
 assert.match(
@@ -63,7 +71,7 @@ const configWatchStart = source.indexOf('watch(() => props.configId')
 assert.ok(canvasSizeWatchStart >= 0, 'canvas size changes must clamp the current viewport')
 assert.ok(configWatchStart > canvasSizeWatchStart, 'canvas size watcher must be defined before config loading watcher')
 const canvasSizeWatch = source.slice(canvasSizeWatchStart, configWatchStart)
-assert.match(canvasSizeWatch, /if \(dragging\.state\) return[\s\S]*clampCurrentViewport\(nextCanvas\)/)
+assert.match(canvasSizeWatch, /if \(dragging\.state \|\| suppressCanvasClamp\.value\) return[\s\S]*clampCurrentViewport\(nextCanvas\)/)
 assert.match(canvasSizeWatch, /\{ flush: 'sync' \}/)
 assert.doesNotMatch(canvasSizeWatch, /saveGraph|saveWorkflowDefinitionGraph|fetchWorkflowDefinitionGraph|applyWorkflowDefinitionTemplate/)
 
@@ -76,7 +84,16 @@ assert.match(
 assert.match(clampCurrentViewportBody, /viewportOffset\.x = next\.x[\s\S]*viewportOffset\.y = next\.y/)
 
 const stopDragBody = functionBody('stopDrag', 'startViewportDrag')
-assert.match(stopDragBody, /dragging\.state = null[\s\S]*clampCurrentViewport\(\)/)
+assert.match(stopDragBody, /suppressCanvasClamp\.value = true[\s\S]*dragging\.state = null/)
+assert.doesNotMatch(stopDragBody, /clampCurrentViewport\(\)/)
+
+const startDragBody = functionBody('startDrag', 'onDrag')
+assert.ok(
+  startDragBody.indexOf('dragging.edgeViews = [...fullTransitionViews.value]') <
+    startDragBody.indexOf('dragging.state = state'),
+  'edge snapshots must be captured before drag state activates'
+)
+assert.match(startDragBody, /dragging\.canvasEdges = \[\.\.\.fullTransitionViews\.value\]/)
 
 const onDragBody = functionBody('onDrag', 'clampCurrentViewport')
 assert.match(onDragBody, /canvasSize\.value\.right - 140/)

@@ -73,19 +73,50 @@
               v-for="state in states"
               :key="state.id"
               class="workflow-node"
-              :class="{ selected: isSelectedState(state), terminal: state.category === 'terminal' }"
+              :class="{
+                selected: isSelectedState(state),
+                terminal: state.category === 'terminal',
+                inactive: state.enabled === false
+              }"
               :transform="`translate(${state.x}, ${state.y})`"
               @mousedown.stop.prevent="startDrag(state, $event)"
               @click.stop="selectState(state)"
             >
-              <rect :fill="state.color || '#2563eb'" width="118" height="42" rx="6" />
-              <text x="59" y="26">{{ state.status_name }}</text>
+              <rect :fill="state.enabled === false ? '#ffffff' : (state.color || '#2563eb')" width="118" height="42" rx="6" />
+              <text x="59" :y="state.enabled === false ? 19 : 26">{{ state.status_name }}</text>
+              <text v-if="state.enabled === false" class="workflow-node-status" x="59" y="34">已停用</text>
+            </g>
+            <g
+              v-for="action in nodeActionViews"
+              :key="action.key"
+              class="workflow-node-action"
+              :class="{ selected: isSelectedTransition(action.transition) }"
+              :transform="`translate(${action.x}, ${action.y})`"
+              role="button"
+              tabindex="0"
+              @click.stop="selectTransition(action.transition)"
+              @keydown.enter.prevent="selectTransition(action.transition)"
+              @keydown.space.prevent="selectTransition(action.transition)"
+            >
+              <rect :width="action.width" :height="action.height" rx="4" />
+              <text :x="action.width / 2" :y="action.height / 2 + 4">{{ action.transition.action_name }}</text>
             </g>
           </g>
         </svg>
       </div>
 
-      <aside class="workflow-config-panel">
+    </div>
+
+    <el-drawer
+      v-model="detailsDrawerVisible"
+      class="workflow-details-drawer"
+      direction="rtl"
+      size="420px"
+      :append-to-body="false"
+      :lock-scroll="false"
+      @closed="onDetailsDrawerClosed"
+    >
+      <div class="workflow-details-content">
         <template v-if="selectedState">
           <h3>状态配置</h3>
           <el-form label-position="top">
@@ -157,8 +188,8 @@
         </template>
 
         <el-empty v-else description="选择状态或流转进行配置" />
-      </aside>
-    </div>
+      </div>
+    </el-drawer>
     <WorkflowAdvancedConfigDrawer
       ref="advancedDrawer"
       v-model="advancedDrawerVisible"
@@ -172,7 +203,7 @@
 </template>
 
 <script setup>
-import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { onBeforeRouteLeave } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 
@@ -185,6 +216,8 @@ import {
   saveWorkflowDefinitionGraph
 } from '../api/workflowDefinitions'
 import { layoutWorkflowNodes } from '../utils/workflowAutoLayout'
+import { projectWorkflowCanvas } from '../utils/workflowCanvasProjection'
+import { combineWorkflowDragViews } from '../utils/workflowDragViews'
 import { buildWorkflowEdgePreviewViews, buildWorkflowEdgeViews } from '../utils/workflowEdgePath'
 import { requestWorkflowOrganization } from '../utils/workflowLayoutInteraction'
 import {
@@ -247,15 +280,51 @@ const loading = ref(false)
 const saving = ref(false)
 const advancedDrawer = ref(null)
 const advancedDrawerVisible = ref(false)
+const detailsDrawerVisible = ref(false)
+const preserveSelectionOnDetailsClose = ref(false)
+const suppressCanvasClamp = ref(false)
 const viewportOffset = reactive({ x: 0, y: 0 })
-const dragging = reactive({ state: null, startX: 0, startY: 0, originX: 0, originY: 0 })
+const dragging = reactive({
+  state: null,
+  startX: 0,
+  startY: 0,
+  originX: 0,
+  originY: 0,
+  edgeViews: [],
+  canvasEdges: []
+})
 const viewportDrag = reactive({ active: false, startX: 0, startY: 0, originX: 0, originY: 0 })
 const enabledStates = computed(() => states.value.filter((state) => state.enabled))
-const fullTransitionViews = computed(() => buildWorkflowEdgeViews(states.value, transitions.value, transitionKey))
-const previewTransitionViews = computed(() => buildWorkflowEdgePreviewViews(states.value, transitions.value, transitionKey))
-const transitionViews = computed(() => dragging.state ? previewTransitionViews.value : fullTransitionViews.value)
-const canvasEdgeViews = computed(() => dragging.state ? [] : fullTransitionViews.value)
-const canvasSize = computed(() => workflowCanvasSize(states.value, minimumCanvas, undefined, canvasEdgeViews.value))
+const canvasProjection = computed(() => projectWorkflowCanvas(states.value, transitions.value))
+const fullTransitionViews = computed(() => (
+  buildWorkflowEdgeViews(states.value, canvasProjection.value.routedTransitions, transitionKey)
+))
+const previewTransitionViews = computed(() => (
+  buildWorkflowEdgePreviewViews(states.value, canvasProjection.value.routedTransitions, transitionKey)
+))
+const transitionViews = computed(() => dragging.state
+  ? combineWorkflowDragViews(dragging.edgeViews, previewTransitionViews.value, dragging.state.id)
+  : fullTransitionViews.value)
+const canvasEdgeViews = computed(() => dragging.state ? dragging.canvasEdges : fullTransitionViews.value)
+const nodeActionViews = computed(() => states.value.flatMap((state) => (
+  (canvasProjection.value.stateActionsByStateId.get(state.id) || []).map((transition, index) => ({
+    key: transitionKey(transition),
+    transition,
+    x: state.x + 19,
+    y: state.y + 50 + index * 30,
+    width: 80,
+    height: 24
+  }))
+)))
+const nodeActionBounds = computed(() => nodeActionViews.value.map((action) => ({
+  left: action.x,
+  top: action.y,
+  right: action.x + action.width,
+  bottom: action.y + action.height
+})))
+const canvasSize = computed(() => (
+  workflowCanvasSize(states.value, minimumCanvas, undefined, canvasEdgeViews.value, nodeActionBounds.value)
+))
 
 const selectedState = computed(() => (
   selectedKind.value === 'state'
@@ -275,7 +344,7 @@ const canvasGridStyle = computed(() => ({
 }))
 
 watch(canvasSize, (nextCanvas) => {
-  if (dragging.state) return
+  if (dragging.state || suppressCanvasClamp.value) return
   clampCurrentViewport(nextCanvas)
 }, { flush: 'sync' })
 
@@ -417,8 +486,7 @@ function addState() {
     sort_order: index * 10,
     enabled: true
   })
-  selectedKind.value = 'state'
-  selectedKey.value = temporaryId
+  selectState(states.value[states.value.length - 1])
 }
 
 function nextTemporaryStateId() {
@@ -455,16 +523,27 @@ function addTransition() {
 function selectState(state) {
   selectedKind.value = 'state'
   selectedKey.value = state.id
+  detailsDrawerVisible.value = true
 }
 
 function selectTransition(transition) {
   selectedKind.value = 'transition'
   selectedKey.value = transitionKey(transition)
+  detailsDrawerVisible.value = true
 }
 
 function clearSelection() {
+  detailsDrawerVisible.value = false
   selectedKind.value = ''
   selectedKey.value = ''
+}
+
+function onDetailsDrawerClosed() {
+  if (preserveSelectionOnDetailsClose.value) {
+    preserveSelectionOnDetailsClose.value = false
+    return
+  }
+  clearSelection()
 }
 
 function removeSelectedState() {
@@ -487,6 +566,8 @@ function removeSelectedTransition() {
 
 function openAdvancedDrawer() {
   if (selectedUnsupportedSections.value.length) return
+  preserveSelectionOnDetailsClose.value = true
+  detailsDrawerVisible.value = false
   advancedDrawerVisible.value = true
   advancedDrawer.value?.open?.()
 }
@@ -527,6 +608,8 @@ function handlerTypeSummary(type, roles) {
 }
 
 function startDrag(state, event) {
+  dragging.edgeViews = [...fullTransitionViews.value]
+  dragging.canvasEdges = [...fullTransitionViews.value]
   dragging.state = state
   dragging.startX = event.clientX
   dragging.startY = event.clientY
@@ -547,8 +630,14 @@ function clampCurrentViewport(nextCanvas = canvasSize.value) {
 }
 
 function stopDrag() {
+  if (!dragging.state) return
+  suppressCanvasClamp.value = true
   dragging.state = null
-  clampCurrentViewport()
+  dragging.edgeViews = []
+  dragging.canvasEdges = []
+  nextTick(() => {
+    suppressCanvasClamp.value = false
+  })
 }
 
 function startViewportDrag(event) {
@@ -649,8 +738,6 @@ function transitionKey(transition) {
 }
 
 .workflow-designer-main {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 320px;
   min-height: 540px;
 }
 
@@ -733,17 +820,51 @@ function transitionKey(transition) {
   stroke-width: 3;
 }
 
-.workflow-config-panel {
-  border-left: 1px solid #e5e7eb;
-  padding: 16px;
-  background: #ffffff;
-  overflow: auto;
+.workflow-node.inactive rect {
+  stroke: #94a3b8;
+  stroke-width: 2;
+  stroke-dasharray: 6 4;
+  filter: none;
 }
 
-.workflow-config-panel h3 {
-  margin: 0 0 14px;
-  font-size: 16px;
-  color: #0f172a;
+.workflow-node.inactive text {
+  fill: #475569;
+}
+
+.workflow-node .workflow-node-status {
+  fill: #94a3b8;
+  font-size: 10px;
+  font-weight: 500;
+}
+
+.workflow-node-action {
+  cursor: pointer;
+  outline: none;
+}
+
+.workflow-node-action rect {
+  fill: #ffffff;
+  stroke: #94a3b8;
+  stroke-width: 1;
+}
+
+.workflow-node-action text {
+  fill: #334155;
+  font-size: 12px;
+  text-anchor: middle;
+  user-select: none;
+}
+
+.workflow-node-action:hover rect,
+.workflow-node-action:focus-visible rect,
+.workflow-node-action.selected rect {
+  fill: #eff6ff;
+  stroke: #2563eb;
+  stroke-width: 2;
+}
+
+.workflow-details-content {
+  padding: 0 4px 20px;
 }
 
 .workflow-readonly-summary {
@@ -790,14 +911,4 @@ function transitionKey(transition) {
   font-size: 12px;
 }
 
-@media (max-width: 1100px) {
-  .workflow-designer-main {
-    grid-template-columns: 1fr;
-  }
-
-  .workflow-config-panel {
-    border-left: 0;
-    border-top: 1px solid #e5e7eb;
-  }
-}
 </style>

@@ -5,7 +5,8 @@ export function workflowCanvasSize(
   nodes,
   minimumCanvas = { width: 2400, height: 1400 },
   padding = { left: 160, top: 120, right: 160, bottom: 120 },
-  edgeViews = []
+  edgeViews = [],
+  extraRectangles = []
 ) {
   const nodeBounds = nodes.map((node) => ({
     left: node.x,
@@ -13,7 +14,7 @@ export function workflowCanvasSize(
     right: node.x + NODE_WIDTH,
     bottom: node.y + NODE_HEIGHT
   }))
-  const contentBounds = [...nodeBounds, ...edgeViews.map((edge) => edge.bounds)]
+  const contentBounds = [...nodeBounds, ...edgeViews.map((edge) => edge.bounds), ...extraRectangles]
     .reduce((bounds, item) => ({
       left: Math.min(bounds.left, item.left),
       top: Math.min(bounds.top, item.top),

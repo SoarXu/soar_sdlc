@@ -20,7 +20,13 @@ assert.deepEqual(WORKFLOW_LAYOUT, {
   marginX: 80,
   marginY: 80,
   layerGap: 240,
-  rowGap: 120
+  rowGap: 120,
+  nodeHeight: 42,
+  actionHeight: 24,
+  actionGap: 6,
+  actionTopGap: 8,
+  rowClearance: 24,
+  disabledRegionGap: 120
 })
 assert.equal(Object.isFrozen(WORKFLOW_LAYOUT), true)
 
@@ -130,6 +136,42 @@ assert.deepEqual(layoutWorkflowNodes([], [], 1), [])
   assert.ok(byId(result, 2).y < byId(result, 3).y)
   assert.ok(byId(result, 2).x - byId(result, 1).x >= WORKFLOW_LAYOUT.layerGap)
   assert.ok(byId(result, 3).y - byId(result, 2).y >= WORKFLOW_LAYOUT.rowGap)
+}
+
+{
+  const states = [
+    state(1, 10, { status_name: 'Pending', enabled: true, category: 'start' }),
+    state(2, 20, { status_name: 'Processing', enabled: true }),
+    state(3, 30, { status_name: 'Confirmation', enabled: true }),
+    state(4, 40, { status_name: 'Completed', enabled: true, category: 'terminal' }),
+    state(5, 50, { status_name: 'Canceled', enabled: true, category: 'terminal' }),
+    state(6, 60, { status_name: 'Retired pending', enabled: false }),
+    state(7, 70, { status_name: 'Retired processing', enabled: false })
+  ]
+  const transitions = [
+    transition(1, 2), transition(2, 4), transition(1, 5),
+    transition(2, 5), transition(3, 5), transition(5, 1), transition(4, 1),
+    transition(1, 1), transition(1, 1),
+    transition(2, 2), transition(2, 2), transition(2, 2),
+    transition(3, 3), transition(3, 3), transition(3, 3),
+    transition(4, 4), transition(5, 5), transition(5, 5)
+  ]
+  const result = layoutWorkflowNodes(states, transitions, 1)
+  const activeBottom = Math.max(...result.filter((item) => item.enabled).map((item) => item.y + 42))
+
+  assert.equal(byId(result, 1).x, WORKFLOW_LAYOUT.marginX)
+  assert.equal(byId(result, 2).x, byId(result, 3).x)
+  assert.equal(byId(result, 4).x, byId(result, 5).x)
+  assert.ok(byId(result, 1).x < byId(result, 2).x)
+  assert.ok(byId(result, 2).x < byId(result, 4).x)
+  assert.ok(
+    Math.abs(byId(result, 2).y - byId(result, 3).y) >=
+      WORKFLOW_LAYOUT.nodeHeight + 3 * (WORKFLOW_LAYOUT.actionHeight + WORKFLOW_LAYOUT.actionGap) +
+        WORKFLOW_LAYOUT.actionTopGap + WORKFLOW_LAYOUT.rowClearance
+  )
+  assert.ok(byId(result, 6).y >= activeBottom + WORKFLOW_LAYOUT.disabledRegionGap)
+  assert.equal(byId(result, 7).x - byId(result, 6).x, WORKFLOW_LAYOUT.layerGap)
+  assert.deepEqual(layoutWorkflowNodes(states, transitions, 1), result)
 }
 
 console.log('workflow auto layout tests passed')

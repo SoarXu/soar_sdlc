@@ -2,13 +2,16 @@ export function projectWorkflowCanvas(states, transitions) {
   const stateIds = new Set(states.map((state) => state.id))
   const activeStates = states.filter((state) => state.enabled !== false)
   const inactiveStates = states.filter((state) => state.enabled === false)
+  const activeStateIds = new Set(activeStates.map((state) => state.id))
   const validTransitions = transitions
     .filter((transition) => (
       stateIds.has(transition.from_state_id) && stateIds.has(transition.to_state_id)
     ))
     .sort(compareTransitions)
   const routedTransitions = validTransitions.filter((transition) => (
-    transition.from_state_id !== transition.to_state_id
+    transition.from_state_id !== transition.to_state_id &&
+    activeStateIds.has(transition.from_state_id) &&
+    activeStateIds.has(transition.to_state_id)
   ))
   const stateActionsByStateId = new Map(states.map((state) => [state.id, []]))
 

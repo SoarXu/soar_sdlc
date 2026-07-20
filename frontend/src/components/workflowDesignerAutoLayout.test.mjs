@@ -43,12 +43,24 @@ assert.match(
 )
 assert.match(
   source,
-  /workflowCanvasSize\(states\.value, minimumCanvas, undefined, canvasEdgeViews\.value, nodeActionBounds\.value\)/
+  /workflowCanvasSize\(states\.value, minimumCanvas, undefined, canvasEdgeViews\.value, nodeActionTriggerBounds\.value\)/
 )
 assert.match(source, /v-for="edge in transitionViews"/)
-assert.match(source, /v-for="action in nodeActionViews"/)
-assert.match(source, /@click\.stop="selectTransition\(action\.transition\)"/)
-assert.match(source, /class="workflow-node-action"/)
+assert.match(source, /v-for="trigger in nodeActionTriggers"/)
+assert.match(source, /class="workflow-node-action-trigger"/)
+assert.match(source, /操作 \{\{ trigger\.actions\.length \}\}/)
+assert.match(
+  source,
+  /class="workflow-node-action-trigger"[\s\S]{0,650}@keydown\.esc\.stop\.prevent="closeNodeActionMenu"/
+)
+assert.match(source, /class="workflow-node-action-menu"/)
+assert.match(source, /v-for="action in activeNodeActionMenu\.actions"/)
+assert.match(source, /@click="selectNodeAction\(action\)"/)
+assert.doesNotMatch(source, /v-for="action in nodeActionViews"/)
+assert.ok(
+  source.indexOf('</svg>') < source.indexOf('class="workflow-node-action-menu"'),
+  'the floating action menu must render outside the SVG'
+)
 assert.doesNotMatch(source, /<aside class="workflow-config-panel">/)
 assert.doesNotMatch(source, /workflow-details-drawer/)
 assert.match(source, /<WorkflowAdvancedConfigDrawer/)
@@ -84,12 +96,16 @@ assert.match(stopDragBody, /suppressCanvasClamp\.value = true[\s\S]*dragging\.st
 assert.doesNotMatch(stopDragBody, /clampCurrentViewport\(\)/)
 
 const startDragBody = functionBody('startDrag', 'onDrag')
+assert.match(startDragBody, /closeNodeActionMenu\(\)/)
 assert.ok(
   startDragBody.indexOf('dragging.edgeViews = [...fullTransitionViews.value]') <
     startDragBody.indexOf('dragging.state = state'),
   'edge snapshots must be captured before drag state activates'
 )
 assert.match(startDragBody, /dragging\.canvasEdges = \[\.\.\.fullTransitionViews\.value\]/)
+
+const startViewportDragBody = functionBody('startViewportDrag', 'onViewportDrag')
+assert.match(startViewportDragBody, /closeNodeActionMenu\(\)/)
 
 const onDragBody = functionBody('onDrag', 'clampCurrentViewport')
 assert.match(onDragBody, /canvasSize\.value\.right - 140/)
@@ -127,8 +143,18 @@ assert.doesNotMatch(
 
 const applyGraphBody = functionBody('applyGraph', 'applyTemplate')
 assert.match(source, /function applyGraph\(graph, \{ organize = false \} = \{\}\)/)
+assert.match(applyGraphBody, /closeNodeActionMenu\(\)/)
 assert.match(applyGraphBody, /if \(organize\) applyOrganizedLayout\(\)/)
 assert.match(applyGraphBody, /fitToContent\(\)/)
+
+const clearSelectionBody = functionBody('clearSelection', 'removeSelectedState')
+assert.match(clearSelectionBody, /closeNodeActionMenu\(\)/)
+
+const selectStateBody = functionBody('selectState', 'selectTransition')
+assert.match(selectStateBody, /closeNodeActionMenu\(\)/)
+
+const selectTransitionBody = functionBody('selectTransition', 'clearSelection')
+assert.match(selectTransitionBody, /closeNodeActionMenu\(\)/)
 
 const loadDefinitionBody = functionBody('loadDefinition', 'applyOrganizedLayout')
 assert.match(loadDefinitionBody, /applyGraph\(graph\.data\)/)

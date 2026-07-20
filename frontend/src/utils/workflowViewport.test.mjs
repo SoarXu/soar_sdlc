@@ -35,19 +35,19 @@ const viewport = { width: 900, height: 540 }
 
 {
   const nodes = [{ id: 1, x: 80, y: 80 }]
-  const actionBounds = [
-    { left: 99, top: 130, right: 179, bottom: 454 }
+  const actionTriggerBounds = [
+    { left: 99, top: 130, right: 179, bottom: 154 }
   ]
   const expanded = workflowCanvasSize(
     nodes,
-    { width: 500, height: 300 },
+    { width: 100, height: 100 },
     { left: 40, top: 40, right: 40, bottom: 60 },
     [],
-    actionBounds
+    actionTriggerBounds
   )
 
-  assert.equal(expanded.bottom, 514)
-  assert.equal(expanded.height, 514)
+  assert.equal(expanded.bottom, 214)
+  assert.equal(expanded.height, 214)
 }
 
 {

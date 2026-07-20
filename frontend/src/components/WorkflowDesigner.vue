@@ -33,6 +33,7 @@
 
     <div class="workflow-designer-main">
       <div
+        ref="workflowCanvasElement"
         class="workflow-canvas"
         :class="{ panning: viewportDrag.active }"
         :style="canvasGridStyle"
@@ -86,22 +87,44 @@
               <text v-if="state.enabled === false" class="workflow-node-status" x="59" y="34">已停用</text>
             </g>
             <g
-              v-for="action in nodeActionViews"
-              :key="action.key"
-              class="workflow-node-action"
-              :class="{ selected: isSelectedTransition(action.transition) }"
-              :transform="`translate(${action.x}, ${action.y})`"
+              v-for="trigger in nodeActionTriggers"
+              :key="trigger.stateId"
+              class="workflow-node-action-trigger"
+              :class="{ selected: activeNodeActionStateId === trigger.stateId }"
+              :transform="`translate(${trigger.x}, ${trigger.y})`"
               role="button"
               tabindex="0"
-              @click.stop="selectTransition(action.transition)"
-              @keydown.enter.prevent="selectTransition(action.transition)"
-              @keydown.space.prevent="selectTransition(action.transition)"
+              @click.stop="toggleNodeActionMenu(trigger)"
+              @keydown.enter.prevent="toggleNodeActionMenu(trigger)"
+              @keydown.space.prevent="toggleNodeActionMenu(trigger)"
+              @keydown.esc.stop.prevent="closeNodeActionMenu"
             >
-              <rect :width="action.width" :height="action.height" rx="4" />
-              <text :x="action.width / 2" :y="action.height / 2 + 4">{{ action.transition.action_name }}</text>
+              <rect :width="trigger.width" :height="trigger.height" rx="4" />
+              <text :x="trigger.width / 2" :y="trigger.height / 2 + 4">操作 {{ trigger.actions.length }}</text>
             </g>
           </g>
         </svg>
+        <div
+          v-if="activeNodeActionMenu"
+          class="workflow-node-action-menu"
+          :style="nodeActionMenuStyle"
+          role="menu"
+          @click.stop
+          @keydown.esc.stop.prevent="closeNodeActionMenu"
+        >
+          <button
+            v-for="action in activeNodeActionMenu.actions"
+            :key="transitionKey(action)"
+            type="button"
+            class="workflow-node-action-menu-item"
+            :class="{ inactive: action.enabled === false }"
+            role="menuitem"
+            @click="selectNodeAction(action)"
+          >
+            <span>{{ action.action_name }}</span>
+            <small v-if="action.enabled === false">已停用</small>
+          </button>
+        </div>
       </div>
 
     </div>
@@ -201,6 +224,9 @@ const saving = ref(false)
 const advancedDrawer = ref(null)
 const advancedDrawerVisible = ref(false)
 const suppressCanvasClamp = ref(false)
+const workflowCanvasElement = ref(null)
+const canvasRenderedSize = reactive({ ...viewportSize })
+const activeNodeActionStateId = ref(null)
 const viewportOffset = reactive({ x: 0, y: 0 })
 const dragging = reactive({
   state: null,
@@ -224,25 +250,53 @@ const transitionViews = computed(() => dragging.state
   ? combineWorkflowDragViews(dragging.edgeViews, previewTransitionViews.value, dragging.state.id)
   : fullTransitionViews.value)
 const canvasEdgeViews = computed(() => dragging.state ? dragging.canvasEdges : fullTransitionViews.value)
-const nodeActionViews = computed(() => states.value.flatMap((state) => (
-  (canvasProjection.value.stateActionsByStateId.get(state.id) || []).map((transition, index) => ({
-    key: transitionKey(transition),
-    transition,
+const nodeActionTriggers = computed(() => states.value.flatMap((state) => {
+  const actions = canvasProjection.value.stateActionsByStateId.get(state.id) || []
+  if (!actions.length) return []
+  return [{
+    stateId: state.id,
+    actions,
     x: state.x + 19,
-    y: state.y + 50 + index * 30,
+    y: state.y + 50,
     width: 80,
     height: 24
-  }))
-)))
-const nodeActionBounds = computed(() => nodeActionViews.value.map((action) => ({
-  left: action.x,
-  top: action.y,
-  right: action.x + action.width,
-  bottom: action.y + action.height
+  }]
+}))
+const nodeActionTriggerBounds = computed(() => nodeActionTriggers.value.map((trigger) => ({
+  left: trigger.x,
+  top: trigger.y,
+  right: trigger.x + trigger.width,
+  bottom: trigger.y + trigger.height
 })))
 const canvasSize = computed(() => (
-  workflowCanvasSize(states.value, minimumCanvas, undefined, canvasEdgeViews.value, nodeActionBounds.value)
+  workflowCanvasSize(states.value, minimumCanvas, undefined, canvasEdgeViews.value, nodeActionTriggerBounds.value)
 ))
+const activeNodeActionMenu = computed(() => (
+  nodeActionTriggers.value.find((trigger) => trigger.stateId === activeNodeActionStateId.value) || null
+))
+const nodeActionMenuStyle = computed(() => {
+  const menu = activeNodeActionMenu.value
+  if (!menu) return {}
+  const renderedWidth = Math.max(240, canvasRenderedSize.width)
+  const renderedHeight = Math.max(240, canvasRenderedSize.height)
+  const scaleX = renderedWidth / viewportSize.width
+  const scaleY = renderedHeight / viewportSize.height
+  const width = Math.min(200, renderedWidth - 16)
+  const height = Math.min(12 + menu.actions.length * 36, renderedHeight - 16)
+  const triggerLeft = (menu.x + viewportOffset.x) * scaleX
+  const triggerTop = (menu.y + viewportOffset.y) * scaleY
+  const belowTop = triggerTop + menu.height * scaleY + 6
+  const top = belowTop + height <= renderedHeight - 8
+    ? belowTop
+    : Math.max(8, triggerTop - height - 6)
+  const left = Math.max(8, Math.min(renderedWidth - width - 8, triggerLeft))
+  return {
+    left: `${left}px`,
+    top: `${top}px`,
+    width: `${width}px`,
+    maxHeight: `${height}px`
+  }
+})
 
 const selectedState = computed(() => (
   selectedKind.value === 'state'
@@ -275,12 +329,21 @@ watch(() => props.configId, () => loadDefinition())
 
 onBeforeRouteLeave(async () => confirmDiscardAdvancedDraft())
 
+let workflowCanvasResizeObserver = null
+
 onMounted(() => {
   window.addEventListener('mousemove', onDrag)
   window.addEventListener('mouseup', stopDrag)
   window.addEventListener('mousemove', onViewportDrag)
   window.addEventListener('mouseup', stopViewportDrag)
   window.addEventListener('beforeunload', onBeforeUnload)
+  nextTick(() => {
+    syncCanvasRenderedSize()
+    if (typeof ResizeObserver !== 'undefined' && workflowCanvasElement.value) {
+      workflowCanvasResizeObserver = new ResizeObserver(syncCanvasRenderedSize)
+      workflowCanvasResizeObserver.observe(workflowCanvasElement.value)
+    }
+  })
   loadDefinition()
 })
 
@@ -290,7 +353,15 @@ onBeforeUnmount(() => {
   window.removeEventListener('mousemove', onViewportDrag)
   window.removeEventListener('mouseup', stopViewportDrag)
   window.removeEventListener('beforeunload', onBeforeUnload)
+  workflowCanvasResizeObserver?.disconnect()
 })
+
+function syncCanvasRenderedSize() {
+  if (!workflowCanvasElement.value) return
+  const bounds = workflowCanvasElement.value.getBoundingClientRect()
+  canvasRenderedSize.width = bounds.width || viewportSize.width
+  canvasRenderedSize.height = bounds.height || viewportSize.height
+}
 
 async function loadDefinition({ discardPendingDraft = true } = {}) {
   if (!props.configId) return
@@ -334,11 +405,13 @@ async function organizeLayout() {
     notifyEmpty: () => ElMessage.info('当前没有可整理的状态节点')
   })
   if (!result.organized) return
+  closeNodeActionMenu()
   states.value = result.states
   fitToContent()
 }
 
 function applyGraph(graph, { organize = false } = {}) {
+  closeNodeActionMenu()
   definition.value = graph.definition || definition.value
   states.value = (graph.states || []).map((item) => ({ ...item }))
   transitions.value = (graph.transitions || []).map((item) => normalizeTransition({
@@ -445,6 +518,7 @@ function addTransition(group = 'more') {
 }
 
 function selectState(state) {
+  closeNodeActionMenu()
   selectedKind.value = 'state'
   selectedKey.value = state.id
   advancedDrawerVisible.value = true
@@ -452,6 +526,7 @@ function selectState(state) {
 }
 
 function selectTransition(transition) {
+  closeNodeActionMenu()
   selectedKind.value = 'transition'
   selectedKey.value = transitionKey(transition)
   advancedDrawerVisible.value = true
@@ -469,6 +544,7 @@ function returnToStateActions() {
 }
 
 function clearSelection() {
+  closeNodeActionMenu()
   selectedKind.value = ''
   selectedKey.value = ''
   advancedDrawerVisible.value = false
@@ -532,7 +608,23 @@ function handlerTypeSummary(type, roles) {
   return type === 'project_role' ? `${label}（${roleSummary(roles)}）` : label
 }
 
+function toggleNodeActionMenu(trigger) {
+  activeNodeActionStateId.value = activeNodeActionStateId.value === trigger.stateId
+    ? null
+    : trigger.stateId
+}
+
+function closeNodeActionMenu() {
+  activeNodeActionStateId.value = null
+}
+
+function selectNodeAction(transition) {
+  closeNodeActionMenu()
+  selectTransition(transition)
+}
+
 function startDrag(state, event) {
+  closeNodeActionMenu()
   dragging.edgeViews = [...fullTransitionViews.value]
   dragging.canvasEdges = [...fullTransitionViews.value]
   dragging.state = state
@@ -566,6 +658,7 @@ function stopDrag() {
 }
 
 function startViewportDrag(event) {
+  closeNodeActionMenu()
   viewportDrag.active = true
   viewportDrag.startX = event.clientX
   viewportDrag.startY = event.clientY
@@ -668,6 +761,7 @@ function transitionKey(transition) {
 }
 
 .workflow-canvas {
+  position: relative;
   background:
     linear-gradient(#eef2f7 1px, transparent 1px),
     linear-gradient(90deg, #eef2f7 1px, transparent 1px);
@@ -775,32 +869,82 @@ function transitionKey(transition) {
   font-weight: 500;
 }
 
-.workflow-node-action {
+.workflow-node-action-trigger {
   cursor: pointer;
   outline: none;
 }
 
-.workflow-node-action rect {
+.workflow-node-action-trigger rect {
   fill: #ffffff;
   stroke: #94a3b8;
   stroke-width: 1;
 }
 
-.workflow-node-action text {
+.workflow-node-action-trigger text {
   fill: #334155;
   font-size: 12px;
   text-anchor: middle;
   user-select: none;
 }
 
-.workflow-node-action:hover rect,
-.workflow-node-action:focus-visible rect,
-.workflow-node-action.selected rect {
+.workflow-node-action-trigger:hover rect,
+.workflow-node-action-trigger:focus-visible rect,
+.workflow-node-action-trigger.selected rect {
   fill: #eff6ff;
   stroke: #2563eb;
   stroke-width: 2;
 }
 
+.workflow-node-action-menu {
+  position: absolute;
+  z-index: 5;
+  display: grid;
+  gap: 4px;
+  padding: 6px;
+  overflow-y: auto;
+  border: 1px solid #d8dee8;
+  border-radius: 6px;
+  background: #ffffff;
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.16);
+}
+
+.workflow-node-action-menu-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 32px;
+  width: 100%;
+  padding: 6px 10px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: #334155;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.workflow-node-action-menu-item span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.workflow-node-action-menu-item small {
+  flex: 0 0 auto;
+  color: #94a3b8;
+}
+
+.workflow-node-action-menu-item:hover,
+.workflow-node-action-menu-item:focus-visible {
+  outline: none;
+  background: #eff6ff;
+  color: #1d4ed8;
+}
+
+.workflow-node-action-menu-item.inactive {
+  color: #94a3b8;
+}
 .workflow-readonly-summary {
   display: grid;
   gap: 8px;

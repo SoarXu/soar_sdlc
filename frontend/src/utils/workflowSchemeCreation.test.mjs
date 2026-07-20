@@ -66,6 +66,19 @@ assert.match(workflowView, /source\.description/)
 assert.match(workflowView, /enableAssigneeRuleConfig/)
 assert.match(workflowView, /disableAssigneeRuleConfig/)
 assert.doesNotMatch(workflowView, /form\.enabled|deleteAssigneeRuleConfig/)
+assert.match(workflowView, /:role-options="workflowExecutionRoleOptions"/)
+for (const [label, value] of [
+  ['创建人', 'creator'],
+  ['项目负责人', 'project_owner'],
+  ['当前处理人', 'current_handler'],
+  ['系统管理员', 'system_admin']
+]) {
+  assert.match(
+    workflowView,
+    new RegExp(`\\{ label: '${label}', value: '${value}' \\}`),
+    `workflow role ${value} must have a Chinese label`
+  )
+}
 assert.match(projectDetailView, /lifecycle_status === 'enabled'/)
 assert.match(projectsView, /lifecycle_status === 'enabled'/)
 

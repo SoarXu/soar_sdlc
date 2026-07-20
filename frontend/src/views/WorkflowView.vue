@@ -153,7 +153,7 @@
       <WorkflowDesigner
         :config-id="editingId"
         :config-name="form.name"
-        :role-options="projectMemberRoleOptions"
+        :role-options="workflowExecutionRoleOptions"
       />
     </el-card>
 
@@ -278,7 +278,15 @@ const currentUser = computed(() => currentUserFromStorage(users.value))
 const canEditWorkflow = computed(() => canConfigureWorkflow(currentUser.value))
 const currentConfig = computed(() => configs.value.find((item) => item.id === editingId.value) || null)
 const templateSourceGroups = computed(() => groupWorkflowTemplateSources(templateSources.value))
-const projectMemberRoleOptions = [
+const workflowExecutionRoleOptions = [
+  { label: '系统管理员', value: 'system_admin' },
+  { label: '项目负责人', value: 'project_owner' },
+  { label: '项目成员', value: 'project_member' },
+  { label: '当前处理人', value: 'current_handler' },
+  { label: '当前负责人', value: 'owner' },
+  { label: '创建人', value: 'creator' },
+  { label: '需求提出人', value: 'proposer' },
+  { label: '缺陷报告人', value: 'reporter' },
   { label: '产品/需求负责人', value: 'product_owner' },
   { label: '产品经理', value: 'product_manager' },
   { label: '部门负责人', value: 'department_head' },

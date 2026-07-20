@@ -1,19 +1,14 @@
-function priorityOf(action) {
-  const value = action?.list_priority ?? action?.ui_config?.list_priority
-  const priority = Number(value)
-  return Number.isFinite(priority) ? priority : 100
+function orderOf(action) {
+  const order = Number(action?.sort_order)
+  return Number.isFinite(order) ? order : 100
 }
 
 function listDisplayOf(action) {
   return action?.list_display || action?.ui_config?.list_display || 'more'
 }
 
-function isDanger(action) {
-  return (action?.button_type || action?.ui_config?.button_type) === 'danger'
-}
-
-function actionKeyOf(action) {
-  return action?.action_key || ''
+function transitionIdOf(action) {
+  return Number(action?.transition_id) || 0
 }
 
 export async function replaceWorkflowTransitionMap(fetchBatch, projectIds = [], replaceMap = () => {}) {
@@ -56,30 +51,24 @@ export function actionNeedsDialog(action) {
 
 export function sortWorkflowActions(actions = []) {
   return [...actions].sort((a, b) => {
-    const priorityDelta = priorityOf(a) - priorityOf(b)
-    if (priorityDelta !== 0) return priorityDelta
-    return actionKeyOf(a).localeCompare(actionKeyOf(b))
+    const orderDelta = orderOf(a) - orderOf(b)
+    if (orderDelta !== 0) return orderDelta
+    return transitionIdOf(a) - transitionIdOf(b)
   })
 }
 
 export function visibleListActions(actions = []) {
-  return sortWorkflowActions(actions).filter((action) => listDisplayOf(action) !== 'hidden')
+  return sortWorkflowActions(actions)
 }
 
 export function visibleDetailActions(actions = []) {
-  return sortWorkflowActions(actions).filter((action) => action?.ui_config?.visible_in_detail !== false)
+  return sortWorkflowActions(actions)
 }
 
 export function splitListActions(actions = []) {
-  const visibleActions = visibleListActions(actions).filter((action) => action?.ui_config?.visible_in_list !== false)
-  if (!visibleActions.length) {
-    return { primaryAction: null, moreActions: [] }
-  }
-
-  const explicitPrimary = visibleActions.filter((action) => listDisplayOf(action) === 'primary')
-  const primaryAction = explicitPrimary[0] || visibleActions.find((action) => !isDanger(action)) || visibleActions[0]
+  const visibleActions = visibleListActions(actions)
   return {
-    primaryAction,
-    moreActions: visibleActions.filter((action) => action !== primaryAction)
+    primaryActions: visibleActions.filter((action) => listDisplayOf(action) === 'primary'),
+    moreActions: visibleActions.filter((action) => listDisplayOf(action) !== 'primary')
   }
 }

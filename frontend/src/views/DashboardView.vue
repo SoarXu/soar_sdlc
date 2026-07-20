@@ -134,7 +134,7 @@
             <el-table-column :label="extraInfoLabel" min-width="170" show-overflow-tooltip>
               <template #default="{ row }">{{ extraInfo(row) }}</template>
             </el-table-column>
-            <el-table-column label="操作" width="180" fixed="right">
+            <el-table-column label="操作" :width="workflowOperationWidth" fixed="right">
               <template #default="{ row }">
                 <div class="workbench-list-actions">
                   <WorkflowActionButtons
@@ -226,6 +226,7 @@ import { fetchWorkbench } from '../api/dashboard'
 import { createBugFromTestCase, executeTestCase } from '../api/testCases'
 import { fetchUsers } from '../api/users'
 import { fetchWorkflowTransitionsBatch } from '../api/workflowRuntime'
+import { workflowActionColumnWidth } from '../utils/workflowActionColumn'
 import RequirementPriorityBadge from '../components/RequirementPriorityBadge.vue'
 import RichTextPasteEditor from '../components/RichTextPasteEditor.vue'
 import WorkflowActionButtons from '../components/WorkflowActionButtons.vue'
@@ -300,6 +301,10 @@ const activeListSection = computed(() => (
     : viewModel.value.queueSectionsByKey[activeView.value]
 ))
 const filteredListItems = computed(() => filterWorkbenchItems(activeListSection.value?.items || [], activeFilters.value))
+const workflowOperationWidth = computed(() => workflowActionColumnWidth(
+  filteredListItems.value.map((row) => workflowTransitionsFor(row)),
+  { minWidth: 180, extraWidth: 90 }
+))
 const activeFilters = computed(() => ({
   keyword: keywordFilter.value,
   types: typeFilter.value,

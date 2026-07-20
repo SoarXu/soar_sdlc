@@ -11,15 +11,72 @@
   >
     <template #header>
       <div class="drawer-header">
+        <el-button v-if="transition" text circle aria-label="返回流转列表" @click="requestBack">
+          <el-icon><ArrowLeft /></el-icon>
+        </el-button>
         <div>
-          <h2>{{ transition?.action_name || transition?.action_key || '流转高级配置' }}</h2>
-          <p>{{ stateName(transition?.from_state_id) }} -&gt; {{ stateName(transition?.to_state_id) }}</p>
+          <h2>{{ transition?.action_name || state?.status_name || '流转配置' }}</h2>
+          <p v-if="transition">{{ stateName(transition.from_state_id) }} -&gt; {{ stateName(transition.to_state_id) }}</p>
+          <p v-else>配置该状态可以执行的流转动作</p>
         </div>
         <span v-if="hasPendingChanges()" class="draft-status">未应用修改</span>
       </div>
     </template>
 
-    <div v-if="draft" class="drawer-shell">
+    <div v-if="state && !transition" class="state-action-shell">
+      <div class="state-settings">
+        <el-form label-position="top">
+          <div class="form-grid">
+            <el-form-item label="状态名称"><el-input v-model="state.status_name" /></el-form-item>
+            <el-form-item label="状态类型">
+              <el-select v-model="state.category">
+                <el-option label="开始" value="start" />
+                <el-option label="普通" value="normal" />
+                <el-option label="结束" value="terminal" />
+              </el-select>
+            </el-form-item>
+            <el-form-item label="颜色"><el-color-picker v-model="state.color" /></el-form-item>
+            <el-form-item label="启用"><el-switch v-model="state.enabled" /></el-form-item>
+          </div>
+        </el-form>
+      </div>
+      <section v-for="group in actionGroups" :key="group.key" class="action-group">
+        <header class="action-group-header">
+          <div><h3>{{ group.label }}</h3><span>{{ groupedTransitions[group.key].length }}</span></div>
+          <el-tooltip content="新增流转" placement="top">
+            <el-button text circle :aria-label="`在${group.label}新增流转`" @click="emit('add-transition', group.key)">
+              <el-icon><Plus /></el-icon>
+            </el-button>
+          </el-tooltip>
+        </header>
+        <div
+          class="action-drop-zone"
+          @dragover.prevent
+          @drop.prevent="dropTransition(group.key, groupedTransitions[group.key].length)"
+        >
+          <button
+            v-for="(item, index) in groupedTransitions[group.key]"
+            :key="transitionIdentity(item)"
+            class="transition-card"
+            type="button"
+            draggable="true"
+            @dragstart="startTransitionDrag(item)"
+            @dragover.prevent
+            @drop.stop.prevent="dropTransition(group.key, index)"
+            @click="emit('select-transition', item)"
+          >
+            <el-icon class="drag-handle"><Rank /></el-icon>
+            <span class="transition-card-copy">
+              <strong>{{ item.action_name }}</strong>
+              <small>到 {{ stateName(item.to_state_id) }}</small>
+            </span>
+          </button>
+          <el-empty v-if="!groupedTransitions[group.key].length" :description="`${group.label}暂无流转`" :image-size="48" />
+        </div>
+      </section>
+    </div>
+
+    <div v-else-if="draft" class="drawer-shell">
       <div class="drawer-layout">
         <nav class="section-nav" aria-label="高级配置分区">
           <button
@@ -36,7 +93,22 @@
         </nav>
 
         <main class="section-content">
-          <section v-if="activeSection === 'rules'" class="editor-section">
+          <section v-if="activeSection === 'basic'" class="editor-section">
+            <div class="section-heading"><h3>基础配置</h3></div>
+            <div class="form-grid">
+              <el-form-item label="流转名称"><el-input v-model="transition.action_name" /></el-form-item>
+              <el-form-item label="来源状态"><el-input :model-value="stateName(transition.from_state_id)" disabled /></el-form-item>
+              <el-form-item label="目标状态">
+                <el-select v-model="transition.to_state_id">
+                  <el-option v-for="item in states" :key="item.id" :label="item.status_name" :value="item.id" />
+                </el-select>
+              </el-form-item>
+              <el-form-item label="启用"><el-switch v-model="transition.enabled" /></el-form-item>
+            </div>
+            <el-button v-if="!transition.id" type="danger" plain @click="emit('remove-transition')">删除未保存流转</el-button>
+          </section>
+
+          <section v-else-if="activeSection === 'rules'" class="editor-section">
             <div class="section-heading">
               <h3>流转规则</h3>
               <p>配置字段路由、覆盖权限和流转门禁。</p>
@@ -170,81 +242,21 @@
 
           <section v-else-if="activeSection === 'form'" class="editor-section">
             <div class="section-heading">
-              <h3>动作表单</h3>
-              <p>字段键用于路由配置，必须保持稳定且唯一。</p>
+              <h3>系统固定动作表单</h3>
             </div>
             <div class="form-grid">
-              <el-form-item label="表单标题">
-                <el-input v-model="draft.form_config.title" />
-              </el-form-item>
-              <el-form-item label="提交文字">
-                <el-input v-model="draft.form_config.submit_text" />
+              <el-form-item label="表单类型">
+                <el-select v-model="formPreset">
+                  <el-option v-for="option in formPresetOptions" :key="option.value" v-bind="option" />
+                </el-select>
               </el-form-item>
             </div>
-            <div class="subsection-heading">
-              <h4>表单字段</h4>
-              <el-button type="primary" link @click="addFormField">新增字段</el-button>
+            <div v-if="draft.form_config.fields.length" class="fixed-form-preview">
+              <div v-for="field in draft.form_config.fields" :key="field.field">
+                <strong>{{ field.label }}</strong>
+                <span>{{ field.required ? '必填' : '选填' }}</span>
+              </div>
             </div>
-            <div v-if="!draft.form_config.fields.length" class="empty-hint">尚未配置动作表单字段。</div>
-            <article v-for="(field, index) in draft.form_config.fields" :key="index" class="field-editor">
-              <div class="field-editor-heading">
-                <strong>字段 {{ index + 1 }}</strong>
-                <div class="field-editor-actions">
-                  <el-tooltip content="上移" placement="top">
-                    <el-button
-                      text
-                      circle
-                      aria-label="上移字段"
-                      :disabled="index === 0"
-                      @click="moveFormField(index, -1)"
-                    >
-                      <el-icon><ArrowUp /></el-icon>
-                    </el-button>
-                  </el-tooltip>
-                  <el-tooltip content="下移" placement="top">
-                    <el-button
-                      text
-                      circle
-                      aria-label="下移字段"
-                      :disabled="index === draft.form_config.fields.length - 1"
-                      @click="moveFormField(index, 1)"
-                    >
-                      <el-icon><ArrowDown /></el-icon>
-                    </el-button>
-                  </el-tooltip>
-                  <el-button type="danger" text @click="removeFormField(index)">删除</el-button>
-                </div>
-              </div>
-              <div class="form-grid">
-                <el-form-item label="字段键" :error="errorFor(`form_config.fields.${index}.field`)">
-                  <el-input v-model="field.field" />
-                </el-form-item>
-                <el-form-item label="显示名称">
-                  <el-input v-model="field.label" />
-                </el-form-item>
-                <el-form-item label="组件类型">
-                  <el-select v-model="field.type">
-                    <el-option v-for="option in fieldTypeOptions" :key="option.value" v-bind="option" />
-                  </el-select>
-                </el-form-item>
-                <el-form-item label="必填">
-                  <el-switch v-model="field.required" />
-                </el-form-item>
-                <el-form-item v-if="field.type === 'select'" label="数据字典">
-                  <el-select v-model="field.dictionary" clearable placeholder="手工选项">
-                    <el-option label="Bug 类型字典" value="bug_type" />
-                  </el-select>
-                </el-form-item>
-                <el-form-item
-                  v-if="field.type === 'select' && field.dictionary !== 'bug_type'"
-                  class="full-width"
-                  label="下拉选项"
-                  :error="errorFor(`form_config.fields.${index}.options`)"
-                >
-                  <el-input v-model="field.option_lines" :rows="3" type="textarea" placeholder="显示名称:值，每行一项" />
-                </el-form-item>
-              </div>
-            </article>
           </section>
 
           <section v-else-if="activeSection === 'button'" class="editor-section">
@@ -268,8 +280,6 @@
                   <el-option v-for="option in actionCategoryOptions" :key="option.value" v-bind="option" />
                 </el-select>
               </el-form-item>
-              <el-form-item label="详情页展示"><el-switch v-model="draft.ui_config.visible_in_detail" /></el-form-item>
-              <el-form-item label="列表展示"><el-switch v-model="draft.ui_config.visible_in_list" /></el-form-item>
               <el-form-item label="执行前确认"><el-switch v-model="draft.ui_config.confirm_required" /></el-form-item>
             </div>
           </section>
@@ -329,7 +339,7 @@
 <script setup>
 import { computed, ref, watch } from 'vue'
 import { ElMessageBox } from 'element-plus'
-import { ArrowDown, ArrowUp } from '@element-plus/icons-vue'
+import { ArrowLeft, Plus, Rank } from '@element-plus/icons-vue'
 
 import {
   ADVANCED_SECTION_KEYS,
@@ -337,22 +347,28 @@ import {
   clearAdvancedSection,
   createAdvancedConfigDraft,
   isAdvancedConfigDirty,
-  moveAdvancedFormField,
   validateAdvancedConfig
 } from '../utils/workflowAdvancedConfig'
+import { groupStateTransitions } from '../utils/workflowTransitionOrdering'
 
 const props = defineProps({
   modelValue: { type: Boolean, default: false },
+  state: { type: Object, default: null },
   transition: { type: Object, default: null },
+  transitions: { type: Array, default: () => [] },
   states: { type: Array, default: () => [] },
   roleOptions: { type: Array, default: () => [] },
   targetTypes: { type: Array, default: () => [] }
 })
 
-const emit = defineEmits(['update:modelValue', 'apply'])
+const emit = defineEmits([
+  'update:modelValue', 'apply', 'back', 'select-transition', 'move-transition',
+  'add-transition', 'remove-transition'
+])
 
 const drawerSize = 'clamp(520px, 42vw, 640px)'
 const sections = [
+  { key: 'basic', label: '基础配置' },
   { key: 'rules', label: '流转规则' },
   { key: 'assignment', label: '处理人与权限' },
   { key: 'form', label: '动作表单' },
@@ -370,13 +386,15 @@ const validatorOptions = [
   { label: '迭代工作项完成门禁', value: 'iteration_terminal_gate' },
   { label: '项目工作项完成门禁', value: 'project_close_gate' }
 ]
-const fieldTypeOptions = [
-  { label: '单行文本', value: 'text' },
-  { label: '多行文本', value: 'textarea' },
-  { label: '下拉选择', value: 'select' },
-  { label: '数字', value: 'number' },
-  { label: '日期', value: 'date' },
-  { label: '日期时间', value: 'datetime' }
+const formPresetOptions = [
+  { label: '无需填写', value: 'none' },
+  { label: '必填原因', value: 'required_reason' },
+  { label: '可选原因', value: 'optional_reason' },
+  { label: 'Bug 类型选择', value: 'bug_type' },
+  { label: 'Bug 类型重分类及原因', value: 'bug_reclassify' },
+  { label: '补充信息', value: 'information' },
+  { label: '实际开始日期', value: 'actual_start_date' },
+  { label: '实际完成日期', value: 'actual_end_date' }
 ]
 const buttonTypeOptions = [
   { label: '主要', value: 'primary' },
@@ -387,8 +405,7 @@ const buttonTypeOptions = [
 ]
 const listDisplayOptions = [
   { label: '主操作', value: 'primary' },
-  { label: '更多操作', value: 'more' },
-  { label: '隐藏', value: 'hidden' }
+  { label: '更多操作', value: 'more' }
 ]
 const actionCategoryOptions = [
   { label: '流程', value: 'workflow' },
@@ -405,9 +422,15 @@ const receiverOptions = [
 ]
 
 const draft = ref(null)
-const activeSection = ref('rules')
+const activeSection = ref('basic')
 const errors = ref(createErrors())
 const drawerVisible = ref(false)
+const draggedTransitionIdentity = ref(null)
+const actionGroups = [
+  { key: 'primary', label: '主操作' },
+  { key: 'more', label: '更多操作' }
+]
+const groupedTransitions = computed(() => groupStateTransitions(props.transitions, props.state?.id))
 
 const sectionStates = computed(() => (
   draft.value ? advancedSectionStates(draft.value, props.states) : unconfiguredSectionStates()
@@ -425,6 +448,17 @@ watch(() => props.modelValue, (visible, wasVisible) => {
   if (visible && !wasVisible) initializeDraft()
 }, { immediate: true })
 
+watch(() => props.transition, () => {
+  if (drawerVisible.value) initializeDraft()
+})
+const formPreset = computed({
+  get: () => formPresetKey(draft.value?.form_config?.fields || []),
+  set: (value) => {
+    if (!draft.value) return
+    draft.value.form_config = fixedFormConfig(value)
+  }
+})
+
 watch(drawerVisible, (visible) => {
   if (visible !== props.modelValue) emit('update:modelValue', visible)
 })
@@ -439,7 +473,7 @@ function unconfiguredSectionStates() {
 
 function initializeDraft() {
   draft.value = props.transition ? createAdvancedConfigDraft(props.transition) : null
-  activeSection.value = 'rules'
+  activeSection.value = 'basic'
   errors.value = createErrors()
 }
 
@@ -485,7 +519,11 @@ function apply() {
     return
   }
   emit('apply', createAdvancedConfigDraft(draft.value))
-  drawerVisible.value = false
+  initializeDraft()
+}
+
+async function requestBack() {
+  if (await confirmDiscardPendingChanges()) emit('back')
 }
 
 function errorFor(field) {
@@ -501,20 +539,54 @@ function stateName(stateId) {
   return props.states.find((state) => state.id === stateId)?.status_name || '-'
 }
 
+function transitionIdentity(item) {
+  return item?.id ?? item?._client_id
+}
+
+function startTransitionDrag(item) {
+  draggedTransitionIdentity.value = transitionIdentity(item)
+}
+
+function dropTransition(targetGroup, targetIndex) {
+  if (draggedTransitionIdentity.value === null) return
+  emit('move-transition', {
+    transitionIdentity: draggedTransitionIdentity.value,
+    targetGroup,
+    targetIndex
+  })
+  draggedTransitionIdentity.value = null
+}
+
 function removeRoute(index) {
   draft.value.condition_routes.splice(index, 1)
 }
 
-function addFormField() {
-  draft.value.form_config.fields.push({ field: '', label: '', type: 'text', required: false, option_lines: '' })
+function formPresetKey(fields) {
+  if (!fields.length) return 'none'
+  if (fields.length === 1 && fields[0].field === 'reason') return fields[0].required ? 'required_reason' : 'optional_reason'
+  if (fields.length === 1 && fields[0].field === 'bug_type') return 'bug_type'
+  if (fields.length === 2 && fields[0].field === 'bug_type' && fields[1].field === 'reason') return 'bug_reclassify'
+  if (fields.length === 1 && fields[0].field === 'content') return 'information'
+  if (fields.length === 1 && fields[0].field === 'effective_time' && fields[0].label === '实际开始日期') return 'actual_start_date'
+  if (fields.length === 1 && fields[0].field === 'effective_time' && fields[0].label === '实际完成日期') return 'actual_end_date'
+  return 'none'
 }
 
-function removeFormField(index) {
-  draft.value.form_config.fields.splice(index, 1)
-}
-
-function moveFormField(index, offset) {
-  moveAdvancedFormField(draft.value, index, offset)
+function fixedFormConfig(key) {
+  const presets = {
+    none: [],
+    required_reason: [{ field: 'reason', label: '原因', type: 'textarea', required: true }],
+    optional_reason: [{ field: 'reason', label: '原因', type: 'textarea', required: false }],
+    bug_type: [{ field: 'bug_type', label: 'Bug 类型', type: 'select', dictionary: 'bug_type', required: true }],
+    bug_reclassify: [
+      { field: 'bug_type', label: 'Bug 类型', type: 'select', dictionary: 'bug_type', required: true },
+      { field: 'reason', label: '重分类原因', type: 'textarea', required: true }
+    ],
+    information: [{ field: 'content', label: '补充内容', type: 'textarea', required: true }],
+    actual_start_date: [{ field: 'effective_time', label: '实际开始日期', type: 'date', required: true }],
+    actual_end_date: [{ field: 'effective_time', label: '实际完成日期', type: 'date', required: true }]
+  }
+  return { fields: structuredClone(presets[key] || []) }
 }
 
 function toggleNotification(key, enabled) {
@@ -581,6 +653,52 @@ defineExpose({ open, hasPendingChanges, confirmDiscardPendingChanges })
   height: 100%;
   min-height: 0;
 }
+
+.state-action-shell {
+  height: 100%;
+  overflow-y: auto;
+  padding: 18px 20px 24px;
+  background: #f7f9fc;
+}
+
+.state-settings,
+.action-group {
+  padding: 16px;
+  border: 1px solid #dfe5ec;
+  border-radius: 6px;
+  background: #fff;
+}
+
+.action-group { margin-top: 14px; }
+.action-group-header,
+.action-group-header > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.action-group-header h3 { margin: 0; color: #172033; font-size: 15px; }
+.action-group-header span { color: #7a8595; font-size: 12px; }
+.action-drop-zone { min-height: 72px; padding-top: 8px; }
+.transition-card {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  min-height: 54px;
+  margin-top: 8px;
+  padding: 9px 12px;
+  border: 1px solid #dfe5ec;
+  border-radius: 6px;
+  color: #344054;
+  background: #fff;
+  cursor: pointer;
+  text-align: left;
+}
+.transition-card:hover { border-color: #84b3e8; background: #f4f8fe; }
+.drag-handle { flex: 0 0 auto; margin-right: 10px; color: #7a8595; cursor: grab; }
+.transition-card-copy { display: grid; min-width: 0; gap: 3px; }
+.transition-card-copy strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.transition-card-copy small { color: #7a8595; }
 
 .drawer-layout {
   display: grid;
@@ -679,6 +797,17 @@ defineExpose({ open, hasPendingChanges, confirmDiscardPendingChanges })
 .subsection-heading { margin: 10px 0 8px; }
 .subsection-heading h4, .notification-heading h4 { font-size: 14px; }
 .empty-hint { padding: 14px 0; color: #7a8595; font-size: 13px; }
+.fixed-form-preview {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+  padding: 12px;
+  border: 1px solid #dfe5ec;
+  border-radius: 6px;
+  background: #f7f9fc;
+}
+.fixed-form-preview > div { display: flex; justify-content: space-between; gap: 12px; }
+.fixed-form-preview span { color: #7a8595; font-size: 12px; }
 
 .route-row {
   display: grid;

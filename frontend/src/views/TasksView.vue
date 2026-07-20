@@ -26,7 +26,7 @@
             <span v-else>{{ row.status_name || '-' }}</span>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="330" fixed="right">
+        <el-table-column label="操作" :width="workflowOperationWidth" fixed="right">
           <template #default="{ row }">
             <WatchToggleButton object-type="task" :object-id="row.id" />
             <WorkflowActionButtons object-type="task" :object-id="row.id" mode="list" :transitions="workflowTransitionsFor(row)" :auto-load="false" :users="users" @command="handleWorkflowCommand(row, $event)" @executed="loadData" /><el-popconfirm v-if="canDeleteTaskRow(row)" title="确认删除该任务？" @confirm="removeTask(row.id)">
@@ -103,6 +103,7 @@ import { canCreateWorkItem, canDeleteWorkItem, currentUserFromStorage } from '..
 import { labelById, userLabel } from '../utils/referenceLabels'
 import { loadCloseReasonMap } from '../utils/closeReasonTooltip'
 import { usePagination } from '../utils/usePagination'
+import { workflowActionColumnWidth } from '../utils/workflowActionColumn'
 import { deriveTaskBranch, TASK_BRANCH_OPTIONS, taskBranchLabel } from '../utils/taskBranchRules'
 
 const router = useRouter()
@@ -126,6 +127,10 @@ const {
   total: taskTotal,
   pagedItems: pagedTasks
 } = usePagination(tasks)
+const workflowOperationWidth = computed(() => workflowActionColumnWidth(
+  pagedTasks.value.map((row) => workflowTransitionsFor(row)),
+  { minWidth: 180, extraWidth: 90 }
+))
 const form = reactive({ project_id: null, source_project_id: null, requirement_id: null, title: '', task_type: 'standalone_operation', priority: 'medium', owner_id: null, due_date: null, description: '' })
 const ownerManuallySet = ref(false)
 const availableRequirements = computed(() => {

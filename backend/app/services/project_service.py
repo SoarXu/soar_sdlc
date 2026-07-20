@@ -299,14 +299,13 @@ def replace_project_members(db: Session, project_id: int, payload: list[ProjectM
     return list_project_members(db, project_id)
 
 
-def start_project(db: Session, project_id: int, payload: StatusOperationCreate | None = None, actor_id: int | None = None) -> Project:
-    project = _get_active_project(db, project_id)
+def _project_transition(db: Session, project: Project, action_keys: set[str]) -> WorkflowTransition:
     transition = (
         db.query(WorkflowTransition)
         .filter(
             WorkflowTransition.definition_id == project.workflow_definition_id,
             WorkflowTransition.from_state_id == project.current_state_id,
-            WorkflowTransition.action_key.in_(("start", "resume")),
+            WorkflowTransition.action_key.in_(action_keys),
             WorkflowTransition.enabled.is_(True),
         )
         .order_by(WorkflowTransition.id.asc())
@@ -314,6 +313,12 @@ def start_project(db: Session, project_id: int, payload: StatusOperationCreate |
     )
     if not transition:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="只有规划中或已挂起的项目可以启动")
+    return transition
+
+
+def start_project(db: Session, project_id: int, payload: StatusOperationCreate | None = None, actor_id: int | None = None) -> Project:
+    project = _get_active_project(db, project_id)
+    transition = _project_transition(db, project, {"start", "resume"})
     if transition.action_key == "start":
         _require_effective_time(payload, "请选择实际开始日期")
         project.actual_start_date = _effective_date(payload)
@@ -322,7 +327,7 @@ def start_project(db: Session, project_id: int, payload: StatusOperationCreate |
         "project",
         project.id,
         WorkflowTransitionExecuteRequest(
-            action_key=transition.action_key,
+            transition_id=transition.id,
             payload=_status_payload_dict(payload),
         ),
         _actor_user(db, actor_id),
@@ -335,11 +340,12 @@ def start_project(db: Session, project_id: int, payload: StatusOperationCreate |
 
 def suspend_project(db: Session, project_id: int, payload: StatusOperationCreate | None = None, actor_id: int | None = None) -> Project:
     project = _get_active_project(db, project_id)
+    transition = _project_transition(db, project, {"suspend"})
     execute_transition(
         db,
         "project",
         project.id,
-        WorkflowTransitionExecuteRequest(action_key="suspend", payload=_status_payload_dict(payload)),
+        WorkflowTransitionExecuteRequest(transition_id=transition.id, payload=_status_payload_dict(payload)),
         _actor_user(db, actor_id),
     )
     db.commit()
@@ -349,13 +355,14 @@ def suspend_project(db: Session, project_id: int, payload: StatusOperationCreate
 
 def close_project(db: Session, project_id: int, payload: StatusOperationCreate | None = None, actor_id: int | None = None) -> Project:
     project = _get_active_project(db, project_id)
+    transition = _project_transition(db, project, {"close"})
     _require_effective_time(payload, "请选择实际完成日期")
     execute_transition(
         db,
         "project",
         project.id,
         WorkflowTransitionExecuteRequest(
-            action_key="close",
+            transition_id=transition.id,
             payload=_status_payload_dict(payload),
         ),
         _actor_user(db, actor_id),
@@ -368,11 +375,12 @@ def close_project(db: Session, project_id: int, payload: StatusOperationCreate |
 
 def activate_project(db: Session, project_id: int, payload: StatusOperationCreate | None = None, actor_id: int | None = None) -> Project:
     project = _get_active_project(db, project_id)
+    transition = _project_transition(db, project, {"activate"})
     execute_transition(
         db,
         "project",
         project.id,
-        WorkflowTransitionExecuteRequest(action_key="activate", payload=_status_payload_dict(payload)),
+        WorkflowTransitionExecuteRequest(transition_id=transition.id, payload=_status_payload_dict(payload)),
         _actor_user(db, actor_id),
     )
     project.actual_end_date = None

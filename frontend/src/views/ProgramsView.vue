@@ -52,7 +52,7 @@
         <el-table-column label="状态" min-width="90">
           <template #default="{ row }">{{ statusLabel(row) }}</template>
         </el-table-column>
-        <el-table-column label="操作" width="440" fixed="right">
+        <el-table-column label="操作" :width="programOperationWidth" fixed="right">
           <template #default="{ row }">
             <template v-if="row.nodeType === 'program'">
               <el-button link type="primary" @click="openEdit(row)">编辑</el-button>
@@ -68,10 +68,15 @@
             </template>
             <template v-else>
               <el-button link type="primary" @click="openProjectEdit(row.id)">编辑</el-button>
-              <el-button v-if="hasProjectAction(row, 'start') || hasProjectAction(row, 'resume')" link type="success" @click="openStatusDialog(row, 'project', 'start')">启动</el-button>
-              <el-button v-if="hasProjectAction(row, 'suspend')" link type="warning" @click="openStatusDialog(row, 'project', 'suspend')">挂起</el-button>
-              <el-button v-if="hasProjectAction(row, 'close')" link type="danger" @click="openStatusDialog(row, 'project', 'close')">关闭</el-button>
-              <el-button v-if="hasProjectAction(row, 'activate')" link type="success" @click="openStatusDialog(row, 'project', 'activate')">激活</el-button>
+              <WorkflowActionButtons
+                object-type="project"
+                :object-id="row.id"
+                mode="list"
+                :transitions="projectWorkflowTransitions[row.id] || []"
+                :auto-load="false"
+                :users="users"
+                @executed="loadData"
+              />
               <el-button link type="success" @click="openSubProjectCreate(row)">新增项目</el-button>
             </template>
           </template>
@@ -226,8 +231,10 @@ import {
 } from '../api/projects'
 import { fetchUsers } from '../api/users'
 import { fetchWorkflowTransitionsBatch } from '../api/workflowRuntime'
+import WorkflowActionButtons from '../components/WorkflowActionButtons.vue'
 import { userLabel } from '../utils/referenceLabels'
 import { usePagination } from '../utils/usePagination'
+import { workflowActionColumnWidth } from '../utils/workflowActionColumn'
 import { replaceWorkflowTransitionMap } from '../utils/workflowRuntimeActions'
 
 const router = useRouter()
@@ -310,6 +317,11 @@ const {
   total: treeTotal,
   pagedItems: pagedTreeRows
 } = usePagination(treeRows)
+const programOperationWidth = computed(() => workflowActionColumnWidth(
+  flatProjects.value
+    .map((row) => projectWorkflowTransitions.value[row.id] || []),
+  { minWidth: 440, extraWidth: 150 }
+))
 
 function statusLabel(row) {
   if ('from_state_name' in row || 'to_state_name' in row) {
@@ -330,13 +342,9 @@ function statusActionLabel(value) {
   return statusActionOptions[value] || value || '-'
 }
 
-function hasProjectAction(row, actionKey) {
-  return Boolean(row && (projectWorkflowTransitions.value[row.id] || []).some((item) => item.action_key === actionKey))
-}
-
 function startDateRequired() {
   if (statusTargetType.value === 'program') return statusTarget.value?.status === 'planning'
-  return hasProjectAction(statusTarget.value, 'start')
+  return !statusTarget.value?.actual_start_date
 }
 
 function buildProjectTree(projects, programId) {

@@ -43,14 +43,20 @@
         <el-table-column label="工作流方案" width="180" show-overflow-tooltip>
           <template #default="{ row }">{{ workflowSchemeLabel(row.assignee_rule_config_id) }}</template>
         </el-table-column>
-        <el-table-column label="操作" width="330" fixed="right">
+        <el-table-column label="操作" :width="projectOperationWidth" fixed="right">
           <template #default="{ row }">
             <el-button v-if="canManageProjectRow(row)" link type="primary" @click="openEdit(row)">编辑</el-button>
             <el-button v-if="canCreateProject" link type="success" @click="openCreate(row)">新增项目</el-button>
-            <el-button v-if="canManageProjectRow(row) && (hasProjectAction(row, 'start') || hasProjectAction(row, 'resume'))" link type="success" @click="openStatusDialog(row, 'start')">启动</el-button>
-            <el-button v-if="canManageProjectRow(row) && hasProjectAction(row, 'suspend')" link type="warning" @click="openStatusDialog(row, 'suspend')">挂起</el-button>
-            <el-button v-if="canManageProjectRow(row) && hasProjectAction(row, 'close')" link type="danger" @click="openStatusDialog(row, 'close')">关闭</el-button>
-            <el-button v-if="canManageProjectRow(row) && hasProjectAction(row, 'activate')" link type="success" @click="openStatusDialog(row, 'activate')">激活</el-button>
+            <WorkflowActionButtons
+              v-if="canManageProjectRow(row)"
+              object-type="project"
+              :object-id="row.id"
+              mode="list"
+              :transitions="workflowTransitions[row.id] || []"
+              :auto-load="false"
+              :users="users"
+              @executed="loadData"
+            />
             <el-popconfirm v-if="canDeleteProjectRow" title="确认删除该项目？子项目将一并删除。" @confirm="removeProject(row.id)">
               <template #reference><el-button link type="danger">删除</el-button></template>
             </el-popconfirm>
@@ -164,10 +170,12 @@ import {
 } from '../api/projects'
 import { fetchUsers } from '../api/users'
 import { fetchWorkflowTransitionsBatch } from '../api/workflowRuntime'
+import WorkflowActionButtons from '../components/WorkflowActionButtons.vue'
 import { showActionError } from '../utils/actionFeedback'
 import { canDeleteProject, canManageProject, currentUserFromStorage, isSystemAdmin } from '../utils/permissions'
 import { labelById, userLabel } from '../utils/referenceLabels'
 import { usePagination } from '../utils/usePagination'
+import { workflowActionColumnWidth } from '../utils/workflowActionColumn'
 import { replaceWorkflowTransitionMap } from '../utils/workflowRuntimeActions'
 
 const loading = ref(false)
@@ -213,6 +221,10 @@ const {
   total: projectTotal,
   pagedItems: pagedProjectTree
 } = usePagination(projectTree)
+const projectOperationWidth = computed(() => workflowActionColumnWidth(
+  projects.value.map((row) => (canManageProjectRow(row) ? workflowTransitions.value[row.id] || [] : [])),
+  { minWidth: 330, extraWidth: 190 }
+))
 const form = reactive({ parent_id: null, program_id: null, name: '', owner_id: null, assignee_rule_config_id: null, start_date: null, end_date: null, is_long_term: false, description: '' })
 const statusActionOptions = {
   start: '启动',
@@ -224,7 +236,7 @@ const statusForm = reactive({ effective_time: '', remark: '' })
 
 const statusDialogTitle = computed(() => `${statusActionLabel(statusAction.value)}项目 ${statusTarget.value?.name || ''}`)
 const statusConfirmText = computed(() => `${statusActionLabel(statusAction.value)}项目`)
-const statusDateRequired = computed(() => statusAction.value === 'close' || (statusAction.value === 'start' && hasProjectAction(statusTarget.value, 'start')))
+const statusDateRequired = computed(() => statusAction.value === 'close' || (statusAction.value === 'start' && !statusTarget.value?.actual_start_date))
 const statusDateLabel = computed(() => (statusAction.value === 'start' ? '实际开始日期' : '实际完成日期'))
 
 function statusActionLabel(value) {
@@ -237,7 +249,6 @@ function workflowSchemeLabel(configId) {
 }
 function membersForProject(projectId) { return projectMembersById.value[projectId] || [] }
 function canManageProjectRow(row) { return canManageProject(row, currentUser.value, membersForProject(row.id)) }
-function hasProjectAction(row, actionKey) { return Boolean(row && (workflowTransitions.value[row.id] || []).some((item) => item.action_key === actionKey)) }
 
 function resetForm() {
   Object.assign(form, { parent_id: null, program_id: null, name: '', owner_id: null, assignee_rule_config_id: null, start_date: null, end_date: null, is_long_term: false, description: '' })

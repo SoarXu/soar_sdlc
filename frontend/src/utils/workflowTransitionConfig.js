@@ -57,6 +57,7 @@ export function serializeWorkflowTransition(item) {
   const {
     id,
     definition_id,
+    action_key,
     _client_id,
     allowed_role_list,
     handler_target_roles,
@@ -65,6 +66,9 @@ export function serializeWorkflowTransition(item) {
     ...rest
   } = item
   const conditionConfig = { ...(rest.condition_config || {}) }
+  const uiConfig = { ...(rest.ui_config || {}) }
+  for (const key of ['hidden', 'list_priority', 'visible_in_detail', 'visible_in_list']) delete uiConfig[key]
+  uiConfig.list_display = uiConfig.list_display === 'primary' ? 'primary' : 'more'
   const formConfig = { ...(rest.form_config || {}) }
   formConfig.fields = (formConfig.fields || []).map(({ option_lines, ...field }) => ({
     ...field,
@@ -97,7 +101,7 @@ export function serializeWorkflowTransition(item) {
     form_config: formConfig.fields?.length || formConfig.title || formConfig.submit_text
       ? formConfig
       : null,
-    ui_config: Object.keys(rest.ui_config || {}).length ? rest.ui_config : null,
+    ui_config: uiConfig,
     allowed_roles: allowed_role_list.join(','),
     handler_rule: {
       ...rest.handler_rule,

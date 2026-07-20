@@ -85,7 +85,7 @@ assert.doesNotMatch(onDragBody, /canvasSize\.value\.(?:width|height)/)
 
 assert.match(
   source,
-  /<el-button size="small" @click="addTransition">新增流转<\/el-button>\s*<el-button size="small" @click="organizeLayout">整理布局<\/el-button>\s*<el-button size="small" @click="fitToContent">适应视图<\/el-button>/
+  /<el-button size="small" @click="addState">新增状态<\/el-button>\s*<el-button size="small" @click="organizeLayout">整理布局<\/el-button>\s*<el-button size="small" @click="fitToContent">适应视图<\/el-button>/
 )
 
 const applyOrganizedLayoutBody = functionBody('applyOrganizedLayout', 'organizeLayout')

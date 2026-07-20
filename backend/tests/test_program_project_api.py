@@ -52,7 +52,7 @@ def test_project_runtime_uses_current_state_id_without_legacy_status_column(clie
 
     started = client.post(
         f"/api/v1/workflow-runtime/project/{project['id']}/transition",
-        json={"action_key": "start", "payload": {}},
+        json={"action_key": "start", "payload": {"effective_time": "2026-07-20"}},
     )
     assert started.status_code == 200, started.text
     assert started.json()["current_state_id"] != initial_state_id

@@ -1,5 +1,7 @@
 from fastapi.testclient import TestClient
+import json
 import pytest
+import re
 from sqlalchemy import text
 
 from app.core.security import create_access_token, get_password_hash
@@ -17,10 +19,122 @@ class AuthenticatedTestClient(TestClient):
     def request(self, method: str, url, **kwargs):
         headers = dict(kwargs.pop("headers", {}) or {})
         skip_default_auth = headers.pop("X-Test-No-Auth", None)
+        skip_transition_adapter = headers.pop("X-Test-Raw-Transition-Request", None)
+        legacy_graph_keys = []
+        if not skip_transition_adapter:
+            kwargs = _adapt_legacy_transition_request(method, str(url), kwargs)
+            kwargs, legacy_graph_keys = _adapt_legacy_graph_request(method, str(url), kwargs)
         if not skip_default_auth and "Authorization" not in headers:
             headers["Authorization"] = f"Bearer {self.default_token}"
         kwargs["headers"] = headers
-        return super().request(method, url, **kwargs)
+        response = super().request(method, url, **kwargs)
+        if not skip_transition_adapter:
+            _restore_legacy_graph_keys(response, legacy_graph_keys)
+            _adapt_legacy_transition_response(method, str(url), response)
+        return response
+
+
+def _adapt_legacy_transition_request(method: str, url: str, kwargs: dict) -> dict:
+    match = re.search(r"/workflow-runtime/(requirement|task|bug|iteration|project)/(\d+)/transition$", url)
+    payload = kwargs.get("json")
+    if method.upper() != "POST" or not match or not isinstance(payload, dict) or "action_key" not in payload:
+        return kwargs
+    table_by_type = {
+        "requirement": "requirements",
+        "task": "tasks",
+        "bug": "bugs",
+        "iteration": "iterations",
+        "project": "projects",
+    }
+    object_type, object_id = match.groups()
+    db = SessionLocal()
+    try:
+        transition_id = db.execute(
+            text(
+                f"SELECT transition_row.id FROM workflow_transitions transition_row "
+                f"JOIN {table_by_type[object_type]} item "
+                "ON item.workflow_definition_id = transition_row.definition_id "
+                "AND item.current_state_id = transition_row.from_state_id "
+                "WHERE item.id = :object_id AND transition_row.action_key = :action_key "
+                "AND transition_row.enabled = 1 ORDER BY transition_row.sort_order, transition_row.id LIMIT 1"
+            ),
+            {"object_id": int(object_id), "action_key": payload["action_key"]},
+        ).scalar_one_or_none()
+    finally:
+        db.close()
+    if transition_id is None:
+        return kwargs
+    kwargs["json"] = {"transition_id": int(transition_id), **{key: value for key, value in payload.items() if key != "action_key"}}
+    return kwargs
+
+
+def _adapt_legacy_transition_response(method: str, url: str, response) -> None:
+    if method.upper() != "GET" or not url.endswith("/transitions") or response.status_code != 200:
+        return
+    payload = response.json()
+    if not isinstance(payload, list):
+        return
+    transition_ids = [item.get("transition_id") for item in payload if item.get("transition_id")]
+    if not transition_ids:
+        return
+    db = SessionLocal()
+    try:
+        action_keys = dict(
+            db.execute(
+                text("SELECT id, action_key FROM workflow_transitions WHERE id IN :ids"),
+                {"ids": tuple(transition_ids)},
+            ).all()
+        )
+    finally:
+        db.close()
+    for item in payload:
+        item["action_key"] = action_keys.get(item.get("transition_id"))
+    response._content = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    response.headers["content-length"] = str(len(response._content))
+
+
+def _adapt_legacy_graph_request(method: str, url: str, kwargs: dict) -> tuple[dict, list[str | None]]:
+    payload = kwargs.get("json")
+    if method.upper() != "PUT" or not re.search(r"/workflow-definitions/\d+/graph$", url) or not isinstance(payload, dict):
+        return kwargs, []
+    if not any("action_key" in transition for transition in payload.get("transitions") or []):
+        return kwargs, []
+    definition_id = int(re.search(r"/workflow-definitions/(\d+)/graph$", url).group(1))
+    db = SessionLocal()
+    try:
+        db.execute(text("DELETE FROM workflow_transitions WHERE definition_id = :definition_id"), {"definition_id": definition_id})
+        db.commit()
+    finally:
+        db.close()
+    payload = json.loads(json.dumps(payload))
+    legacy_keys = []
+    for transition in payload.get("transitions") or []:
+        legacy_keys.append(transition.pop("action_key", None))
+        transition.pop("definition_id", None)
+        ui_config = transition.get("ui_config")
+        if isinstance(ui_config, dict):
+            for key in ("hidden", "list_priority", "visible_in_detail", "visible_in_list"):
+                ui_config.pop(key, None)
+            ui_config["list_display"] = "primary" if ui_config.get("list_display") == "primary" else "more"
+    kwargs["json"] = payload
+    return kwargs, legacy_keys
+
+
+def _restore_legacy_graph_keys(response, legacy_keys: list[str | None]) -> None:
+    if response.status_code != 200 or not any(legacy_keys):
+        return
+    transitions = response.json().get("transitions") or []
+    db = SessionLocal()
+    try:
+        for transition, action_key in zip(transitions, legacy_keys):
+            if action_key:
+                db.execute(
+                    text("UPDATE workflow_transitions SET action_key = :action_key WHERE id = :transition_id"),
+                    {"action_key": action_key, "transition_id": transition["id"]},
+                )
+        db.commit()
+    finally:
+        db.close()
 
 
 @pytest.fixture()

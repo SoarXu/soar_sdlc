@@ -1,5 +1,6 @@
 from copy import deepcopy
 from datetime import datetime
+from uuid import uuid4
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 
@@ -15,6 +16,7 @@ from app.views.workflow_definition_view import (
     WorkflowDefinitionCreate,
     WorkflowDefinitionUpdate,
     WorkflowGraphSave,
+    WorkflowTemplateGraphSave,
 )
 
 
@@ -37,9 +39,9 @@ VALIDATOR_TYPES = {
 }
 FORM_FIELD_TYPES = {"text", "textarea", "select", "number", "date", "datetime"}
 UI_CONFIG_KEYS = {
-    "button_type", "list_display", "list_priority", "confirm_required", "hidden",
+    "button_type", "list_display", "confirm_required",
     "ownerless_only", "requires_owner", "handler_scope", "command_type",
-    "action_category", "visible_in_detail", "visible_in_list",
+    "action_category",
 }
 CONDITION_CONFIG_KEYS = {
     "task_types", "field", "routes", "route_dictionary", "routing_mode", "allow_override_roles",
@@ -130,9 +132,11 @@ def _save_graph(
     db: Session,
     definition: WorkflowDefinition,
     payload: WorkflowGraphSave,
+    *,
+    disable_omitted_transitions: bool = False,
 ) -> None:
     _validate_graph(db, definition, payload)
-    _persist_graph(db, definition, payload)
+    _persist_graph(db, definition, payload, disable_omitted_transitions=disable_omitted_transitions)
     definition.version = (definition.version or 1) + 1
     definition.update_time = datetime.now()
     db.commit()
@@ -146,7 +150,7 @@ def apply_template(db: Session, definition_id: int) -> dict:
         definition,
         graph_for_object_type(definition.object_type),
     )
-    _save_graph(db, definition, payload)
+    _save_graph(db, definition, payload, disable_omitted_transitions=True)
     return _graph_response(db, definition)
 
 
@@ -188,7 +192,7 @@ def _validate_graph(db: Session, definition: WorkflowDefinition, payload: Workfl
     if initial and not initial.enabled:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Initial state must be enabled")
     transition_ids: set[int] = set()
-    transition_keys: set[tuple[str, int, int]] = set()
+    transition_names: set[tuple[int, str]] = set()
     for transition in payload.transitions:
         if transition.id is not None and transition.id > 0:
             if transition.id in transition_ids:
@@ -196,10 +200,14 @@ def _validate_graph(db: Session, definition: WorkflowDefinition, payload: Workfl
             transition_ids.add(transition.id)
         if transition.from_state_id not in state_ids or transition.to_state_id not in state_ids:
             raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Transition references unknown state")
-        key = (transition.action_key, transition.from_state_id, transition.to_state_id)
-        if key in transition_keys:
-            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Duplicate transition")
-        transition_keys.add(key)
+        name_key = (transition.from_state_id, transition.action_name.strip())
+        if transition.enabled and name_key in transition_names:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Duplicate enabled transition name for source state",
+            )
+        if transition.enabled:
+            transition_names.add(name_key)
         _validate_roles(db, transition.allowed_roles)
         _validate_handler_rule(db, transition.handler_rule)
         _validate_condition_config(db, transition.condition_config, state_ids)
@@ -299,6 +307,8 @@ def _validate_typed_config(config: dict | list | None, allowed_types: set[str], 
 def _validate_ui_config(config: dict | None) -> None:
     if config and (not isinstance(config, dict) or set(config) - UI_CONFIG_KEYS):
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Unsupported UI configuration")
+    if config and config.get("list_display", "more") not in {"primary", "more"}:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Unsupported button group")
 
 
 def _validate_automation_config(config: dict | list | None, label: str) -> None:
@@ -316,6 +326,8 @@ def _persist_graph(
     db: Session,
     definition: WorkflowDefinition,
     payload: WorkflowGraphSave,
+    *,
+    disable_omitted_transitions: bool = False,
 ) -> list[WorkflowTransition]:
     existing_states = {
         item.id: item
@@ -365,7 +377,7 @@ def _persist_graph(
     for item in payload.transitions:
         from_state_id = state_id_map[item.from_state_id]
         to_state_id = state_id_map[item.to_state_id]
-        data = item.model_dump(exclude={"id", "from_state_id", "to_state_id"})
+        data = item.model_dump(exclude={"id", "from_state_id", "to_state_id", "action_key"})
         data["condition_config"] = _remap_condition_state_ids(data.get("condition_config"), state_id_map)
         if item.id is not None and item.id > 0:
             transition = existing_transitions.get(item.id)
@@ -378,7 +390,11 @@ def _persist_graph(
             for field, value in data.items():
                 setattr(transition, field, value)
         else:
-            transition = WorkflowTransition(definition_id=definition.id, **data)
+            transition = WorkflowTransition(
+                definition_id=definition.id,
+                action_key=getattr(item, "action_key", None) or f"custom_{uuid4().hex}",
+                **data,
+            )
             db.add(transition)
         transition.from_state_id = from_state_id
         transition.to_state_id = to_state_id
@@ -387,8 +403,14 @@ def _persist_graph(
 
     omitted_transition_ids = set(existing_transitions) - submitted_transition_ids
     if omitted_transition_ids:
-        db.query(WorkflowTransition).filter(WorkflowTransition.id.in_(omitted_transition_ids)).delete(
-            synchronize_session=False
+        if disable_omitted_transitions:
+            for transition_id in omitted_transition_ids:
+                existing_transitions[transition_id].enabled = False
+            omitted_transition_ids = set()
+    if omitted_transition_ids:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Persisted workflow transitions cannot be deleted; disable them instead",
         )
 
     definition.initial_state_id = initial_state_id
@@ -439,7 +461,7 @@ def _remap_condition_state_ids(config: dict | list | None, state_id_map: dict[in
     return remapped
 
 
-def _template_graph_payload(db: Session, definition: WorkflowDefinition, template) -> WorkflowGraphSave:
+def _template_graph_payload(db: Session, definition: WorkflowDefinition, template) -> WorkflowTemplateGraphSave:
     ref_to_input_id: dict[str, int] = {}
     states = []
     next_temp_id = -1
@@ -471,7 +493,7 @@ def _template_graph_payload(db: Session, definition: WorkflowDefinition, templat
         data["condition_config"] = condition
         transitions.append(data)
     initial = next((item for item in template.states if item.category == "start"), None)
-    return WorkflowGraphSave(
+    return WorkflowTemplateGraphSave(
         initial_state_id=ref_to_input_id[initial.ref] if initial else None,
         states=states,
         transitions=transitions,

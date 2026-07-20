@@ -249,7 +249,7 @@ def test_runtime_change_handler_rejects_terminal_items_independently(client: Tes
     )
 
     assert active_response.status_code == 200
-    assert terminal_response.status_code == 400
+    assert terminal_response.status_code == 422
     assert client.get(f"/api/v1/requirements/{active_requirement['id']}").json()["owner_id"] == target_id
 
 

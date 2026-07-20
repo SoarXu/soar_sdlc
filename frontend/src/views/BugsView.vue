@@ -18,7 +18,7 @@
         <el-table-column label="当前处理人" width="140"><template #default="{ row }">{{ userLabel(users, row.owner_id) }}</template></el-table-column>
         <el-table-column label="严重程度" width="110"><template #default="{ row }"><RequirementPriorityBadge :value="row.severity" /></template></el-table-column>
         <el-table-column label="状态" width="120"><template #default="{ row }">{{ row.status_name || '-' }}</template></el-table-column>
-        <el-table-column label="操作" width="470" fixed="right">
+        <el-table-column label="操作" :width="workflowOperationWidth" fixed="right">
           <template #default="{ row }">
             <div class="table-actions">
               <WatchToggleButton object-type="bug" :object-id="row.id" />
@@ -87,6 +87,7 @@ import { labelById, userLabel } from '../utils/referenceLabels'
 import { bugIterationOptions, includeSelectedIterationOption } from '../utils/bugIterations'
 import { canCreateWorkItem, canDeleteWorkItem, currentUserFromStorage } from '../utils/permissions'
 import { usePagination } from '../utils/usePagination'
+import { workflowActionColumnWidth } from '../utils/workflowActionColumn'
 
 const router = useRouter()
 const loading = ref(false), saving = ref(false), dialogVisible = ref(false), editingId = ref(null)
@@ -100,6 +101,10 @@ const {
   total: bugTotal,
   pagedItems: pagedBugs
 } = usePagination(bugs)
+const workflowOperationWidth = computed(() => workflowActionColumnWidth(
+  pagedBugs.value.map((row) => workflowTransitionsFor(row)),
+  { minWidth: 180, extraWidth: 90 }
+))
 const priorityLevelOptions = [
   { label: '① 最高', value: '1' },
   { label: '② 高', value: '2' },

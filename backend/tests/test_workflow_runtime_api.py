@@ -94,17 +94,21 @@ def test_runtime_discovers_executes_and_audits_transitions_by_state_id(client: T
 
     actions = client.get(
         f"/api/v1/workflow-runtime/requirement/{requirement['id']}/transitions",
-        headers={"Authorization": f"Bearer {token}"},
+        headers={"Authorization": f"Bearer {token}", "X-Test-Raw-Transition-Request": "1"},
     )
 
     assert actions.status_code == 200
-    claim = next(item for item in actions.json() if item["action_key"] == "claim")
+    claim = next(item for item in actions.json() if item["action_name"] == "认领")
+    assert isinstance(claim["transition_id"], int)
+    assert "action_key" not in claim
+    assert "list_priority" not in claim
+    assert claim["sort_order"] >= 0
     assert claim["from_state_id"] == requirement["current_state_id"]
     assert claim["to_state_id"] != claim["from_state_id"]
 
     executed = client.post(
         f"/api/v1/workflow-runtime/requirement/{requirement['id']}/transition",
-        json={"action_key": "claim"},
+        json={"transition_id": claim["transition_id"]},
         headers={"Authorization": f"Bearer {token}"},
     )
 
@@ -123,6 +127,13 @@ def test_runtime_discovers_executes_and_audits_transitions_by_state_id(client: T
     assert operation["to_state_id"] == claim["to_state_id"]
     assert operation["from_state_name"] == "待分派"
     assert operation["to_state_name"] == "处理中"
+
+    rejected_legacy = client.post(
+        f"/api/v1/workflow-runtime/requirement/{requirement['id']}/transition",
+        json={"action_key": "claim"},
+        headers={"Authorization": f"Bearer {token}", "X-Test-Raw-Transition-Request": "1"},
+    )
+    assert rejected_legacy.status_code == 422
 
 
 def _create_project_with_bug_workflow(client: TestClient) -> tuple[int, int]:
@@ -191,7 +202,7 @@ def _create_project_with_bug_workflow(client: TestClient) -> tuple[int, int]:
             ],
         },
     )
-    assert graph.status_code == 200
+    assert graph.status_code == 200, graph.text
     enabled = client.post(f"/api/v1/assignee-rule-configs/{config.json()['id']}/enable")
     assert enabled.status_code == 200, enabled.text
     project = client.post(
@@ -938,23 +949,27 @@ def test_scoped_workflow_does_not_fallback_to_system_action(client: TestClient):
         },
     ).json()
     definition = _scheme_definition(client, config["id"], "task")
+    existing_graph = client.get(f"/api/v1/workflow-definitions/{definition['id']}").json()
     graph = client.put(
         f"/api/v1/workflow-definitions/{definition['id']}/graph",
         json={
-            "initial_state_id": -1,
-            "states": [
+            "initial_state_id": existing_graph["definition"]["initial_state_id"],
+            "states": existing_graph["states"],
+            "transitions": [
                 {
-                    "id": -1,
-                    "status_name": "Pending Assignment",
-                    "category": "start",
-                    "x": 100,
-                    "y": 100,
+                    **{key: value for key, value in item.items() if key != "definition_id"},
+                    "enabled": False,
+                    "ui_config": {
+                        key: value
+                        for key, value in (item.get("ui_config") or {}).items()
+                        if key not in {"hidden", "list_priority", "visible_in_detail", "visible_in_list"}
+                    },
                 }
+                for item in existing_graph["transitions"]
             ],
-            "transitions": [],
         },
     )
-    assert graph.status_code == 200
+    assert graph.status_code == 200, graph.text
     member_id, member_token = _create_user("Authoritative Member", "developer")
     _add_project_member(project["id"], member_id, "developer")
     task = client.post(
@@ -979,8 +994,8 @@ def test_scoped_workflow_does_not_fallback_to_system_action(client: TestClient):
 
     assert listed.status_code == 200
     assert listed.json() == []
-    assert executed.status_code == 400
-    assert "not available" in executed.json()["detail"].lower()
+    assert executed.status_code == 422
+    assert any(error["loc"][-1] == "transition_id" for error in executed.json()["detail"])
 
 
 def test_runtime_owner_transfer_and_admin_change_handler_are_atomic_and_audited(client: TestClient):

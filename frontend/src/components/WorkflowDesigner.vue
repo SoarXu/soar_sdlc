@@ -162,8 +162,7 @@ import {
 } from '../api/workflowDefinitions'
 import { layoutWorkflowNodes } from '../utils/workflowAutoLayout'
 import { projectWorkflowCanvas } from '../utils/workflowCanvasProjection'
-import { combineWorkflowDragViews } from '../utils/workflowDragViews'
-import { buildWorkflowEdgePreviewViews, buildWorkflowEdgeViews } from '../utils/workflowEdgePath'
+import { buildWorkflowEdgeViews } from '../utils/workflowEdgePath'
 import { requestWorkflowOrganization } from '../utils/workflowLayoutInteraction'
 import {
   normalizeWorkflowTransition as normalizeTransition,
@@ -235,8 +234,9 @@ const dragging = reactive({
   startY: 0,
   originX: 0,
   originY: 0,
-  edgeViews: [],
-  canvasEdges: []
+  pendingX: 0,
+  pendingY: 0,
+  frame: 0
 })
 const viewportDrag = reactive({ active: false, startX: 0, startY: 0, originX: 0, originY: 0 })
 const enabledStates = computed(() => states.value.filter((state) => state.enabled))
@@ -244,13 +244,8 @@ const canvasProjection = computed(() => projectWorkflowCanvas(states.value, tran
 const fullTransitionViews = computed(() => (
   buildWorkflowEdgeViews(states.value, canvasProjection.value.routedTransitions, transitionKey)
 ))
-const previewTransitionViews = computed(() => (
-  buildWorkflowEdgePreviewViews(states.value, canvasProjection.value.routedTransitions, transitionKey)
-))
-const transitionViews = computed(() => dragging.state
-  ? combineWorkflowDragViews(dragging.edgeViews, previewTransitionViews.value, dragging.state.id)
-  : fullTransitionViews.value)
-const canvasEdgeViews = computed(() => dragging.state ? dragging.canvasEdges : fullTransitionViews.value)
+const transitionViews = computed(() => fullTransitionViews.value)
+const canvasEdgeViews = computed(() => fullTransitionViews.value)
 const nodeActionTriggers = computed(() => states.value.flatMap((state) => {
   const actions = canvasProjection.value.stateActionsByStateId.get(state.id) || []
   if (!actions.length) return []
@@ -350,6 +345,7 @@ onBeforeUnmount(() => {
   window.removeEventListener('mousemove', onViewportDrag)
   window.removeEventListener('mouseup', stopViewportDrag)
   window.removeEventListener('beforeunload', onBeforeUnload)
+  if (dragging.frame) cancelAnimationFrame(dragging.frame)
   workflowCanvasResizeObserver?.disconnect()
 })
 
@@ -630,19 +626,27 @@ function selectNodeAction(transition) {
 
 function startDrag(state, event) {
   closeNodeActionMenu()
-  dragging.edgeViews = [...fullTransitionViews.value]
-  dragging.canvasEdges = [...fullTransitionViews.value]
   dragging.state = state
   dragging.startX = event.clientX
   dragging.startY = event.clientY
   dragging.originX = state.x
   dragging.originY = state.y
+  dragging.pendingX = event.clientX
+  dragging.pendingY = event.clientY
 }
 
 function onDrag(event) {
   if (!dragging.state) return
-  dragging.state.x = Math.max(20, Math.min(canvasSize.value.right - 140, dragging.originX + event.clientX - dragging.startX))
-  dragging.state.y = Math.max(20, Math.min(canvasSize.value.bottom - 70, dragging.originY + event.clientY - dragging.startY))
+  dragging.pendingX = event.clientX
+  dragging.pendingY = event.clientY
+  if (!dragging.frame) dragging.frame = requestAnimationFrame(flushNodeDrag)
+}
+
+function flushNodeDrag() {
+  dragging.frame = 0
+  if (!dragging.state) return
+  dragging.state.x = Math.max(20, Math.min(canvasSize.value.right - 140, dragging.originX + dragging.pendingX - dragging.startX))
+  dragging.state.y = Math.max(20, Math.min(canvasSize.value.bottom - 70, dragging.originY + dragging.pendingY - dragging.startY))
 }
 
 function clampCurrentViewport(nextCanvas = canvasSize.value) {
@@ -653,10 +657,13 @@ function clampCurrentViewport(nextCanvas = canvasSize.value) {
 
 function stopDrag() {
   if (!dragging.state) return
+  if (dragging.frame) {
+    cancelAnimationFrame(dragging.frame)
+    dragging.frame = 0
+    flushNodeDrag()
+  }
   suppressCanvasClamp.value = true
   dragging.state = null
-  dragging.edgeViews = []
-  dragging.canvasEdges = []
   nextTick(() => {
     suppressCanvasClamp.value = false
   })

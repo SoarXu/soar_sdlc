@@ -247,10 +247,10 @@ function layerHeight(ids, selfActionCount) {
 }
 
 function nodeBlockHeight(id, selfActionCount) {
-  const actionCount = selfActionCount.get(id) || 0
-  if (!actionCount) return WORKFLOW_LAYOUT.nodeHeight
+  const hasActions = (selfActionCount.get(id) || 0) > 0
+  if (!hasActions) return WORKFLOW_LAYOUT.nodeHeight
   return WORKFLOW_LAYOUT.nodeHeight + WORKFLOW_LAYOUT.actionTopGap +
-    actionCount * (WORKFLOW_LAYOUT.actionHeight + WORKFLOW_LAYOUT.actionGap)
+    WORKFLOW_LAYOUT.actionHeight + WORKFLOW_LAYOUT.actionGap
 }
 
 function compareStates(left, right) {

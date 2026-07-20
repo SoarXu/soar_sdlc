@@ -76,7 +76,7 @@
                   <span v-else>{{ row.status_name || '-' }}</span>
                 </template>
               </el-table-column>
-              <el-table-column label="操作" width="420" fixed="right">
+              <el-table-column label="操作" :width="requirementOperationWidth" fixed="right">
                 <template #default="{ row }">
                   <div class="table-actions">
                     <el-button v-if="canEditWorkItem(row)" link type="primary" @click="openRequirementEdit(row)">编辑</el-button>
@@ -120,7 +120,7 @@
                 <span v-else>{{ row.status_name || '-' }}</span>
               </template>
             </el-table-column>
-            <el-table-column label="操作" width="260" fixed="right">
+            <el-table-column label="操作" :width="taskOperationWidth" fixed="right">
               <template #default="{ row }">
                 <div class="table-actions">
                   <el-button v-if="canEditWorkItem(row)" link type="primary" @click="openTaskEdit(row)">编辑</el-button>
@@ -378,6 +378,7 @@ import { createLinkedTask, deleteTask, fetchTaskStatusOperations, updateTask } f
 import { fetchProjectMembers } from '../api/projects'
 import { fetchUsers } from '../api/users'
 import { fetchWorkflowTransitionsBatch } from '../api/workflowRuntime'
+import { workflowActionColumnWidth } from '../utils/workflowActionColumn'
 import RequirementPriorityBadge from '../components/RequirementPriorityBadge.vue'
 import RichTextPasteEditor from '../components/RichTextPasteEditor.vue'
 import WorkflowActionButtons from '../components/WorkflowActionButtons.vue'
@@ -402,6 +403,14 @@ const tasks = ref([])
 const testCases = ref([])
 const bugs = ref([])
 const iterationWorkflowTransitions = ref({})
+const requirementOperationWidth = computed(() => workflowActionColumnWidth(
+  requirements.value.map((row) => iterationWorkflowTransitionsFor('requirement', row.id)),
+  { minWidth: 260, extraWidth: 220 }
+))
+const taskOperationWidth = computed(() => workflowActionColumnWidth(
+  tasks.value.map((row) => iterationWorkflowTransitionsFor('task', row.id)),
+  { minWidth: 220, extraWidth: 130 }
+))
 const metrics = ref({})
 const users = ref([])
 const projectMembersById = ref({})

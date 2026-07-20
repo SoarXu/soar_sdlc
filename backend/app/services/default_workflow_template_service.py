@@ -612,7 +612,13 @@ def _iteration_graph() -> WorkflowGraphSave:
             _state("canceled", "已取消", "terminal", "#94a3b8", 480, 260),
         ],
         transitions=[
-            _transition("start", "开始", "planning", "active"),
+            _transition(
+                "start",
+                "开始",
+                "planning",
+                "active",
+                form_config={"fields": [{"field": "effective_time", "label": "实际开始日期", "type": "date", "required": True}]},
+            ),
             _transition("complete", "完成", "active", "completed", validator_config={"type": "iteration_terminal_gate"}),
             _transition("cancel", "取消", "active", "canceled", validator_config={"type": "iteration_terminal_gate"}),
         ],
@@ -628,11 +634,31 @@ def _project_graph() -> WorkflowGraphSave:
             _state("closed", "已关闭", "terminal", "#059669", 680, 120),
         ],
         transitions=[
-            _transition("start", "开始", "planning", "active"),
+            _transition(
+                "start",
+                "开始",
+                "planning",
+                "active",
+                form_config={"fields": [{"field": "effective_time", "label": "实际开始日期", "type": "date", "required": True}]},
+            ),
             _transition("suspend", "暂停", "active", "paused"),
             _transition("resume", "恢复", "paused", "active"),
-            _transition("close", "关闭", "active", "closed", validator_config={"type": "project_close_gate"}),
-            _transition("close", "关闭", "paused", "closed", validator_config={"type": "project_close_gate"}),
+            _transition(
+                "close",
+                "关闭",
+                "active",
+                "closed",
+                validator_config={"type": "project_close_gate"},
+                form_config={"fields": [{"field": "effective_time", "label": "实际完成日期", "type": "date", "required": True}]},
+            ),
+            _transition(
+                "close",
+                "关闭",
+                "paused",
+                "closed",
+                validator_config={"type": "project_close_gate"},
+                form_config={"fields": [{"field": "effective_time", "label": "实际完成日期", "type": "date", "required": True}]},
+            ),
             _transition("activate", "激活", "closed", "active"),
         ],
     )
@@ -680,6 +706,7 @@ def _transition(
             resolved_ui_config["action_category"] = "management"
             resolved_ui_config.setdefault("list_display", "more")
             resolved_ui_config.setdefault("list_priority", 20)
+    sort_order = int(resolved_ui_config.pop("list_priority", 100))
     return WorkflowTransitionBase(
         action_key=action_key,
         action_name=action_name,
@@ -698,6 +725,7 @@ def _transition(
         validator_config=validator_config,
         form_config=form_config,
         ui_config=resolved_ui_config,
+        sort_order=sort_order,
     )
 
 

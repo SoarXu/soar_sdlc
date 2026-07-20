@@ -50,6 +50,95 @@ def test_create_and_list_workflow_definition(client: TestClient):
     assert data["id"] in {item["id"] for item in listed.json()}
 
 
+def test_graph_save_generates_private_identity_and_protects_persisted_transition(client: TestClient):
+    config_id = _create_config(client)
+    definition = client.post(
+        "/api/v1/workflow-definitions",
+        json={
+            "name": f"Protected transition workflow {uuid4().hex[:8]}",
+            "object_type": "requirement",
+            "scope_type": "assignee_rule_config",
+            "scope_id": config_id,
+        },
+    ).json()
+    payload = {
+        "initial_state_id": -1,
+        "states": [
+            {"id": -1, "status_name": "待处理", "category": "start"},
+            {"id": -2, "status_name": "处理中", "category": "normal"},
+        ],
+        "transitions": [
+            {
+                "action_name": "开始处理",
+                "from_state_id": -1,
+                "to_state_id": -2,
+                "ui_config": {"list_display": "primary"},
+                "sort_order": 10,
+            }
+        ],
+    }
+
+    saved = client.put(f"/api/v1/workflow-definitions/{definition['id']}/graph", json=payload)
+
+    assert saved.status_code == 200, saved.text
+    assert "action_key" not in saved.json()["transitions"][0]
+    protected_payload = {
+        "initial_state_id": saved.json()["definition"]["initial_state_id"],
+        "states": saved.json()["states"],
+        "transitions": [],
+    }
+    rejected = client.put(f"/api/v1/workflow-definitions/{definition['id']}/graph", json=protected_payload)
+    assert rejected.status_code == 422
+    assert "cannot be deleted" in rejected.json()["detail"].lower()
+
+
+def test_graph_rejects_duplicate_enabled_names_and_invalid_button_group(client: TestClient):
+    config_id = _create_config(client)
+    definition = client.post(
+        "/api/v1/workflow-definitions",
+        json={
+            "name": f"Validated transition workflow {uuid4().hex[:8]}",
+            "object_type": "requirement",
+            "scope_type": "assignee_rule_config",
+            "scope_id": config_id,
+        },
+    ).json()
+    base = {
+        "initial_state_id": -1,
+        "states": [
+            {"id": -1, "status_name": "待处理", "category": "start"},
+            {"id": -2, "status_name": "处理中", "category": "normal"},
+        ],
+    }
+    duplicate = client.put(
+        f"/api/v1/workflow-definitions/{definition['id']}/graph",
+        json={
+            **base,
+            "transitions": [
+                {"action_name": "处理", "from_state_id": -1, "to_state_id": -2},
+                {"action_name": "处理", "from_state_id": -1, "to_state_id": -1},
+            ],
+        },
+    )
+    invalid_group = client.put(
+        f"/api/v1/workflow-definitions/{definition['id']}/graph",
+        json={
+            **base,
+            "transitions": [
+                {
+                    "action_name": "处理",
+                    "from_state_id": -1,
+                    "to_state_id": -2,
+                    "ui_config": {"list_display": "hidden"},
+                }
+            ],
+        },
+    )
+
+    assert duplicate.status_code == 422
+    assert invalid_group.status_code == 422
+
+
 def test_graph_save_remaps_temporary_ids_and_preserves_ids_when_state_is_renamed(client: TestClient):
     config_id = _create_config(client)
     definition = client.post(
@@ -69,7 +158,6 @@ def test_graph_save_remaps_temporary_ids_and_preserves_ids_when_state_is_renamed
         ],
         "transitions": [
             {
-                "action_key": "start",
                 "action_name": "开始处理",
                 "from_state_id": -1,
                 "to_state_id": -2,
@@ -99,7 +187,10 @@ def test_graph_save_remaps_temporary_ids_and_preserves_ids_when_state_is_renamed
             {**first_states["待处理"], "status_name": "待受理"},
             first_states["处理中"],
         ],
-        "transitions": first_graph["transitions"],
+        "transitions": [
+            {key: value for key, value in item.items() if key != "definition_id"}
+            for item in first_graph["transitions"]
+        ],
     }
     second = client.put(f"/api/v1/workflow-definitions/{definition['id']}/graph", json=second_payload)
 
@@ -236,9 +327,9 @@ def test_apply_template_creates_graph_nodes_and_transitions(client: TestClient):
         "已关闭",
     }
     names_by_id = {node["id"]: node["status_name"] for node in graph["states"]}
-    assert any(edge["action_key"] == "submit_verification" and names_by_id[edge["to_state_id"]] == "待验证" for edge in graph["transitions"])
-    assert any(edge["action_key"] == "verification_passed" and names_by_id[edge["to_state_id"]] == "已验证" for edge in graph["transitions"])
-    assert any(edge["action_key"] == "close" and names_by_id[edge["to_state_id"]] == "已关闭" for edge in graph["transitions"])
+    assert any(edge["action_name"] == "提交验证" and names_by_id[edge["to_state_id"]] == "待验证" for edge in graph["transitions"])
+    assert any(edge["action_name"] == "验证通过" and names_by_id[edge["to_state_id"]] == "已验证" for edge in graph["transitions"])
+    assert any(edge["action_name"] == "关闭" and names_by_id[edge["to_state_id"]] == "已关闭" for edge in graph["transitions"])
 
 
 def test_apply_template_reuses_state_ids_on_repeated_application(client: TestClient):
@@ -349,7 +440,6 @@ def test_save_graph_preserves_layout_and_validates_duplicates(client: TestClient
         ],
         "transitions": [
             {
-                "action_key": "activate",
                 "action_name": "Activate",
                 "from_state_id": -1,
                 "to_state_id": -2,
@@ -402,7 +492,6 @@ def test_transition_handler_rule_is_persisted_only_on_transition(client: TestCli
             ],
             "transitions": [
                 {
-                    "action_key": "activate",
                     "action_name": "Activate",
                     "from_state_id": -1,
                     "to_state_id": -2,
@@ -449,14 +538,12 @@ def test_save_graph_preserves_transition_ui_and_form_config(client: TestClient):
             ],
             "transitions": [
                 {
-                    "action_key": "resolve",
                     "action_name": "确认解决",
                     "from_state_id": -1,
                     "to_state_id": -2,
                     "ui_config": {
                         "button_type": "success",
                         "list_display": "primary",
-                        "list_priority": 10,
                     },
                     "form_config": {
                         "title": "解决 Bug",
@@ -508,7 +595,6 @@ def _advanced_definition(client: TestClient) -> dict:
 
 def _advanced_graph(transition_overrides: dict | None = None) -> dict:
     transition = {
-        "action_key": "classify",
         "action_name": "Classify",
         "from_state_id": -1,
         "to_state_id": -2,
@@ -544,10 +630,7 @@ def _advanced_graph(transition_overrides: dict | None = None) -> dict:
         "ui_config": {
             "button_type": "warning",
             "list_display": "primary",
-            "list_priority": 20,
             "action_category": "management",
-            "visible_in_detail": True,
-            "visible_in_list": True,
         },
         "trigger_config": {
             "type": "notification",
@@ -645,25 +728,10 @@ def test_bug_default_template_matches_prd_baseline(client: TestClient):
     assert graph.status_code == 200
     states = {node["status_name"] for node in graph.json()["states"]}
     assert states == {"待处理", "修复中", "待验证", "已验证", "已关闭"}
-    transitions = {item["action_key"] for item in graph.json()["transitions"]}
-    assert {
-        "confirm_bug_type",
-        "submit_verification",
-        "verification_passed",
-        "verification_failed",
-        "close",
-        "activate",
-        "reclassify_bug_type",
-    } <= transitions
+    transition_names = {item["action_name"] for item in graph.json()["transitions"]}
+    assert {"确认缺陷类型", "提交验证", "验证通过", "验证不通过", "关闭", "激活", "重新判定缺陷类型"} <= transition_names
     assert all("status_key" not in node for node in graph.json()["states"])
-    action_names = {item["action_key"]: item["action_name"] for item in graph.json()["transitions"]}
-    assert action_names["confirm_bug_type"] == "确认缺陷类型"
-    assert action_names["reclassify_bug_type"] == "重新判定缺陷类型"
-    assert action_names["submit_verification"] == "提交验证"
-    assert action_names["verification_passed"] == "验证通过"
-    assert action_names["verification_failed"] == "验证不通过"
-    assert action_names["close"] == "关闭"
-    assert action_names["activate"] == "激活"
+    assert all("action_key" not in item for item in graph.json()["transitions"])
     assert graph.json()["definition"]["template_key"] == "bug.default"
 
 
@@ -684,11 +752,5 @@ def test_requirement_and_project_default_templates_expose_default_metadata(clien
     assert requirement_graph.status_code == 200
     requirement_state_names = {node["status_name"] for node in requirement_graph.json()["states"]}
     assert requirement_state_names == {"待分派", "处理中", "待确认", "已完成", "已取消"}
-    requirement_action_names = {
-        item["action_key"]: item["action_name"] for item in requirement_graph.json()["transitions"]
-    }
-    assert requirement_action_names["claim"] == "认领"
-    assert requirement_action_names["assign"] == "指派"
-    assert requirement_action_names["complete"] == "完成"
-    assert requirement_action_names["cancel"] == "取消"
-    assert requirement_action_names["reactivate"] == "重新激活"
+    requirement_action_names = {item["action_name"] for item in requirement_graph.json()["transitions"]}
+    assert {"认领", "指派", "完成", "取消", "重新激活"} <= requirement_action_names

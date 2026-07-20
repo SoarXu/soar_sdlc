@@ -1004,7 +1004,7 @@ function testRunStatusLabel(value) { return optionLabel(testRunStatusOptions, va
 function operationActionLabel(value) { return optionLabel([{ label: '启动', value: 'start' }, { label: '挂起', value: 'suspend' }, { label: '关闭', value: 'close' }, { label: '激活', value: 'activate' }], value) }
 function projectWorkflowTransitionKey(objectType, id) { return `${objectType}:${id}` }
 function projectWorkflowTransitionsFor(objectType, id) { return projectWorkflowTransitions.value[projectWorkflowTransitionKey(objectType, id)] || [] }
-function iterationCanDefer(row) { return projectWorkflowTransitionsFor('iteration', row.id).some((item) => ['complete', 'cancel'].includes(item.action_key)) }
+function iterationCanDefer(row) { return row.state_category === 'normal' && projectWorkflowTransitionsFor('iteration', row.id).length > 0 }
 async function loadProjectWorkflowTransitions(objectType, rows) {
   const items = (rows || []).map((row) => ({ object_type: objectType, id: row.id }))
   if (!items.length) return

@@ -110,7 +110,7 @@ def execute_transition(
     ensure_authenticated(actor)
     ensure_default_workflow_templates(db)
     item = _get_item(db, object_type, object_id)
-    transition_context = _get_executable_transition(db, object_type, item, request.action_key)
+    transition_context = _get_executable_transition(db, object_type, item, request.transition_id)
     transition, current_state = transition_context
     _ensure_supported_runtime_configuration(transition)
     from_status = current_state.status_name
@@ -273,14 +273,14 @@ def _resolve_definition_context(db: Session, object_type: str, item):
     return definition, state_record
 
 
-def _get_executable_transition(db: Session, object_type: str, item, action_key: str):
+def _get_executable_transition(db: Session, object_type: str, item, transition_id: int):
     definition, current_state = _resolve_definition_context(db, object_type, item)
     transitions = (
         db.query(WorkflowTransition)
         .filter(
             WorkflowTransition.definition_id == definition.id,
             WorkflowTransition.from_state_id == current_state.id,
-            WorkflowTransition.action_key == action_key,
+            WorkflowTransition.id == transition_id,
             WorkflowTransition.enabled == True,  # noqa: E712
         )
         .order_by(WorkflowTransition.sort_order.asc(), WorkflowTransition.id.asc())
@@ -317,13 +317,13 @@ def _transition_read(db: Session, transition: WorkflowTransition) -> WorkflowTra
     if handler_rule.get("allow_manual_owner") and "allow_manual_owner" not in form_config:
         form_config["allow_manual_owner"] = True
     return WorkflowTransitionActionRead(
-        action_key=transition.action_key,
+        transition_id=transition.id,
         action_name=transition.action_name,
         from_state_id=transition.from_state_id,
         to_state_id=transition.to_state_id,
         button_type=ui_config.get("button_type", "primary"),
         list_display=ui_config.get("list_display", "more"),
-        list_priority=int(ui_config.get("list_priority", transition.sort_order or 100)),
+        sort_order=transition.sort_order or 100,
         requires_form=bool((form_config.get("fields") or [])),
         confirm_required=bool(ui_config.get("confirm_required", False)),
         routing_mode=condition_config.get("routing_mode"),
@@ -641,6 +641,18 @@ def _apply_domain_payload(
             item.actual_start_date = effective_time.date()
         elif transition.action_key in {"complete", "cancel"}:
             item.actual_end_date = effective_time.date()
+    if object_type == "project":
+        effective_time = _parse_effective_time(payload)
+        if transition.action_key == "start":
+            if not effective_time:
+                raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="effective_time is required")
+            item.actual_start_date = effective_time.date()
+        elif transition.action_key == "close":
+            if not effective_time:
+                raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="effective_time is required")
+            item.actual_end_date = effective_time.date()
+        elif transition.action_key == "activate":
+            item.actual_end_date = None
 
 
 def _run_transition_validator(

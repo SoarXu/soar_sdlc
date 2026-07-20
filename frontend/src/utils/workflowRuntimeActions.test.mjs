@@ -11,13 +11,13 @@ import {
 
 const { replaceWorkflowTransitionMap } = workflowRuntimeActions
 
-function action(actionKey, overrides = {}) {
+function action(transitionId, overrides = {}) {
   return {
-    action_key: actionKey,
-    action_name: actionKey,
+    transition_id: transitionId,
+    action_name: `动作${transitionId}`,
     button_type: 'success',
     list_display: 'more',
-    list_priority: 100,
+    sort_order: 100,
     ui_config: {},
     ...overrides
   }
@@ -25,34 +25,23 @@ function action(actionKey, overrides = {}) {
 
 {
   const result = splitListActions([
-    action('close', { button_type: 'danger', list_priority: 10 }),
-    action('submit_validation', { list_priority: 20 })
+    action(1, { button_type: 'danger', sort_order: 10 }),
+    action(2, { sort_order: 20 })
   ])
 
-  assert.equal(result.primaryAction.action_key, 'submit_validation')
-  assert.deepEqual(result.moreActions.map((item) => item.action_key), ['close'])
+  assert.deepEqual(result.primaryActions, [])
+  assert.deepEqual(result.moreActions.map((item) => item.transition_id), [1, 2])
 }
 
 {
   const result = splitListActions([
-    action('close', { button_type: 'danger', list_display: 'primary', list_priority: 5 }),
-    action('submit_validation', { list_display: 'primary', list_priority: 10 }),
-    action('defer', { list_priority: 20 })
+    action(1, { button_type: 'danger', list_display: 'primary', sort_order: 20 }),
+    action(2, { list_display: 'primary', sort_order: 10 }),
+    action(3, { sort_order: 20 })
   ])
 
-  assert.equal(result.primaryAction.action_key, 'close')
-  assert.deepEqual(result.moreActions.map((item) => item.action_key), ['submit_validation', 'defer'])
-}
-
-{
-  const result = splitListActions([
-    action('hidden', { list_display: 'hidden', list_priority: 1 }),
-    action('primary', { list_display: 'primary', list_priority: 2 }),
-    action('more', { list_display: 'more', list_priority: 3 })
-  ])
-
-  assert.equal(result.primaryAction.action_key, 'primary')
-  assert.deepEqual(result.moreActions.map((item) => item.action_key), ['more'])
+  assert.deepEqual(result.primaryActions.map((item) => item.transition_id), [2, 1])
+  assert.deepEqual(result.moreActions.map((item) => item.transition_id), [3])
 }
 
 {
@@ -66,16 +55,16 @@ function action(actionKey, overrides = {}) {
     allowed_target_states: [{ id: 4, status_name: '已完成' }]
   })), true)
 
-  assert.equal(actionNeedsDialog(action('claim')), false)
+  assert.equal(actionNeedsDialog(action(3)), false)
 }
 
 {
   const result = visibleDetailActions([
-    action('hidden_in_detail', { ui_config: { visible_in_detail: false } }),
-    action('visible', { list_priority: 1 })
+    action(2, { sort_order: 20 }),
+    action(1, { sort_order: 10 })
   ])
 
-  assert.deepEqual(result.map((item) => item.action_key), ['visible'])
+  assert.deepEqual(result.map((item) => item.transition_id), [1, 2])
 }
 
 {
@@ -94,7 +83,7 @@ function action(actionKey, overrides = {}) {
       return {
         data: {
           items: [
-            { object_type: 'project', id: 3, transitions: [{ action_key: 'start' }] },
+            { object_type: 'project', id: 3, transitions: [{ transition_id: 31 }] },
             { object_type: 'project', id: 8, transitions: null }
           ]
         }
@@ -108,7 +97,7 @@ function action(actionKey, overrides = {}) {
     { object_type: 'project', id: 3 },
     { object_type: 'project', id: 8 }
   ])
-  assert.deepEqual(result, { 3: [{ action_key: 'start' }], 8: [] })
+  assert.deepEqual(result, { 3: [{ transition_id: 31 }], 8: [] })
   assert.deepEqual(replacements, [{}, result])
 }
 

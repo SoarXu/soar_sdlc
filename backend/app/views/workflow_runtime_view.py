@@ -9,13 +9,13 @@ class WorkflowTargetStateRead(BaseModel):
 
 
 class WorkflowTransitionActionRead(BaseModel):
-    action_key: str
+    transition_id: int
     action_name: str
     from_state_id: int
     to_state_id: int
     button_type: str = "primary"
     list_display: str = "more"
-    list_priority: int = 100
+    sort_order: int = 100
     requires_form: bool = False
     confirm_required: bool = False
     routing_mode: str | None = None
@@ -28,7 +28,7 @@ class WorkflowTransitionActionRead(BaseModel):
 class WorkflowTransitionExecuteRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    action_key: str
+    transition_id: int
     payload: dict[str, Any] = Field(default_factory=dict)
     next_owner_id: int | None = None
     delegate_reason: str | None = None

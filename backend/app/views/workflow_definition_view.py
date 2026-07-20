@@ -58,8 +58,9 @@ class WorkflowStateRead(WorkflowStateBase):
 
 
 class WorkflowTransitionBase(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     id: int | None = None
-    action_key: str
     action_name: str
     from_state_id: int
     to_state_id: int
@@ -85,6 +86,16 @@ class WorkflowGraphSave(BaseModel):
     initial_state_id: int | None = None
     states: list[WorkflowStateBase] = Field(default_factory=list)
     transitions: list[WorkflowTransitionBase] = Field(default_factory=list)
+
+
+class WorkflowTemplateTransitionSave(WorkflowTransitionBase):
+    action_key: str
+
+
+class WorkflowTemplateGraphSave(BaseModel):
+    initial_state_id: int | None = None
+    states: list[WorkflowStateBase] = Field(default_factory=list)
+    transitions: list[WorkflowTemplateTransitionSave] = Field(default_factory=list)
 
 
 class WorkflowGraphRead(BaseModel):

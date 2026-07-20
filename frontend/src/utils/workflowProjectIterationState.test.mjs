@@ -30,6 +30,7 @@ for (const [path, source] of sources) {
 }
 
 const programsSource = sources.find(([path]) => path.endsWith('ProgramsView.vue'))[1]
+const projectsSource = sources.find(([path]) => path.endsWith('ProjectsView.vue'))[1]
 const programActionBranch = programsSource.match(/<template v-if="row\.nodeType === 'program'">([\s\S]*?)<\/template>\s*<template v-else>/)?.[1] || ''
 const projectActionBranch = programsSource.match(/<template v-else>([\s\S]*?)<\/template>/)?.[1] || ''
 assert.match(programActionBranch, /row\.status/, 'ProgramsView.vue program actions may continue using Program.status')
@@ -37,16 +38,19 @@ assert.ok(projectActionBranch, 'ProgramsView.vue project action branch must be p
 assert.doesNotMatch(projectActionBranch, /row\.status/, 'ProgramsView.vue project actions must not read row.status')
 assert.doesNotMatch(projectActionBranch, /['"](?:planning|active|paused|closed)['"]/, 'ProgramsView.vue project actions must not use string status gates')
 assert.match(programsSource, /fetchWorkflowTransitionsBatch/, 'ProgramsView.vue must batch-load project transitions')
-assert.match(programsSource, /action_key/, 'ProgramsView.vue project actions must be driven by transition action_key')
+assert.doesNotMatch(programsSource, /action_key/, 'ProgramsView.vue must not depend on internal transition action keys')
+assert.match(projectActionBranch, /WorkflowActionButtons/, 'ProgramsView.vue project actions must use runtime transition buttons')
 assert.match(programsSource, /row\.status_name/, 'ProgramsView.vue project status display must use status_name')
+assert.match(programsSource, /programOperationWidth[\s\S]*flatProjects\.value/, 'ProgramsView.vue operation width must include nested project rows')
+assert.match(projectsSource, /projectOperationWidth[\s\S]*projects\.value/, 'ProjectsView.vue operation width must include child project rows')
 
 const statusDateRequired = programsSource.match(/const statusDateRequired = computed\(\(\) =>[^\n]+/)?.[0] || ''
 assert.ok(statusDateRequired, 'ProgramsView.vue status date gate must be present')
 assert.doesNotMatch(statusDateRequired, /statusTarget\.value\?\.status/, 'ProgramsView.vue project date gate must not read project.status')
 const startDateRequired = programsSource.match(/function startDateRequired\(\) \{([\s\S]*?)\n\}/)?.[1] || ''
-const projectStartDateGate = startDateRequired.match(/return hasProjectAction\([^\n]+/)?.[0] || ''
+const projectStartDateGate = startDateRequired.match(/return !statusTarget\.value\?\.actual_start_date/)?.[0] || ''
 assert.match(startDateRequired, /statusTargetType\.value === 'program'/, 'ProgramsView.vue must scope legacy status checks to programs')
-assert.match(projectStartDateGate, /'start'/, 'ProgramsView.vue project start date gate must use the executable start transition')
+assert.match(projectStartDateGate, /actual_start_date/, 'ProgramsView.vue project start date gate must use project date identity')
 assert.doesNotMatch(projectStartDateGate, /\.status/, 'ProgramsView.vue project start date gate must not read project.status')
 
 const projectDetailSource = sources.find(([path]) => path.endsWith('ProjectDetailView.vue'))[1]
@@ -74,6 +78,9 @@ for (const [path, source] of sources.filter(([path]) => /(?:Programs|Projects)Vi
   assert.doesNotMatch(loadData, /fetchWorkflowTransitionsBatch/, path + ' base list load must not own transition failures')
   assert.match(source, /async function loadProjectWorkflowTransitions\(\)/, path + ' must load project actions separately')
   assert.match(source, /ElMessage\.error\('项目动作加载失败'\)/, path + ' must distinguish project action loading errors')
+  assert.match(source, /workflowActionColumnWidth/, path + ' must calculate the operation column from runtime actions')
+  assert.match(source, /:width="[^\"]*[Oo]perationWidth"/, path + ' must bind the calculated operation column width')
+  assert.doesNotMatch(source, /<el-table-column label="操作" width="(?:330|440)"/, path + ' must not retain a fixed operation column width')
 }
 
 console.log('project and iteration state identity source contract passed')

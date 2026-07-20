@@ -23,7 +23,6 @@
           />
         </el-select>
         <el-button size="small" @click="addState">新增状态</el-button>
-        <el-button size="small" @click="addTransition">新增流转</el-button>
         <el-button size="small" @click="organizeLayout">整理布局</el-button>
         <el-button size="small" @click="fitToContent">适应视图</el-button>
         <el-button size="small" @click="resetViewport">回到原点</el-button>
@@ -62,7 +61,7 @@
               v-for="edge in transitionViews"
               :key="edge.key"
               class="workflow-edge"
-              :class="{ selected: isSelectedTransition(edge.transition) }"
+              :class="{ selected: isSelectedTransition(edge.transition), disabled: !edge.transition.enabled }"
               @click.stop="selectTransition(edge.transition)"
             >
               <path :d="edge.path" />
@@ -106,98 +105,21 @@
       </div>
 
     </div>
-
-    <el-drawer
-      v-model="detailsDrawerVisible"
-      class="workflow-details-drawer"
-      direction="rtl"
-      size="420px"
-      :append-to-body="false"
-      :lock-scroll="false"
-      @closed="onDetailsDrawerClosed"
-    >
-      <div class="workflow-details-content">
-        <template v-if="selectedState">
-          <h3>状态配置</h3>
-          <el-form label-position="top">
-            <el-form-item label="状态名称"><el-input v-model="selectedState.status_name" /></el-form-item>
-            <el-form-item label="状态类型">
-              <el-select v-model="selectedState.category">
-                <el-option label="开始" value="start" />
-                <el-option label="普通" value="normal" />
-                <el-option label="结束" value="terminal" />
-              </el-select>
-            </el-form-item>
-            <el-form-item label="颜色"><el-color-picker v-model="selectedState.color" /></el-form-item>
-            <el-form-item label="启用"><el-switch v-model="selectedState.enabled" /></el-form-item>
-            <el-button type="danger" plain @click="removeSelectedState">删除状态</el-button>
-          </el-form>
-        </template>
-
-        <template v-else-if="selectedTransition">
-          <h3>流转配置</h3>
-          <el-form label-position="top">
-            <el-form-item label="动作名称"><el-input v-model="selectedTransition.action_name" /></el-form-item>
-            <el-form-item label="动作键"><el-input v-model="selectedTransition.action_key" /></el-form-item>
-            <el-form-item label="来源状态">
-              <el-select v-model="selectedTransition.from_state_id">
-                <el-option
-                  v-for="state in states"
-                  :key="state.id"
-                  :label="state.status_name"
-                  :value="state.id"
-                />
-              </el-select>
-            </el-form-item>
-            <el-form-item label="目标状态">
-              <el-select v-model="selectedTransition.to_state_id">
-                <el-option
-                  v-for="state in states"
-                  :key="state.id"
-                  :label="state.status_name"
-                  :value="state.id"
-                />
-              </el-select>
-            </el-form-item>
-            <div class="workflow-readonly-summary">
-              <div><span>允许角色</span><strong>{{ roleSummary(selectedTransition.allowed_role_list) }}</strong></div>
-              <div><span>处理人</span><strong>{{ handlerSummary(selectedTransition) }}</strong></div>
-            </div>
-            <el-form-item label="启用"><el-switch v-model="selectedTransition.enabled" /></el-form-item>
-            <el-alert
-              v-if="selectedUnsupportedSections.length"
-              class="workflow-advanced-warning"
-              type="warning"
-              :closable="false"
-              title="该流转包含未支持的历史配置，迁移前不能覆盖保存。"
-              description="高级配置已禁用，以免覆盖历史配置。"
-            />
-            <div class="workflow-advanced-entry">
-              <el-button
-                type="primary"
-                plain
-                :disabled="selectedUnsupportedSections.length > 0"
-                @click="openAdvancedDrawer"
-              >
-                高级配置
-              </el-button>
-              <span>已配置 {{ configuredAdvancedSectionCount(selectedTransition, states) }} 项</span>
-            </div>
-            <el-button type="danger" plain @click="removeSelectedTransition">删除流转</el-button>
-          </el-form>
-        </template>
-
-        <el-empty v-else description="选择状态或流转进行配置" />
-      </div>
-    </el-drawer>
     <WorkflowAdvancedConfigDrawer
       ref="advancedDrawer"
       v-model="advancedDrawerVisible"
+      :state="drawerState"
       :transition="selectedTransition"
+      :transitions="transitions"
       :states="states"
       :role-options="roleOptions"
       :target-types="targetTypes"
       @apply="applyAdvancedDraft"
+      @select-transition="selectTransition"
+      @move-transition="moveTransition"
+      @add-transition="addTransition"
+      @remove-transition="removeSelectedTransition"
+      @back="returnToStateActions"
     />
   </div>
 </template>
@@ -225,10 +147,8 @@ import {
   serializeWorkflowTransition as serializeTransition,
   unsupportedWorkflowConfigSections
 } from '../utils/workflowTransitionConfig'
-import {
-  applyAdvancedConfigDraft,
-  configuredAdvancedSectionCount
-} from '../utils/workflowAdvancedConfig'
+import { applyAdvancedConfigDraft } from '../utils/workflowAdvancedConfig'
+import { moveStateTransition, nextGroupSortOrder } from '../utils/workflowTransitionOrdering'
 import {
   applyPanDelta,
   clampViewport,
@@ -280,8 +200,6 @@ const loading = ref(false)
 const saving = ref(false)
 const advancedDrawer = ref(null)
 const advancedDrawerVisible = ref(false)
-const detailsDrawerVisible = ref(false)
-const preserveSelectionOnDetailsClose = ref(false)
 const suppressCanvasClamp = ref(false)
 const viewportOffset = reactive({ x: 0, y: 0 })
 const dragging = reactive({
@@ -336,6 +254,11 @@ const selectedTransition = computed(() => (
     ? transitions.value.find((item) => transitionKey(item) === selectedKey.value)
     : null
 ))
+const drawerState = computed(() => {
+  if (selectedState.value) return selectedState.value
+  if (!selectedTransition.value) return null
+  return states.value.find((item) => item.id === selectedTransition.value.from_state_id) || null
+})
 const selectedUnsupportedSections = computed(() => (
   selectedTransition.value ? unsupportedWorkflowConfigSections(selectedTransition.value) : []
 ))
@@ -493,15 +416,15 @@ function nextTemporaryStateId() {
   return Math.min(-1, ...states.value.map((state) => state.id - 1))
 }
 
-function addTransition() {
+function addTransition(group = 'more') {
+  const from = drawerState.value
+  if (!from) return
   if (states.value.length < 2) {
     ElMessage.warning('至少需要两个状态')
     return
   }
-  const from = states.value[0]
-  const to = states.value[1]
+  const to = states.value.find((state) => state.id !== from.id)
   const transition = normalizeTransition({
-    action_key: `action_${transitions.value.length + 1}`,
     action_name: `流转${transitions.value.length + 1}`,
     from_state_id: from.id,
     to_state_id: to.id,
@@ -514,7 +437,8 @@ function addTransition() {
       fallback_roles: ''
     },
     enabled: true,
-    sort_order: (transitions.value.length + 1) * 10
+    sort_order: nextGroupSortOrder(transitions.value, from.id, group),
+    ui_config: { list_display: group }
   })
   transitions.value.push(transition)
   selectTransition(transition)
@@ -523,27 +447,31 @@ function addTransition() {
 function selectState(state) {
   selectedKind.value = 'state'
   selectedKey.value = state.id
-  detailsDrawerVisible.value = true
+  advancedDrawerVisible.value = true
+  advancedDrawer.value?.open?.()
 }
 
 function selectTransition(transition) {
   selectedKind.value = 'transition'
   selectedKey.value = transitionKey(transition)
-  detailsDrawerVisible.value = true
+  advancedDrawerVisible.value = true
+  advancedDrawer.value?.open?.()
+}
+
+function moveTransition({ transitionIdentity, targetGroup, targetIndex }) {
+  transitions.value = moveStateTransition(transitions.value, transitionIdentity, targetGroup, targetIndex)
+}
+
+function returnToStateActions() {
+  if (!drawerState.value) return
+  selectedKind.value = 'state'
+  selectedKey.value = drawerState.value.id
 }
 
 function clearSelection() {
-  detailsDrawerVisible.value = false
   selectedKind.value = ''
   selectedKey.value = ''
-}
-
-function onDetailsDrawerClosed() {
-  if (preserveSelectionOnDetailsClose.value) {
-    preserveSelectionOnDetailsClose.value = false
-    return
-  }
-  clearSelection()
+  advancedDrawerVisible.value = false
 }
 
 function removeSelectedState() {
@@ -559,17 +487,14 @@ function removeSelectedState() {
 
 function removeSelectedTransition() {
   if (!selectedTransition.value) return
+  if (selectedTransition.value.id) {
+    selectedTransition.value.enabled = false
+    returnToStateActions()
+    return
+  }
   const key = transitionKey(selectedTransition.value)
   transitions.value = transitions.value.filter((item) => transitionKey(item) !== key)
   clearSelection()
-}
-
-function openAdvancedDrawer() {
-  if (selectedUnsupportedSections.value.length) return
-  preserveSelectionOnDetailsClose.value = true
-  detailsDrawerVisible.value = false
-  advancedDrawerVisible.value = true
-  advancedDrawer.value?.open?.()
 }
 
 function applyAdvancedDraft(draft) {
@@ -738,6 +663,7 @@ function transitionKey(transition) {
 }
 
 .workflow-designer-main {
+  display: block;
   min-height: 540px;
 }
 
@@ -792,6 +718,18 @@ function transitionKey(transition) {
 .workflow-edge.selected rect {
   stroke: #1d4ed8;
 }
+
+.workflow-edge.disabled path {
+  stroke: #a8b0bc;
+  stroke-dasharray: 7 5;
+}
+
+.workflow-edge.disabled rect {
+  fill: #f4f6f8;
+  stroke-dasharray: 4 3;
+}
+
+.workflow-edge.disabled text { fill: #7a8595; }
 
 .workflow-node {
   cursor: move;
@@ -861,10 +799,6 @@ function transitionKey(transition) {
   fill: #eff6ff;
   stroke: #2563eb;
   stroke-width: 2;
-}
-
-.workflow-details-content {
-  padding: 0 4px 20px;
 }
 
 .workflow-readonly-summary {

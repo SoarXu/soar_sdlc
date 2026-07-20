@@ -50,14 +50,10 @@ assert.match(source, /v-for="action in nodeActionViews"/)
 assert.match(source, /@click\.stop="selectTransition\(action\.transition\)"/)
 assert.match(source, /class="workflow-node-action"/)
 assert.doesNotMatch(source, /<aside class="workflow-config-panel">/)
-assert.match(source, /<el-drawer[\s\S]*class="workflow-details-drawer"/)
-assert.match(source, /@closed="onDetailsDrawerClosed"/)
-const detailsClosedBody = functionBody('onDetailsDrawerClosed', 'removeSelectedState')
-assert.match(detailsClosedBody, /if \(preserveSelectionOnDetailsClose\.value\)/)
-assert.match(detailsClosedBody, /preserveSelectionOnDetailsClose\.value = false[\s\S]*return/)
-assert.match(detailsClosedBody, /clearSelection\(\)/)
-const advancedDrawerBody = functionBody('openAdvancedDrawer', 'applyAdvancedDraft')
-assert.match(advancedDrawerBody, /preserveSelectionOnDetailsClose\.value = true[\s\S]*detailsDrawerVisible\.value = false/)
+assert.doesNotMatch(source, /workflow-details-drawer/)
+assert.match(source, /<WorkflowAdvancedConfigDrawer/)
+assert.match(source, /:state="drawerState"/)
+assert.match(source, /:transitions="transitions"/)
 assert.doesNotMatch(source, /\b(?:applyPanDelta|clampViewport|fitViewportToNodes)\([\s\S]{0,180}\bminimumCanvas\b/)
 assert.match(source, /applyPanDelta\([\s\S]{0,180}canvasSize\.value/)
 assert.match(
@@ -102,7 +98,7 @@ assert.doesNotMatch(onDragBody, /canvasSize\.value\.(?:width|height)/)
 
 assert.match(
   source,
-  /<el-button size="small" @click="addTransition">新增流转<\/el-button>\s*<el-button size="small" @click="organizeLayout">整理布局<\/el-button>\s*<el-button size="small" @click="fitToContent">适应视图<\/el-button>/
+  /<el-button size="small" @click="addState">新增状态<\/el-button>\s*<el-button size="small" @click="organizeLayout">整理布局<\/el-button>\s*<el-button size="small" @click="fitToContent">适应视图<\/el-button>/
 )
 
 const applyOrganizedLayoutBody = functionBody('applyOrganizedLayout', 'organizeLayout')

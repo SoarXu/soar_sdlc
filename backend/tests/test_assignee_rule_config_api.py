@@ -129,7 +129,7 @@ def _normalized_graph(graph: dict) -> dict:
                 }
                 for item in graph["transitions"]
             ],
-            key=lambda item: (item["sort_order"], item["action_key"], item["from_state"], item["to_state"]),
+            key=lambda item: (item["sort_order"], item["action_name"], item["from_state"], item["to_state"]),
         ),
     }
 

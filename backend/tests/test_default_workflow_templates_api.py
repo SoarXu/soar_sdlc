@@ -760,7 +760,7 @@ def test_project_close_blocks_on_direct_scoped_objects(client: TestClient):
 
     close = client.post(
         f"/api/v1/workflow-runtime/project/{project_id}/transition",
-        json={"action_key": "close", "payload": {"reason": "release done"}},
+        json={"action_key": "close", "payload": {"reason": "release done", "effective_time": "2026-07-20"}},
         headers={"Authorization": f"Bearer {handler_token}"},
     )
 

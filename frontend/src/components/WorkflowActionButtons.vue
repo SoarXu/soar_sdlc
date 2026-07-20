@@ -1,38 +1,27 @@
 <template>
   <div v-if="visibleActions.length" class="workflow-action-buttons" :class="`workflow-action-buttons-${mode}`">
-    <template v-if="mode === 'list'">
+    <div class="workflow-primary-actions">
       <el-button
-        v-if="primaryAction"
-        link
-        :type="buttonType(primaryAction)"
-        :loading="submittingAction === primaryAction.action_key"
-        @click="openAction(primaryAction)"
-      >
-        {{ primaryAction.action_name }}
-      </el-button>
-      <el-dropdown v-if="moreActions.length" trigger="click" @command="handleMoreCommand">
-        <el-button link type="primary" class="workflow-action-more">更多</el-button>
-        <template #dropdown>
-          <el-dropdown-menu>
-            <el-dropdown-item v-for="action in moreActions" :key="action.action_key" :command="action.action_key">
-              {{ action.action_name }}
-            </el-dropdown-item>
-          </el-dropdown-menu>
-        </template>
-      </el-dropdown>
-    </template>
-
-    <template v-else>
-      <el-button
-        v-for="action in visibleActions"
-        :key="action.action_key"
+        v-for="action in primaryActions"
+        :key="action.transition_id"
+        :link="mode === 'list'"
         :type="buttonType(action)"
-        :loading="submittingAction === action.action_key"
+        :loading="submittingAction === action.transition_id"
         @click="openAction(action)"
       >
         {{ action.action_name }}
       </el-button>
-    </template>
+    </div>
+    <el-dropdown v-if="moreActions.length" trigger="click" @command="handleMoreCommand">
+      <el-button :link="mode === 'list'" type="primary" class="workflow-action-more">更多</el-button>
+      <template #dropdown>
+        <el-dropdown-menu>
+          <el-dropdown-item v-for="action in moreActions" :key="action.transition_id" :command="action.transition_id">
+            {{ action.action_name }}
+          </el-dropdown-item>
+        </el-dropdown-menu>
+      </template>
+    </el-dropdown>
 
     <el-dialog v-model="dialogVisible" :title="dialogTitle" width="640px">
       <el-form label-position="top">
@@ -149,9 +138,7 @@ import { isDelegateReasonRequiredError } from '../utils/permissions'
 import {
   actionNeedsDialog,
   actionNeedsTargetStateSelection,
-  sortWorkflowActions,
   splitListActions,
-  visibleDetailActions,
   workflowCommandType
 } from '../utils/workflowRuntimeActions'
 
@@ -180,13 +167,10 @@ const delegateReasonRequired = ref(false)
 const loadedUsers = ref([])
 
 const actions = computed(() => props.transitions ?? loadedTransitions.value)
-const visibleActions = computed(() => {
-  if (props.mode === 'list') return sortWorkflowActions(actions.value)
-  return visibleDetailActions(actions.value)
-})
 const listSplit = computed(() => splitListActions(actions.value))
-const primaryAction = computed(() => listSplit.value.primaryAction)
+const primaryActions = computed(() => listSplit.value.primaryActions)
 const moreActions = computed(() => listSplit.value.moreActions)
+const visibleActions = computed(() => [...primaryActions.value, ...moreActions.value])
 const formFields = computed(() => activeAction.value?.form_config?.fields || [])
 const dialogTitle = computed(() => activeAction.value?.form_config?.title || activeAction.value?.action_name || '执行流转')
 const submitText = computed(() => activeAction.value?.form_config?.submit_text || activeAction.value?.action_name || '确认')
@@ -235,7 +219,7 @@ function resetForm(action) {
 }
 
 function confirmMessage(action) {
-  return action?.ui_config?.confirm_message || `确认执行「${action?.action_name || action?.action_key}」？`
+  return action?.ui_config?.confirm_message || `确认执行「${action?.action_name || '当前操作'}」？`
 }
 
 async function ensureUsersLoaded() {
@@ -263,8 +247,8 @@ async function openAction(action) {
   await submitAction(action)
 }
 
-function handleMoreCommand(actionKey) {
-  const action = moreActions.value.find((item) => item.action_key === actionKey)
+function handleMoreCommand(transitionId) {
+  const action = moreActions.value.find((item) => item.transition_id === transitionId)
   if (action) openAction(action)
 }
 
@@ -297,7 +281,7 @@ async function submitActiveAction() {
 }
 
 async function submitAction(action) {
-  submittingAction.value = action.action_key
+  submittingAction.value = action.transition_id
   try {
     if (workflowCommandType(action) === 'add_information') {
       await createWorkItemComment({
@@ -312,7 +296,7 @@ async function submitAction(action) {
       return
     }
     const payload = {
-      action_key: action.action_key,
+      transition_id: action.transition_id,
       payload: { ...formPayload }
     }
     if (nextOwnerId.value) payload.next_owner_id = nextOwnerId.value
@@ -355,3 +339,21 @@ async function loadTransitions() {
 watch(() => [props.objectType, props.objectId], loadTransitions)
 onMounted(loadTransitions)
 </script>
+
+<style scoped>
+.workflow-action-buttons,
+.workflow-primary-actions {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: nowrap;
+  white-space: nowrap;
+}
+
+.workflow-action-buttons {
+  gap: 8px;
+}
+
+.workflow-primary-actions {
+  gap: 4px;
+}
+</style>

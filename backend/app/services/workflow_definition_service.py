@@ -1,3 +1,4 @@
+from collections import defaultdict
 from copy import deepcopy
 from datetime import datetime
 from fastapi import HTTPException, status
@@ -440,12 +441,33 @@ def _remap_condition_state_ids(config: dict | list | None, state_id_map: dict[in
 
 
 def _template_graph_payload(db: Session, definition: WorkflowDefinition, template) -> WorkflowGraphSave:
+    existing_by_identity: dict[tuple[str, str], list[WorkflowState]] = defaultdict(list)
+    existing_states = (
+        db.query(WorkflowState)
+        .filter(WorkflowState.definition_id == definition.id)
+        .order_by(WorkflowState.id.asc())
+        .all()
+    )
+    for state in existing_states:
+        existing_by_identity[(state.status_name, state.category)].append(state)
+
     ref_to_input_id: dict[str, int] = {}
     states = []
     next_temp_id = -1
     for item in template.states:
-        input_id = next_temp_id
-        next_temp_id -= 1
+        matches = existing_by_identity[(item.status_name, item.category)]
+        enabled_matches = [state for state in matches if state.enabled]
+        if len(enabled_matches) > 1 or (not enabled_matches and len(matches) > 1):
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"Ambiguous template state: {item.status_name}",
+            )
+        candidate = enabled_matches[0] if enabled_matches else (matches[0] if matches else None)
+        if candidate:
+            input_id = candidate.id
+        else:
+            input_id = next_temp_id
+            next_temp_id -= 1
         ref_to_input_id[item.ref] = input_id
         states.append({"id": input_id, **item.model_dump(exclude={"ref"})})
 

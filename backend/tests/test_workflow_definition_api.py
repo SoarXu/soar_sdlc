@@ -6,6 +6,7 @@ from fastapi.testclient import TestClient
 
 from app.db.session import SessionLocal
 from app.models.status_operation import StatusOperationLog
+from app.models.workflow_definition import WorkflowState
 
 
 def _create_config(client: TestClient) -> int:
@@ -238,6 +239,95 @@ def test_apply_template_creates_graph_nodes_and_transitions(client: TestClient):
     assert any(edge["action_key"] == "submit_verification" and names_by_id[edge["to_state_id"]] == "待验证" for edge in graph["transitions"])
     assert any(edge["action_key"] == "verification_passed" and names_by_id[edge["to_state_id"]] == "已验证" for edge in graph["transitions"])
     assert any(edge["action_key"] == "close" and names_by_id[edge["to_state_id"]] == "已关闭" for edge in graph["transitions"])
+
+
+def test_apply_template_reuses_state_ids_on_repeated_application(client: TestClient):
+    config_id = _create_config(client)
+    definition = client.post(
+        "/api/v1/workflow-definitions",
+        json={
+            "name": f"Repeat template workflow {uuid4().hex[:8]}",
+            "object_type": "requirement",
+            "scope_type": "assignee_rule_config",
+            "scope_id": config_id,
+        },
+    ).json()
+
+    first = client.post(f"/api/v1/workflow-definitions/{definition['id']}/apply-template")
+    second = client.post(f"/api/v1/workflow-definitions/{definition['id']}/apply-template")
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    first_ids = {
+        (item["status_name"], item["category"]): item["id"]
+        for item in first.json()["states"]
+        if item["enabled"]
+    }
+    second_ids = {
+        (item["status_name"], item["category"]): item["id"]
+        for item in second.json()["states"]
+        if item["enabled"]
+    }
+    assert second_ids == first_ids
+    assert len(second_ids) == 5
+    assert len(second.json()["states"]) == 5
+
+
+def test_apply_template_reuses_and_enables_unique_disabled_state(client: TestClient):
+    config_id = _create_config(client)
+    definition = client.post(
+        "/api/v1/workflow-definitions",
+        json={
+            "name": f"Disabled template workflow {uuid4().hex[:8]}",
+            "object_type": "bug",
+            "scope_type": "assignee_rule_config",
+            "scope_id": config_id,
+        },
+    ).json()
+    first = client.post(f"/api/v1/workflow-definitions/{definition['id']}/apply-template").json()
+    disabled = next(item for item in first["states"] if item["status_name"] == "修复中")
+    with SessionLocal() as db:
+        state = db.get(WorkflowState, disabled["id"])
+        state.enabled = False
+        db.commit()
+
+    applied = client.post(f"/api/v1/workflow-definitions/{definition['id']}/apply-template")
+
+    assert applied.status_code == 200
+    reused = next(item for item in applied.json()["states"] if item["status_name"] == "修复中")
+    assert reused["id"] == disabled["id"]
+    assert reused["enabled"] is True
+
+
+def test_apply_template_rejects_ambiguous_semantic_state_matches(client: TestClient):
+    config_id = _create_config(client)
+    definition = client.post(
+        "/api/v1/workflow-definitions",
+        json={
+            "name": f"Ambiguous template workflow {uuid4().hex[:8]}",
+            "object_type": "task",
+            "scope_type": "assignee_rule_config",
+            "scope_id": config_id,
+        },
+    ).json()
+    first = client.post(f"/api/v1/workflow-definitions/{definition['id']}/apply-template").json()
+    existing = first["states"][0]
+    with SessionLocal() as db:
+        db.add(
+            WorkflowState(
+                definition_id=definition["id"],
+                status_name=existing["status_name"],
+                category=existing["category"],
+                color=existing["color"],
+                enabled=True,
+            )
+        )
+        db.commit()
+
+    applied = client.post(f"/api/v1/workflow-definitions/{definition['id']}/apply-template")
+
+    assert applied.status_code == 422
+    assert existing["status_name"] in applied.json()["detail"]
 
 
 def test_save_graph_preserves_layout_and_validates_duplicates(client: TestClient):

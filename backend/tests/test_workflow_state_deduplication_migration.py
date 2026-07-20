@@ -37,7 +37,7 @@ def _schema(bind):
     for table in ("requirements", "tasks", "bugs", "projects", "iterations"):
         bind.execute(sa.text(f"CREATE TABLE {table} (id INTEGER PRIMARY KEY, current_state_id INTEGER)"))
     bind.execute(sa.text(
-        "CREATE TABLE status_operation_logs ("
+        "CREATE TABLE status_operation_log ("
         "id INTEGER PRIMARY KEY, from_state_id INTEGER, to_state_id INTEGER)"
     ))
 
@@ -116,7 +116,7 @@ def test_execute_migration_updates_every_reference_before_deleting_duplicate():
         bind.execute(sa.text("INSERT INTO workflow_definitions VALUES (7, 11)"))
         for table in ("requirements", "tasks", "bugs", "projects", "iterations"):
             bind.execute(sa.text(f"INSERT INTO {table} VALUES (1, 11)"))
-        bind.execute(sa.text("INSERT INTO status_operation_logs VALUES (1, 11, 11)"))
+        bind.execute(sa.text("INSERT INTO status_operation_log VALUES (1, 11, 11)"))
         bind.execute(
             sa.text("INSERT INTO workflow_transitions VALUES (1, 11, 11, :config)"),
             {"config": json.dumps({"routes": {"done": 11}, "threshold": 11})},
@@ -130,7 +130,7 @@ def test_execute_migration_updates_every_reference_before_deleting_duplicate():
         for table in ("requirements", "tasks", "bugs", "projects", "iterations"):
             assert bind.execute(sa.text(f"SELECT current_state_id FROM {table}")).scalar_one() == 10
         log = bind.execute(sa.text(
-            "SELECT from_state_id, to_state_id FROM status_operation_logs"
+            "SELECT from_state_id, to_state_id FROM status_operation_log"
         )).one()
         assert tuple(log) == (10, 10)
         transition = bind.execute(sa.text(

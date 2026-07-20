@@ -27,6 +27,13 @@ const source = {
   ] },
   validator_config: { type: 'bug_close_gate' },
   ui_config: { button_type: 'warning', list_display: 'primary', action_category: 'management' },
+  diagram_config: {
+    version: 1,
+    routing_mode: 'manual',
+    source_anchor: { side: 'bottom', ratio: 0.5 },
+    target_anchor: { side: 'top', ratio: 0.5 },
+    waypoints: [{ x: 120, y: 180 }, { x: 320, y: 180 }]
+  },
   trigger_config: { type: 'notification', receiver: 'actor', title: 'Started' },
   post_action_config: { type: 'notification', receiver: 'next_handler', title: 'Assigned' }
 }
@@ -39,9 +46,11 @@ assert.deepEqual(normalized.condition_routes, [{ value: 'code_issue', state_id: 
 const serialized = serializeWorkflowTransition(normalized)
 assert.equal(serialized.id, 9)
 assert.equal('definition_id' in serialized, false)
-for (const key of ['condition_config', 'form_config', 'validator_config', 'ui_config', 'trigger_config', 'post_action_config']) {
+for (const key of ['condition_config', 'form_config', 'validator_config', 'ui_config', 'diagram_config', 'trigger_config', 'post_action_config']) {
   assert.deepEqual(serialized[key], source[key])
 }
+normalized.diagram_config.waypoints[0].x = 999
+assert.equal(source.diagram_config.waypoints[0].x, 120)
 
 assert.deepEqual(unsupportedWorkflowConfigSections(source), [])
 const historical = { ...source, trigger_config: { type: 'legacy_script', source: 'keep me' } }

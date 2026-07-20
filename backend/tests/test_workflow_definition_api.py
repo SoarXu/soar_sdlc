@@ -580,6 +580,146 @@ def test_save_graph_preserves_transition_ui_and_form_config(client: TestClient):
     assert loaded.json()["transitions"][0]["form_config"]["fields"][0]["field"] == "resolution"
 
 
+def test_save_graph_round_trips_transition_diagram_config(client: TestClient):
+    config_id = _create_config(client)
+    definition = client.post(
+        "/api/v1/workflow-definitions",
+        json={
+            "name": f"Manual route workflow {uuid4().hex[:8]}",
+            "object_type": "requirement",
+            "scope_type": "assignee_rule_config",
+            "scope_id": config_id,
+        },
+    ).json()
+    diagram_config = {
+        "version": 1,
+        "routing_mode": "manual",
+        "source_anchor": {"side": "bottom", "ratio": 0.5},
+        "target_anchor": {"side": "top", "ratio": 0.5},
+        "waypoints": [{"x": 159, "y": 180}, {"x": 379, "y": 180}],
+    }
+
+    saved = client.put(
+        f"/api/v1/workflow-definitions/{definition['id']}/graph",
+        json={
+            "initial_state_id": -1,
+            "states": [
+                {"id": -1, "status_name": "待处理", "category": "start", "x": 100, "y": 100},
+                {"id": -2, "status_name": "处理中", "category": "normal", "x": 320, "y": 240},
+            ],
+            "transitions": [{
+                "action_name": "开始处理",
+                "from_state_id": -1,
+                "to_state_id": -2,
+                "diagram_config": diagram_config,
+            }],
+        },
+    )
+
+    assert saved.status_code == 200, saved.text
+    assert saved.json()["transitions"][0]["diagram_config"] == diagram_config
+    loaded = client.get(f"/api/v1/workflow-definitions/{definition['id']}")
+    assert loaded.status_code == 200
+    assert loaded.json()["transitions"][0]["diagram_config"] == diagram_config
+
+
+@pytest.mark.parametrize(
+    "diagram_config",
+    [
+        {
+            "version": 2,
+            "routing_mode": "manual",
+            "source_anchor": {"side": "bottom", "ratio": 0.5},
+            "target_anchor": {"side": "top", "ratio": 0.5},
+            "waypoints": [{"x": 159, "y": 180}, {"x": 379, "y": 180}],
+        },
+        {
+            "version": 1,
+            "routing_mode": "automatic",
+            "source_anchor": {"side": "bottom", "ratio": 0.5},
+            "target_anchor": {"side": "top", "ratio": 0.5},
+            "waypoints": [{"x": 159, "y": 180}, {"x": 379, "y": 180}],
+        },
+        {
+            "version": 1,
+            "routing_mode": "manual",
+            "source_anchor": {"side": "center", "ratio": 0.5},
+            "target_anchor": {"side": "top", "ratio": 0.5},
+            "waypoints": [{"x": 159, "y": 180}, {"x": 379, "y": 180}],
+        },
+        {
+            "version": 1,
+            "routing_mode": "manual",
+            "source_anchor": {"side": "bottom", "ratio": -0.1},
+            "target_anchor": {"side": "top", "ratio": 0.5},
+            "waypoints": [{"x": 159, "y": 180}, {"x": 379, "y": 180}],
+        },
+        {
+            "version": 1,
+            "routing_mode": "manual",
+            "source_anchor": {"side": "bottom", "ratio": True},
+            "target_anchor": {"side": "top", "ratio": 0.5},
+            "waypoints": [{"x": 159, "y": 180}, {"x": 379, "y": 180}],
+        },
+        {
+            "version": 1,
+            "routing_mode": "manual",
+            "source_anchor": {"side": "bottom", "ratio": 0.5},
+            "target_anchor": {"side": "top", "ratio": 0.5},
+            "waypoints": [{"x": "159", "y": 180}, {"x": 379, "y": 180}],
+        },
+        {
+            "version": 1,
+            "routing_mode": "manual",
+            "source_anchor": {"side": "bottom", "ratio": 0.5},
+            "target_anchor": {"side": "top", "ratio": 0.5},
+            "waypoints": [{"x": 159, "y": 180}] * 33,
+        },
+        {
+            "version": 1,
+            "routing_mode": "manual",
+            "source_anchor": {"side": "bottom", "ratio": 0.5},
+            "target_anchor": {"side": "top", "ratio": 0.5},
+            "waypoints": [{"x": 159, "y": 180}, {"x": 300, "y": 200}],
+        },
+    ],
+)
+def test_save_graph_rejects_invalid_transition_diagram_config(
+    client: TestClient,
+    diagram_config: dict,
+):
+    config_id = _create_config(client)
+    definition = client.post(
+        "/api/v1/workflow-definitions",
+        json={
+            "name": f"Invalid manual route {uuid4().hex[:8]}",
+            "object_type": "requirement",
+            "scope_type": "assignee_rule_config",
+            "scope_id": config_id,
+        },
+    ).json()
+
+    response = client.put(
+        f"/api/v1/workflow-definitions/{definition['id']}/graph",
+        json={
+            "initial_state_id": -1,
+            "states": [
+                {"id": -1, "status_name": "待处理", "category": "start", "x": 100, "y": 100},
+                {"id": -2, "status_name": "处理中", "category": "normal", "x": 320, "y": 240},
+            ],
+            "transitions": [{
+                "action_name": "开始处理",
+                "from_state_id": -1,
+                "to_state_id": -2,
+                "diagram_config": diagram_config,
+            }],
+        },
+    )
+
+    assert response.status_code == 422
+    assert "diagram" in response.json()["detail"].lower()
+
+
 def _advanced_definition(client: TestClient) -> dict:
     config_id = _create_config(client)
     return client.post(

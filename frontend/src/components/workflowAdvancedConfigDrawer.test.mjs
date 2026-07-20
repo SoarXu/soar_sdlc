@@ -17,5 +17,9 @@ assert.match(source, /\.form-grid :deep\(\.el-form-item\)\s*\{[^}]*display:\s*bl
 assert.match(source, /\.form-grid :deep\(\.el-form-item__content\)\s*\{[^}]*width:\s*100%/s)
 assert.match(source, /:max-collapse-tags="2"/)
 assert.match(source, /collapse-tags-tooltip/)
+assert.match(source, /画布布线/)
+assert.match(source, /手工布线/)
+assert.match(source, /恢复自动布线/)
+assert.match(source, /reset-diagram-route/)
 
 console.log('workflow advanced config drawer source-contract tests passed')

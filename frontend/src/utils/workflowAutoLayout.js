@@ -4,9 +4,6 @@ export const WORKFLOW_LAYOUT = Object.freeze({
   layerGap: 240,
   rowGap: 120,
   nodeHeight: 42,
-  actionHeight: 24,
-  actionGap: 6,
-  actionTopGap: 8,
   rowClearance: 24,
   disabledRegionGap: 120
 })
@@ -21,15 +18,11 @@ export function layoutWorkflowNodes(states, transitions, initialStateId) {
   const outgoing = new Map(nodeIds.map((id) => [id, []]))
   const incoming = new Map(nodeIds.map((id) => [id, []]))
 
-  const selfActionCount = new Map(nodeIds.map((id) => [id, 0]))
   for (const transition of transitions) {
     const fromId = transition.from_state_id
     const toId = transition.to_state_id
     if (!nodesById.has(fromId) || !nodesById.has(toId)) continue
-    if (fromId === toId) {
-      selfActionCount.set(fromId, selfActionCount.get(fromId) + 1)
-      continue
-    }
+    if (fromId === toId) continue
     outgoing.get(fromId).push(toId)
     incoming.get(toId).push(fromId)
   }
@@ -83,8 +76,8 @@ export function layoutWorkflowNodes(states, transitions, initialStateId) {
     const layerMetrics = layers.map(([layer, ids]) => ({
       layer,
       ids,
-      offsets: rowOffsets(ids, selfActionCount),
-      height: layerHeight(ids, selfActionCount)
+      offsets: rowOffsets(ids),
+      height: layerHeight(ids)
     }))
     const maximumHeight = Math.max(1, ...layerMetrics.map(({ height }) => height))
 
@@ -103,7 +96,7 @@ export function layoutWorkflowNodes(states, transitions, initialStateId) {
 
   const activeBottom = activeNodeIds.length
     ? Math.max(...activeNodeIds.map((id) => (
-        coordinates.get(id).y + nodeBlockHeight(id, selfActionCount)
+        coordinates.get(id).y + nodeBlockHeight()
       )))
     : WORKFLOW_LAYOUT.marginY - WORKFLOW_LAYOUT.disabledRegionGap
   let disabledTop = activeBottom + WORKFLOW_LAYOUT.disabledRegionGap
@@ -116,7 +109,7 @@ export function layoutWorkflowNodes(states, transitions, initialStateId) {
         y: disabledTop
       })
     })
-    disabledTop += Math.max(...rowIds.map((id) => nodeBlockHeight(id, selfActionCount))) +
+    disabledTop += nodeBlockHeight() +
       WORKFLOW_LAYOUT.rowClearance
   }
 
@@ -226,31 +219,27 @@ function collectWeakComponent(rootId, outgoing, incoming, excluded, allowed = nu
   return visited
 }
 
-function rowOffsets(ids, selfActionCount) {
+function rowOffsets(ids) {
   const offsets = []
   let offset = 0
   ids.forEach((id) => {
     offsets.push(offset)
     offset += Math.max(
       WORKFLOW_LAYOUT.rowGap,
-      nodeBlockHeight(id, selfActionCount) + WORKFLOW_LAYOUT.rowClearance
+      nodeBlockHeight() + WORKFLOW_LAYOUT.rowClearance
     )
   })
   return offsets
 }
 
-function layerHeight(ids, selfActionCount) {
+function layerHeight(ids) {
   if (!ids.length) return 0
-  const offsets = rowOffsets(ids, selfActionCount)
-  const lastId = ids[ids.length - 1]
-  return offsets[offsets.length - 1] + nodeBlockHeight(lastId, selfActionCount)
+  const offsets = rowOffsets(ids)
+  return offsets[offsets.length - 1] + nodeBlockHeight()
 }
 
-function nodeBlockHeight(id, selfActionCount) {
-  const hasActions = (selfActionCount.get(id) || 0) > 0
-  if (!hasActions) return WORKFLOW_LAYOUT.nodeHeight
-  return WORKFLOW_LAYOUT.nodeHeight + WORKFLOW_LAYOUT.actionTopGap +
-    WORKFLOW_LAYOUT.actionHeight + WORKFLOW_LAYOUT.actionGap
+function nodeBlockHeight() {
+  return WORKFLOW_LAYOUT.nodeHeight
 }
 
 function compareStates(left, right) {

@@ -6,7 +6,7 @@ MIGRATION_PATH = (
     Path(__file__).parents[1]
     / "alembic"
     / "versions"
-    / "20260720_001_normalize_workflow_transition_buttons.py"
+    / "20260720_002_normalize_workflow_transition_buttons.py"
 )
 
 

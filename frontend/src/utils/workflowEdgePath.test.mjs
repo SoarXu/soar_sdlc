@@ -1577,4 +1577,47 @@ function segmentIntersectsRectangle({ from, to }, rectangle) {
   return true
 }
 
+{
+  const states = [
+    { id: 'manual-source', x: 100, y: 100 },
+    { id: 'manual-target', x: 360, y: 260 },
+    { id: 'automatic-target', x: 640, y: 100 }
+  ]
+  const manualPoints = [
+    { x: 159, y: 142 },
+    { x: 159, y: 190 },
+    { x: 419, y: 190 },
+    { x: 419, y: 260 }
+  ]
+  const transitions = [
+    {
+      id: 'manual-route',
+      from_state_id: 'manual-source',
+      to_state_id: 'manual-target',
+      diagram_config: {
+        version: 1,
+        routing_mode: 'manual',
+        source_anchor: { side: 'bottom', ratio: 0.5 },
+        target_anchor: { side: 'top', ratio: 0.5 },
+        waypoints: manualPoints.slice(1, -1)
+      }
+    },
+    {
+      id: 'automatic-route',
+      from_state_id: 'manual-source',
+      to_state_id: 'automatic-target'
+    }
+  ]
+
+  const edges = buildWorkflowEdgeViews(states, transitions, transitionKey)
+  const manual = edges.find((edge) => edge.key === 'manual-route')
+  const automatic = edges.find((edge) => edge.key === 'automatic-route')
+
+  assert.deepEqual(manual.points, manualPoints)
+  assert.equal(typeof manual.path, 'string')
+  assert.ok(Number.isFinite(manual.labelX))
+  assert.ok(Number.isFinite(manual.bounds.bottom))
+  assert.notDeepEqual(automatic.points, manualPoints)
+}
+
 console.log('workflowEdgePath tests passed')

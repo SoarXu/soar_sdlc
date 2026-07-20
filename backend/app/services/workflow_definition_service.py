@@ -1,6 +1,7 @@
 from collections import defaultdict
 from copy import deepcopy
 from datetime import datetime
+from math import isfinite
 from uuid import uuid4
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
@@ -55,6 +56,11 @@ FORM_FIELD_KEYS = {
 ROUTING_MODES = {"automatic", "manual_allowed", "automatic_with_override"}
 AUTOMATION_TYPES = {"notification"}
 NOTIFICATION_RECEIVERS = {"actor", "current_handler", "next_handler", "creator", "project_owner"}
+DIAGRAM_SIDES = {"top", "right", "bottom", "left"}
+MAX_DIAGRAM_WAYPOINTS = 32
+DIAGRAM_NODE_WIDTH = 118
+DIAGRAM_NODE_HEIGHT = 42
+DIAGRAM_CORNER_GUARD = 8
 
 
 def list_definitions(
@@ -179,12 +185,14 @@ def _validate_graph(db: Session, definition: WorkflowDefinition, payload: Workfl
     if definition.object_type not in OBJECT_TYPES:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Unknown workflow object type")
     state_ids: set[int] = set()
+    states_by_id = {}
     for state in payload.states:
         if state.category not in STATE_CATEGORIES:
             raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Unknown state category")
         if state.id in state_ids:
             raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Duplicate state id")
         state_ids.add(state.id)
+        states_by_id[state.id] = state
     if payload.states and payload.initial_state_id is None:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Initial state is required")
     if payload.initial_state_id is not None and payload.initial_state_id not in state_ids:
@@ -215,6 +223,11 @@ def _validate_graph(db: Session, definition: WorkflowDefinition, payload: Workfl
         _validate_form_config(transition.form_config)
         _validate_typed_config(transition.validator_config, VALIDATOR_TYPES, "validator")
         _validate_ui_config(transition.ui_config)
+        _validate_diagram_config(
+            transition.diagram_config,
+            states_by_id[transition.from_state_id],
+            states_by_id[transition.to_state_id],
+        )
         _validate_automation_config(transition.trigger_config, "trigger")
         _validate_automation_config(transition.post_action_config, "post action")
 
@@ -310,6 +323,78 @@ def _validate_ui_config(config: dict | None) -> None:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Unsupported UI configuration")
     if config and config.get("list_display", "more") not in {"primary", "more"}:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Unsupported button group")
+
+
+def _diagram_error() -> HTTPException:
+    return HTTPException(
+        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+        detail="Invalid diagram configuration",
+    )
+
+
+def _validate_diagram_config(config: dict | None, from_state, to_state) -> None:
+    if not config:
+        return
+    expected_keys = {
+        "version", "routing_mode", "source_anchor", "target_anchor", "waypoints",
+    }
+    if not isinstance(config, dict) or set(config) != expected_keys:
+        raise _diagram_error()
+    if config["version"] != 1 or config["routing_mode"] != "manual":
+        raise _diagram_error()
+
+    anchors = []
+    for key, node in (("source_anchor", from_state), ("target_anchor", to_state)):
+        anchor = config[key]
+        if not isinstance(anchor, dict) or set(anchor) != {"side", "ratio"}:
+            raise _diagram_error()
+        ratio = anchor["ratio"]
+        if (
+            anchor["side"] not in DIAGRAM_SIDES
+            or isinstance(ratio, bool)
+            or not isinstance(ratio, (int, float))
+            or not isfinite(ratio)
+            or not 0 <= ratio <= 1
+        ):
+            raise _diagram_error()
+        anchors.append(_diagram_anchor_point(node, anchor["side"], ratio))
+
+    waypoints = config["waypoints"]
+    if not isinstance(waypoints, list) or len(waypoints) > MAX_DIAGRAM_WAYPOINTS:
+        raise _diagram_error()
+    points = []
+    for waypoint in waypoints:
+        if not isinstance(waypoint, dict) or set(waypoint) != {"x", "y"}:
+            raise _diagram_error()
+        x = waypoint["x"]
+        y = waypoint["y"]
+        if (
+            isinstance(x, bool)
+            or isinstance(y, bool)
+            or not isinstance(x, (int, float))
+            or not isinstance(y, (int, float))
+            or not isfinite(x)
+            or not isfinite(y)
+        ):
+            raise _diagram_error()
+        points.append((x, y))
+
+    route = [anchors[0], *points, anchors[1]]
+    for start, end in zip(route, route[1:]):
+        if start == end or (start[0] != end[0] and start[1] != end[1]):
+            raise _diagram_error()
+
+
+def _diagram_anchor_point(node, side: str, ratio: float) -> tuple[float, float]:
+    if side in {"top", "bottom"}:
+        raw_x = node.x + DIAGRAM_NODE_WIDTH * ratio
+        x = min(max(raw_x, node.x + DIAGRAM_CORNER_GUARD), node.x + DIAGRAM_NODE_WIDTH - DIAGRAM_CORNER_GUARD)
+        y = node.y if side == "top" else node.y + DIAGRAM_NODE_HEIGHT
+        return x, y
+    raw_y = node.y + DIAGRAM_NODE_HEIGHT * ratio
+    y = min(max(raw_y, node.y + DIAGRAM_CORNER_GUARD), node.y + DIAGRAM_NODE_HEIGHT - DIAGRAM_CORNER_GUARD)
+    x = node.x if side == "left" else node.x + DIAGRAM_NODE_WIDTH
+    return x, y
 
 
 def _validate_automation_config(config: dict | list | None, label: str) -> None:

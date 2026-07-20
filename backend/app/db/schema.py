@@ -276,6 +276,7 @@ def ensure_runtime_schema(engine: Engine) -> None:
                 "post_action_config JSON NULL COMMENT 'post action config',"
                 "ui_config JSON NULL COMMENT 'ui config',"
                 "form_config JSON NULL COMMENT 'form config',"
+                "diagram_config JSON NULL COMMENT 'diagram routing config',"
                 "enabled TINYINT(1) NOT NULL DEFAULT 1 COMMENT 'enabled',"
                 "sort_order INT NOT NULL DEFAULT 100 COMMENT 'sort order',"
                 "create_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT 'create time',"
@@ -290,6 +291,8 @@ def ensure_runtime_schema(engine: Engine) -> None:
                    "ALTER TABLE workflow_transitions ADD COLUMN ui_config JSON NULL COMMENT 'ui config' AFTER post_action_config")
     _ensure_column(engine, "workflow_transitions", "form_config",
                    "ALTER TABLE workflow_transitions ADD COLUMN form_config JSON NULL COMMENT 'form config' AFTER ui_config")
+    _ensure_column(engine, "workflow_transitions", "diagram_config",
+                   "ALTER TABLE workflow_transitions ADD COLUMN diagram_config JSON NULL COMMENT 'diagram routing config' AFTER form_config")
 
     _ensure_column(engine, "assignee_rule_configs", "lifecycle_status",
                    "ALTER TABLE assignee_rule_configs ADD COLUMN lifecycle_status VARCHAR(16) NOT NULL DEFAULT 'draft' COMMENT 'draft/enabled/disabled' AFTER description",

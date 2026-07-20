@@ -33,6 +33,7 @@ export function normalizeWorkflowTransition(item) {
       }))
     },
     ui_config: { ...(item.ui_config || {}) },
+    diagram_config: item.diagram_config ? structuredClone(item.diagram_config) : null,
     validator_config: item.validator_config ? { ...item.validator_config } : null,
     trigger_config: item.trigger_config ? { ...item.trigger_config } : null,
     post_action_config: item.post_action_config ? { ...item.post_action_config } : null,

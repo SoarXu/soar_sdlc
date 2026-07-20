@@ -16,12 +16,16 @@ function functionBody(name, nextName) {
 assert.match(source, /import \{ layoutWorkflowNodes \} from '\.\.\/utils\/workflowAutoLayout'/)
 assert.match(
   source,
-  /import \{ buildWorkflowEdgePreviewViews, buildWorkflowEdgeViews \} from '\.\.\/utils\/workflowEdgePath'/
+  /import \{ buildWorkflowEdgeViews \} from '\.\.\/utils\/workflowEdgePath'/
 )
 assert.match(source, /import \{ requestWorkflowOrganization \} from '\.\.\/utils\/workflowLayoutInteraction'/)
 assert.match(source, /import \{ projectWorkflowCanvas \} from '\.\.\/utils\/workflowCanvasProjection'/)
-assert.match(source, /import \{ combineWorkflowDragViews \} from '\.\.\/utils\/workflowDragViews'/)
+assert.doesNotMatch(source, /combineWorkflowDragViews/)
+assert.doesNotMatch(source, /buildWorkflowEdgePreviewViews/)
 assert.match(source, /workflowCanvasSize/)
+assert.match(source, /createManualDiagramConfig/)
+assert.match(source, /moveManualAnchor/)
+assert.match(source, /moveManualSegment/)
 assert.doesNotMatch(source, /\bbuildWorkflowEdgeView\b/)
 assert.match(
   source,
@@ -31,35 +35,38 @@ assert.match(
   source,
   /buildWorkflowEdgeViews\(states\.value, canvasProjection\.value\.routedTransitions, transitionKey\)/
 )
-assert.match(
-  source,
-  /buildWorkflowEdgePreviewViews\(states\.value, canvasProjection\.value\.routedTransitions, transitionKey\)/
-)
-assert.match(source, /combineWorkflowDragViews\(dragging\.edgeViews, previewTransitionViews\.value, dragging\.state\.id\)/)
+assert.match(source, /const transitionViews = computed\(\(\) => fullTransitionViews\.value\)/)
 assert.match(source, /const minimumCanvas = \{ width: 2400, height: 1400 \}/)
 assert.match(
   source,
-  /const canvasEdgeViews = computed\(\(\) => dragging\.state \? dragging\.canvasEdges : fullTransitionViews\.value\)/
+  /const canvasEdgeViews = computed\(\(\) => fullTransitionViews\.value\)/
 )
 assert.match(
   source,
-  /workflowCanvasSize\(states\.value, minimumCanvas, undefined, canvasEdgeViews\.value, nodeActionTriggerBounds\.value\)/
+  /workflowCanvasSize\(states\.value, minimumCanvas, undefined, canvasEdgeViews\.value\)/
 )
 assert.match(source, /v-for="edge in transitionViews"/)
-assert.match(source, /v-for="trigger in nodeActionTriggers"/)
-assert.match(source, /class="workflow-node-action-trigger"/)
-assert.match(source, /操作 \{\{ trigger\.actions\.length \}\}/)
-assert.match(source, /@click\.stop="toggleNodeActionMenu\(trigger, \$event\)"/)
+assert.match(source, /class="workflow-node-action-badge"/)
+assert.match(source, /:aria-label="nodeActionAriaLabel\(state\)"/)
+assert.match(source, /@click\.stop="toggleNodeActionMenu\(nodeActionForState\(state\), \$event\)"/)
+assert.doesNotMatch(source, /class="workflow-node-action-trigger"/)
+assert.doesNotMatch(source, /nodeActionTriggerBounds/)
 assert.match(source, /event\.currentTarget\.getBoundingClientRect\(\)/)
 assert.match(source, /workflowCanvasElement\.value\.getBoundingClientRect\(\)/)
 assert.match(
   source,
-  /class="workflow-node-action-trigger"[\s\S]{0,650}@keydown\.esc\.stop\.prevent="closeNodeActionMenu"/
+  /class="workflow-node-action-badge"[\s\S]{0,650}@keydown\.esc\.stop\.prevent="closeNodeActionMenu"/
 )
 assert.match(source, /class="workflow-node-action-menu"/)
 assert.match(source, /v-for="action in activeNodeActionMenu\.actions"/)
 assert.match(source, /@click="selectNodeAction\(action\)"/)
 assert.doesNotMatch(source, /v-for="action in nodeActionViews"/)
+assert.match(source, /class="workflow-edge-endpoint"/)
+assert.match(source, /class="workflow-edge-segment-hit"/)
+assert.match(source, /startEndpointDrag/)
+assert.match(source, /startSegmentDrag/)
+assert.match(source, /cancelRouteDrag/)
+assert.match(source, /@reset-diagram-route="resetSelectedDiagramRoute"/)
 assert.ok(
   source.indexOf('</svg>') < source.indexOf('class="workflow-node-action-menu"'),
   'the floating action menu must render outside the SVG'
@@ -100,12 +107,12 @@ assert.doesNotMatch(stopDragBody, /clampCurrentViewport\(\)/)
 
 const startDragBody = functionBody('startDrag', 'onDrag')
 assert.match(startDragBody, /closeNodeActionMenu\(\)/)
-assert.ok(
-  startDragBody.indexOf('dragging.edgeViews = [...fullTransitionViews.value]') <
-    startDragBody.indexOf('dragging.state = state'),
-  'edge snapshots must be captured before drag state activates'
-)
-assert.match(startDragBody, /dragging\.canvasEdges = \[\.\.\.fullTransitionViews\.value\]/)
+assert.doesNotMatch(startDragBody, /edgeViews|canvasEdges/)
+
+const startEndpointDragBody = functionBody('startEndpointDrag', 'startSegmentDrag')
+const startSegmentDragBody = functionBody('startSegmentDrag', 'beginRouteDrag')
+assert.doesNotMatch(startEndpointDragBody, /onRouteDrag\(/)
+assert.doesNotMatch(startSegmentDragBody, /onRouteDrag\(/)
 
 const startViewportDragBody = functionBody('startViewportDrag', 'onViewportDrag')
 assert.match(startViewportDragBody, /closeNodeActionMenu\(\)/)
@@ -113,6 +120,7 @@ assert.match(startViewportDragBody, /closeNodeActionMenu\(\)/)
 const onDragBody = functionBody('onDrag', 'clampCurrentViewport')
 assert.match(onDragBody, /canvasSize\.value\.right - 140/)
 assert.match(onDragBody, /canvasSize\.value\.bottom - 70/)
+assert.match(onDragBody, /requestAnimationFrame/)
 assert.doesNotMatch(onDragBody, /canvasSize\.value\.(?:width|height)/)
 
 assert.match(
@@ -133,10 +141,11 @@ assert.match(organizeLayoutBody, /transitions: transitions\.value/)
 assert.match(organizeLayoutBody, /initialStateId: initialStateId\.value/)
 assert.match(
   organizeLayoutBody,
-  /confirm: \(\) => ElMessageBox\.confirm\('整理布局将重新排列全部节点，确认继续？', '整理布局', \{ type: 'warning' \}\)/
+  /confirm: \(\) => ElMessageBox\.confirm\('整理布局将重新排列全部节点并清除手工布线，确认继续？', '整理布局', \{ type: 'warning' \}\)/
 )
 assert.match(organizeLayoutBody, /notifyEmpty: \(\) => ElMessage\.info\('当前没有可整理的状态节点'\)/)
 assert.match(organizeLayoutBody, /if \(!result\.organized\) return/)
+assert.match(organizeLayoutBody, /transition\.diagram_config = null/)
 assert.match(organizeLayoutBody, /states\.value = result\.states/)
 assert.match(organizeLayoutBody, /states\.value = result\.states[\s\S]*fitToContent\(\)/)
 assert.doesNotMatch(
@@ -146,8 +155,12 @@ assert.doesNotMatch(
 
 const applyGraphBody = functionBody('applyGraph', 'applyTemplate')
 assert.match(source, /function applyGraph\(graph, \{ organize = false \} = \{\}\)/)
+assert.match(applyGraphBody, /stopRouteDrag\(\)/)
 assert.match(applyGraphBody, /closeNodeActionMenu\(\)/)
-assert.match(applyGraphBody, /if \(organize\) applyOrganizedLayout\(\)/)
+assert.match(
+  applyGraphBody,
+  /if \(organize\) \{[\s\S]*transition\.diagram_config = null[\s\S]*applyOrganizedLayout\(\)[\s\S]*\}/
+)
 assert.match(applyGraphBody, /fitToContent\(\)/)
 
 const clearSelectionBody = functionBody('clearSelection', 'removeSelectedState')

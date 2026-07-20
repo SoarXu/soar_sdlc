@@ -1,7 +1,7 @@
 """normalize workflow transition button configuration
 
-Revision ID: 20260720_001
-Revises: 20260717_002
+Revision ID: 20260720_002
+Revises: 20260720_001
 Create Date: 2026-07-20 12:00:00.000000
 """
 
@@ -13,8 +13,8 @@ from alembic import op
 import sqlalchemy as sa
 
 
-revision: str = "20260720_001"
-down_revision: Union[str, None] = "20260717_002"
+revision: str = "20260720_002"
+down_revision: Union[str, None] = "20260720_001"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

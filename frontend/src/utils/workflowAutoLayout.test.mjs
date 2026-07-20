@@ -22,9 +22,6 @@ assert.deepEqual(WORKFLOW_LAYOUT, {
   layerGap: 240,
   rowGap: 120,
   nodeHeight: 42,
-  actionHeight: 24,
-  actionGap: 6,
-  actionTopGap: 8,
   rowClearance: 24,
   disabledRegionGap: 120
 })
@@ -140,6 +137,7 @@ assert.deepEqual(layoutWorkflowNodes([], [], 1), [])
 
 {
   const nodes = [state(1, 10), state(2, 20)]
+  const noAction = layoutWorkflowNodes(nodes, [], 1)
   const oneAction = layoutWorkflowNodes(nodes, [transition(1, 1)], 1)
   const threeActions = layoutWorkflowNodes(
     nodes,
@@ -147,6 +145,7 @@ assert.deepEqual(layoutWorkflowNodes([], [], 1), [])
     1
   )
 
+  assert.deepEqual(oneAction, noAction)
   assert.equal(byId(oneAction, 2).y, byId(threeActions, 2).y)
 }
 
@@ -178,8 +177,7 @@ assert.deepEqual(layoutWorkflowNodes([], [], 1), [])
   assert.ok(byId(result, 2).x < byId(result, 4).x)
   assert.ok(
     Math.abs(byId(result, 2).y - byId(result, 3).y) >=
-      WORKFLOW_LAYOUT.nodeHeight + WORKFLOW_LAYOUT.actionTopGap +
-        WORKFLOW_LAYOUT.actionHeight + WORKFLOW_LAYOUT.actionGap + WORKFLOW_LAYOUT.rowClearance
+      WORKFLOW_LAYOUT.nodeHeight + WORKFLOW_LAYOUT.rowClearance
   )
   assert.ok(byId(result, 6).y >= activeBottom + WORKFLOW_LAYOUT.disabledRegionGap)
   assert.equal(byId(result, 7).x - byId(result, 6).x, WORKFLOW_LAYOUT.layerGap)

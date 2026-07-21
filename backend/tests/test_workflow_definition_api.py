@@ -923,6 +923,215 @@ def test_save_graph_round_trips_controlled_runtime_configuration(client: TestCli
         **payload["transitions"][0]["condition_config"],
         "routes": {"real": state_ids["Fixing"], "invalid": state_ids["Closed"]},
     }
+
+
+def test_save_graph_accepts_builtin_workflow_roles(client: TestClient):
+    definition = _advanced_definition(client)
+    payload = _advanced_graph({"allowed_roles": "test_lead,product_owner,tech_lead"})
+
+    saved = client.put(f"/api/v1/workflow-definitions/{definition['id']}/graph", json=payload)
+
+    assert saved.status_code == 200, saved.text
+
+
+def test_save_graph_migrates_legacy_template_route_references(client: TestClient):
+    definition = _advanced_definition(client)
+    applied = client.post(f"/api/v1/workflow-definitions/{definition['id']}/apply-template")
+    assert applied.status_code == 200, applied.text
+    with SessionLocal() as db:
+        transition = (
+            db.query(WorkflowTransition)
+            .filter(
+                WorkflowTransition.definition_id == definition["id"],
+                WorkflowTransition.action_key == "confirm_bug_type",
+            )
+            .one()
+        )
+        transition_id = transition.id
+        transition.condition_config = {
+            "field": "bug_type",
+            "routing_mode": "automatic",
+            "routes": {
+                "code_issue": "fixing",
+                "cannot_reproduce": "pending_verification",
+            },
+        }
+        transition.form_config = {
+            "title": "自定义缺陷分类",
+            "submit_text": "确认分类",
+            "fields": [
+                {
+                    "field": "bug_type",
+                    "type": "select",
+                    "required": False,
+                    "placeholder": "请选择自定义分类",
+                },
+            ],
+        }
+        db.commit()
+
+    graph = client.get(f"/api/v1/workflow-definitions/{definition['id']}").json()
+    saved = client.put(
+        f"/api/v1/workflow-definitions/{definition['id']}/graph",
+        json={
+            "initial_state_id": graph["definition"]["initial_state_id"],
+            "states": [
+                {key: value for key, value in item.items() if key != "definition_id"}
+                for item in graph["states"]
+            ],
+            "transitions": [
+                {key: value for key, value in item.items() if key != "definition_id"}
+                for item in graph["transitions"]
+            ],
+        },
+    )
+
+    assert saved.status_code == 200, saved.text
+    migrated = next(item for item in saved.json()["transitions"] if item["id"] == transition_id)
+    assert migrated["condition_config"]["route_dictionary"] == "bug_type"
+    assert "routes" not in migrated["condition_config"]
+    assert migrated["form_config"]["fields"][0] == {
+        "field": "bug_type",
+        "label": "Bug 类型",
+        "type": "select",
+        "dictionary": "bug_type",
+        "required": False,
+        "placeholder": "请选择自定义分类",
+    }
+    assert migrated["form_config"]["title"] == "自定义缺陷分类"
+    assert migrated["form_config"]["submit_text"] == "确认分类"
+
+
+def test_save_graph_does_not_migrate_custom_transition_with_template_action_key(client: TestClient):
+    definition = _advanced_definition(client)
+    applied = client.post(f"/api/v1/workflow-definitions/{definition['id']}/apply-template")
+    assert applied.status_code == 200, applied.text
+    graph = client.get(f"/api/v1/workflow-definitions/{definition['id']}").json()
+    transition = next(item for item in graph["transitions"] if item["action_name"] == "确认缺陷类型")
+    custom_source = next(
+        item["id"] for item in graph["states"] if item["id"] != transition["from_state_id"]
+    )
+    transition["from_state_id"] = custom_source
+    transition["condition_config"] = {
+        "field": "bug_type",
+        "routing_mode": "automatic",
+        "routes": {"code_issue": "fixing"},
+    }
+
+    saved = client.put(
+        f"/api/v1/workflow-definitions/{definition['id']}/graph",
+        json={
+            "initial_state_id": graph["definition"]["initial_state_id"],
+            "states": [
+                {key: value for key, value in item.items() if key != "definition_id"}
+                for item in graph["states"]
+            ],
+            "transitions": [
+                {key: value for key, value in item.items() if key != "definition_id"}
+                for item in graph["transitions"]
+            ],
+        },
+    )
+
+    assert saved.status_code == 422
+    assert saved.json()["detail"] == "Condition route references unknown state"
+
+
+def test_save_graph_migrates_stale_template_owner_routes(client: TestClient):
+    config_id = _create_config(client)
+    definition = client.post(
+        "/api/v1/workflow-definitions",
+        json={
+            "name": f"Legacy owner routes {uuid4().hex[:8]}",
+            "object_type": "requirement",
+            "scope_type": "assignee_rule_config",
+            "scope_id": config_id,
+        },
+    ).json()
+    applied = client.post(f"/api/v1/workflow-definitions/{definition['id']}/apply-template")
+    assert applied.status_code == 200, applied.text
+    with SessionLocal() as db:
+        transition = (
+            db.query(WorkflowTransition)
+            .filter(
+                WorkflowTransition.definition_id == definition["id"],
+                WorkflowTransition.action_key == "reactivate",
+            )
+            .first()
+        )
+        transition_id = transition.id
+        transition.condition_config = {
+            "target_state_id_by_owner": {
+                "with_owner": 999001,
+                "without_owner": 999002,
+            }
+        }
+        db.commit()
+
+    graph = client.get(f"/api/v1/workflow-definitions/{definition['id']}").json()
+    saved = client.put(
+        f"/api/v1/workflow-definitions/{definition['id']}/graph",
+        json={
+            "initial_state_id": graph["definition"]["initial_state_id"],
+            "states": [
+                {key: value for key, value in item.items() if key != "definition_id"}
+                for item in graph["states"]
+            ],
+            "transitions": [
+                {key: value for key, value in item.items() if key != "definition_id"}
+                for item in graph["transitions"]
+            ],
+        },
+    )
+
+    assert saved.status_code == 200, saved.text
+    state_ids = {item["id"] for item in saved.json()["states"]}
+    migrated = next(item for item in saved.json()["transitions"] if item["id"] == transition_id)
+    assert set(migrated["condition_config"]["target_state_id_by_owner"].values()) <= state_ids
+
+
+def test_save_graph_does_not_replace_mixed_custom_owner_routes(client: TestClient):
+    config_id = _create_config(client)
+    definition = client.post(
+        "/api/v1/workflow-definitions",
+        json={
+            "name": f"Mixed owner routes {uuid4().hex[:8]}",
+            "object_type": "requirement",
+            "scope_type": "assignee_rule_config",
+            "scope_id": config_id,
+        },
+    ).json()
+    applied = client.post(f"/api/v1/workflow-definitions/{definition['id']}/apply-template")
+    assert applied.status_code == 200, applied.text
+    graph = client.get(f"/api/v1/workflow-definitions/{definition['id']}").json()
+    transition = next(item for item in graph["transitions"] if item["action_name"] == "重新激活")
+    valid_target = transition["to_state_id"]
+    transition["condition_config"] = {
+        "target_state_id_by_owner": {
+            "with_owner": valid_target,
+            "without_owner": 999002,
+        }
+    }
+
+    saved = client.put(
+        f"/api/v1/workflow-definitions/{definition['id']}/graph",
+        json={
+            "initial_state_id": graph["definition"]["initial_state_id"],
+            "states": [
+                {key: value for key, value in item.items() if key != "definition_id"}
+                for item in graph["states"]
+            ],
+            "transitions": [
+                {key: value for key, value in item.items() if key != "definition_id"}
+                for item in graph["transitions"]
+            ],
+        },
+    )
+
+    assert saved.status_code == 422
+    assert saved.json()["detail"] == "Owner route references unknown state"
+
+
 def test_default_template_definitions_exist_for_core_objects(client: TestClient):
     listed = client.get("/api/v1/workflow-definitions?scope_type=system")
 

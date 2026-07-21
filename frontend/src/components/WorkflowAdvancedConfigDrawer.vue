@@ -520,16 +520,22 @@ function clearActiveSection() {
   errors.value[activeSection.value] = []
 }
 
-function apply() {
-  if (!draft.value) return
+function applyPendingChanges() {
+  if (!draft.value || !props.transition) return true
   const result = validateAdvancedConfig(draft.value, props.states)
   errors.value = result.errors
   if (!result.valid) {
     activeSection.value = result.firstSection
-    return
+    return false
   }
+  if (!hasPendingChanges()) return true
   emit('apply', createAdvancedConfigDraft(draft.value))
   initializeDraft()
+  return true
+}
+
+function apply() {
+  applyPendingChanges()
 }
 
 async function requestBack() {
@@ -614,7 +620,7 @@ function toggleNotification(key, enabled) {
     : null
 }
 
-defineExpose({ open, hasPendingChanges, confirmDiscardPendingChanges })
+defineExpose({ open, hasPendingChanges, applyPendingChanges, confirmDiscardPendingChanges })
 </script>
 
 <style scoped>

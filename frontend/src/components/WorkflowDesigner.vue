@@ -532,6 +532,10 @@ async function saveGraph() {
     ElMessage.error('存在未支持的历史配置，请先完成迁移后再保存。')
     return
   }
+  if (advancedDrawer.value?.applyPendingChanges?.() === false) {
+    ElMessage.warning('请先修正高级配置中的校验错误')
+    return
+  }
   saving.value = true
   try {
     const payload = {

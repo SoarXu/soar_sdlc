@@ -28,7 +28,9 @@ SCOPE_TYPES = {"system", "project", "assignee_rule_config"}
 STATE_CATEGORIES = {"start", "normal", "terminal"}
 IDENTITY_ROLES = {
     "system_admin", "project_owner", "project_member", "current_handler", "owner",
-    "creator", "reporter", "proposer", "tester",
+    "creator", "reporter", "proposer", "product_owner", "product_manager",
+    "department_head", "tech_lead", "development_lead", "developer", "test_lead",
+    "tester", "viewer",
 }
 HANDLER_SOURCE_TYPES = {
     "keep_current", "none", "actor", "explicit_owner", "creator", "proposer",
@@ -132,6 +134,7 @@ def get_graph(db: Session, definition_id: int) -> dict:
 
 def save_graph(db: Session, definition_id: int, payload: WorkflowGraphSave) -> dict:
     definition = _get_definition(db, definition_id)
+    payload = _normalize_legacy_template_references(db, definition, payload)
     _save_graph(
         db,
         definition,
@@ -139,6 +142,164 @@ def save_graph(db: Session, definition_id: int, payload: WorkflowGraphSave) -> d
         disable_omitted_transitions=payload.replace_existing_transitions,
     )
     return _graph_response(db, definition)
+
+
+def _normalize_legacy_template_references(
+    db: Session,
+    definition: WorkflowDefinition,
+    payload: WorkflowGraphSave,
+) -> WorkflowGraphSave:
+    template = graph_for_object_type(definition.object_type)
+    submitted_by_identity: dict[tuple[str, str], list[int]] = defaultdict(list)
+    for state in payload.states:
+        submitted_by_identity[(state.status_name, state.category)].append(state.id)
+
+    ref_to_state_id = {}
+    for template_state in template.states:
+        matches = submitted_by_identity[(template_state.status_name, template_state.category)]
+        if len(matches) == 1:
+            ref_to_state_id[template_state.ref] = matches[0]
+
+    if not ref_to_state_id:
+        return payload
+
+    existing_action_keys = {
+        item.id: item.action_key
+        for item in db.query(WorkflowTransition).filter(
+            WorkflowTransition.definition_id == definition.id
+        ).all()
+    }
+    templates_by_action_key: dict[str, list] = defaultdict(list)
+    for template_transition in template.transitions:
+        templates_by_action_key[template_transition.action_key].append(template_transition)
+
+    normalized = payload.model_copy(deep=True)
+    state_ids = {state.id for state in normalized.states}
+    for transition in normalized.transitions:
+        action_key = transition.action_key or existing_action_keys.get(transition.id)
+        candidates = templates_by_action_key.get(action_key, [])
+        template_transition = next((
+            item for item in candidates
+            if ref_to_state_id.get(item.from_ref) == transition.from_state_id
+            and ref_to_state_id.get(item.to_ref) == transition.to_state_id
+        ), None)
+        if not template_transition:
+            continue
+        expected = template_transition.condition_config
+        if isinstance(transition.condition_config, dict) and isinstance(expected, dict):
+            transition.condition_config = _normalize_template_condition_references(
+                transition.condition_config,
+                expected,
+                ref_to_state_id,
+                state_ids,
+            )
+        if _is_legacy_template_form_config(transition.form_config, template_transition.form_config):
+            transition.form_config = _normalize_legacy_template_form_config(
+                transition.form_config,
+                template_transition.form_config,
+            )
+    return normalized
+
+
+def _normalize_template_condition_references(
+    condition_config: dict,
+    expected: dict,
+    ref_to_state_id: dict[str, int],
+    state_ids: set[int],
+) -> dict:
+    normalized = deepcopy(condition_config)
+    routes = normalized.get("routes")
+    if isinstance(routes, dict) and set(routes.values()) - state_ids:
+        mapped_routes = _map_legacy_state_values(routes, ref_to_state_id, state_ids)
+        if expected.get("route_dictionary") and mapped_routes is not None and all(
+            isinstance(value, str) for value in routes.values()
+        ):
+            normalized.pop("routes", None)
+            for key in ("field", "routing_mode", "route_dictionary"):
+                if key in expected:
+                    normalized[key] = deepcopy(expected[key])
+        elif isinstance(expected.get("routes"), dict) and mapped_routes is not None:
+            normalized["routes"] = mapped_routes
+
+    owner_targets = (
+        normalized.get("target_state_id_by_owner")
+        or normalized.get("target_status_by_owner")
+    )
+    if isinstance(owner_targets, dict) and set(owner_targets.values()) - state_ids:
+        expected_targets = (
+            expected.get("target_status_by_owner")
+            or expected.get("target_state_id_by_owner")
+        )
+        if isinstance(expected_targets, dict):
+            mapped_targets = _map_legacy_state_values(owner_targets, ref_to_state_id, state_ids)
+            if (
+                mapped_targets is None
+                and set(owner_targets) == set(expected_targets)
+                and all(value not in state_ids for value in owner_targets.values())
+            ):
+                mapped_targets = _map_template_state_refs(expected_targets, ref_to_state_id)
+            if mapped_targets is not None:
+                normalized.pop("target_status_by_owner", None)
+                normalized["target_state_id_by_owner"] = mapped_targets
+    return normalized
+
+
+def _map_template_state_refs(values: dict, ref_to_state_id: dict[str, int]) -> dict | None:
+    if set(values.values()) - set(ref_to_state_id):
+        return None
+    return {key: ref_to_state_id[value] for key, value in values.items()}
+
+
+def _map_legacy_state_values(
+    values: dict,
+    ref_to_state_id: dict[str, int],
+    state_ids: set[int],
+) -> dict | None:
+    mapped = {}
+    for key, value in values.items():
+        if value in state_ids:
+            mapped[key] = value
+        elif isinstance(value, str) and value in ref_to_state_id:
+            mapped[key] = ref_to_state_id[value]
+        else:
+            return None
+    return mapped
+
+
+def _is_legacy_template_form_config(current: dict | None, expected: dict | None) -> bool:
+    if not isinstance(current, dict) or not isinstance(expected, dict):
+        return False
+    current_fields = current.get("fields")
+    expected_fields = expected.get("fields")
+    if not isinstance(current_fields, list) or not current_fields or not isinstance(expected_fields, list):
+        return False
+    expected_by_name = {
+        field.get("field"): field
+        for field in expected_fields
+        if isinstance(field, dict) and field.get("field")
+    }
+    return all(
+        isinstance(field, dict)
+        and not field.get("label")
+        and field.get("field") in expected_by_name
+        and field.get("type") == expected_by_name[field["field"]].get("type")
+        for field in current_fields
+    )
+
+
+def _normalize_legacy_template_form_config(current: dict, expected: dict) -> dict:
+    normalized = deepcopy(current)
+    expected_by_name = {
+        field.get("field"): field
+        for field in expected["fields"]
+        if isinstance(field, dict) and field.get("field")
+    }
+    for field in normalized["fields"]:
+        expected_field = expected_by_name[field["field"]]
+        for key in ("label", "dictionary", "options"):
+            if key not in field and key in expected_field:
+                field[key] = deepcopy(expected_field[key])
+    return normalized
 
 
 def _save_graph(

@@ -136,10 +136,12 @@ import { createWorkItemComment } from '../api/workItemComments'
 import { showActionError } from '../utils/actionFeedback'
 import { isDelegateReasonRequiredError } from '../utils/permissions'
 import {
+  actionNeedsConfirmation,
   actionNeedsDialog,
   actionNeedsTargetStateSelection,
   splitListActions,
-  workflowCommandType
+  workflowCommandType,
+  workflowConfirmationMessage
 } from '../utils/workflowRuntimeActions'
 
 const props = defineProps({
@@ -218,10 +220,6 @@ function resetForm(action) {
   delegateReasonRequired.value = false
 }
 
-function confirmMessage(action) {
-  return action?.ui_config?.confirm_message || `确认执行「${action?.action_name || '当前操作'}」？`
-}
-
 async function ensureUsersLoaded() {
   if (props.users.length || loadedUsers.value.length || !allowManualOwner.value) return
   const { data } = await fetchUsers()
@@ -241,8 +239,12 @@ async function openAction(action) {
     dialogVisible.value = true
     return
   }
-  if (action.confirm_required) {
-    await ElMessageBox.confirm(confirmMessage(action), action?.ui_config?.confirm_title || action.action_name, { type: buttonType(action) })
+  if (actionNeedsConfirmation(action)) {
+    await ElMessageBox.confirm(workflowConfirmationMessage(action), '提示', {
+      type: buttonType(action),
+      confirmButtonText: '确认',
+      cancelButtonText: '取消'
+    })
   }
   await submitAction(action)
 }
@@ -274,9 +276,6 @@ function validatePayload() {
 
 async function submitActiveAction() {
   if (!activeAction.value || !validatePayload()) return
-  if (activeAction.value.confirm_required) {
-    await ElMessageBox.confirm(confirmMessage(activeAction.value), activeAction.value?.ui_config?.confirm_title || activeAction.value.action_name, { type: buttonType(activeAction.value) })
-  }
   await submitAction(activeAction.value)
 }
 

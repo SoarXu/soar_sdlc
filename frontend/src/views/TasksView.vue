@@ -83,7 +83,8 @@
       <template #footer><el-button @click="dialogVisible = false">取消</el-button><el-button type="primary" :loading="saving" @click="submitTask">保存</el-button></template>
     </el-dialog>
 
-    
+    <TaskEditDialog v-model="editDialogVisible" :item-id="editingId" @saved="loadData" />
+
   </section>
 </template>
 
@@ -97,6 +98,7 @@ import { createTask, deleteTask, fetchTasks, fetchTaskStatusOperations, updateTa
 import { fetchUsers } from '../api/users'
 import { fetchWorkflowTransitionsBatch } from '../api/workflowRuntime'
 import WorkflowActionButtons from '../components/WorkflowActionButtons.vue'
+import TaskEditDialog from '../components/work-items/TaskEditDialog.vue'
 import WatchToggleButton from '../components/WatchToggleButton.vue'
 import { showActionError } from '../utils/actionFeedback'
 import { canCreateWorkItem, canDeleteWorkItem, currentUserFromStorage } from '../utils/permissions'
@@ -110,6 +112,7 @@ const router = useRouter()
 const loading = ref(false)
 const saving = ref(false)
 const dialogVisible = ref(false)
+const editDialogVisible = ref(false)
 const editingId = ref(null)
 const tasks = ref([])
 const closeReasonByTask = ref({})
@@ -151,19 +154,7 @@ function resetForm() { Object.assign(form, { project_id: null, source_project_id
 function openCreate() { editingId.value = null; resetForm(); dialogVisible.value = true }
 function openEdit(row) {
   editingId.value = row.id
-  ownerManuallySet.value = true
-  Object.assign(form, {
-    project_id: row.project_id || null,
-    source_project_id: row.source_project_id || null,
-    requirement_id: row.requirement_id || null,
-    title: row.title || '',
-    task_type: deriveTaskBranch({ requirementId: row.requirement_id, currentType: row.task_type }),
-    priority: row.priority || 'medium',
-    owner_id: row.owner_id || null,
-    due_date: row.due_date || null,
-    description: row.description || ''
-  })
-  dialogVisible.value = true
+  editDialogVisible.value = true
 }
 function handleWorkflowCommand(row, { commandType }) {
   if (commandType === 'edit') openEdit(row)

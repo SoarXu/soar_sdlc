@@ -62,6 +62,8 @@
       <template #footer><el-button @click="dialogVisible = false">取消</el-button><el-button type="primary" :loading="saving" @click="submitBug">保存</el-button></template>
     </el-dialog>
 
+    <BugEditDialog v-model="editDialogVisible" :item-id="editingId" @saved="loadData" />
+
   </section>
 </template>
 
@@ -81,6 +83,7 @@ import { fetchWorkflowTransitionsBatch } from '../api/workflowRuntime'
 import RequirementPriorityBadge from '../components/RequirementPriorityBadge.vue'
 import RichTextPasteEditor from '../components/RichTextPasteEditor.vue'
 import WorkflowActionButtons from '../components/WorkflowActionButtons.vue'
+import BugEditDialog from '../components/work-items/BugEditDialog.vue'
 import WatchToggleButton from '../components/WatchToggleButton.vue'
 import { showActionError } from '../utils/actionFeedback'
 import { labelById, userLabel } from '../utils/referenceLabels'
@@ -90,7 +93,7 @@ import { usePagination } from '../utils/usePagination'
 import { workflowActionColumnWidth } from '../utils/workflowActionColumn'
 
 const router = useRouter()
-const loading = ref(false), saving = ref(false), dialogVisible = ref(false), editingId = ref(null)
+const loading = ref(false), saving = ref(false), dialogVisible = ref(false), editDialogVisible = ref(false), editingId = ref(null)
 const bugs = ref([]), projects = ref([]), requirements = ref([]), tasks = ref([]), testCases = ref([]), testRuns = ref([]), users = ref([]), iterations = ref([])
 const projectMembersById = ref({})
 const workflowTransitions = ref({})
@@ -128,7 +131,7 @@ function canDeleteBugRow(row) {
 }
 function resetForm() { Object.assign(form, { project_id: null, iteration_id: null, requirement_id: null, task_id: null, test_case_id: null, test_run_id: null, title: '', severity: '3', priority: '3', owner_id: null, reporter_id: null, reproduce_steps: '', expected_result: '', actual_result: '' }) }
 function openCreate() { editingId.value = null; resetForm(); dialogVisible.value = true }
-function openEdit(row) { editingId.value = row.id; Object.assign(form, { ...row, reproduce_steps: row.reproduce_steps || '', expected_result: row.expected_result || '', actual_result: row.actual_result || '' }); dialogVisible.value = true }
+function openEdit(row) { editingId.value = row.id; editDialogVisible.value = true }
 function handleWorkflowCommand(row, { commandType }) {
   if (commandType === 'edit') openEdit(row)
   if (commandType === 'view_history') router.push({ name: 'bug-detail', params: { id: row.id }, hash: '#history' })

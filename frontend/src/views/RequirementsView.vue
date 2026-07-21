@@ -98,6 +98,8 @@
       <template #footer><el-button @click="dialogVisible = false">取消</el-button><el-button type="primary" :loading="saving" @click="submitRequirement">保存</el-button></template>
     </el-dialog>
 
+    <RequirementEditDialog v-model="editDialogVisible" :item-id="editingId" @saved="loadData" />
+
     <el-dialog v-model="generateVisible" title="从需求生成任务" width="480px">
       <el-form label-position="top">
         <el-form-item label="任务标题" required><el-input v-model="generateForm.title" /></el-form-item>
@@ -189,6 +191,7 @@ import { fetchWorkflowTransitionsBatch } from '../api/workflowRuntime'
 import RequirementPriorityBadge from '../components/RequirementPriorityBadge.vue'
 import WatchToggleButton from '../components/WatchToggleButton.vue'
 import WorkflowActionButtons from '../components/WorkflowActionButtons.vue'
+import RequirementEditDialog from '../components/work-items/RequirementEditDialog.vue'
 import { showActionError } from '../utils/actionFeedback'
 import { currentUserId } from '../utils/currentUser'
 import { loadCloseReasonMap } from '../utils/closeReasonTooltip'
@@ -202,6 +205,7 @@ const router = useRouter()
 const loading = ref(false)
 const saving = ref(false)
 const dialogVisible = ref(false)
+const editDialogVisible = ref(false)
 const generateVisible = ref(false)
 const importVisible = ref(false)
 const editingId = ref(null)
@@ -259,7 +263,7 @@ function resetForm() { Object.assign(form, { project_id: null, source_project_id
 function openCreate() { editingId.value = null; resetForm(); dialogVisible.value = true }
 function onSourceProjectChange() {}
 function onOwnerChange() { ownerManuallySet.value = true }
-function openEdit(row) { editingId.value = row.id; ownerManuallySet.value = true; Object.assign(form, { ...row, priority: normalizeRequirementPriority(row.priority), requirement_type: row.requirement_type || '', description: row.description || '', acceptance_criteria: row.acceptance_criteria || '' }); dialogVisible.value = true }
+function openEdit(row) { editingId.value = row.id; editDialogVisible.value = true }
 function handleWorkflowCommand(row, { commandType }) {
   if (commandType === 'edit') openEdit(row)
   if (commandType === 'view_history') router.push(`/requirements/${row.id}#history`)

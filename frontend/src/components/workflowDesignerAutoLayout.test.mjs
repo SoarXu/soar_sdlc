@@ -13,7 +13,8 @@ function functionBody(name, nextName) {
   return source.slice(start, end)
 }
 
-assert.match(source, /import \{ layoutWorkflowNodes \} from '\.\.\/utils\/workflowAutoLayout'/)
+assert.doesNotMatch(source, /import \{ layoutWorkflowNodes \} from '\.\.\/utils\/workflowAutoLayout'/)
+assert.match(source, /import \{ layoutWorkflowWithElk \} from '\.\.\/utils\/workflowElkLayout'/)
 assert.match(
   source,
   /import \{ buildWorkflowEdgeViews \} from '\.\.\/utils\/workflowEdgePath'/
@@ -150,13 +151,7 @@ assert.doesNotMatch(flushNodeDragBody, /dragging\.state\.(?:x|y)\s*=/)
 
 assert.match(
   source,
-  /<el-button size="small" @click="addState">新增状态<\/el-button>\s*<el-button size="small" @click="organizeLayout">整理布局<\/el-button>\s*<el-button size="small" @click="fitToContent">适应视图<\/el-button>/
-)
-
-const applyOrganizedLayoutBody = functionBody('applyOrganizedLayout', 'organizeLayout')
-assert.match(
-  applyOrganizedLayoutBody,
-  /states\.value = layoutWorkflowNodes\(states\.value, transitions\.value, initialStateId\.value\)/
+  /<el-button size="small" @click="addState">新增状态<\/el-button>\s*<el-button size="small" :loading="loading" @click="organizeLayout">整理布局<\/el-button>\s*<el-button size="small" @click="fitToContent">适应视图<\/el-button>/
 )
 
 const organizeLayoutBody = functionBody('organizeLayout', 'applyGraph')
@@ -170,22 +165,21 @@ assert.match(
 )
 assert.match(organizeLayoutBody, /notifyEmpty: \(\) => ElMessage\.info\('当前没有可整理的状态节点'\)/)
 assert.match(organizeLayoutBody, /if \(!result\.organized\) return/)
-assert.match(organizeLayoutBody, /transition\.diagram_config = null/)
 assert.match(organizeLayoutBody, /states\.value = result\.states/)
-assert.match(organizeLayoutBody, /states\.value = result\.states[\s\S]*fitToContent\(\)/)
+assert.match(organizeLayoutBody, /transitions\.value = result\.transitions/)
+assert.doesNotMatch(organizeLayoutBody, /transition\.diagram_config = null/)
+assert.match(organizeLayoutBody, /loading\.value = true[\s\S]*finally[\s\S]*loading\.value = false/)
+assert.match(organizeLayoutBody, /ElMessage\.error\('整理布局失败，当前流程图未更改'\)/)
 assert.doesNotMatch(
   organizeLayoutBody,
   /\bsaveGraph\s*\(|\bsaveWorkflowDefinitionGraph\s*\(|\bapplyWorkflowDefinitionTemplate\s*\(|\bfetchWorkflowDefinitionGraph\s*\(/
 )
 
 const applyGraphBody = functionBody('applyGraph', 'applyTemplate')
-assert.match(source, /function applyGraph\(graph, \{ organize = false \} = \{\}\)/)
+assert.match(source, /function applyGraph\(graph\)/)
 assert.match(applyGraphBody, /stopRouteDrag\(\)/)
 assert.match(applyGraphBody, /closeNodeActionMenu\(\)/)
-assert.match(
-  applyGraphBody,
-  /if \(organize\) \{[\s\S]*transition\.diagram_config = null[\s\S]*applyOrganizedLayout\(\)[\s\S]*\}/
-)
+assert.doesNotMatch(applyGraphBody, /organize|layoutWorkflow/)
 assert.match(applyGraphBody, /fitToContent\(\)/)
 
 const clearSelectionBody = functionBody('clearSelection', 'removeSelectedState')
@@ -202,12 +196,15 @@ assert.match(selectStateBody, /closeNodeActionMenu\(\)/)
 const selectTransitionBody = functionBody('selectTransition', 'clearSelection')
 assert.match(selectTransitionBody, /closeNodeActionMenu\(\)/)
 
-const loadDefinitionBody = functionBody('loadDefinition', 'applyOrganizedLayout')
+const loadDefinitionBody = functionBody('loadDefinition', 'organizeLayout')
 assert.match(loadDefinitionBody, /applyGraph\(graph\.data\)/)
 assert.doesNotMatch(loadDefinitionBody, /applyGraph\(graph\.data, \{ organize: true \}\)/)
 
 const applyTemplateBody = functionBody('applyTemplate', 'changeObjectType')
-assert.match(applyTemplateBody, /applyGraph\(graph\.data, \{ organize: true \}\)/)
+assert.match(applyTemplateBody, /organized = await layoutWorkflowWithElk\(/)
+assert.match(applyTemplateBody, /applyGraph\(\{[\s\S]*states: organized\.states[\s\S]*transitions: organized\.transitions[\s\S]*\}\)/)
+assert.doesNotMatch(applyTemplateBody, /applyGraph\(graph\.data/)
+assert.match(applyTemplateBody, /ElMessage\.error\('模板布局失败，当前流程图未更改'\)/)
 
 const saveGraphBody = functionBody('saveGraph', 'addState')
 assert.match(saveGraphBody, /applyGraph\(graph\.data\)/)

@@ -23,7 +23,7 @@
           />
         </el-select>
         <el-button size="small" @click="addState">新增状态</el-button>
-        <el-button size="small" @click="organizeLayout">整理布局</el-button>
+        <el-button size="small" :loading="loading" @click="organizeLayout">整理布局</el-button>
         <el-button size="small" @click="fitToContent">适应视图</el-button>
         <el-button size="small" @click="resetViewport">回到原点</el-button>
         <el-button size="small" :loading="loading" @click="applyTemplate">套用模板</el-button>
@@ -188,10 +188,10 @@ import {
   fetchWorkflowDefinitions,
   saveWorkflowDefinitionGraph
 } from '../api/workflowDefinitions'
-import { layoutWorkflowNodes } from '../utils/workflowAutoLayout'
 import { projectWorkflowCanvas } from '../utils/workflowCanvasProjection'
 import { createWorkflowDragFrame } from '../utils/workflowDragFrame'
 import { buildWorkflowEdgeViews } from '../utils/workflowEdgePath'
+import { layoutWorkflowWithElk } from '../utils/workflowElkLayout'
 import {
   createManualDiagramConfig,
   moveManualAnchor,
@@ -426,26 +426,29 @@ async function loadDefinition({ discardPendingDraft = true } = {}) {
   }
 }
 
-function applyOrganizedLayout() {
-  states.value = layoutWorkflowNodes(states.value, transitions.value, initialStateId.value)
-}
-
 async function organizeLayout() {
-  const result = await requestWorkflowOrganization({
-    states: states.value,
-    transitions: transitions.value,
-    initialStateId: initialStateId.value,
-    confirm: () => ElMessageBox.confirm('整理布局将重新排列全部节点并清除手工布线，确认继续？', '整理布局', { type: 'warning' }),
-    notifyEmpty: () => ElMessage.info('当前没有可整理的状态节点')
-  })
-  if (!result.organized) return
-  closeNodeActionMenu()
-  transitions.value.forEach((transition) => { transition.diagram_config = null })
-  states.value = result.states
-  fitToContent()
+  loading.value = true
+  try {
+    const result = await requestWorkflowOrganization({
+      states: states.value,
+      transitions: transitions.value,
+      initialStateId: initialStateId.value,
+      confirm: () => ElMessageBox.confirm('整理布局将重新排列全部节点并清除手工布线，确认继续？', '整理布局', { type: 'warning' }),
+      notifyEmpty: () => ElMessage.info('当前没有可整理的状态节点')
+    })
+    if (!result.organized) return
+    closeNodeActionMenu()
+    states.value = result.states
+    transitions.value = result.transitions
+    fitToContent()
+  } catch {
+    ElMessage.error('整理布局失败，当前流程图未更改')
+  } finally {
+    loading.value = false
+  }
 }
 
-function applyGraph(graph, { organize = false } = {}) {
+function applyGraph(graph) {
   stopRouteDrag()
   closeNodeActionMenu()
   definition.value = graph.definition || definition.value
@@ -455,10 +458,6 @@ function applyGraph(graph, { organize = false } = {}) {
     _client_id: `transition-${item.id}`
   }))
   initialStateId.value = graph.definition?.initial_state_id ?? null
-  if (organize) {
-    transitions.value.forEach((transition) => { transition.diagram_config = null })
-    applyOrganizedLayout()
-  }
   if (!states.value.length) {
     selectedKind.value = ''
     selectedKey.value = ''
@@ -473,7 +472,22 @@ async function applyTemplate() {
   loading.value = true
   try {
     const graph = await applyWorkflowDefinitionTemplate(definition.value.id)
-    applyGraph(graph.data, { organize: true })
+    let organized
+    try {
+      organized = await layoutWorkflowWithElk(
+        graph.data.states || [],
+        graph.data.transitions || [],
+        graph.data.definition?.initial_state_id ?? null
+      )
+    } catch {
+      ElMessage.error('模板布局失败，当前流程图未更改')
+      return
+    }
+    applyGraph({
+      ...graph.data,
+      states: organized.states,
+      transitions: organized.transitions
+    })
     ElMessage.success('模板已套用')
   } finally {
     loading.value = false

@@ -580,7 +580,11 @@ def test_save_graph_preserves_transition_ui_and_form_config(client: TestClient):
     assert loaded.json()["transitions"][0]["form_config"]["fields"][0]["field"] == "resolution"
 
 
-def test_save_graph_round_trips_transition_diagram_config(client: TestClient):
+@pytest.mark.parametrize("routing_mode", ["manual", "generated"])
+def test_save_graph_round_trips_transition_diagram_config(
+    client: TestClient,
+    routing_mode: str,
+):
     config_id = _create_config(client)
     definition = client.post(
         "/api/v1/workflow-definitions",
@@ -593,7 +597,7 @@ def test_save_graph_round_trips_transition_diagram_config(client: TestClient):
     ).json()
     diagram_config = {
         "version": 1,
-        "routing_mode": "manual",
+        "routing_mode": routing_mode,
         "source_anchor": {"side": "bottom", "ratio": 0.5},
         "target_anchor": {"side": "top", "ratio": 0.5},
         "waypoints": [{"x": 159, "y": 180}, {"x": 379, "y": 180}],

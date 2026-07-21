@@ -3,7 +3,9 @@ import assert from 'node:assert/strict'
 import {
   anchorPointForNode,
   createManualDiagramConfig,
-  manualRoutePoints,
+  diagramRoutePoints,
+  isGeneratedDiagramRoute,
+  isManualDiagramRoute,
   moveManualAnchor,
   moveManualSegment,
   normalizeManualWaypoints
@@ -37,10 +39,18 @@ assert.deepEqual(manual, {
   target_anchor: { side: 'top', ratio: 0.5 },
   waypoints: [{ x: 159, y: 190 }, { x: 419, y: 190 }]
 })
-assert.deepEqual(manualRoutePoints(from, to, manual), initialView.points)
+assert.equal(isManualDiagramRoute(manual), true)
+assert.equal(isGeneratedDiagramRoute(manual), false)
+assert.deepEqual(diagramRoutePoints(from, to, manual), initialView.points)
+
+const generated = { ...structuredClone(manual), routing_mode: 'generated' }
+assert.equal(isManualDiagramRoute(generated), false)
+assert.equal(isGeneratedDiagramRoute(generated), true)
+assert.deepEqual(diagramRoutePoints(from, to, generated), initialView.points)
+assert.equal(diagramRoutePoints(from, to, { ...manual, routing_mode: 'unknown' }), null)
 
 const movedTo = { ...to, x: 440, y: 300 }
-assert.deepEqual(manualRoutePoints(from, movedTo, manual), [
+assert.deepEqual(diagramRoutePoints(from, movedTo, manual), [
   { x: 159, y: 142 },
   { x: 159, y: 190 },
   { x: 499, y: 190 },
@@ -56,7 +66,7 @@ const movedSourceAnchor = moveManualAnchor(
 )
 assert.equal(movedSourceAnchor.source_anchor.side, 'right')
 assert.equal(movedSourceAnchor.source_anchor.ratio, 18 / 42)
-assert.deepEqual(manualRoutePoints(from, to, movedSourceAnchor), [
+assert.deepEqual(diagramRoutePoints(from, to, movedSourceAnchor), [
   { x: 218, y: 118 },
   { x: 246, y: 118 },
   { x: 246, y: 190 },
@@ -69,7 +79,7 @@ assert.deepEqual(movedSegment.waypoints, [
   { x: 159, y: 220 },
   { x: 419, y: 220 }
 ])
-assert.deepEqual(manualRoutePoints(from, to, movedSegment), [
+assert.deepEqual(diagramRoutePoints(from, to, movedSegment), [
   { x: 159, y: 142 },
   { x: 159, y: 220 },
   { x: 419, y: 220 },

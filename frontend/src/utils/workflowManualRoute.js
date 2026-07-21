@@ -4,6 +4,15 @@ export const WORKFLOW_NODE_HEIGHT = 42
 const CORNER_GUARD = 8
 const ENDPOINT_STUB = 28
 const SIDES = new Set(['top', 'right', 'bottom', 'left'])
+const STORED_ROUTING_MODES = new Set(['manual', 'generated'])
+
+export function isManualDiagramRoute(config) {
+  return config?.version === 1 && config?.routing_mode === 'manual'
+}
+
+export function isGeneratedDiagramRoute(config) {
+  return config?.version === 1 && config?.routing_mode === 'generated'
+}
 
 export function anchorPointForNode(node, anchor) {
   if (!node || !SIDES.has(anchor?.side) || !Number.isFinite(Number(anchor?.ratio))) return null
@@ -32,8 +41,8 @@ export function createManualDiagramConfig(view, from, to) {
   }
 }
 
-export function manualRoutePoints(from, to, config) {
-  if (!from || !to || config?.version !== 1 || config?.routing_mode !== 'manual') return null
+export function diagramRoutePoints(from, to, config) {
+  if (!from || !to || config?.version !== 1 || !STORED_ROUTING_MODES.has(config?.routing_mode)) return null
   const start = anchorPointForNode(from, config.source_anchor)
   const end = anchorPointForNode(to, config.target_anchor)
   if (!start || !end) return null
@@ -56,6 +65,10 @@ export function manualRoutePoints(from, to, config) {
 
   const points = normalizeManualWaypoints([start, ...waypoints, end])
   return routeIsOrthogonal(points) ? points : null
+}
+
+export function manualRoutePoints(from, to, config) {
+  return isManualDiagramRoute(config) ? diagramRoutePoints(from, to, config) : null
 }
 
 export function moveManualAnchor(config, endpoint, pointer, from, to) {

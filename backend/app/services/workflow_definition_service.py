@@ -340,7 +340,7 @@ def _validate_diagram_config(config: dict | None, from_state, to_state) -> None:
     }
     if not isinstance(config, dict) or set(config) != expected_keys:
         raise _diagram_error()
-    if config["version"] != 1 or config["routing_mode"] != "manual":
+    if config["version"] != 1 or config["routing_mode"] not in {"manual", "generated"}:
         raise _diagram_error()
 
     anchors = []

@@ -46,6 +46,7 @@ assert.match(
   /workflowCanvasSize\(states\.value, minimumCanvas, undefined, canvasEdgeViews\.value\)/
 )
 assert.match(source, /v-for="edge in transitionViews"/)
+assert.match(source, /@click\.stop="handleStateClick\(state\)"/)
 assert.match(source, /class="workflow-node-action-badge"/)
 assert.match(source, /:aria-label="nodeActionAriaLabel\(state\)"/)
 assert.match(source, /@click\.stop="toggleNodeActionMenu\(nodeActionForState\(state\), \$event\)"/)
@@ -103,10 +104,14 @@ assert.match(clampCurrentViewportBody, /viewportOffset\.x = next\.x[\s\S]*viewpo
 
 const stopDragBody = functionBody('stopDrag', 'startViewportDrag')
 assert.match(stopDragBody, /suppressCanvasClamp\.value = true[\s\S]*dragging\.state = null/)
+assert.match(stopDragBody, /const draggedStateId = dragging\.state\.id/)
+assert.match(stopDragBody, /if \(dragging\.moved\)[\s\S]*suppressedStateClickId\.value = draggedStateId/)
+assert.match(stopDragBody, /setTimeout\([\s\S]*suppressedStateClickId\.value = null[\s\S]*, 0\)/)
 assert.doesNotMatch(stopDragBody, /clampCurrentViewport\(\)/)
 
 const startDragBody = functionBody('startDrag', 'onDrag')
 assert.match(startDragBody, /closeNodeActionMenu\(\)/)
+assert.match(startDragBody, /dragging\.moved = false/)
 assert.doesNotMatch(startDragBody, /edgeViews|canvasEdges/)
 
 const startEndpointDragBody = functionBody('startEndpointDrag', 'startSegmentDrag')
@@ -118,6 +123,11 @@ const startViewportDragBody = functionBody('startViewportDrag', 'onViewportDrag'
 assert.match(startViewportDragBody, /closeNodeActionMenu\(\)/)
 
 const onDragBody = functionBody('onDrag', 'clampCurrentViewport')
+assert.match(source, /const NODE_DRAG_THRESHOLD = 4/)
+assert.match(onDragBody, /const deltaX = event\.clientX - dragging\.startX/)
+assert.match(onDragBody, /const deltaY = event\.clientY - dragging\.startY/)
+assert.match(onDragBody, /deltaX \* deltaX \+ deltaY \* deltaY > NODE_DRAG_THRESHOLD \* NODE_DRAG_THRESHOLD/)
+assert.match(onDragBody, /if \(!dragging\.moved\) return/)
 assert.match(onDragBody, /canvasSize\.value\.right - 140/)
 assert.match(onDragBody, /canvasSize\.value\.bottom - 70/)
 assert.match(onDragBody, /requestAnimationFrame/)
@@ -165,6 +175,11 @@ assert.match(applyGraphBody, /fitToContent\(\)/)
 
 const clearSelectionBody = functionBody('clearSelection', 'removeSelectedState')
 assert.match(clearSelectionBody, /closeNodeActionMenu\(\)/)
+
+const handleStateClickBody = functionBody('handleStateClick', 'selectState')
+assert.match(handleStateClickBody, /if \(suppressedStateClickId\.value === state\.id\)/)
+assert.match(handleStateClickBody, /suppressedStateClickId\.value = null[\s\S]*return/)
+assert.match(handleStateClickBody, /selectState\(state\)/)
 
 const selectStateBody = functionBody('selectState', 'selectTransition')
 assert.match(selectStateBody, /closeNodeActionMenu\(\)/)

@@ -105,7 +105,7 @@
               }"
               :transform="`translate(${state.x}, ${state.y})`"
               @mousedown.stop.prevent="startDrag(state, $event)"
-              @click.stop="selectState(state)"
+              @click.stop="handleStateClick(state)"
             >
               <rect :fill="state.enabled === false ? '#ffffff' : (state.color || '#2563eb')" width="118" height="42" rx="6" />
               <text x="59" :y="state.enabled === false ? 19 : 26">{{ state.status_name }}</text>
@@ -244,6 +244,7 @@ const targetTypes = [
 ]
 const minimumCanvas = { width: 2400, height: 1400 }
 const viewportSize = { width: 980, height: 540 }
+const NODE_DRAG_THRESHOLD = 4
 const activeObjectType = ref('requirement')
 const definition = ref(null)
 const states = ref([])
@@ -256,6 +257,7 @@ const saving = ref(false)
 const advancedDrawer = ref(null)
 const advancedDrawerVisible = ref(false)
 const suppressCanvasClamp = ref(false)
+const suppressedStateClickId = ref(null)
 const workflowCanvasElement = ref(null)
 const workflowSvgElement = ref(null)
 const canvasRenderedSize = reactive({ ...viewportSize })
@@ -270,6 +272,7 @@ const dragging = reactive({
   originY: 0,
   pendingX: 0,
   pendingY: 0,
+  moved: false,
   frame: 0
 })
 const viewportDrag = reactive({ active: false, startX: 0, startY: 0, originX: 0, originY: 0 })
@@ -349,6 +352,7 @@ watch(() => props.configId, () => loadDefinition())
 onBeforeRouteLeave(async () => confirmDiscardAdvancedDraft())
 
 let workflowCanvasResizeObserver = null
+let suppressedStateClickTimer = null
 
 onMounted(() => {
   window.addEventListener('mousemove', onDrag)
@@ -379,6 +383,7 @@ onBeforeUnmount(() => {
   window.removeEventListener('keydown', onDesignerKeydown)
   window.removeEventListener('beforeunload', onBeforeUnload)
   if (dragging.frame) cancelAnimationFrame(dragging.frame)
+  if (suppressedStateClickTimer) clearTimeout(suppressedStateClickTimer)
   workflowCanvasResizeObserver?.disconnect()
 })
 
@@ -546,6 +551,16 @@ function addTransition(group = 'more') {
   })
   transitions.value.push(transition)
   selectTransition(transition)
+}
+
+function handleStateClick(state) {
+  if (suppressedStateClickId.value === state.id) {
+    suppressedStateClickId.value = null
+    if (suppressedStateClickTimer) clearTimeout(suppressedStateClickTimer)
+    suppressedStateClickTimer = null
+    return
+  }
+  selectState(state)
 }
 
 function selectState(state) {
@@ -783,12 +798,19 @@ function startDrag(state, event) {
   dragging.originY = state.y
   dragging.pendingX = event.clientX
   dragging.pendingY = event.clientY
+  dragging.moved = false
 }
 
 function onDrag(event) {
   if (!dragging.state) return
   dragging.pendingX = event.clientX
   dragging.pendingY = event.clientY
+  const deltaX = event.clientX - dragging.startX
+  const deltaY = event.clientY - dragging.startY
+  if (!dragging.moved) {
+    dragging.moved = deltaX * deltaX + deltaY * deltaY > NODE_DRAG_THRESHOLD * NODE_DRAG_THRESHOLD
+  }
+  if (!dragging.moved) return
   if (!dragging.frame) dragging.frame = requestAnimationFrame(flushNodeDrag)
 }
 
@@ -807,10 +829,19 @@ function clampCurrentViewport(nextCanvas = canvasSize.value) {
 
 function stopDrag() {
   if (!dragging.state) return
+  const draggedStateId = dragging.state.id
   if (dragging.frame) {
     cancelAnimationFrame(dragging.frame)
     dragging.frame = 0
     flushNodeDrag()
+  }
+  if (dragging.moved) {
+    suppressedStateClickId.value = draggedStateId
+    if (suppressedStateClickTimer) clearTimeout(suppressedStateClickTimer)
+    suppressedStateClickTimer = setTimeout(() => {
+      if (suppressedStateClickId.value === draggedStateId) suppressedStateClickId.value = null
+      suppressedStateClickTimer = null
+    }, 0)
   }
   suppressCanvasClamp.value = true
   dragging.state = null

@@ -2,9 +2,11 @@ import assert from 'node:assert/strict'
 
 import * as workflowRuntimeActions from './workflowRuntimeActions.js'
 import {
+  actionNeedsConfirmation,
   actionNeedsDialog,
   actionNeedsTargetStateSelection,
   workflowCommandType,
+  workflowConfirmationMessage,
   splitListActions,
   visibleDetailActions
 } from './workflowRuntimeActions.js'
@@ -56,6 +58,14 @@ function action(transitionId, overrides = {}) {
   })), true)
 
   assert.equal(actionNeedsDialog(action(3)), false)
+  assert.equal(actionNeedsDialog(action(4, { confirm_required: true })), false)
+  assert.equal(actionNeedsConfirmation(action(4, { confirm_required: true })), true)
+  assert.equal(actionNeedsConfirmation(action(5, {
+    confirm_required: true,
+    requires_form: true,
+    form_config: { fields: [{ field: 'comment', required: true }] }
+  })), false)
+  assert.equal(workflowConfirmationMessage(action(6, { action_name: '取消' })), '确认“取消”吗？')
 }
 
 {

@@ -42,11 +42,18 @@ export function workflowCommandType(action) {
 export function actionNeedsDialog(action) {
   return Boolean(
     action?.requires_form ||
-      action?.confirm_required ||
       actionNeedsTargetStateSelection(action) ||
       action?.form_config?.allow_manual_owner ||
       (action?.form_config?.fields || []).length
   )
+}
+
+export function actionNeedsConfirmation(action) {
+  return Boolean(action?.confirm_required && !actionNeedsDialog(action))
+}
+
+export function workflowConfirmationMessage(action) {
+  return `确认“${action?.action_name || '当前操作'}”吗？`
 }
 
 export function sortWorkflowActions(actions = []) {

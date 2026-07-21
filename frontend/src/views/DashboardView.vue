@@ -145,6 +145,7 @@
                     :transitions="workflowTransitionsFor(row)"
                     :auto-load="false"
                     :users="users"
+                    @command="handleWorkflowCommand(row, $event)"
                     @executed="loadWorkbench"
                   />
                   <el-button
@@ -214,6 +215,25 @@
         <el-button type="primary" :loading="saving" @click="submitCaseBug">提交</el-button>
       </template>
     </el-dialog>
+
+    <RequirementEditDialog
+      v-if="activeEditorType === 'requirement'"
+      v-model="editorVisible"
+      :item-id="activeEditorId"
+      @saved="handleEditorSaved"
+    />
+    <TaskEditDialog
+      v-if="activeEditorType === 'task'"
+      v-model="editorVisible"
+      :item-id="activeEditorId"
+      @saved="handleEditorSaved"
+    />
+    <BugEditDialog
+      v-if="activeEditorType === 'bug'"
+      v-model="editorVisible"
+      :item-id="activeEditorId"
+      @saved="handleEditorSaved"
+    />
   </section>
 </template>
 
@@ -227,9 +247,13 @@ import { createBugFromTestCase, executeTestCase } from '../api/testCases'
 import { fetchUsers } from '../api/users'
 import { fetchWorkflowTransitionsBatch } from '../api/workflowRuntime'
 import { workflowActionColumnWidth } from '../utils/workflowActionColumn'
+import { resolveWorkbenchWorkflowCommand } from '../utils/workbenchWorkflowCommands'
 import RequirementPriorityBadge from '../components/RequirementPriorityBadge.vue'
 import RichTextPasteEditor from '../components/RichTextPasteEditor.vue'
 import WorkflowActionButtons from '../components/WorkflowActionButtons.vue'
+import BugEditDialog from '../components/work-items/BugEditDialog.vue'
+import RequirementEditDialog from '../components/work-items/RequirementEditDialog.vue'
+import TaskEditDialog from '../components/work-items/TaskEditDialog.vue'
 import { showActionError } from '../utils/actionFeedback'
 import {
   buildWorkbenchViewModel,
@@ -267,6 +291,9 @@ const exceptionMinOverdueHours = ref(0)
 const selectedCase = ref(null)
 const caseExecutionVisible = ref(false)
 const caseBugVisible = ref(false)
+const editorVisible = ref(false)
+const activeEditorType = ref('')
+const activeEditorId = ref(null)
 const caseExecutionForm = reactive({ execute_time: '', steps_result_json: [] })
 const caseBugForm = reactive({ title: '', bug_type: DEFAULT_BUG_TYPE_KEY, severity: '3', priority: '3', reproduce_steps: '', actual_result: '' })
 
@@ -414,6 +441,19 @@ function runItemAction(item, action) {
     create_case_bug: openCaseBug
   }
   handlers[action.key]?.(item)
+}
+
+function handleWorkflowCommand(item, { commandType }) {
+  const command = resolveWorkbenchWorkflowCommand(item, commandType)
+  if (!command) return
+  activeEditorType.value = command.objectType
+  activeEditorId.value = command.objectId
+  editorVisible.value = true
+}
+
+async function handleEditorSaved() {
+  editorVisible.value = false
+  await loadWorkbench()
 }
 
 function openCaseExecution(item) {

@@ -26,6 +26,7 @@ assert.match(source, /workflowCanvasSize/)
 assert.match(source, /createManualDiagramConfig/)
 assert.match(source, /moveManualAnchor/)
 assert.match(source, /moveManualSegment/)
+assert.match(source, /import \{ createWorkflowDragFrame \} from '\.\.\/utils\/workflowDragFrame'/)
 assert.doesNotMatch(source, /\bbuildWorkflowEdgeView\b/)
 assert.match(
   source,
@@ -35,17 +36,23 @@ assert.match(
   source,
   /buildWorkflowEdgeViews\(states\.value, canvasProjection\.value\.routedTransitions, transitionKey\)/
 )
-assert.match(source, /const transitionViews = computed\(\(\) => fullTransitionViews\.value\)/)
+assert.match(source, /const dragFrame = ref\(null\)/)
+assert.match(source, /const renderedStates = computed\(\(\) => dragFrame\.value\?\.states \|\| states\.value\)/)
+assert.match(
+  source,
+  /const transitionViews = computed\(\(\) => dragFrame\.value\?\.transitionViews \|\| fullTransitionViews\.value\)/
+)
 assert.match(source, /const minimumCanvas = \{ width: 2400, height: 1400 \}/)
 assert.match(
   source,
-  /const canvasEdgeViews = computed\(\(\) => fullTransitionViews\.value\)/
+  /const canvasEdgeViews = computed\(\(\) => transitionViews\.value\)/
 )
 assert.match(
   source,
-  /workflowCanvasSize\(states\.value, minimumCanvas, undefined, canvasEdgeViews\.value\)/
+  /workflowCanvasSize\(renderedStates\.value, minimumCanvas, undefined, canvasEdgeViews\.value\)/
 )
 assert.match(source, /v-for="edge in transitionViews"/)
+assert.match(source, /v-for="state in renderedStates"/)
 assert.match(source, /@click\.stop="handleStateClick\(state\)"/)
 assert.match(source, /class="workflow-node-action-badge"/)
 assert.match(source, /:aria-label="nodeActionAriaLabel\(state\)"/)
@@ -105,12 +112,16 @@ assert.match(clampCurrentViewportBody, /viewportOffset\.x = next\.x[\s\S]*viewpo
 const stopDragBody = functionBody('stopDrag', 'startViewportDrag')
 assert.match(stopDragBody, /suppressCanvasClamp\.value = true[\s\S]*dragging\.state = null/)
 assert.match(stopDragBody, /const draggedStateId = dragging\.state\.id/)
+assert.match(stopDragBody, /const finalState = dragFrame\.value\?\.states\.find/)
+assert.match(stopDragBody, /dragging\.state\.x = finalState\.x[\s\S]*dragging\.state\.y = finalState\.y/)
+assert.match(stopDragBody, /dragFrame\.value = null/)
 assert.match(stopDragBody, /if \(dragging\.moved\)[\s\S]*suppressedStateClickId\.value = draggedStateId/)
 assert.match(stopDragBody, /setTimeout\([\s\S]*suppressedStateClickId\.value = null[\s\S]*, 0\)/)
 assert.doesNotMatch(stopDragBody, /clampCurrentViewport\(\)/)
 
 const startDragBody = functionBody('startDrag', 'onDrag')
 assert.match(startDragBody, /closeNodeActionMenu\(\)/)
+assert.match(startDragBody, /dragging\.state = stateById\(state\.id\)/)
 assert.match(startDragBody, /dragging\.moved = false/)
 assert.doesNotMatch(startDragBody, /edgeViews|canvasEdges/)
 
@@ -132,6 +143,10 @@ assert.match(onDragBody, /canvasSize\.value\.right - 140/)
 assert.match(onDragBody, /canvasSize\.value\.bottom - 70/)
 assert.match(onDragBody, /requestAnimationFrame/)
 assert.doesNotMatch(onDragBody, /canvasSize\.value\.(?:width|height)/)
+
+const flushNodeDragBody = functionBody('flushNodeDrag', 'clampCurrentViewport')
+assert.match(flushNodeDragBody, /dragFrame\.value = createWorkflowDragFrame\(/)
+assert.doesNotMatch(flushNodeDragBody, /dragging\.state\.(?:x|y)\s*=/)
 
 assert.match(
   source,

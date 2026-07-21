@@ -81,7 +81,8 @@ export function buildWorkflowEdgeViews(states, transitions, transitionKey = defa
 
       if (manualPoints) {
         const labelBounds = states.map((state) => expandedRectangle(state, 0))
-        view = routeViewWithClearLabel(manualPoints, labelBounds, globalReservations) || routedEdgeView(manualPoints)
+        const labeledView = routeViewWithClearLabel(manualPoints, labelBounds, globalReservations)
+        view = labeledView?.view || routedEdgeView(manualPoints)
       } else if (metadata.verticalGroupKey !== undefined) {
         const verticalGroupKey = metadata.verticalGroupKey
         view = buildVerticalView(

@@ -95,7 +95,7 @@
               </template>
             </g>
             <g
-              v-for="state in states"
+              v-for="state in renderedStates"
               :key="state.id"
               class="workflow-node"
               :class="{
@@ -190,6 +190,7 @@ import {
 } from '../api/workflowDefinitions'
 import { layoutWorkflowNodes } from '../utils/workflowAutoLayout'
 import { projectWorkflowCanvas } from '../utils/workflowCanvasProjection'
+import { createWorkflowDragFrame } from '../utils/workflowDragFrame'
 import { buildWorkflowEdgeViews } from '../utils/workflowEdgePath'
 import {
   createManualDiagramConfig,
@@ -258,6 +259,7 @@ const advancedDrawer = ref(null)
 const advancedDrawerVisible = ref(false)
 const suppressCanvasClamp = ref(false)
 const suppressedStateClickId = ref(null)
+const dragFrame = ref(null)
 const workflowCanvasElement = ref(null)
 const workflowSvgElement = ref(null)
 const canvasRenderedSize = reactive({ ...viewportSize })
@@ -288,14 +290,15 @@ const canvasProjection = computed(() => projectWorkflowCanvas(states.value, tran
 const fullTransitionViews = computed(() => (
   buildWorkflowEdgeViews(states.value, canvasProjection.value.routedTransitions, transitionKey)
 ))
-const transitionViews = computed(() => fullTransitionViews.value)
-const canvasEdgeViews = computed(() => fullTransitionViews.value)
+const renderedStates = computed(() => dragFrame.value?.states || states.value)
+const transitionViews = computed(() => dragFrame.value?.transitionViews || fullTransitionViews.value)
+const canvasEdgeViews = computed(() => transitionViews.value)
 const nodeActionsByStateId = computed(() => new Map(states.value.flatMap((state) => {
   const actions = canvasProjection.value.stateActionsByStateId.get(state.id) || []
   return actions.length ? [[state.id, { stateId: state.id, actions }]] : []
 })))
 const canvasSize = computed(() => (
-  workflowCanvasSize(states.value, minimumCanvas, undefined, canvasEdgeViews.value)
+  workflowCanvasSize(renderedStates.value, minimumCanvas, undefined, canvasEdgeViews.value)
 ))
 const activeNodeActionMenu = computed(() => (
   nodeActionsByStateId.value.get(activeNodeActionStateId.value) || null
@@ -791,7 +794,9 @@ function stateById(stateId) {
 function startDrag(state, event) {
   if (routeDrag.kind) return
   closeNodeActionMenu()
-  dragging.state = state
+  dragging.state = stateById(state.id)
+  if (!dragging.state) return
+  dragFrame.value = null
   dragging.startX = event.clientX
   dragging.startY = event.clientY
   dragging.originX = state.x
@@ -817,8 +822,15 @@ function onDrag(event) {
 function flushNodeDrag() {
   dragging.frame = 0
   if (!dragging.state) return
-  dragging.state.x = Math.max(20, Math.min(canvasSize.value.right - 140, dragging.originX + dragging.pendingX - dragging.startX))
-  dragging.state.y = Math.max(20, Math.min(canvasSize.value.bottom - 70, dragging.originY + dragging.pendingY - dragging.startY))
+  const x = Math.max(20, Math.min(canvasSize.value.right - 140, dragging.originX + dragging.pendingX - dragging.startX))
+  const y = Math.max(20, Math.min(canvasSize.value.bottom - 70, dragging.originY + dragging.pendingY - dragging.startY))
+  dragFrame.value = createWorkflowDragFrame(
+    states.value,
+    canvasProjection.value.routedTransitions,
+    dragging.state.id,
+    { x, y },
+    transitionKey
+  )
 }
 
 function clampCurrentViewport(nextCanvas = canvasSize.value) {
@@ -835,6 +847,11 @@ function stopDrag() {
     dragging.frame = 0
     flushNodeDrag()
   }
+  const finalState = dragFrame.value?.states.find((state) => state.id === draggedStateId)
+  if (finalState) {
+    dragging.state.x = finalState.x
+    dragging.state.y = finalState.y
+  }
   if (dragging.moved) {
     suppressedStateClickId.value = draggedStateId
     if (suppressedStateClickTimer) clearTimeout(suppressedStateClickTimer)
@@ -845,6 +862,7 @@ function stopDrag() {
   }
   suppressCanvasClamp.value = true
   dragging.state = null
+  dragFrame.value = null
   nextTick(() => {
     suppressCanvasClamp.value = false
   })

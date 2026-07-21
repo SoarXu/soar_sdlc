@@ -1,5 +1,6 @@
 import { buildWorkflowEdgeViews } from './workflowEdgePath.js'
 import {
+  createManualDiagramConfig,
   generatedDiagramConfigFromView,
   isManualDiagramRoute
 } from './workflowManualRoute.js'
@@ -44,14 +45,19 @@ export function applyGeneratedRoutesFromViews(
   const viewsByKey = new Map(transitionViews.map((view) => [view.key, view]))
 
   return transitions.map((transition) => {
-    if (isManualDiagramRoute(transition.diagram_config) ||
-      transition.from_state_id === transition.to_state_id) {
+    if (transition.from_state_id === transition.to_state_id) {
       return transition
     }
     const from = statesById.get(transition.from_state_id)
     const to = statesById.get(transition.to_state_id)
     const view = viewsByKey.get(transitionKey(transition))
     if (!from || !to || !view) return transition
+    if (isManualDiagramRoute(transition.diagram_config)) {
+      return {
+        ...transition,
+        diagram_config: createManualDiagramConfig(view, from, to)
+      }
+    }
     return {
       ...transition,
       diagram_config: generatedDiagramConfigFromView(view, from, to)

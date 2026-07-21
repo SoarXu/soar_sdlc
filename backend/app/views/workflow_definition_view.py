@@ -83,13 +83,18 @@ class WorkflowTransitionRead(WorkflowTransitionBase):
     definition_id: int | None = None
 
 
+class WorkflowTransitionSave(WorkflowTransitionBase):
+    action_key: str | None = None
+
+
 class WorkflowGraphSave(BaseModel):
     initial_state_id: int | None = None
+    replace_existing_transitions: bool = False
     states: list[WorkflowStateBase] = Field(default_factory=list)
-    transitions: list[WorkflowTransitionBase] = Field(default_factory=list)
+    transitions: list[WorkflowTransitionSave] = Field(default_factory=list)
 
 
-class WorkflowTemplateTransitionSave(WorkflowTransitionBase):
+class WorkflowTemplateTransitionSave(WorkflowTransitionSave):
     action_key: str
 
 
@@ -103,6 +108,16 @@ class WorkflowGraphRead(BaseModel):
     definition: WorkflowDefinitionRead
     states: list[WorkflowStateRead] = Field(default_factory=list)
     transitions: list[WorkflowTransitionRead] = Field(default_factory=list)
+
+
+class WorkflowTemplateTransitionRead(WorkflowTransitionRead):
+    action_key: str
+
+
+class WorkflowTemplatePreviewRead(BaseModel):
+    definition: WorkflowDefinitionRead
+    states: list[WorkflowStateRead] = Field(default_factory=list)
+    transitions: list[WorkflowTemplateTransitionRead] = Field(default_factory=list)
 
 
 class WorkflowTemplateState(BaseModel):

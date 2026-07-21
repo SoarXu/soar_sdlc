@@ -58,7 +58,6 @@ export function serializeWorkflowTransition(item) {
   const {
     id,
     definition_id,
-    action_key,
     _client_id,
     allowed_role_list,
     handler_target_roles,

@@ -14,14 +14,22 @@ const states = [
   { id: 4, status_name: 'Retired', sort_order: 50, x: 400, y: 400, enabled: false }
 ]
 
+const staleManualConfig = {
+  version: 1,
+  routing_mode: 'manual',
+  source_anchor: { side: 'right', ratio: 0.5 },
+  target_anchor: { side: 'left', ratio: 0.5 },
+  waypoints: [{ x: 200, y: 121 }, { x: 200, y: 300 }]
+}
+
 const transitions = [
   { id: 11, action_name: 'Start', sort_order: 10, from_state_id: 1, to_state_id: 2 },
   { id: 12, action_name: 'Confirm', sort_order: 20, from_state_id: 2, to_state_id: '2' },
   { id: 13, action_name: 'Complete', sort_order: 30, from_state_id: '2', to_state_id: 3 },
   { id: 14, action_name: 'Return', sort_order: 40, from_state_id: 3, to_state_id: 1 },
-  { id: 15, action_name: 'Add note', sort_order: 50, from_state_id: 1, to_state_id: 1 },
-  { id: 16, action_name: 'Retired route', sort_order: 60, from_state_id: 4, to_state_id: 1 },
-  { id: 17, action_name: 'Missing route', sort_order: 70, from_state_id: 99, to_state_id: 1 }
+  { id: 15, action_name: 'Add note', sort_order: 50, from_state_id: 1, to_state_id: 1, diagram_config: structuredClone(staleManualConfig) },
+  { id: 16, action_name: 'Retired route', sort_order: 60, from_state_id: 4, to_state_id: 1, diagram_config: structuredClone(staleManualConfig) },
+  { id: 17, action_name: 'Missing route', sort_order: 70, from_state_id: 99, to_state_id: 1, diagram_config: structuredClone(staleManualConfig) }
 ]
 
 const statesSnapshot = structuredClone(states)
@@ -115,7 +123,9 @@ assert.deepEqual(converted.transitions[0].diagram_config, {
   ]
 })
 assert.equal(converted.transitions[1].diagram_config, null)
-assert.equal(Object.hasOwn(converted.transitions[4], 'diagram_config'), false)
+assert.equal(converted.transitions[4].diagram_config, null)
+assert.equal(converted.transitions[5].diagram_config, null)
+assert.equal(converted.transitions[6].diagram_config, null)
 assert.deepEqual(states, statesSnapshot)
 assert.deepEqual(transitions, transitionsSnapshot)
 assert.equal(firstNodeId, graph.children[0].id)

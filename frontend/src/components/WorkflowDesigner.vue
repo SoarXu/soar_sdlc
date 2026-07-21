@@ -182,9 +182,9 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 
 import WorkflowAdvancedConfigDrawer from './WorkflowAdvancedConfigDrawer.vue'
 import {
-  applyWorkflowDefinitionTemplate,
   createWorkflowDefinition,
   fetchWorkflowDefinitionGraph,
+  fetchWorkflowDefinitionTemplatePreview,
   fetchWorkflowDefinitions,
   saveWorkflowDefinitionGraph
 } from '../api/workflowDefinitions'
@@ -253,6 +253,7 @@ const viewportSize = { width: 980, height: 540 }
 const NODE_DRAG_THRESHOLD = 4
 const activeObjectType = ref('requirement')
 const definition = ref(null)
+const replaceExistingTransitionsOnSave = ref(false)
 const states = ref([])
 const transitions = ref([])
 const initialStateId = ref(null)
@@ -358,7 +359,9 @@ const currentGraphSnapshot = computed(() => workflowGraphSnapshot({
   transitions: transitions.value
 }))
 const hasUnsavedGraphChanges = computed(() => (
-  savedGraphSnapshot.value !== '' && savedGraphSnapshot.value !== currentGraphSnapshot.value
+  replaceExistingTransitionsOnSave.value || (
+    savedGraphSnapshot.value !== '' && savedGraphSnapshot.value !== currentGraphSnapshot.value
+  )
 ))
 
 watch(canvasSize, (nextCanvas) => {
@@ -437,6 +440,7 @@ async function loadDefinition({ discardPendingChanges = true } = {}) {
     definition.value = current
     const graph = await fetchWorkflowDefinitionGraph(current.id)
     applyGraph(graph.data)
+    replaceExistingTransitionsOnSave.value = false
     captureSavedGraphSnapshot()
   } finally {
     loading.value = false
@@ -491,7 +495,7 @@ async function applyTemplate() {
   })) return
   loading.value = true
   try {
-    const graph = await applyWorkflowDefinitionTemplate(definition.value.id)
+    const graph = await fetchWorkflowDefinitionTemplatePreview(definition.value.id)
     let organized
     try {
       organized = await layoutWorkflowWithElk(
@@ -508,6 +512,7 @@ async function applyTemplate() {
       states: organized.states,
       transitions: organized.transitions
     })
+    replaceExistingTransitionsOnSave.value = true
     ElMessage.success('模板已套用')
   } finally {
     loading.value = false
@@ -531,11 +536,13 @@ async function saveGraph() {
   try {
     const payload = {
       initial_state_id: initialStateId.value,
+      replace_existing_transitions: replaceExistingTransitionsOnSave.value,
       states: states.value.map(({ definition_id, ...item }) => item),
       transitions: transitions.value.map((item) => serializeTransition(item))
     }
     const graph = await saveWorkflowDefinitionGraph(definition.value.id, payload)
     applyGraph(graph.data)
+    replaceExistingTransitionsOnSave.value = false
     captureSavedGraphSnapshot()
     ElMessage.success('流程图已保存')
   } finally {
@@ -691,6 +698,8 @@ async function confirmDiscardWorkflowChanges({
     return false
   }
 }
+
+defineExpose({ confirmDiscardWorkflowChanges })
 
 function onBeforeUnload(event) {
   if (!hasPendingWorkflowChanges()) return

@@ -16,6 +16,7 @@ from app.models.workflow_definition import WorkflowDefinition, WorkflowState, Wo
 from app.services.default_workflow_template_service import ensure_default_workflow_templates, graph_for_object_type
 from app.views.workflow_definition_view import (
     WorkflowDefinitionCreate,
+    WorkflowDefinitionRead,
     WorkflowDefinitionUpdate,
     WorkflowGraphSave,
     WorkflowTemplateGraphSave,
@@ -131,7 +132,12 @@ def get_graph(db: Session, definition_id: int) -> dict:
 
 def save_graph(db: Session, definition_id: int, payload: WorkflowGraphSave) -> dict:
     definition = _get_definition(db, definition_id)
-    _save_graph(db, definition, payload)
+    _save_graph(
+        db,
+        definition,
+        payload,
+        disable_omitted_transitions=payload.replace_existing_transitions,
+    )
     return _graph_response(db, definition)
 
 
@@ -159,6 +165,22 @@ def apply_template(db: Session, definition_id: int) -> dict:
     )
     _save_graph(db, definition, payload, disable_omitted_transitions=True)
     return _graph_response(db, definition)
+
+
+def preview_template(db: Session, definition_id: int) -> dict:
+    definition = _get_definition(db, definition_id)
+    payload = _template_graph_payload(
+        db,
+        definition,
+        graph_for_object_type(definition.object_type),
+    )
+    return {
+        "definition": WorkflowDefinitionRead.model_validate(definition).model_copy(
+            update={"initial_state_id": payload.initial_state_id}
+        ),
+        "states": [item.model_dump() for item in payload.states],
+        "transitions": [item.model_dump() for item in payload.transitions],
+    }
 
 
 def _get_definition(db: Session, definition_id: int) -> WorkflowDefinition:

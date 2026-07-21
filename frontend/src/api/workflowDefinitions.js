@@ -19,3 +19,7 @@ export function saveWorkflowDefinitionGraph(id, payload) {
 export function applyWorkflowDefinitionTemplate(id) {
   return http.post(`/workflow-definitions/${id}/apply-template`)
 }
+
+export function fetchWorkflowDefinitionTemplatePreview(id) {
+  return http.get(`/workflow-definitions/${id}/template-preview`)
+}

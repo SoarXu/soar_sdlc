@@ -16,6 +16,8 @@ function functionBody(name, nextName) {
 assert.doesNotMatch(source, /import \{ layoutWorkflowNodes \} from '\.\.\/utils\/workflowAutoLayout'/)
 assert.match(source, /import \{ layoutWorkflowWithElk \} from '\.\.\/utils\/workflowElkLayout'/)
 assert.match(source, /import \{ workflowGraphSnapshot \} from '\.\.\/utils\/workflowGraphSnapshot'/)
+assert.match(source, /fetchWorkflowDefinitionTemplatePreview/)
+assert.doesNotMatch(source, /applyWorkflowDefinitionTemplate/)
 assert.match(
   source,
   /import \{ buildWorkflowEdgeViews \} from '\.\.\/utils\/workflowEdgePath'/
@@ -212,19 +214,25 @@ assert.doesNotMatch(loadDefinitionBody, /applyGraph\(graph\.data, \{ organize: t
 const applyTemplateBody = functionBody('applyTemplate', 'changeObjectType')
 assert.match(applyTemplateBody, /confirmDiscardWorkflowChanges\(\{[\s\S]*force: true/)
 assert.equal((applyTemplateBody.match(/ElMessageBox\.confirm/g) || []).length, 0)
+assert.match(applyTemplateBody, /fetchWorkflowDefinitionTemplatePreview\(definition\.value\.id\)/)
 assert.match(applyTemplateBody, /organized = await layoutWorkflowWithElk\(/)
 assert.match(applyTemplateBody, /applyGraph\(\{[\s\S]*states: organized\.states[\s\S]*transitions: organized\.transitions[\s\S]*\}\)/)
+assert.match(applyTemplateBody, /applyGraph\([\s\S]*replaceExistingTransitionsOnSave\.value = true/)
 assert.doesNotMatch(applyTemplateBody, /applyGraph\(graph\.data/)
 assert.match(applyTemplateBody, /ElMessage\.error\('模板布局失败，当前流程图未更改'\)/)
 
 const saveGraphBody = functionBody('saveGraph', 'addState')
+assert.match(saveGraphBody, /replace_existing_transitions: replaceExistingTransitionsOnSave\.value/)
 assert.match(saveGraphBody, /applyGraph\(graph\.data\)/)
+assert.match(saveGraphBody, /applyGraph\(graph\.data\)[\s\S]*replaceExistingTransitionsOnSave\.value = false/)
 assert.match(saveGraphBody, /applyGraph\(graph\.data\)[\s\S]*captureSavedGraphSnapshot\(\)/)
 assert.doesNotMatch(saveGraphBody, /applyGraph\(graph\.data, \{ organize: true \}\)/)
 
 assert.match(source, /const savedGraphSnapshot = ref\(''\)/)
+assert.match(source, /const replaceExistingTransitionsOnSave = ref\(false\)/)
 assert.match(source, /const currentGraphSnapshot = computed\(\(\) => workflowGraphSnapshot\(\{/)
 assert.match(source, /const hasUnsavedGraphChanges = computed\(/)
+assert.match(source, /hasUnsavedGraphChanges = computed\(\(\) => \([\s\S]*replaceExistingTransitionsOnSave\.value/)
 assert.match(source, /onBeforeRouteLeave\(async \(\) => confirmDiscardWorkflowChanges\(\)\)/)
 
 const confirmDiscardBody = functionBody('confirmDiscardWorkflowChanges', 'onBeforeUnload')

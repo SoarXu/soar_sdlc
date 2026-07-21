@@ -90,9 +90,14 @@ for (const transition of persistedTransitions.filter((item) => item.id !== 'inco
   const to = frame.states.find((state) => state.id === transition.to_state_id)
   assert.deepEqual(diagramRoutePoints(from, to, transition.diagram_config), view.points)
 }
+const persistedManual = persistedTransitions.find((item) => item.id === 'incoming-manual')
+const originalManual = transitions.find((item) => item.id === 'incoming-manual')
+const manualView = frame.transitionViews.find((edge) => edge.key === 'incoming-manual')
+assert.equal(persistedManual.diagram_config.routing_mode, 'manual')
+assert.notDeepEqual(persistedManual.diagram_config, originalManual.diagram_config)
 assert.deepEqual(
-  persistedTransitions.find((item) => item.id === 'incoming-manual').diagram_config,
-  transitions.find((item) => item.id === 'incoming-manual').diagram_config
+  diagramRoutePoints(frame.states[0], dragged, persistedManual.diagram_config),
+  manualView.points
 )
 
 assert.deepEqual(states, statesSnapshot)

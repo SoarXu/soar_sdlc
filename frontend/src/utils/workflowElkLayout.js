@@ -117,6 +117,7 @@ export function convertWorkflowElkResult(result, states, transitions) {
 
   const convertedTransitions = transitions.map((transition, index) => {
     const clone = structuredClone(transition)
+    clone.diagram_config = null
     if (
       transition.from_state_id === transition.to_state_id ||
       !activeIds.has(transition.from_state_id) ||

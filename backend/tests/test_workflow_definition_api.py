@@ -6,7 +6,7 @@ from fastapi.testclient import TestClient
 
 from app.db.session import SessionLocal
 from app.models.status_operation import StatusOperationLog
-from app.models.workflow_definition import WorkflowState
+from app.models.workflow_definition import WorkflowState, WorkflowTransition
 
 
 def _create_config(client: TestClient) -> int:
@@ -330,6 +330,82 @@ def test_apply_template_creates_graph_nodes_and_transitions(client: TestClient):
     assert any(edge["action_name"] == "提交验证" and names_by_id[edge["to_state_id"]] == "待验证" for edge in graph["transitions"])
     assert any(edge["action_name"] == "验证通过" and names_by_id[edge["to_state_id"]] == "已验证" for edge in graph["transitions"])
     assert any(edge["action_name"] == "关闭" and names_by_id[edge["to_state_id"]] == "已关闭" for edge in graph["transitions"])
+
+
+def test_template_preview_does_not_persist_graph_changes(client: TestClient):
+    config_id = _create_config(client)
+    definition = client.post(
+        "/api/v1/workflow-definitions",
+        json={
+            "name": "Template preview workflow",
+            "object_type": "requirement",
+            "scope_type": "assignee_rule_config",
+            "scope_id": config_id,
+        },
+    ).json()
+    saved_response = client.put(
+        f"/api/v1/workflow-definitions/{definition['id']}/graph",
+        json={
+            "initial_state_id": -1,
+            "states": [
+                {"id": -1, "status_name": "Saved start", "category": "start", "x": 10, "y": 20},
+                {"id": -2, "status_name": "Saved end", "category": "terminal", "x": 300, "y": 20},
+            ],
+            "transitions": [
+                {"action_name": "Saved transition", "from_state_id": -1, "to_state_id": -2},
+            ],
+        },
+    )
+    assert saved_response.status_code == 200, saved_response.text
+    saved = saved_response.json()
+
+    preview = client.get(f"/api/v1/workflow-definitions/{definition['id']}/template-preview")
+
+    assert preview.status_code == 200
+    preview_graph = preview.json()
+    assert "Saved start" not in {item["status_name"] for item in preview_graph["states"]}
+    assert preview_graph["definition"]["initial_state_id"] in {
+        item["id"] for item in preview_graph["states"]
+    }
+    assert all(item.get("action_key") for item in preview_graph["transitions"])
+    persisted_response = client.get(f"/api/v1/workflow-definitions/{definition['id']}")
+    assert persisted_response.status_code == 200, persisted_response.text
+    persisted = persisted_response.json()
+    assert persisted["definition"]["version"] == saved["definition"]["version"]
+    assert [(item["id"], item["status_name"], item["x"], item["y"]) for item in persisted["states"]] == [
+        (item["id"], item["status_name"], item["x"], item["y"]) for item in saved["states"]
+    ]
+    assert [item["action_name"] for item in persisted["transitions"]] == ["Saved transition"]
+
+    replacement = client.put(
+        f"/api/v1/workflow-definitions/{definition['id']}/graph",
+        json={
+            "initial_state_id": preview_graph["definition"]["initial_state_id"],
+            "replace_existing_transitions": True,
+            "states": [
+                {key: value for key, value in item.items() if key != "definition_id"}
+                for item in preview_graph["states"]
+            ],
+            "transitions": [
+                {key: value for key, value in item.items() if key != "definition_id"}
+                for item in preview_graph["transitions"]
+            ],
+        },
+    )
+    assert replacement.status_code == 200, replacement.text
+    with SessionLocal() as db:
+        enabled_transitions = (
+            db.query(WorkflowTransition)
+            .filter(
+                WorkflowTransition.definition_id == definition["id"],
+                WorkflowTransition.enabled.is_(True),
+            )
+            .all()
+        )
+        assert {item.action_key for item in enabled_transitions} == {
+            item["action_key"] for item in preview_graph["transitions"]
+        }
+        assert all(not item.action_key.startswith("custom_") for item in enabled_transitions)
 
 
 def test_apply_template_reuses_state_ids_on_repeated_application(client: TestClient):

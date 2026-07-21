@@ -10,6 +10,7 @@ from app.views.workflow_definition_view import (
     WorkflowDefinitionUpdate,
     WorkflowGraphRead,
     WorkflowGraphSave,
+    WorkflowTemplatePreviewRead,
 )
 
 
@@ -72,6 +73,15 @@ def post_workflow_definition_template(
     _admin=Depends(require_system_admin),
 ):
     return workflow_definition_service.apply_template(db, definition_id)
+
+
+@router.get("/{definition_id}/template-preview", response_model=WorkflowTemplatePreviewRead)
+def get_workflow_definition_template_preview(
+    definition_id: int,
+    db: Session = Depends(get_db),
+    _admin=Depends(require_system_admin),
+):
+    return workflow_definition_service.preview_template(db, definition_id)
 
 
 @router.delete("/{definition_id}", status_code=status.HTTP_204_NO_CONTENT)

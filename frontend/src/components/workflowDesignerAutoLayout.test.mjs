@@ -15,6 +15,7 @@ function functionBody(name, nextName) {
 
 assert.doesNotMatch(source, /import \{ layoutWorkflowNodes \} from '\.\.\/utils\/workflowAutoLayout'/)
 assert.match(source, /import \{ layoutWorkflowWithElk \} from '\.\.\/utils\/workflowElkLayout'/)
+assert.match(source, /import \{ workflowGraphSnapshot \} from '\.\.\/utils\/workflowGraphSnapshot'/)
 assert.match(
   source,
   /import \{ buildWorkflowEdgeViews \} from '\.\.\/utils\/workflowEdgePath'/
@@ -187,6 +188,7 @@ assert.match(applyGraphBody, /stopRouteDrag\(\)/)
 assert.match(applyGraphBody, /closeNodeActionMenu\(\)/)
 assert.doesNotMatch(applyGraphBody, /organize|layoutWorkflow/)
 assert.match(applyGraphBody, /fitToContent\(\)/)
+assert.doesNotMatch(applyGraphBody, /captureSavedGraphSnapshot/)
 
 const clearSelectionBody = functionBody('clearSelection', 'removeSelectedState')
 assert.match(clearSelectionBody, /closeNodeActionMenu\(\)/)
@@ -204,9 +206,12 @@ assert.match(selectTransitionBody, /closeNodeActionMenu\(\)/)
 
 const loadDefinitionBody = functionBody('loadDefinition', 'organizeLayout')
 assert.match(loadDefinitionBody, /applyGraph\(graph\.data\)/)
+assert.match(loadDefinitionBody, /applyGraph\(graph\.data\)[\s\S]*captureSavedGraphSnapshot\(\)/)
 assert.doesNotMatch(loadDefinitionBody, /applyGraph\(graph\.data, \{ organize: true \}\)/)
 
 const applyTemplateBody = functionBody('applyTemplate', 'changeObjectType')
+assert.match(applyTemplateBody, /confirmDiscardWorkflowChanges\(\{[\s\S]*force: true/)
+assert.equal((applyTemplateBody.match(/ElMessageBox\.confirm/g) || []).length, 0)
 assert.match(applyTemplateBody, /organized = await layoutWorkflowWithElk\(/)
 assert.match(applyTemplateBody, /applyGraph\(\{[\s\S]*states: organized\.states[\s\S]*transitions: organized\.transitions[\s\S]*\}\)/)
 assert.doesNotMatch(applyTemplateBody, /applyGraph\(graph\.data/)
@@ -214,6 +219,22 @@ assert.match(applyTemplateBody, /ElMessage\.error\('模板布局失败，当前�
 
 const saveGraphBody = functionBody('saveGraph', 'addState')
 assert.match(saveGraphBody, /applyGraph\(graph\.data\)/)
+assert.match(saveGraphBody, /applyGraph\(graph\.data\)[\s\S]*captureSavedGraphSnapshot\(\)/)
 assert.doesNotMatch(saveGraphBody, /applyGraph\(graph\.data, \{ organize: true \}\)/)
+
+assert.match(source, /const savedGraphSnapshot = ref\(''\)/)
+assert.match(source, /const currentGraphSnapshot = computed\(\(\) => workflowGraphSnapshot\(\{/)
+assert.match(source, /const hasUnsavedGraphChanges = computed\(/)
+assert.match(source, /onBeforeRouteLeave\(async \(\) => confirmDiscardWorkflowChanges\(\)\)/)
+
+const confirmDiscardBody = functionBody('confirmDiscardWorkflowChanges', 'onBeforeUnload')
+const hasPendingBody = functionBody('hasPendingWorkflowChanges', 'confirmDiscardWorkflowChanges')
+assert.match(hasPendingBody, /hasUnsavedGraphChanges\.value/)
+assert.match(hasPendingBody, /advancedDrawer\.value\?\.hasPendingChanges\?\.\(\)/)
+assert.match(confirmDiscardBody, /hasPendingWorkflowChanges\(\)/)
+assert.match(confirmDiscardBody, /ElMessageBox\.confirm/)
+
+const beforeUnloadBody = functionBody('onBeforeUnload', 'eventToCanvasPoint')
+assert.match(beforeUnloadBody, /hasPendingWorkflowChanges\(\)/)
 
 console.log('workflow designer auto layout source contract passed')

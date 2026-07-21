@@ -195,6 +195,7 @@ import {
 } from '../utils/workflowDragFrame'
 import { buildWorkflowEdgeViews } from '../utils/workflowEdgePath'
 import { layoutWorkflowWithElk } from '../utils/workflowElkLayout'
+import { workflowGraphSnapshot } from '../utils/workflowGraphSnapshot'
 import {
   createManualDiagramConfig,
   isManualDiagramRoute,
@@ -259,6 +260,7 @@ const selectedKind = ref('')
 const selectedKey = ref('')
 const loading = ref(false)
 const saving = ref(false)
+const savedGraphSnapshot = ref('')
 const advancedDrawer = ref(null)
 const advancedDrawerVisible = ref(false)
 const suppressCanvasClamp = ref(false)
@@ -348,6 +350,16 @@ const selectedUnsupportedSections = computed(() => (
 const canvasGridStyle = computed(() => ({
   backgroundPosition: `${viewportOffset.x}px ${viewportOffset.y}px`
 }))
+const currentGraphSnapshot = computed(() => workflowGraphSnapshot({
+  definitionId: definition.value?.id,
+  objectType: activeObjectType.value,
+  initialStateId: initialStateId.value,
+  states: states.value,
+  transitions: transitions.value
+}))
+const hasUnsavedGraphChanges = computed(() => (
+  savedGraphSnapshot.value !== '' && savedGraphSnapshot.value !== currentGraphSnapshot.value
+))
 
 watch(canvasSize, (nextCanvas) => {
   if (dragging.state || suppressCanvasClamp.value) return
@@ -356,7 +368,7 @@ watch(canvasSize, (nextCanvas) => {
 
 watch(() => props.configId, () => loadDefinition())
 
-onBeforeRouteLeave(async () => confirmDiscardAdvancedDraft())
+onBeforeRouteLeave(async () => confirmDiscardWorkflowChanges())
 
 let workflowCanvasResizeObserver = null
 let suppressedStateClickTimer = null
@@ -401,9 +413,9 @@ function syncCanvasRenderedSize() {
   canvasRenderedSize.height = bounds.height || viewportSize.height
 }
 
-async function loadDefinition({ discardPendingDraft = true } = {}) {
+async function loadDefinition({ discardPendingChanges = true } = {}) {
   if (!props.configId) return
-  if (discardPendingDraft && !await confirmDiscardAdvancedDraft()) return
+  if (discardPendingChanges && !await confirmDiscardWorkflowChanges()) return
   loading.value = true
   try {
     const list = await fetchWorkflowDefinitions({
@@ -425,6 +437,7 @@ async function loadDefinition({ discardPendingDraft = true } = {}) {
     definition.value = current
     const graph = await fetchWorkflowDefinitionGraph(current.id)
     applyGraph(graph.data)
+    captureSavedGraphSnapshot()
   } finally {
     loading.value = false
   }
@@ -471,8 +484,11 @@ function applyGraph(graph) {
 
 async function applyTemplate() {
   if (!definition.value?.id) return
-  await ElMessageBox.confirm('套用模板会覆盖当前流程图，确认继续？', '套用模板', { type: 'warning' })
-  if (!await confirmDiscardAdvancedDraft()) return
+  if (!await confirmDiscardWorkflowChanges({
+    force: true,
+    title: '套用模板',
+    message: '套用模板会覆盖当前流程图，未保存修改将被放弃，确认继续？'
+  })) return
   loading.value = true
   try {
     const graph = await applyWorkflowDefinitionTemplate(definition.value.id)
@@ -500,9 +516,9 @@ async function applyTemplate() {
 
 async function changeObjectType(nextObjectType) {
   if (nextObjectType === activeObjectType.value) return
-  if (!await confirmDiscardAdvancedDraft()) return
+  if (!await confirmDiscardWorkflowChanges()) return
   activeObjectType.value = nextObjectType
-  await loadDefinition({ discardPendingDraft: false })
+  await loadDefinition({ discardPendingChanges: false })
 }
 
 async function saveGraph() {
@@ -520,6 +536,7 @@ async function saveGraph() {
     }
     const graph = await saveWorkflowDefinitionGraph(definition.value.id, payload)
     applyGraph(graph.data)
+    captureSavedGraphSnapshot()
     ElMessage.success('流程图已保存')
   } finally {
     saving.value = false
@@ -653,13 +670,30 @@ function resetSelectedDiagramRoute() {
   selectedTransition.value.diagram_config = null
 }
 
-async function confirmDiscardAdvancedDraft() {
-  if (!advancedDrawer.value?.hasPendingChanges?.()) return true
-  return advancedDrawer.value.confirmDiscardPendingChanges()
+function captureSavedGraphSnapshot() {
+  savedGraphSnapshot.value = currentGraphSnapshot.value
+}
+
+function hasPendingWorkflowChanges() {
+  return hasUnsavedGraphChanges.value || Boolean(advancedDrawer.value?.hasPendingChanges?.())
+}
+
+async function confirmDiscardWorkflowChanges({
+  force = false,
+  title = '放弃未保存修改',
+  message = '当前流程图或高级配置有未保存修改，确认放弃？'
+} = {}) {
+  if (!force && !hasPendingWorkflowChanges()) return true
+  try {
+    await ElMessageBox.confirm(message, title, { type: 'warning' })
+    return true
+  } catch {
+    return false
+  }
 }
 
 function onBeforeUnload(event) {
-  if (!advancedDrawer.value?.hasPendingChanges?.()) return
+  if (!hasPendingWorkflowChanges()) return
   event.preventDefault()
   event.returnValue = ''
 }

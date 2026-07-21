@@ -108,9 +108,9 @@
             <div class="diagram-routing-row">
               <div>
                 <span>画布布线</span>
-                <strong>{{ transition.diagram_config ? '手工布线' : '自动布线' }}</strong>
+                <strong>{{ isManualDiagramRoute(transition.diagram_config) ? '手工布线' : '自动布线' }}</strong>
               </div>
-              <el-button v-if="transition.diagram_config" type="primary" link @click="resetDiagramRoute">
+              <el-button v-if="isManualDiagramRoute(transition.diagram_config)" type="primary" link @click="resetDiagramRoute">
                 恢复自动布线
               </el-button>
             </div>
@@ -359,6 +359,7 @@ import {
   validateAdvancedConfig
 } from '../utils/workflowAdvancedConfig'
 import { groupStateTransitions } from '../utils/workflowTransitionOrdering'
+import { isManualDiagramRoute } from '../utils/workflowManualRoute'
 
 const props = defineProps({
   modelValue: { type: Boolean, default: false },

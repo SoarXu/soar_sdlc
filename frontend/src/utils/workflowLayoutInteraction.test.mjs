@@ -25,7 +25,8 @@ function workflowFixture() {
     transitions,
     initialStateId: 2,
     confirm: async () => { throw 'cancel' },
-    notifyEmpty: () => assert.fail('non-empty workflow must not notify')
+    notifyEmpty: () => assert.fail('non-empty workflow must not notify'),
+    layout: () => assert.fail('canceled organization must not run layout')
   })
 
   assert.equal(result.organized, false)
@@ -43,7 +44,8 @@ function workflowFixture() {
     transitions,
     initialStateId: 2,
     confirm: async () => { throw 'close' },
-    notifyEmpty: () => assert.fail('non-empty workflow must not notify')
+    notifyEmpty: () => assert.fail('non-empty workflow must not notify'),
+    layout: () => assert.fail('closed organization must not run layout')
   })
 
   assert.equal(result.organized, false)
@@ -61,7 +63,8 @@ function workflowFixture() {
       transitions,
       initialStateId: 2,
       confirm: async () => { throw confirmationError },
-      notifyEmpty: () => assert.fail('non-empty workflow must not notify')
+      notifyEmpty: () => assert.fail('non-empty workflow must not notify'),
+      layout: () => assert.fail('failed confirmation must not run layout')
     }),
     (error) => error === confirmationError
   )
@@ -72,19 +75,35 @@ function workflowFixture() {
   const originalStates = structuredClone(states)
   const originalTransitions = structuredClone(transitions)
   let confirmCount = 0
+  let layoutCount = 0
+  const expected = {
+    states: states.map((state) => ({ ...state, x: state.x + 10 })),
+    transitions: transitions.map((transition) => ({
+      ...transition,
+      diagram_config: { routing_mode: 'generated' }
+    }))
+  }
 
   const result = await requestWorkflowOrganization({
     states,
     transitions,
     initialStateId: 2,
     confirm: async () => { confirmCount += 1 },
-    notifyEmpty: () => assert.fail('non-empty workflow must not notify')
+    notifyEmpty: () => assert.fail('non-empty workflow must not notify'),
+    layout: async (receivedStates, receivedTransitions, receivedInitialStateId) => {
+      layoutCount += 1
+      assert.strictEqual(receivedStates, states)
+      assert.strictEqual(receivedTransitions, transitions)
+      assert.equal(receivedInitialStateId, 2)
+      return expected
+    }
   })
 
   assert.equal(confirmCount, 1)
+  assert.equal(layoutCount, 1)
   assert.equal(result.organized, true)
-  assert.notStrictEqual(result.states, states)
-  assert.notDeepEqual(result.states, originalStates)
+  assert.strictEqual(result.states, expected.states)
+  assert.strictEqual(result.transitions, expected.transitions)
   assert.deepEqual(states, originalStates)
   assert.deepEqual(transitions, originalTransitions)
 }
@@ -100,13 +119,15 @@ function workflowFixture() {
     transitions,
     initialStateId: null,
     confirm: async () => { confirmCount += 1 },
-    notifyEmpty: () => { notifyCount += 1 }
+    notifyEmpty: () => { notifyCount += 1 },
+    layout: () => assert.fail('empty workflow must not run layout')
   })
 
   assert.equal(confirmCount, 0)
   assert.equal(notifyCount, 1)
   assert.equal(result.organized, false)
   assert.strictEqual(result.states, states)
+  assert.strictEqual(result.transitions, transitions)
 }
 
 {
@@ -116,12 +137,40 @@ function workflowFixture() {
     transitions,
     initialStateId: 2,
     confirm: async () => {},
-    notifyEmpty: () => {}
+    notifyEmpty: () => {},
+    layout: async (receivedStates, receivedTransitions, configuredInitialStateId) => ({
+      states: receivedStates.map((state) => ({
+        ...state,
+        x: state.id === configuredInitialStateId ? 80 : 320
+      })),
+      transitions: receivedTransitions.map((transition) => ({ ...transition }))
+    })
   })
   const initialState = result.states.find((state) => state.id === 2)
   const otherState = result.states.find((state) => state.id === 1)
 
   assert.ok(initialState.x < otherState.x, 'the configured initial state must occupy the first layer')
+}
+
+{
+  const { states, transitions } = workflowFixture()
+  const originalStates = structuredClone(states)
+  const originalTransitions = structuredClone(transitions)
+  const layoutError = new Error('elk failed')
+
+  await assert.rejects(
+    requestWorkflowOrganization({
+      states,
+      transitions,
+      initialStateId: 2,
+      confirm: async () => {},
+      notifyEmpty: () => {},
+      layout: async () => { throw layoutError }
+    }),
+    (error) => error === layoutError
+  )
+  assert.deepEqual(states, originalStates)
+  assert.deepEqual(transitions, originalTransitions)
 }
 
 console.log('workflow layout interaction tests passed')

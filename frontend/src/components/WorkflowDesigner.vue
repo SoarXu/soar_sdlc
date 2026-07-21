@@ -23,7 +23,7 @@
           />
         </el-select>
         <el-button size="small" @click="addState">新增状态</el-button>
-        <el-button size="small" @click="organizeLayout">整理布局</el-button>
+        <el-button size="small" :loading="loading" @click="organizeLayout">整理布局</el-button>
         <el-button size="small" @click="fitToContent">适应视图</el-button>
         <el-button size="small" @click="resetViewport">回到原点</el-button>
         <el-button size="small" :loading="loading" @click="applyTemplate">套用模板</el-button>
@@ -95,7 +95,7 @@
               </template>
             </g>
             <g
-              v-for="state in states"
+              v-for="state in renderedStates"
               :key="state.id"
               class="workflow-node"
               :class="{
@@ -182,17 +182,23 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 
 import WorkflowAdvancedConfigDrawer from './WorkflowAdvancedConfigDrawer.vue'
 import {
-  applyWorkflowDefinitionTemplate,
   createWorkflowDefinition,
   fetchWorkflowDefinitionGraph,
+  fetchWorkflowDefinitionTemplatePreview,
   fetchWorkflowDefinitions,
   saveWorkflowDefinitionGraph
 } from '../api/workflowDefinitions'
-import { layoutWorkflowNodes } from '../utils/workflowAutoLayout'
 import { projectWorkflowCanvas } from '../utils/workflowCanvasProjection'
+import {
+  applyGeneratedRoutesFromViews,
+  createWorkflowDragFrame
+} from '../utils/workflowDragFrame'
 import { buildWorkflowEdgeViews } from '../utils/workflowEdgePath'
+import { layoutWorkflowWithElk } from '../utils/workflowElkLayout'
+import { workflowGraphSnapshot } from '../utils/workflowGraphSnapshot'
 import {
   createManualDiagramConfig,
+  isManualDiagramRoute,
   moveManualAnchor,
   moveManualSegment
 } from '../utils/workflowManualRoute'
@@ -247,6 +253,7 @@ const viewportSize = { width: 980, height: 540 }
 const NODE_DRAG_THRESHOLD = 4
 const activeObjectType = ref('requirement')
 const definition = ref(null)
+const replaceExistingTransitionsOnSave = ref(false)
 const states = ref([])
 const transitions = ref([])
 const initialStateId = ref(null)
@@ -254,10 +261,12 @@ const selectedKind = ref('')
 const selectedKey = ref('')
 const loading = ref(false)
 const saving = ref(false)
+const savedGraphSnapshot = ref('')
 const advancedDrawer = ref(null)
 const advancedDrawerVisible = ref(false)
 const suppressCanvasClamp = ref(false)
 const suppressedStateClickId = ref(null)
+const dragFrame = ref(null)
 const workflowCanvasElement = ref(null)
 const workflowSvgElement = ref(null)
 const canvasRenderedSize = reactive({ ...viewportSize })
@@ -288,14 +297,15 @@ const canvasProjection = computed(() => projectWorkflowCanvas(states.value, tran
 const fullTransitionViews = computed(() => (
   buildWorkflowEdgeViews(states.value, canvasProjection.value.routedTransitions, transitionKey)
 ))
-const transitionViews = computed(() => fullTransitionViews.value)
-const canvasEdgeViews = computed(() => fullTransitionViews.value)
+const renderedStates = computed(() => dragFrame.value?.states || states.value)
+const transitionViews = computed(() => dragFrame.value?.transitionViews || fullTransitionViews.value)
+const canvasEdgeViews = computed(() => transitionViews.value)
 const nodeActionsByStateId = computed(() => new Map(states.value.flatMap((state) => {
   const actions = canvasProjection.value.stateActionsByStateId.get(state.id) || []
   return actions.length ? [[state.id, { stateId: state.id, actions }]] : []
 })))
 const canvasSize = computed(() => (
-  workflowCanvasSize(states.value, minimumCanvas, undefined, canvasEdgeViews.value)
+  workflowCanvasSize(renderedStates.value, minimumCanvas, undefined, canvasEdgeViews.value)
 ))
 const activeNodeActionMenu = computed(() => (
   nodeActionsByStateId.value.get(activeNodeActionStateId.value) || null
@@ -341,6 +351,18 @@ const selectedUnsupportedSections = computed(() => (
 const canvasGridStyle = computed(() => ({
   backgroundPosition: `${viewportOffset.x}px ${viewportOffset.y}px`
 }))
+const currentGraphSnapshot = computed(() => workflowGraphSnapshot({
+  definitionId: definition.value?.id,
+  objectType: activeObjectType.value,
+  initialStateId: initialStateId.value,
+  states: states.value,
+  transitions: transitions.value
+}))
+const hasUnsavedGraphChanges = computed(() => (
+  replaceExistingTransitionsOnSave.value || (
+    savedGraphSnapshot.value !== '' && savedGraphSnapshot.value !== currentGraphSnapshot.value
+  )
+))
 
 watch(canvasSize, (nextCanvas) => {
   if (dragging.state || suppressCanvasClamp.value) return
@@ -349,7 +371,7 @@ watch(canvasSize, (nextCanvas) => {
 
 watch(() => props.configId, () => loadDefinition())
 
-onBeforeRouteLeave(async () => confirmDiscardAdvancedDraft())
+onBeforeRouteLeave(async () => confirmDiscardWorkflowChanges())
 
 let workflowCanvasResizeObserver = null
 let suppressedStateClickTimer = null
@@ -394,9 +416,9 @@ function syncCanvasRenderedSize() {
   canvasRenderedSize.height = bounds.height || viewportSize.height
 }
 
-async function loadDefinition({ discardPendingDraft = true } = {}) {
+async function loadDefinition({ discardPendingChanges = true } = {}) {
   if (!props.configId) return
-  if (discardPendingDraft && !await confirmDiscardAdvancedDraft()) return
+  if (discardPendingChanges && !await confirmDiscardWorkflowChanges()) return
   loading.value = true
   try {
     const list = await fetchWorkflowDefinitions({
@@ -418,31 +440,36 @@ async function loadDefinition({ discardPendingDraft = true } = {}) {
     definition.value = current
     const graph = await fetchWorkflowDefinitionGraph(current.id)
     applyGraph(graph.data)
+    replaceExistingTransitionsOnSave.value = false
+    captureSavedGraphSnapshot()
   } finally {
     loading.value = false
   }
 }
 
-function applyOrganizedLayout() {
-  states.value = layoutWorkflowNodes(states.value, transitions.value, initialStateId.value)
-}
-
 async function organizeLayout() {
-  const result = await requestWorkflowOrganization({
-    states: states.value,
-    transitions: transitions.value,
-    initialStateId: initialStateId.value,
-    confirm: () => ElMessageBox.confirm('整理布局将重新排列全部节点并清除手工布线，确认继续？', '整理布局', { type: 'warning' }),
-    notifyEmpty: () => ElMessage.info('当前没有可整理的状态节点')
-  })
-  if (!result.organized) return
-  closeNodeActionMenu()
-  transitions.value.forEach((transition) => { transition.diagram_config = null })
-  states.value = result.states
-  fitToContent()
+  loading.value = true
+  try {
+    const result = await requestWorkflowOrganization({
+      states: states.value,
+      transitions: transitions.value,
+      initialStateId: initialStateId.value,
+      confirm: () => ElMessageBox.confirm('整理布局将重新排列全部节点并清除手工布线，确认继续？', '整理布局', { type: 'warning' }),
+      notifyEmpty: () => ElMessage.info('当前没有可整理的状态节点')
+    })
+    if (!result.organized) return
+    closeNodeActionMenu()
+    states.value = result.states
+    transitions.value = result.transitions
+    fitToContent()
+  } catch {
+    ElMessage.error('整理布局失败，当前流程图未更改')
+  } finally {
+    loading.value = false
+  }
 }
 
-function applyGraph(graph, { organize = false } = {}) {
+function applyGraph(graph) {
   stopRouteDrag()
   closeNodeActionMenu()
   definition.value = graph.definition || definition.value
@@ -452,10 +479,6 @@ function applyGraph(graph, { organize = false } = {}) {
     _client_id: `transition-${item.id}`
   }))
   initialStateId.value = graph.definition?.initial_state_id ?? null
-  if (organize) {
-    transitions.value.forEach((transition) => { transition.diagram_config = null })
-    applyOrganizedLayout()
-  }
   if (!states.value.length) {
     selectedKind.value = ''
     selectedKey.value = ''
@@ -465,12 +488,31 @@ function applyGraph(graph, { organize = false } = {}) {
 
 async function applyTemplate() {
   if (!definition.value?.id) return
-  await ElMessageBox.confirm('套用模板会覆盖当前流程图，确认继续？', '套用模板', { type: 'warning' })
-  if (!await confirmDiscardAdvancedDraft()) return
+  if (!await confirmDiscardWorkflowChanges({
+    force: true,
+    title: '套用模板',
+    message: '套用模板会覆盖当前流程图，未保存修改将被放弃，确认继续？'
+  })) return
   loading.value = true
   try {
-    const graph = await applyWorkflowDefinitionTemplate(definition.value.id)
-    applyGraph(graph.data, { organize: true })
+    const graph = await fetchWorkflowDefinitionTemplatePreview(definition.value.id)
+    let organized
+    try {
+      organized = await layoutWorkflowWithElk(
+        graph.data.states || [],
+        graph.data.transitions || [],
+        graph.data.definition?.initial_state_id ?? null
+      )
+    } catch {
+      ElMessage.error('模板布局失败，当前流程图未更改')
+      return
+    }
+    applyGraph({
+      ...graph.data,
+      states: organized.states,
+      transitions: organized.transitions
+    })
+    replaceExistingTransitionsOnSave.value = true
     ElMessage.success('模板已套用')
   } finally {
     loading.value = false
@@ -479,9 +521,9 @@ async function applyTemplate() {
 
 async function changeObjectType(nextObjectType) {
   if (nextObjectType === activeObjectType.value) return
-  if (!await confirmDiscardAdvancedDraft()) return
+  if (!await confirmDiscardWorkflowChanges()) return
   activeObjectType.value = nextObjectType
-  await loadDefinition({ discardPendingDraft: false })
+  await loadDefinition({ discardPendingChanges: false })
 }
 
 async function saveGraph() {
@@ -494,11 +536,14 @@ async function saveGraph() {
   try {
     const payload = {
       initial_state_id: initialStateId.value,
+      replace_existing_transitions: replaceExistingTransitionsOnSave.value,
       states: states.value.map(({ definition_id, ...item }) => item),
       transitions: transitions.value.map((item) => serializeTransition(item))
     }
     const graph = await saveWorkflowDefinitionGraph(definition.value.id, payload)
     applyGraph(graph.data)
+    replaceExistingTransitionsOnSave.value = false
+    captureSavedGraphSnapshot()
     ElMessage.success('流程图已保存')
   } finally {
     saving.value = false
@@ -632,13 +677,32 @@ function resetSelectedDiagramRoute() {
   selectedTransition.value.diagram_config = null
 }
 
-async function confirmDiscardAdvancedDraft() {
-  if (!advancedDrawer.value?.hasPendingChanges?.()) return true
-  return advancedDrawer.value.confirmDiscardPendingChanges()
+function captureSavedGraphSnapshot() {
+  savedGraphSnapshot.value = currentGraphSnapshot.value
 }
 
+function hasPendingWorkflowChanges() {
+  return hasUnsavedGraphChanges.value || Boolean(advancedDrawer.value?.hasPendingChanges?.())
+}
+
+async function confirmDiscardWorkflowChanges({
+  force = false,
+  title = '放弃未保存修改',
+  message = '当前流程图或高级配置有未保存修改，确认放弃？'
+} = {}) {
+  if (!force && !hasPendingWorkflowChanges()) return true
+  try {
+    await ElMessageBox.confirm(message, title, { type: 'warning' })
+    return true
+  } catch {
+    return false
+  }
+}
+
+defineExpose({ confirmDiscardWorkflowChanges })
+
 function onBeforeUnload(event) {
-  if (!advancedDrawer.value?.hasPendingChanges?.()) return
+  if (!hasPendingWorkflowChanges()) return
   event.preventDefault()
   event.returnValue = ''
 }
@@ -734,7 +798,7 @@ function beginRouteDrag(edge) {
   routeDrag.originalConfig = transition.diagram_config
     ? structuredClone(transition.diagram_config)
     : null
-  if (!transition.diagram_config) {
+  if (!isManualDiagramRoute(transition.diagram_config)) {
     transition.diagram_config = createManualDiagramConfig(edge, from, to)
   }
   return Boolean(transition.diagram_config)
@@ -791,7 +855,9 @@ function stateById(stateId) {
 function startDrag(state, event) {
   if (routeDrag.kind) return
   closeNodeActionMenu()
-  dragging.state = state
+  dragging.state = stateById(state.id)
+  if (!dragging.state) return
+  dragFrame.value = null
   dragging.startX = event.clientX
   dragging.startY = event.clientY
   dragging.originX = state.x
@@ -817,8 +883,15 @@ function onDrag(event) {
 function flushNodeDrag() {
   dragging.frame = 0
   if (!dragging.state) return
-  dragging.state.x = Math.max(20, Math.min(canvasSize.value.right - 140, dragging.originX + dragging.pendingX - dragging.startX))
-  dragging.state.y = Math.max(20, Math.min(canvasSize.value.bottom - 70, dragging.originY + dragging.pendingY - dragging.startY))
+  const x = Math.max(20, Math.min(canvasSize.value.right - 140, dragging.originX + dragging.pendingX - dragging.startX))
+  const y = Math.max(20, Math.min(canvasSize.value.bottom - 70, dragging.originY + dragging.pendingY - dragging.startY))
+  dragFrame.value = createWorkflowDragFrame(
+    states.value,
+    canvasProjection.value.routedTransitions,
+    dragging.state.id,
+    { x, y },
+    transitionKey
+  )
 }
 
 function clampCurrentViewport(nextCanvas = canvasSize.value) {
@@ -835,6 +908,17 @@ function stopDrag() {
     dragging.frame = 0
     flushNodeDrag()
   }
+  const finalState = dragFrame.value?.states.find((state) => state.id === draggedStateId)
+  if (finalState) {
+    dragging.state.x = finalState.x
+    dragging.state.y = finalState.y
+    transitions.value = applyGeneratedRoutesFromViews(
+      dragFrame.value.states,
+      transitions.value,
+      dragFrame.value.transitionViews,
+      transitionKey
+    )
+  }
   if (dragging.moved) {
     suppressedStateClickId.value = draggedStateId
     if (suppressedStateClickTimer) clearTimeout(suppressedStateClickTimer)
@@ -845,6 +929,7 @@ function stopDrag() {
   }
   suppressCanvasClamp.value = true
   dragging.state = null
+  dragFrame.value = null
   nextTick(() => {
     suppressCanvasClamp.value = false
   })

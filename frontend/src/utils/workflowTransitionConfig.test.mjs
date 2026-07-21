@@ -45,6 +45,7 @@ assert.deepEqual(normalized.condition_routes, [{ value: 'code_issue', state_id: 
 
 const serialized = serializeWorkflowTransition(normalized)
 assert.equal(serialized.id, 9)
+assert.equal(serialized.action_key, 'classify')
 assert.equal('definition_id' in serialized, false)
 for (const key of ['condition_config', 'form_config', 'validator_config', 'ui_config', 'diagram_config', 'trigger_config', 'post_action_config']) {
   assert.deepEqual(serialized[key], source[key])

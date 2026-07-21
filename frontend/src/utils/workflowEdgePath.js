@@ -1,4 +1,4 @@
-import { manualRoutePoints } from './workflowManualRoute.js'
+import { diagramRoutePoints } from './workflowManualRoute.js'
 
 const NODE_WIDTH = 118
 const NODE_HEIGHT = 42
@@ -77,11 +77,12 @@ export function buildWorkflowEdgeViews(states, transitions, transitionKey = defa
     .forEach((edge) => {
       const metadata = routingMetadata.get(edge)
       let view
-      const manualPoints = manualRoutePoints(edge.from, edge.to, edge.transition.diagram_config)
+      const storedPoints = diagramRoutePoints(edge.from, edge.to, edge.transition.diagram_config)
 
-      if (manualPoints) {
+      if (storedPoints) {
         const labelBounds = states.map((state) => expandedRectangle(state, 0))
-        view = routeViewWithClearLabel(manualPoints, labelBounds, globalReservations) || routedEdgeView(manualPoints)
+        const labeledView = routeViewWithClearLabel(storedPoints, labelBounds, globalReservations)
+        view = labeledView?.view || routedEdgeView(storedPoints)
       } else if (metadata.verticalGroupKey !== undefined) {
         const verticalGroupKey = metadata.verticalGroupKey
         view = buildVerticalView(
@@ -113,7 +114,7 @@ export function buildWorkflowEdgeViews(states, transitions, transitionKey = defa
       }
 
       views.set(edge, view)
-      if (manualPoints || metadata.verticalGroupKey === undefined) {
+      if (storedPoints || metadata.verticalGroupKey === undefined) {
         reserveEdgeViewGeometry(view, globalReservations)
       }
     })

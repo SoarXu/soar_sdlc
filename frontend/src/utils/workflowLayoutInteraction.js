@@ -1,28 +1,27 @@
-import { layoutWorkflowNodes } from './workflowAutoLayout.js'
+import { layoutWorkflowWithElk } from './workflowElkLayout.js'
 
 export async function requestWorkflowOrganization({
   states,
   transitions,
   initialStateId,
   confirm,
-  notifyEmpty
+  notifyEmpty,
+  layout = layoutWorkflowWithElk
 }) {
   if (!states.length) {
     notifyEmpty()
-    return { organized: false, states }
+    return { organized: false, states, transitions }
   }
 
   try {
     await confirm()
   } catch (error) {
     if (error === 'cancel' || error === 'close') {
-      return { organized: false, states }
+      return { organized: false, states, transitions }
     }
     throw error
   }
 
-  return {
-    organized: true,
-    states: layoutWorkflowNodes(states, transitions, initialStateId)
-  }
+  const organized = await layout(states, transitions, initialStateId)
+  return { organized: true, ...organized }
 }

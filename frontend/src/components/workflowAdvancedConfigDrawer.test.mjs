@@ -21,5 +21,7 @@ assert.match(source, /画布布线/)
 assert.match(source, /手工布线/)
 assert.match(source, /恢复自动布线/)
 assert.match(source, /reset-diagram-route/)
+assert.match(source, /isManualDiagramRoute\(transition\.diagram_config\)\s*\?[^:]+:/)
+assert.match(source, /v-if="isManualDiagramRoute\(transition\.diagram_config\)"/)
 
 console.log('workflow advanced config drawer source-contract tests passed')

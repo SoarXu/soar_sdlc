@@ -151,6 +151,7 @@
 
     <el-card v-if="editingId && canEditWorkflow" shadow="never" class="mt-16">
       <WorkflowDesigner
+        ref="workflowDesigner"
         :config-id="editingId"
         :config-name="form.name"
         :role-options="workflowExecutionRoleOptions"
@@ -273,6 +274,7 @@ const selectedProjectIds = ref([])
 const transferTargets = reactive({})
 const projectUpdatingIds = ref(new Set())
 const projectLinkTableRef = ref(null)
+const workflowDesigner = ref(null)
 const lifecycleBusyIds = ref(new Set())
 const currentUser = computed(() => currentUserFromStorage(users.value))
 const canEditWorkflow = computed(() => canConfigureWorkflow(currentUser.value))
@@ -362,7 +364,9 @@ function openDetail(row) {
   setTimeout(syncProjectSelection)
 }
 
-function backToList() {
+async function backToList() {
+  const canLeave = await workflowDesigner.value?.confirmDiscardWorkflowChanges?.()
+  if (canLeave === false) return
   viewMode.value = 'list'
   resetForm()
 }

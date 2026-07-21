@@ -132,7 +132,7 @@ async function save() {
   }
 }
 
-watch(() => [props.modelValue, props.itemId], load)
+watch(() => [props.modelValue, props.itemId], load, { immediate: true })
 </script>
 
 <style scoped>

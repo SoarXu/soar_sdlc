@@ -16,6 +16,7 @@ for (const [filename, fetchName, updateName] of components) {
   assert.match(source, new RegExp(fetchName))
   assert.match(source, new RegExp(updateName))
   assert.match(source, /showActionError/)
+  assert.match(source, /watch\([\s\S]*?\{ immediate: true \}\)/)
 }
 
 const viewContracts = [

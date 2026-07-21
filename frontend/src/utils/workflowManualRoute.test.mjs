@@ -4,6 +4,7 @@ import {
   anchorPointForNode,
   createManualDiagramConfig,
   diagramRoutePoints,
+  generatedDiagramConfigFromView,
   isGeneratedDiagramRoute,
   isManualDiagramRoute,
   moveManualAnchor,
@@ -48,6 +49,7 @@ assert.equal(isManualDiagramRoute(generated), false)
 assert.equal(isGeneratedDiagramRoute(generated), true)
 assert.deepEqual(diagramRoutePoints(from, to, generated), initialView.points)
 assert.equal(diagramRoutePoints(from, to, { ...manual, routing_mode: 'unknown' }), null)
+assert.deepEqual(generatedDiagramConfigFromView(initialView, from, to), generated)
 
 const movedTo = { ...to, x: 440, y: 300 }
 assert.deepEqual(diagramRoutePoints(from, movedTo, manual), [

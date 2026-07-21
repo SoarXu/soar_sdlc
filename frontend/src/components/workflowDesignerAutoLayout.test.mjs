@@ -27,7 +27,8 @@ assert.match(source, /workflowCanvasSize/)
 assert.match(source, /createManualDiagramConfig/)
 assert.match(source, /moveManualAnchor/)
 assert.match(source, /moveManualSegment/)
-assert.match(source, /import \{ createWorkflowDragFrame \} from '\.\.\/utils\/workflowDragFrame'/)
+assert.match(source, /isManualDiagramRoute/)
+assert.match(source, /applyGeneratedRoutesFromViews[\s\S]*createWorkflowDragFrame[\s\S]*from '\.\.\/utils\/workflowDragFrame'/)
 assert.doesNotMatch(source, /\bbuildWorkflowEdgeView\b/)
 assert.match(
   source,
@@ -115,6 +116,7 @@ assert.match(stopDragBody, /suppressCanvasClamp\.value = true[\s\S]*dragging\.st
 assert.match(stopDragBody, /const draggedStateId = dragging\.state\.id/)
 assert.match(stopDragBody, /const finalState = dragFrame\.value\?\.states\.find/)
 assert.match(stopDragBody, /dragging\.state\.x = finalState\.x[\s\S]*dragging\.state\.y = finalState\.y/)
+assert.match(stopDragBody, /transitions\.value = applyGeneratedRoutesFromViews\(/)
 assert.match(stopDragBody, /dragFrame\.value = null/)
 assert.match(stopDragBody, /if \(dragging\.moved\)[\s\S]*suppressedStateClickId\.value = draggedStateId/)
 assert.match(stopDragBody, /setTimeout\([\s\S]*suppressedStateClickId\.value = null[\s\S]*, 0\)/)
@@ -130,6 +132,10 @@ const startEndpointDragBody = functionBody('startEndpointDrag', 'startSegmentDra
 const startSegmentDragBody = functionBody('startSegmentDrag', 'beginRouteDrag')
 assert.doesNotMatch(startEndpointDragBody, /onRouteDrag\(/)
 assert.doesNotMatch(startSegmentDragBody, /onRouteDrag\(/)
+
+const beginRouteDragBody = functionBody('beginRouteDrag', 'onRouteDrag')
+assert.match(beginRouteDragBody, /if \(!isManualDiagramRoute\(transition\.diagram_config\)\)/)
+assert.match(beginRouteDragBody, /createManualDiagramConfig\(edge, from, to\)/)
 
 const startViewportDragBody = functionBody('startViewportDrag', 'onViewportDrag')
 assert.match(startViewportDragBody, /closeNodeActionMenu\(\)/)

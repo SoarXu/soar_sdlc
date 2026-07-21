@@ -30,11 +30,19 @@ export function anchorPointForNode(node, anchor) {
 }
 
 export function createManualDiagramConfig(view, from, to) {
+  return diagramConfigFromView(view, from, to, 'manual')
+}
+
+export function generatedDiagramConfigFromView(view, from, to) {
+  return diagramConfigFromView(view, from, to, 'generated')
+}
+
+function diagramConfigFromView(view, from, to, routingMode) {
   const points = normalizeManualWaypoints(view?.points || [view?.start, view?.end].filter(Boolean))
-  if (points.length < 2) return null
+  if (!from || !to || points.length < 2 || !routeIsOrthogonal(points)) return null
   return {
     version: 1,
-    routing_mode: 'manual',
+    routing_mode: routingMode,
     source_anchor: anchorForPoint(from, points[0]),
     target_anchor: anchorForPoint(to, points.at(-1)),
     waypoints: points.slice(1, -1).map(copyPoint)

@@ -189,11 +189,15 @@ import {
   saveWorkflowDefinitionGraph
 } from '../api/workflowDefinitions'
 import { projectWorkflowCanvas } from '../utils/workflowCanvasProjection'
-import { createWorkflowDragFrame } from '../utils/workflowDragFrame'
+import {
+  applyGeneratedRoutesFromViews,
+  createWorkflowDragFrame
+} from '../utils/workflowDragFrame'
 import { buildWorkflowEdgeViews } from '../utils/workflowEdgePath'
 import { layoutWorkflowWithElk } from '../utils/workflowElkLayout'
 import {
   createManualDiagramConfig,
+  isManualDiagramRoute,
   moveManualAnchor,
   moveManualSegment
 } from '../utils/workflowManualRoute'
@@ -751,7 +755,7 @@ function beginRouteDrag(edge) {
   routeDrag.originalConfig = transition.diagram_config
     ? structuredClone(transition.diagram_config)
     : null
-  if (!transition.diagram_config) {
+  if (!isManualDiagramRoute(transition.diagram_config)) {
     transition.diagram_config = createManualDiagramConfig(edge, from, to)
   }
   return Boolean(transition.diagram_config)
@@ -865,6 +869,12 @@ function stopDrag() {
   if (finalState) {
     dragging.state.x = finalState.x
     dragging.state.y = finalState.y
+    transitions.value = applyGeneratedRoutesFromViews(
+      dragFrame.value.states,
+      transitions.value,
+      dragFrame.value.transitionViews,
+      transitionKey
+    )
   }
   if (dragging.moved) {
     suppressedStateClickId.value = draggedStateId

@@ -169,6 +169,15 @@ def ensure_runtime_schema(engine: Engine) -> None:
             "owner_id_snapshot",
             "ALTER TABLE work_item_iteration_history ADD COLUMN owner_id_snapshot BIGINT UNSIGNED NULL COMMENT '离开时处理人' AFTER status_name_snapshot",
         )
+        history_index_names = {index["name"] for index in inspector0.get_indexes("work_item_iteration_history")}
+        if "ix_work_item_iteration_history_open_lookup" not in history_index_names:
+            with engine.begin() as conn:
+                conn.execute(
+                    text(
+                        "CREATE INDEX ix_work_item_iteration_history_open_lookup "
+                        "ON work_item_iteration_history (object_type, object_id, left_at)"
+                    )
+                )
         with engine.begin() as conn:
             for object_type, table_name in (("requirement", "requirements"), ("task", "tasks"), ("bug", "bugs")):
                 if table_name not in inspector0.get_table_names():

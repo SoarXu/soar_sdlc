@@ -11,6 +11,10 @@ from app.models.iteration import Iteration
 from app.models.work_item_iteration_history import WorkItemIterationHistory
 from app.models.workflow_definition import WorkflowState
 from app.services.requirement_import_service import REQUIREMENT_IMPORT_COLUMNS
+from app.services import requirement_import_service
+from types import SimpleNamespace
+from fastapi import HTTPException
+import pytest
 
 
 def _xlsx(rows: list[list[str | None]]) -> tuple[str, bytes, str]:
@@ -261,6 +265,64 @@ def test_requirement_import_update_rejects_terminal_iteration(client: TestClient
     assert response.status_code == 409
     assert response.json()["detail"]["code"] == "ITERATION_NOT_MUTABLE"
     assert client.get(f"/api/v1/requirements/{existing['id']}").json()["iteration_id"] == iteration["id"]
+
+
+def test_import_update_membership_change_rolls_back_and_retries(monkeypatch):
+    events = []
+    rows = iter([SimpleNamespace(iteration_id=7), SimpleNamespace(iteration_id=9)])
+    locked_rows = iter([SimpleNamespace(iteration_id=9), SimpleNamespace(iteration_id=9)])
+
+    class SessionSpy:
+        def rollback(self):
+            events.append("rollback")
+
+    monkeypatch.setattr(
+        requirement_import_service,
+        "_get_requirement_for_import_update",
+        lambda db, requirement_id, for_update: events.append("locked" if for_update else "preview")
+        or next(locked_rows if for_update else rows),
+    )
+    monkeypatch.setattr(
+        requirement_import_service,
+        "lock_iterations_for_mutation",
+        lambda db, ids: events.append(("iterations", tuple(sorted(ids))))
+        or {iteration_id: SimpleNamespace(id=iteration_id) for iteration_id in ids},
+    )
+
+    requirement, locked_iterations = requirement_import_service._lock_requirement_for_import_update(SessionSpy(), 1)
+
+    assert requirement.iteration_id == 9
+    assert set(locked_iterations) == {9}
+    assert events == [
+        "preview", ("iterations", (7,)), "locked", "rollback",
+        "preview", ("iterations", (9,)), "locked",
+    ]
+
+
+def test_import_update_persistent_membership_change_returns_conflict(monkeypatch):
+    rollbacks = []
+
+    class SessionSpy:
+        def rollback(self):
+            rollbacks.append(True)
+
+    monkeypatch.setattr(
+        requirement_import_service,
+        "_get_requirement_for_import_update",
+        lambda db, requirement_id, for_update: SimpleNamespace(iteration_id=9 if not for_update else 10),
+    )
+    monkeypatch.setattr(
+        requirement_import_service,
+        "lock_iterations_for_mutation",
+        lambda db, ids: {iteration_id: SimpleNamespace(id=iteration_id) for iteration_id in ids},
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        requirement_import_service._lock_requirement_for_import_update(SessionSpy(), 1)
+
+    assert exc_info.value.status_code == 409
+    assert exc_info.value.detail["code"] == "ITERATION_STATE_CONFLICT"
+    assert len(rollbacks) == 3
 
 
 def test_requirement_import_commit_keeps_created_requirement_unassigned(client: TestClient):

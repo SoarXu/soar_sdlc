@@ -35,6 +35,11 @@ def _create_requirement(client: TestClient, project_id: int) -> int:
 
 def test_iteration_membership_history_is_registered_in_model_metadata():
     assert "work_item_iteration_history" in Base.metadata.tables
+    index_columns = {
+        tuple(column.name for column in index.columns)
+        for index in Base.metadata.tables["work_item_iteration_history"].indexes
+    }
+    assert ("object_type", "object_id", "left_at") in index_columns
 
 
 def test_link_and_unlink_requirement_open_and_close_membership_history(client: TestClient):

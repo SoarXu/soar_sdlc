@@ -12,7 +12,7 @@ from app.models.user import User
 from app.services.lifecycle_service import project_lifecycle_phase
 from app.services.workflow_state_service import initial_workflow_values
 from app.services.project_permission_service import ensure_work_item_create_permission
-from app.services.iteration_service import ensure_iteration_assignment_mutable
+from app.services.iteration_service import ensure_iteration_mutable, lock_iterations_for_mutation
 from app.services.work_item_iteration_history_service import move_work_item_to_iteration
 
 
@@ -28,6 +28,7 @@ REQUIREMENT_IMPORT_COLUMNS = [
 REQUIRED_COLUMNS = ["项目名称", "需求标题"]
 REQUIREMENT_TYPE_VALUES = ["功能", "接口", "性能", "安全", "体验", "改进", "其他"]
 PRIORITY_VALUES = {"1", "2", "3", "4", "5"}
+IMPORT_MEMBERSHIP_LOCK_RETRY_LIMIT = 3
 
 
 @dataclass
@@ -272,7 +273,9 @@ def _apply_row_to_requirement(
     row: ParsedRequirementRow,
     actor_id: int | None = None,
 ) -> None:
-    ensure_iteration_assignment_mutable(db, requirement.iteration_id, None)
+    requirement, locked_iterations = _lock_requirement_for_import_update(db, requirement.id)
+    for iteration in locked_iterations.values():
+        ensure_iteration_mutable(iteration)
     if requirement.iteration_id is not None:
         move_work_item_to_iteration(
             db,
@@ -290,6 +293,33 @@ def _apply_row_to_requirement(
     requirement.review_status = row.review_status
     requirement.description = row.description
     requirement.acceptance_criteria = row.acceptance_criteria
+
+
+def _lock_requirement_for_import_update(db: Session, requirement_id: int) -> tuple[Requirement, dict]:
+    for _ in range(IMPORT_MEMBERSHIP_LOCK_RETRY_LIMIT):
+        preview = _get_requirement_for_import_update(db, requirement_id, for_update=False)
+        locked_iterations = lock_iterations_for_mutation(db, {preview.iteration_id})
+        requirement = _get_requirement_for_import_update(db, requirement_id, for_update=True)
+        if requirement.iteration_id is None or requirement.iteration_id in locked_iterations:
+            return requirement, locked_iterations
+        db.rollback()
+    raise HTTPException(
+        status_code=status.HTTP_409_CONFLICT,
+        detail={
+            "code": "ITERATION_STATE_CONFLICT",
+            "message": "Iteration membership changed during import; refresh and retry",
+        },
+    )
+
+
+def _get_requirement_for_import_update(db: Session, requirement_id: int, *, for_update: bool) -> Requirement:
+    query = db.query(Requirement).filter(Requirement.id == requirement_id, Requirement.deleted == 0)
+    if for_update:
+        query = query.with_for_update().populate_existing()
+    requirement = query.first()
+    if not requirement:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Requirement not found")
+    return requirement
 
 
 def _ensure_rows_create_permission(db: Session, rows: list[ParsedRequirementRow], actor: User | None) -> None:

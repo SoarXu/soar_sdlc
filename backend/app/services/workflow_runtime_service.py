@@ -358,7 +358,20 @@ def _activation_target_iteration_id(
         WorkflowTransition.action_key == expected_action_key,
         WorkflowTransition.enabled == True,  # noqa: E712
     ).first()
-    return int(target_iteration_id) if target_transition else None
+    return _parse_target_iteration_id(target_iteration_id) if target_transition else None
+
+
+def _parse_target_iteration_id(value) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={
+                "code": "INVALID_TARGET_ITERATION_ID",
+                "message": "target_iteration_id must be a number",
+            },
+        ) from exc
 
 
 def _link_reactivation_history_to_operation(
@@ -1588,7 +1601,7 @@ def _defer_requirement_links(db: Session, requirement: Requirement, payload: dic
     target_iteration_id = payload.get("target_iteration_id") or payload.get("iteration_id")
     if target_iteration_id and requirement.iteration_id == target_iteration_id:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Target iteration cannot be current iteration")
-    parsed_target_iteration_id = int(target_iteration_id) if target_iteration_id else None
+    parsed_target_iteration_id = _parse_target_iteration_id(target_iteration_id) if target_iteration_id else None
     locked_iterations = getattr(requirement, "_transition_locked_iterations", {})
     tasks = (
         db.query(Task)

@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import BigInteger, DateTime, Integer, String, text
+from sqlalchemy import BigInteger, DateTime, Index, Integer, String, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.session import Base
@@ -8,6 +8,9 @@ from app.db.session import Base
 
 class WorkItemIterationHistory(Base):
     __tablename__ = "work_item_iteration_history"
+    __table_args__ = (
+        Index("ix_work_item_iteration_history_open_lookup", "object_type", "object_id", "left_at"),
+    )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     object_type: Mapped[str] = mapped_column(String(32), index=True)

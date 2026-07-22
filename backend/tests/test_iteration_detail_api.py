@@ -5,8 +5,43 @@ from fastapi.testclient import TestClient
 from app.db.session import SessionLocal
 from app.jobs.iteration_jobs import run_auto_start_due_iterations
 from app.models.requirement import Requirement
+from app.models.bug import Bug
+from app.models.iteration import Iteration
 from app.models.task import Task
+from app.models.work_item_iteration_history import WorkItemIterationHistory
 from app.models.workflow_definition import WorkflowState, WorkflowTransition
+from app.services import iteration_service
+
+
+def test_iteration_loader_can_request_a_database_row_lock():
+    class QuerySpy:
+        def __init__(self):
+            self.locked = False
+            self.item = object()
+
+        def filter(self, *args):
+            return self
+
+        def with_for_update(self):
+            self.locked = True
+            return self
+
+        def first(self):
+            return self.item
+
+    class SessionSpy:
+        def __init__(self):
+            self.query_spy = QuerySpy()
+
+        def query(self, model):
+            return self.query_spy
+
+    db = SessionSpy()
+
+    item = iteration_service._get_active_iteration(db, 1, for_update=True)
+
+    assert item is db.query_spy.item
+    assert db.query_spy.locked is True
 
 
 def test_iteration_creation_uses_system_workflow_initial_state(client: TestClient):
@@ -102,6 +137,21 @@ def _create_bug(client: TestClient, project_id: int, iteration_id: int, title: s
     )
     assert response.status_code == 200
     return response.json()["id"]
+
+
+def _mark_iteration_terminal(iteration_id: int) -> None:
+    db = SessionLocal()
+    try:
+        iteration = db.query(Iteration).filter(Iteration.id == iteration_id).one()
+        terminal_state = db.query(WorkflowState).filter(
+            WorkflowState.definition_id == iteration.workflow_definition_id,
+            WorkflowState.category == "terminal",
+        ).first()
+        assert terminal_state is not None
+        iteration.current_state_id = terminal_state.id
+        db.commit()
+    finally:
+        db.close()
 
 
 def _set_requirement_status(requirement_id: int, status: str) -> None:
@@ -307,7 +357,162 @@ def test_iteration_finish_is_blocked_by_unfinished_direct_items(client: TestClie
     )
 
     assert finished.status_code == 400
+    detail = finished.json()["detail"]
+    assert detail["code"] == "ITERATION_HAS_OPEN_ITEMS"
+    assert detail["counts"] == {"requirement": 1, "task": 1, "bug": 1, "test_run": 0}
+    assert {(item["object_type"], item["title"]) for item in detail["items"]} == {
+        ("requirement", "Open requirement"),
+        ("task", "Open task"),
+        ("bug", "Open bug"),
+    }
     assert client.get(f"/api/v1/iterations/{iteration_id}/detail").json()["iteration"]["state_category"] == "normal"
+
+
+def test_terminal_iteration_rejects_scope_mutations(client: TestClient):
+    project_id = _create_project(client)
+    iteration_id = _create_iteration(client, [project_id], status="active")
+    linked_requirement_id = _create_requirement(client, project_id, "Terminal linked requirement")
+    unplanned_requirement_id = _create_requirement(client, project_id, "Terminal new requirement")
+    assert client.post(
+        f"/api/v1/iterations/{iteration_id}/requirements",
+        json={"requirement_ids": [linked_requirement_id]},
+    ).status_code == 200
+    _set_requirement_status(linked_requirement_id, "completed")
+    completed = client.post(
+        f"/api/v1/workflow-runtime/iteration/{iteration_id}/transition",
+        json={"action_key": "complete", "payload": {"effective_time": "2026-07-21T18:00:00"}},
+    )
+    assert completed.status_code == 200
+
+    responses = [
+        client.patch(f"/api/v1/iterations/{iteration_id}", json={"name": "Changed terminal iteration"}),
+        client.post(
+            f"/api/v1/iterations/{iteration_id}/requirements",
+            json={"requirement_ids": [unplanned_requirement_id]},
+        ),
+        client.delete(f"/api/v1/iterations/{iteration_id}/requirements/{linked_requirement_id}"),
+    ]
+
+    for response in responses:
+        assert response.status_code == 409
+        assert response.json()["detail"]["code"] == "ITERATION_NOT_MUTABLE"
+
+
+def test_terminal_iteration_rejects_ordinary_work_item_updates_and_deletes(client: TestClient):
+    project_id = _create_project(client)
+    iteration_id = _create_iteration(client, [project_id])
+    requirement_id = _create_requirement(client, project_id, "Immutable requirement")
+    task_id = _create_task(client, project_id, "Immutable task")
+    bug_id = _create_bug(client, project_id, iteration_id, "Immutable bug")
+    assert client.post(
+        f"/api/v1/iterations/{iteration_id}/requirements",
+        json={"requirement_ids": [requirement_id]},
+    ).status_code == 200
+    assert client.post(
+        f"/api/v1/iterations/{iteration_id}/tasks",
+        json={"task_ids": [task_id]},
+    ).status_code == 200
+    _mark_iteration_terminal(iteration_id)
+
+    for endpoint, object_id in (
+        ("requirements", requirement_id),
+        ("tasks", task_id),
+        ("bugs", bug_id),
+    ):
+        for payload in ({"title": "Forbidden title"}, {"owner_id": None}):
+            response = client.patch(f"/api/v1/{endpoint}/{object_id}", json=payload)
+            assert response.status_code == 409, (endpoint, payload, response.text)
+            assert response.json()["detail"]["code"] == "ITERATION_NOT_MUTABLE"
+
+        deleted = client.delete(f"/api/v1/{endpoint}/{object_id}")
+        assert deleted.status_code == 409, (endpoint, deleted.text)
+        assert deleted.json()["detail"]["code"] == "ITERATION_NOT_MUTABLE"
+
+
+def test_terminal_iteration_rejects_test_run_create_update_move_and_delete(client: TestClient):
+    project_id = _create_project(client)
+    terminal_iteration_id = _create_iteration(client, [project_id])
+    active_iteration_id = _create_iteration(client, [project_id])
+    movable_run = client.post(
+        "/api/v1/test-runs",
+        json={"project_id": project_id, "iteration_id": active_iteration_id, "name": "Movable test run", "status": "completed"},
+    )
+    assert movable_run.status_code == 200
+    terminal_run = client.post(
+        "/api/v1/test-runs",
+        json={"project_id": project_id, "iteration_id": terminal_iteration_id, "name": "Terminal test run", "status": "completed"},
+    )
+    assert terminal_run.status_code == 200
+    test_case = client.post("/api/v1/test-cases", json={"project_id": project_id, "title": "Terminal run case"})
+    selected = client.post(
+        f"/api/v1/test-runs/{terminal_run.json()['id']}/cases",
+        json={"test_case_ids": [test_case.json()["id"]]},
+    )
+    assert selected.status_code == 200
+    _mark_iteration_terminal(terminal_iteration_id)
+    terminal_new_case = client.post(
+        "/api/v1/test-cases",
+        json={"project_id": project_id, "title": "Terminal new run case"},
+    )
+    rejected_case_selection = client.post(
+        f"/api/v1/test-runs/{terminal_run.json()['id']}/cases",
+        json={"test_case_ids": [terminal_new_case.json()["id"]]},
+    )
+
+    responses = [
+        client.post(
+            "/api/v1/test-runs",
+            json={"project_id": project_id, "iteration_id": terminal_iteration_id, "name": "Forbidden test run"},
+        ),
+        client.patch(f"/api/v1/test-runs/{terminal_run.json()['id']}", json={"name": "Forbidden rename"}),
+        client.delete(f"/api/v1/test-runs/{terminal_run.json()['id']}"),
+        client.patch(f"/api/v1/test-runs/{movable_run.json()['id']}", json={"iteration_id": terminal_iteration_id}),
+        client.patch(f"/api/v1/test-run-cases/{selected.json()[0]['id']}", json={"result": "passed"}),
+        rejected_case_selection,
+    ]
+
+    for response in responses:
+        assert response.status_code == 409, response.text
+        assert response.json()["detail"]["code"] == "ITERATION_NOT_MUTABLE"
+
+
+def test_iteration_project_scope_removal_closes_work_item_history_with_actor_and_reason(client: TestClient):
+    retained_project_id = _create_project(client, "Retained project")
+    removed_project_id = _create_project(client, "Removed project")
+    iteration_id = _create_iteration(client, [retained_project_id, removed_project_id])
+    requirement_id = _create_requirement(client, removed_project_id, "Removed requirement")
+    task_id = _create_task(client, removed_project_id, "Removed task")
+    bug_id = _create_bug(client, removed_project_id, iteration_id, "Removed bug")
+    assert client.post(
+        f"/api/v1/iterations/{iteration_id}/requirements",
+        json={"requirement_ids": [requirement_id]},
+    ).status_code == 200
+    assert client.post(
+        f"/api/v1/iterations/{iteration_id}/tasks",
+        json={"task_ids": [task_id]},
+    ).status_code == 200
+
+    updated = client.patch(
+        f"/api/v1/iterations/{iteration_id}",
+        json={"project_ids": [retained_project_id]},
+    )
+
+    assert updated.status_code == 200, updated.text
+    db = SessionLocal()
+    try:
+        assert db.query(Requirement).filter(Requirement.id == requirement_id).one().iteration_id is None
+        assert db.query(Task).filter(Task.id == task_id).one().iteration_id is None
+        assert db.query(Bug).filter(Bug.id == bug_id).one().iteration_id is None
+        histories = db.query(WorkItemIterationHistory).filter(
+            WorkItemIterationHistory.iteration_id == iteration_id,
+            WorkItemIterationHistory.object_id.in_([requirement_id, task_id, bug_id]),
+        ).all()
+        assert len(histories) == 3
+        assert all(row.left_at is not None for row in histories)
+        assert all(row.left_by is not None for row in histories)
+        assert {row.leave_reason for row in histories} == {"iteration_project_scope_removed"}
+    finally:
+        db.close()
 
 
 def test_iteration_cancel_uses_runtime_and_complete_gate(client: TestClient):
@@ -335,6 +540,9 @@ def test_iteration_cancel_uses_runtime_and_complete_gate(client: TestClient):
     assert canceled.status_code == 200
     assert "status" not in canceled.json()
     assert canceled.json()["state_category"] == "terminal"
+    snapshot = client.get(f"/api/v1/iterations/{iteration_id}/detail").json()["completion_snapshot"]
+    assert snapshot["action"] == "cancel"
+    assert snapshot["counts"]["requirement"] == 1
 
 
 def test_iteration_finish_is_blocked_by_open_bug_without_other_work_items(client: TestClient):
@@ -348,7 +556,84 @@ def test_iteration_finish_is_blocked_by_open_bug_without_other_work_items(client
     )
 
     assert finished.status_code == 400
-    assert client.get(f"/api/v1/iterations/{iteration_id}/detail").json()["iteration"]["state_category"] == "normal"
+    detail = client.get(f"/api/v1/iterations/{iteration_id}/detail").json()
+    assert detail["iteration"]["state_category"] == "normal"
+    assert detail["completion_snapshot"] is None
+
+
+def test_terminal_iteration_detail_uses_persisted_completion_snapshot(client: TestClient):
+    project_id = _create_project(client)
+    iteration_id = _create_iteration(client, [project_id], status="active")
+    requirement_id = _create_requirement(client, project_id, "Snapshot requirement", owner_id=1)
+    task_id = _create_task(client, project_id, "Snapshot task", owner_id=1)
+    assert client.post(
+        f"/api/v1/iterations/{iteration_id}/requirements",
+        json={"requirement_ids": [requirement_id]},
+    ).status_code == 200
+    assert client.post(
+        f"/api/v1/iterations/{iteration_id}/tasks",
+        json={"task_ids": [task_id]},
+    ).status_code == 200
+    _set_requirement_status(requirement_id, "completed")
+    _set_task_status(task_id, "completed")
+
+    completed = client.post(
+        f"/api/v1/workflow-runtime/iteration/{iteration_id}/transition",
+        json={"action_key": "complete", "payload": {"effective_time": "2026-07-22T12:00:00"}},
+    )
+
+    assert completed.status_code == 200, completed.text
+    detail = client.get(f"/api/v1/iterations/{iteration_id}/detail").json()
+    snapshot = detail["completion_snapshot"]
+    assert snapshot["action"] == "complete"
+    assert snapshot["operation_log_id"]
+    assert snapshot["counts"] == {"requirement": 1, "task": 1, "bug": 0, "test_run": 0}
+    assert snapshot["items"]["requirement"] == [{
+        "id": requirement_id,
+        "title": "Snapshot requirement",
+        "state_id": detail["requirements"][0]["current_state_id"],
+        "status_name": detail["requirements"][0]["status_name"],
+        "owner_id": 1,
+    }]
+    assert detail["metrics"]["requirement_total"] == 1
+
+    db = SessionLocal()
+    try:
+        db.query(Requirement).filter(Requirement.id == requirement_id).update({Requirement.iteration_id: None})
+        db.commit()
+    finally:
+        db.close()
+
+    historical_detail = client.get(f"/api/v1/iterations/{iteration_id}/detail").json()
+    assert historical_detail["metrics"]["requirement_total"] == 1
+    assert historical_detail["completion_snapshot"]["items"]["requirement"][0]["id"] == requirement_id
+
+
+def test_terminal_iteration_detail_exposes_all_headline_totals_from_snapshot(client: TestClient):
+    project_id = _create_project(client)
+    iteration_id = _create_iteration(client, [project_id], status="active")
+    test_run = client.post(
+        "/api/v1/test-runs",
+        json={
+            "project_id": project_id,
+            "iteration_id": iteration_id,
+            "name": "Completed snapshot test run",
+            "status": "completed",
+        },
+    )
+    assert test_run.status_code == 200
+
+    completed = client.post(
+        f"/api/v1/workflow-runtime/iteration/{iteration_id}/transition",
+        json={"action_key": "complete", "payload": {"effective_time": "2026-07-22T12:00:00"}},
+    )
+    assert completed.status_code == 200, completed.text
+
+    detail = client.get(f"/api/v1/iterations/{iteration_id}/detail").json()
+    assert detail["completion_snapshot"]["counts"]["test_run"] == 1
+    assert detail["completion_snapshot"]["terminal_counts"]["test_run"] == 1
+    assert detail["metrics"]["test_run_total"] == 1
+    assert detail["metrics"]["closed_test_run_total"] == 1
 
 
 def test_iteration_finish_is_blocked_by_open_test_run(client: TestClient):

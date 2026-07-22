@@ -1,4 +1,4 @@
-from sqlalchemy import func
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.models.bug import Bug
@@ -10,19 +10,26 @@ from app.models.project import Project
 from app.models.requirement import Requirement
 from app.models.role import Role, UserRole
 from app.models.task import Task
-from app.models.test_case import TestCase
-from app.models.test_run import TestRun
 from app.models.user import User
 from app.models.work_item_comment import WorkItemComment
+from app.models.workflow_definition import WorkflowTransition
 from app.services.exception_center_service import list_exception_refs
 from app.services.project_team_service import workbench_project_ids_for_user
-from app.services.workflow_state_query_service import current_state_name, is_terminal_state, non_terminal_state_clause
+from app.services.workflow_state_query_service import (
+    current_state_name,
+    is_terminal_state,
+    non_terminal_state_clause,
+    terminal_state_clause,
+)
 from app.views.dashboard_view import (
     DashboardSummary,
     WorkbenchItem,
     WorkbenchResponse,
     WorkbenchSection,
 )
+
+
+WORKBENCH_OBJECT_TYPES = {"requirement", "task", "bug"}
 
 
 def get_dashboard_summary(db: Session) -> DashboardSummary:
@@ -40,20 +47,40 @@ def get_workbench(db: Session, user_id: int | None = None) -> WorkbenchResponse:
     role_keys = _role_keys_for_user(db, user_id)
     view_mode = _workbench_view_mode(role_keys)
     team_project_ids = workbench_project_ids_for_user(db, user_id) if user_id else set()
-    scoped_project_ids = _expand_project_scope_ids(db, team_project_ids) if team_project_ids else set()
+    scoped_project_ids = team_project_ids
     projects = {item.id: item for item in db.query(Project).filter(Project.deleted == 0).all()}
     iteration_names = {item.id: item.name for item in db.query(Iteration).filter(Iteration.deleted == 0).all()}
-    queue_scope_ids = scoped_project_ids if user_id and view_mode != "all" else set()
-    pending_items = _pending_handling_items(db, projects, iteration_names, user_id, queue_scope_ids)
-    unassigned_items = _unassigned_items(db, projects, iteration_names, queue_scope_ids)
-    created_items = _created_by_me_items(db, projects, iteration_names, user_id)
-    watched_items = _watched_by_me_items(db, projects, iteration_names, user_id)
-    mentioned_items = _mentioned_me_items(db, projects, iteration_names, user_id)
-    exception_items = _exception_center_items(db, projects, iteration_names, queue_scope_ids)
+    active_iteration_ids = _active_iteration_ids(db)
+    project_scope_ids = None if user_id and view_mode == "all" else scoped_project_ids
+    pending_items = _pending_handling_items(
+        db, projects, iteration_names, user_id, project_scope_ids, active_iteration_ids
+    )
+    unassigned_items = _unassigned_items(
+        db, projects, iteration_names, project_scope_ids, active_iteration_ids
+    )
+    created_items = _created_by_me_items(
+        db, projects, iteration_names, user_id, project_scope_ids, active_iteration_ids
+    )
+    watched_items = _watched_by_me_items(
+        db, projects, iteration_names, user_id, project_scope_ids, active_iteration_ids
+    )
+    mentioned_items = _mentioned_me_items(
+        db, projects, iteration_names, user_id, project_scope_ids, active_iteration_ids
+    )
+    exception_items = _exception_center_items(
+        db, projects, iteration_names, project_scope_ids, active_iteration_ids
+    )
     review_tasks = _filter_review_tasks_for_role(_review_tasks(db), user_id, view_mode)
     owner_ids = {
         item.owner_id
-        for section in [pending_items, unassigned_items, created_items, watched_items, mentioned_items, exception_items]
+        for section in [
+            pending_items,
+            unassigned_items,
+            created_items,
+            watched_items,
+            mentioned_items,
+            exception_items,
+        ]
         for item in section
         if item.owner_id
     }
@@ -79,29 +106,31 @@ def _pending_handling_items(
     projects: dict[int, Project],
     iteration_names: dict[int, str],
     user_id: int | None,
-    scoped_project_ids: set[int],
+    scoped_project_ids: set[int] | None,
+    active_iteration_ids: set[int],
 ) -> list[WorkbenchItem]:
     if not user_id:
         return []
     items = [
         _requirement_item(item, projects, iteration_names)
         for item in db.query(Requirement).filter(Requirement.deleted == 0, Requirement.owner_id == user_id).all()
-        if not is_terminal_state(item) and _in_project_scope(item.project_id, scoped_project_ids)
+        if not is_terminal_state(item)
+        and item.iteration_id in active_iteration_ids
+        and _in_project_scope(item.project_id, scoped_project_ids)
     ]
     items.extend(
         _task_item(item, projects, iteration_names)
         for item in db.query(Task).filter(Task.deleted == 0, Task.owner_id == user_id).all()
-        if not is_terminal_state(item) and _in_project_scope(item.project_id, scoped_project_ids)
+        if not is_terminal_state(item)
+        and item.iteration_id in active_iteration_ids
+        and _in_project_scope(item.project_id, scoped_project_ids)
     )
     items.extend(
         _bug_item(item, projects, iteration_names)
         for item in db.query(Bug).filter(Bug.deleted == 0, Bug.owner_id == user_id).all()
-        if not is_terminal_state(item) and _in_project_scope(item.project_id, scoped_project_ids)
-    )
-    items.extend(
-        _test_case_item(item, projects, iteration_names)
-        for item in db.query(TestCase).filter(TestCase.deleted == 0, TestCase.default_tester_id == user_id).all()
-        if _in_project_scope(item.project_id, scoped_project_ids)
+        if not is_terminal_state(item)
+        and item.iteration_id in active_iteration_ids
+        and _in_project_scope(item.project_id, scoped_project_ids)
     )
     return _sort_workbench_items(items)
 
@@ -110,22 +139,29 @@ def _unassigned_items(
     db: Session,
     projects: dict[int, Project],
     iteration_names: dict[int, str],
-    scoped_project_ids: set[int],
+    scoped_project_ids: set[int] | None,
+    active_iteration_ids: set[int],
 ) -> list[WorkbenchItem]:
     items = [
         _requirement_item(item, projects, iteration_names)
         for item in db.query(Requirement).filter(Requirement.deleted == 0, Requirement.owner_id.is_(None)).all()
-        if not is_terminal_state(item) and _in_project_scope(item.project_id, scoped_project_ids)
+        if not is_terminal_state(item)
+        and item.iteration_id in active_iteration_ids
+        and _in_project_scope(item.project_id, scoped_project_ids)
     ]
     items.extend(
         _task_item(item, projects, iteration_names)
         for item in db.query(Task).filter(Task.deleted == 0, Task.owner_id.is_(None)).all()
-        if not is_terminal_state(item) and _in_project_scope(item.project_id, scoped_project_ids)
+        if not is_terminal_state(item)
+        and item.iteration_id in active_iteration_ids
+        and _in_project_scope(item.project_id, scoped_project_ids)
     )
     items.extend(
         _bug_item(item, projects, iteration_names)
         for item in db.query(Bug).filter(Bug.deleted == 0, Bug.owner_id.is_(None)).all()
-        if not is_terminal_state(item) and _in_project_scope(item.project_id, scoped_project_ids)
+        if not is_terminal_state(item)
+        and item.iteration_id in active_iteration_ids
+        and _in_project_scope(item.project_id, scoped_project_ids)
     )
     return _sort_workbench_items(items)
 
@@ -135,30 +171,29 @@ def _created_by_me_items(
     projects: dict[int, Project],
     iteration_names: dict[int, str],
     user_id: int | None,
+    scoped_project_ids: set[int] | None,
+    active_iteration_ids: set[int],
 ) -> list[WorkbenchItem]:
     if not user_id:
         return []
     items = [
         _requirement_item(item, projects, iteration_names)
         for item in db.query(Requirement).filter(Requirement.deleted == 0).all()
-        if item.creator_id == user_id or item.proposer_id == user_id
+        if (item.creator_id == user_id or item.proposer_id == user_id)
+        and item.iteration_id in active_iteration_ids
+        and _in_project_scope(item.project_id, scoped_project_ids)
     ]
     items.extend(
         _task_item(item, projects, iteration_names)
         for item in db.query(Task).filter(Task.deleted == 0, Task.creator_id == user_id).all()
+        if item.iteration_id in active_iteration_ids and _in_project_scope(item.project_id, scoped_project_ids)
     )
     items.extend(
         _bug_item(item, projects, iteration_names)
         for item in db.query(Bug).filter(Bug.deleted == 0).all()
-        if item.creator_id == user_id or item.reporter_id == user_id
-    )
-    items.extend(
-        _test_case_item(item, projects, iteration_names)
-        for item in db.query(TestCase).filter(TestCase.deleted == 0, TestCase.creator_id == user_id).all()
-    )
-    items.extend(
-        _test_run_item(item, projects, iteration_names)
-        for item in db.query(TestRun).filter(TestRun.deleted == 0, TestRun.creator_id == user_id).all()
+        if (item.creator_id == user_id or item.reporter_id == user_id)
+        and item.iteration_id in active_iteration_ids
+        and _in_project_scope(item.project_id, scoped_project_ids)
     )
     return _dedup_and_sort_workbench_items(items)
 
@@ -168,6 +203,8 @@ def _watched_by_me_items(
     projects: dict[int, Project],
     iteration_names: dict[int, str],
     user_id: int | None,
+    scoped_project_ids: set[int] | None,
+    active_iteration_ids: set[int],
 ) -> list[WorkbenchItem]:
     if not user_id:
         return []
@@ -182,7 +219,11 @@ def _watched_by_me_items(
         .order_by(ObjectWatch.id.desc())
         .all()
     ]
-    return _load_workbench_items_by_refs(db, projects, iteration_names, refs)
+    return _filter_active_scoped_items(
+        _load_workbench_items_by_refs(db, projects, iteration_names, refs),
+        scoped_project_ids,
+        active_iteration_ids,
+    )
 
 
 def _mentioned_me_items(
@@ -190,6 +231,8 @@ def _mentioned_me_items(
     projects: dict[int, Project],
     iteration_names: dict[int, str],
     user_id: int | None,
+    scoped_project_ids: set[int] | None,
+    active_iteration_ids: set[int],
 ) -> list[WorkbenchItem]:
     if not user_id:
         return []
@@ -205,17 +248,76 @@ def _mentioned_me_items(
                 "mentioned_in_comment_id": comment.id,
             }
         )
-    return _load_workbench_items_by_refs(db, projects, iteration_names, refs)
+    return _filter_active_scoped_items(
+        _load_workbench_items_by_refs(db, projects, iteration_names, refs),
+        scoped_project_ids,
+        active_iteration_ids,
+    )
 
 
 def _exception_center_items(
     db: Session,
     projects: dict[int, Project],
     iteration_names: dict[int, str],
-    scoped_project_ids: set[int],
+    scoped_project_ids: set[int] | None,
+    active_iteration_ids: set[int],
 ) -> list[WorkbenchItem]:
-    refs = list_exception_refs(db, scoped_project_ids if scoped_project_ids else None)
-    return _load_workbench_items_by_refs(db, projects, iteration_names, refs)
+    refs = list_exception_refs(db, scoped_project_ids)
+    active_items = _filter_active_scoped_items(
+        _load_workbench_items_by_refs(db, projects, iteration_names, refs),
+        scoped_project_ids,
+        active_iteration_ids,
+    )
+    integrity_refs = [
+        ref for ref in refs
+        if ref.get("exception_key") in {
+            "owner_required_missing",
+            "owner_ineligible",
+            "iteration_history_inconsistent",
+            "missing_reactivation_audit",
+            "terminal_iteration_snapshot_mismatch",
+        }
+    ]
+    integrity_refs = [*_terminal_iteration_open_item_refs(db, scoped_project_ids), *integrity_refs]
+    integrity_items = _load_workbench_items_by_refs(db, projects, iteration_names, integrity_refs)
+    # Active items were loaded from the complete ref set, so keep them as the
+    # final value when the same object is also present in the integrity scan.
+    return _dedup_and_sort_workbench_items([*integrity_items, *active_items])
+
+
+def _terminal_iteration_open_item_refs(
+    db: Session,
+    scoped_project_ids: set[int] | None,
+) -> list[dict]:
+    if scoped_project_ids == set():
+        return []
+
+    terminal_iteration_ids = select(Iteration.id).where(
+        Iteration.deleted == 0,
+        terminal_state_clause(Iteration),
+    )
+    refs = []
+    for object_type, model in (("requirement", Requirement), ("task", Task), ("bug", Bug)):
+        filters = [
+            model.deleted == 0,
+            model.iteration_id.in_(terminal_iteration_ids),
+            non_terminal_state_clause(model),
+        ]
+        if scoped_project_ids is not None:
+            filters.append(model.project_id.in_(scoped_project_ids))
+        rows = db.query(model.id, model.create_time).filter(*filters).all()
+        for item in rows:
+            refs.append(
+                {
+                    "object_type": object_type,
+                    "id": item.id,
+                    "exception_key": "terminal_iteration_open_item",
+                    "exception_label": "已结束迭代存在未完成事项",
+                    "entered_at": _datetime_value(item.create_time),
+                    "overdue_hours": 0,
+                }
+            )
+    return refs
 
 
 def _load_workbench_items_by_refs(
@@ -225,11 +327,13 @@ def _load_workbench_items_by_refs(
     refs: list[dict],
 ) -> list[WorkbenchItem]:
     grouped_ids: dict[str, set[int]] = {}
-    metadata_by_ref: dict[tuple[str, int], dict] = {}
+    metadata_by_ref: dict[tuple[str, int], list[dict]] = {}
     for ref in refs:
         object_type = ref["object_type"]
+        if object_type not in WORKBENCH_OBJECT_TYPES:
+            continue
         grouped_ids.setdefault(object_type, set()).add(ref["id"])
-        metadata_by_ref.setdefault((object_type, ref["id"]), {}).update(ref)
+        metadata_by_ref.setdefault((object_type, ref["id"]), []).append(ref)
 
     items_by_ref: dict[tuple[str, int], WorkbenchItem] = {}
     if grouped_ids.get("requirement"):
@@ -241,13 +345,6 @@ def _load_workbench_items_by_refs(
     if grouped_ids.get("bug"):
         for item in db.query(Bug).filter(Bug.deleted == 0, Bug.id.in_(grouped_ids["bug"])).all():
             items_by_ref[("bug", item.id)] = _bug_item(item, projects, iteration_names)
-    if grouped_ids.get("test_case"):
-        for item in db.query(TestCase).filter(TestCase.deleted == 0, TestCase.id.in_(grouped_ids["test_case"])).all():
-            items_by_ref[("test_case", item.id)] = _test_case_item(item, projects, iteration_names)
-    if grouped_ids.get("test_run"):
-        for item in db.query(TestRun).filter(TestRun.deleted == 0, TestRun.id.in_(grouped_ids["test_run"])).all():
-            items_by_ref[("test_run", item.id)] = _test_run_item(item, projects, iteration_names)
-
     result: list[WorkbenchItem] = []
     seen: set[tuple[str, int]] = set()
     for ref in refs:
@@ -255,16 +352,34 @@ def _load_workbench_items_by_refs(
         if key in seen or key not in items_by_ref:
             continue
         seen.add(key)
+        metadata_rows = metadata_by_ref[key]
+        metadata = {}
+        for metadata_row in metadata_rows:
+            metadata.update(metadata_row)
+        exception_rows = [row for row in metadata_rows if row.get("exception_key")]
+        primary_exception = exception_rows[0] if exception_rows else {}
+        exception_keys = list(dict.fromkeys(row["exception_key"] for row in exception_rows))
+        exception_details = [
+            {
+                "exception_key": row["exception_key"],
+                "exception_label": row.get("exception_label"),
+                "exception_detail": row.get("exception_detail"),
+                "entered_at": row.get("entered_at"),
+            }
+            for row in exception_rows
+        ]
         item = items_by_ref[key].model_copy(
             update={
-                "watch_source": metadata_by_ref[key].get("watch_source"),
-                "mentioned_in_comment_id": metadata_by_ref[key].get("mentioned_in_comment_id"),
-                "exception_key": metadata_by_ref[key].get("exception_key"),
-                "exception_label": metadata_by_ref[key].get("exception_label"),
-                "entered_at": metadata_by_ref[key].get("entered_at"),
-                "threshold_hours": metadata_by_ref[key].get("threshold_hours"),
-                "threshold_count": metadata_by_ref[key].get("threshold_count"),
-                "overdue_hours": metadata_by_ref[key].get("overdue_hours"),
+                "watch_source": metadata.get("watch_source"),
+                "mentioned_in_comment_id": metadata.get("mentioned_in_comment_id"),
+                "exception_key": primary_exception.get("exception_key"),
+                "exception_label": primary_exception.get("exception_label"),
+                "exception_keys": exception_keys,
+                "exception_details": exception_details,
+                "entered_at": primary_exception.get("entered_at"),
+                "threshold_hours": primary_exception.get("threshold_hours"),
+                "threshold_count": primary_exception.get("threshold_count"),
+                "overdue_hours": primary_exception.get("overdue_hours"),
             }
         )
         result.append(item)
@@ -275,35 +390,38 @@ def _count_active(db: Session, model) -> int:
     return db.query(func.count(model.id)).filter(model.deleted == 0).scalar() or 0
 
 
-def _expand_project_scope_ids(db: Session, project_ids: set[int]) -> set[int]:
-    expanded = set(project_ids)
-    for project_id in project_ids:
-        expanded.update(_collect_descendant_project_ids(db, project_id))
-        expanded.update(_collect_ancestor_project_ids(db, project_id))
-    return expanded
+def _active_iteration_ids(db: Session) -> set[int]:
+    return {
+        row.id
+        for row in (
+            db.query(Iteration.id)
+            .join(
+                WorkflowTransition,
+                (WorkflowTransition.definition_id == Iteration.workflow_definition_id)
+                & (WorkflowTransition.from_state_id == Iteration.current_state_id),
+            )
+            .filter(
+                Iteration.deleted == 0,
+                WorkflowTransition.enabled.is_(True),
+                WorkflowTransition.action_key.in_(("complete", "cancel")),
+            )
+            .distinct()
+            .all()
+        )
+    }
 
 
-def _collect_descendant_project_ids(db: Session, project_id: int) -> set[int]:
-    children = db.query(Project).filter(Project.parent_id == project_id, Project.deleted == 0).all()
-    result = {child.id for child in children}
-    for child in children:
-        result.update(_collect_descendant_project_ids(db, child.id))
-    return result
-
-
-def _collect_ancestor_project_ids(db: Session, project_id: int) -> set[int]:
-    result = set()
-    project = db.query(Project).filter(Project.id == project_id, Project.deleted == 0).first()
-    parent_id = project.parent_id if project else None
-    visited = set()
-    while parent_id and parent_id not in visited:
-        visited.add(parent_id)
-        parent = db.query(Project).filter(Project.id == parent_id, Project.deleted == 0).first()
-        if not parent:
-            break
-        result.add(parent.id)
-        parent_id = parent.parent_id
-    return result
+def _filter_active_scoped_items(
+    items: list[WorkbenchItem],
+    scoped_project_ids: set[int] | None,
+    active_iteration_ids: set[int],
+) -> list[WorkbenchItem]:
+    return [
+        item
+        for item in items
+        if item.iteration_id in active_iteration_ids
+        and _in_project_scope(item.project_id, scoped_project_ids)
+    ]
 
 
 def _review_tasks(db: Session) -> list[dict]:
@@ -391,36 +509,6 @@ def _task_item(
     )
 
 
-def _test_case_item(
-    item: TestCase,
-    projects: dict[int, Project],
-    iteration_names: dict[int, str],
-    iteration_id: int | None = None,
-) -> WorkbenchItem:
-    resolved_iteration_id = iteration_id if iteration_id is not None else item.iteration_id
-    return WorkbenchItem(
-        id=item.id,
-        object_type="test_case",
-        title=item.title,
-        project_id=item.project_id,
-        project_name=_project_name(projects, item.project_id),
-        iteration_id=resolved_iteration_id,
-        iteration_name=_iteration_name(iteration_names, resolved_iteration_id),
-        lifecycle_phase=item.lifecycle_phase,
-        owner_id=item.default_tester_id,
-        handler_id=item.default_tester_id,
-        iteration_group_key=str(resolved_iteration_id) if resolved_iteration_id else "uniterated",
-        status=item.status,
-        create_time=_datetime_value(item.create_time),
-        creator_id=item.creator_id,
-        last_execute_time=_datetime_value(item.last_execute_time),
-        last_execute_result=item.last_execute_result,
-        steps_json=item.steps_json,
-        requirement_id=item.requirement_id,
-        test_case_id=item.id,
-    )
-
-
 def _bug_item(item: Bug, projects: dict[int, Project], iteration_names: dict[int, str]) -> WorkbenchItem:
     return WorkbenchItem(
         id=item.id,
@@ -450,25 +538,6 @@ def _bug_item(item: Bug, projects: dict[int, Project], iteration_names: dict[int
     )
 
 
-def _test_run_item(item: TestRun, projects: dict[int, Project], iteration_names: dict[int, str]) -> WorkbenchItem:
-    return WorkbenchItem(
-        id=item.id,
-        object_type="test_run",
-        title=item.name,
-        project_id=item.project_id,
-        project_name=_project_name(projects, item.project_id),
-        iteration_id=item.iteration_id,
-        iteration_name=_iteration_name(iteration_names, item.iteration_id),
-        iteration_group_key=str(item.iteration_id) if item.iteration_id else "uniterated",
-        lifecycle_phase=item.lifecycle_phase,
-        owner_id=item.test_owner_id,
-        handler_id=item.test_owner_id,
-        status=item.status,
-        create_time=_datetime_value(item.create_time),
-        creator_id=item.creator_id,
-    )
-
-
 def _project_name(projects: dict[int, Project], project_id: int | None) -> str | None:
     return projects.get(project_id).name if project_id in projects else None
 
@@ -486,7 +555,7 @@ def _datetime_value(value) -> str | None:
 
 
 def _in_project_scope(project_id: int | None, scoped_project_ids: set[int] | None) -> bool:
-    if not scoped_project_ids:
+    if scoped_project_ids is None:
         return True
     return bool(project_id and project_id in scoped_project_ids)
 

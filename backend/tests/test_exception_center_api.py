@@ -2,19 +2,24 @@ from datetime import datetime, timedelta
 from uuid import uuid4
 
 from fastapi.testclient import TestClient
+from sqlalchemy import event
 
 from app.core.security import create_access_token, get_password_hash
-from app.db.session import SessionLocal
+from app.db.session import SessionLocal, engine
 from app.models.bug import Bug
+from app.models.exception_rule import ExceptionRule
+from app.models.iteration_completion_snapshot import IterationCompletionSnapshot
 from app.models.project_member import ProjectMember
 from app.models.requirement import Requirement
 from app.models.role import Role, UserRole
 from app.models.status_operation import StatusOperationLog
 from app.models.task import Task
 from app.models.user import User
+from app.models.work_item_iteration_history import WorkItemIterationHistory
 from app.models.workflow_definition import WorkflowTransition
 from app.services.exception_center_service import list_exception_refs
-from app.services.exception_center_service import _latest_state_time
+from app.services.exception_center_service import _is_valid_post_terminal_reactivation, _latest_state_time
+from app.services.work_item_iteration_history_service import move_work_item_to_iteration
 
 
 EXPECTED_KEYS = {
@@ -91,6 +96,51 @@ def _operation(
         to_status="legacy_target",
         effective_time=entered_at,
     )
+
+
+def _exception_query_statements(project_ids: set[int] | None) -> tuple[list[dict], list[str]]:
+    statements: list[str] = []
+
+    def record_statement(_connection, _cursor, statement, _parameters, _context, _executemany):
+        if statement.lstrip().upper().startswith("SELECT"):
+            statements.append(" ".join(statement.lower().split()))
+
+    event.listen(engine, "before_cursor_execute", record_statement)
+    db = SessionLocal()
+    try:
+        return list_exception_refs(db, project_ids), statements
+    finally:
+        db.close()
+        event.remove(engine, "before_cursor_execute", record_statement)
+
+
+def test_exception_scan_short_circuits_empty_scope_without_reading_work_items(client: TestClient):
+    refs, statements = _exception_query_statements(set())
+
+    assert refs == []
+    assert not any(f" from {table} " in statement for statement in statements for table in ("requirements", "tasks", "bugs"))
+
+
+def test_exception_scan_filters_work_items_in_sql_and_query_count_is_batch_bounded(client: TestClient):
+    scoped = client.post("/api/v1/projects", json={"name": f"Scoped scan {uuid4().hex[:8]}"}).json()
+    outside = client.post("/api/v1/projects", json={"name": f"Outside scan {uuid4().hex[:8]}"}).json()
+    client.post("/api/v1/tasks", json={"project_id": scoped["id"], "title": "Scoped task"})
+    outside_task = client.post("/api/v1/tasks", json={"project_id": outside["id"], "title": "Outside task"}).json()
+
+    refs, small_statements = _exception_query_statements({scoped["id"]})
+    work_item_statements = [
+        statement for statement in small_statements
+        if any(f" from {table} " in statement for table in ("requirements", "tasks", "bugs"))
+    ]
+    assert work_item_statements
+    assert all("project_id in" in statement for statement in work_item_statements)
+    assert not any(item["object_type"] == "task" and item["id"] == outside_task["id"] for item in refs)
+
+    for index in range(6):
+        client.post("/api/v1/tasks", json={"project_id": scoped["id"], "title": f"Batch task {index}"})
+    _, large_statements = _exception_query_statements({scoped["id"]})
+
+    assert len(large_statements) <= len(small_statements) + 3
 
 
 def test_latest_state_entry_time_matches_state_id_not_legacy_status(client: TestClient):
@@ -292,3 +342,601 @@ def test_completed_requirement_with_active_bug_is_reported_without_reopening(cli
     )
     assert stored_state_id == completed_state_id
     assert bug["current_state_id"] is not None
+
+
+def test_exception_center_reports_integrity_and_routing_violations_without_flagging_normal_backlog(client: TestClient):
+    project = client.post("/api/v1/projects", json={"name": f"Integrity Project {uuid4().hex[:8]}"}).json()
+    owner_id, _ = _create_user()
+    _add_member(project["id"], owner_id)
+    iteration = client.post(
+        "/api/v1/iterations",
+        json={"project_ids": [project["id"]], "name": f"Integrity iteration {uuid4().hex[:8]}"},
+    ).json()
+    ownerless_processing = client.post(
+        "/api/v1/tasks",
+        json={"project_id": project["id"], "title": "Ownerless processing", "owner_id": owner_id},
+    ).json()
+    invalid_owner = client.post(
+        "/api/v1/tasks",
+        json={"project_id": project["id"], "title": "Invalid owner", "owner_id": owner_id},
+    ).json()
+    history_mismatch = client.post(
+        "/api/v1/tasks",
+        json={"project_id": project["id"], "title": "History mismatch"},
+    ).json()
+    unaudited_reopen = client.post(
+        "/api/v1/bugs",
+        json={"project_id": project["id"], "title": "Unaudited reopen"},
+    ).json()
+    normal_backlog = client.post(
+        "/api/v1/requirements",
+        json={"project_id": project["id"], "title": "Normal unplanned backlog"},
+    ).json()
+
+    db = SessionLocal()
+    try:
+        ownerless_row = db.query(Task).filter(Task.id == ownerless_processing["id"]).one()
+        ownerless_row.current_state_id = _target_state_id(db, ownerless_row.workflow_definition_id, "claim")
+        ownerless_row.owner_id = None
+        db.query(ProjectMember).filter(
+            ProjectMember.project_id == project["id"], ProjectMember.user_id == owner_id
+        ).delete()
+        mismatch_row = db.query(Task).filter(Task.id == history_mismatch["id"]).one()
+        mismatch_row.iteration_id = iteration["id"]
+        db.add_all([
+            WorkItemIterationHistory(object_type="task", object_id=mismatch_row.id, iteration_id=iteration["id"] + 999999, enter_reason="legacy"),
+            WorkItemIterationHistory(object_type="task", object_id=mismatch_row.id, iteration_id=iteration["id"], enter_reason="legacy"),
+        ])
+        db.query(Bug).filter(Bug.id == unaudited_reopen["id"]).update({"reopen_count": 1})
+        db.commit()
+        refs = list_exception_refs(db, {project["id"]})
+    finally:
+        db.close()
+
+    refs_by_key = {(item["object_type"], item["id"], item["exception_key"]) for item in refs}
+    assert ("task", ownerless_processing["id"], "owner_required_missing") in refs_by_key
+    assert ("task", invalid_owner["id"], "owner_ineligible") in refs_by_key
+    assert ("task", history_mismatch["id"], "iteration_history_inconsistent") in refs_by_key
+    assert ("bug", unaudited_reopen["id"], "missing_reactivation_audit") in refs_by_key
+    assert not any(item["id"] == normal_backlog["id"] for item in refs)
+
+
+def test_exception_center_detects_owner_without_current_workflow_action_role(client: TestClient):
+    project = client.post("/api/v1/projects", json={"name": f"Role eligibility {uuid4().hex[:8]}"}).json()
+    developer_id, _ = _create_user("developer")
+    owner_id, _ = _create_user("project_owner")
+    system_admin_id, _ = _create_user("system_admin")
+    _add_member(project["id"], developer_id, "developer")
+    _add_member(project["id"], owner_id, "project_owner")
+    _add_member(project["id"], system_admin_id, "developer")
+    invalid_task = client.post(
+        "/api/v1/tasks",
+        json={"project_id": project["id"], "title": "Wrong current role", "owner_id": developer_id},
+    ).json()
+    matching_task = client.post(
+        "/api/v1/tasks",
+        json={"project_id": project["id"], "title": "Matching current role", "owner_id": developer_id},
+    ).json()
+    owner_task = client.post(
+        "/api/v1/tasks",
+        json={"project_id": project["id"], "title": "Project owner action", "owner_id": owner_id},
+    ).json()
+    system_admin_task = client.post(
+        "/api/v1/tasks",
+        json={"project_id": project["id"], "title": "System admin owner action", "owner_id": system_admin_id},
+    ).json()
+
+    db = SessionLocal()
+    try:
+        task = db.query(Task).filter(Task.id == invalid_task["id"]).one()
+        transition_query = db.query(WorkflowTransition).filter(
+            WorkflowTransition.definition_id == task.workflow_definition_id,
+            WorkflowTransition.from_state_id == task.current_state_id,
+        )
+        original_roles = {transition.id: transition.allowed_roles for transition in transition_query.all()}
+        transition_query.update({"allowed_roles": "tester"}, synchronize_session=False)
+        db.commit()
+        invalid_refs = list_exception_refs(db, {project["id"]})
+
+        transition_query.update({"allowed_roles": "developer"}, synchronize_session=False)
+        db.commit()
+        matching_refs = list_exception_refs(db, {project["id"]})
+
+        transition_query.update({"allowed_roles": "project_owner"}, synchronize_session=False)
+        db.commit()
+        owner_refs = list_exception_refs(db, {project["id"]})
+    finally:
+        if "original_roles" in locals():
+            for transition_id, allowed_roles in original_roles.items():
+                db.query(WorkflowTransition).filter(WorkflowTransition.id == transition_id).update(
+                    {"allowed_roles": allowed_roles}, synchronize_session=False
+                )
+            db.commit()
+        db.close()
+
+    def ineligible_ids(refs):
+        return {item["id"] for item in refs if item["object_type"] == "task" and item["exception_key"] == "owner_ineligible"}
+
+    assert invalid_task["id"] in ineligible_ids(invalid_refs)
+    assert matching_task["id"] not in ineligible_ids(matching_refs)
+    assert owner_task["id"] not in ineligible_ids(owner_refs)
+    assert system_admin_task["id"] not in ineligible_ids(owner_refs)
+
+
+def test_exception_scan_batches_bug_tester_identities_without_cross_object_leakage(client: TestClient):
+    project = client.post("/api/v1/projects", json={"name": f"Tester identities {uuid4().hex[:8]}"}).json()
+    tester_id, _ = _create_user("developer")
+    other_id, _ = _create_user("developer")
+    _add_member(project["id"], tester_id, "developer")
+    _add_member(project["id"], other_id, "developer")
+    own_case = client.post(
+        "/api/v1/test-cases",
+        json={"project_id": project["id"], "title": "Owned case", "default_tester_id": tester_id},
+    ).json()
+    other_case = client.post(
+        "/api/v1/test-cases",
+        json={"project_id": project["id"], "title": "Other case", "default_tester_id": other_id},
+    ).json()
+    own_run = client.post(
+        "/api/v1/test-runs",
+        json={"project_id": project["id"], "name": "Owned run", "test_owner_id": tester_id},
+    ).json()
+    other_run = client.post(
+        "/api/v1/test-runs",
+        json={"project_id": project["id"], "name": "Other run", "test_owner_id": other_id},
+    ).json()
+    bugs = {
+        "case_positive": client.post(
+            "/api/v1/bugs",
+            json={"project_id": project["id"], "title": "Case tester", "owner_id": tester_id, "test_case_id": own_case["id"]},
+        ).json(),
+        "run_positive": client.post(
+            "/api/v1/bugs",
+            json={"project_id": project["id"], "title": "Run tester", "owner_id": tester_id, "test_run_id": own_run["id"]},
+        ).json(),
+        "unlinked_negative": client.post(
+            "/api/v1/bugs",
+            json={"project_id": project["id"], "title": "Unlinked tester", "owner_id": tester_id},
+        ).json(),
+        "case_negative": client.post(
+            "/api/v1/bugs",
+            json={"project_id": project["id"], "title": "Other case tester", "owner_id": tester_id, "test_case_id": other_case["id"]},
+        ).json(),
+        "run_negative": client.post(
+            "/api/v1/bugs",
+            json={"project_id": project["id"], "title": "Other run tester", "owner_id": tester_id, "test_run_id": other_run["id"]},
+        ).json(),
+    }
+    db = SessionLocal()
+    try:
+        row = db.query(Bug).filter(Bug.id == bugs["case_positive"]["id"]).one()
+        transitions = db.query(WorkflowTransition).filter(
+            WorkflowTransition.definition_id == row.workflow_definition_id,
+            WorkflowTransition.from_state_id == row.current_state_id,
+        )
+        original_roles = {transition.id: transition.allowed_roles for transition in transitions.all()}
+        transitions.update({"allowed_roles": "tester"}, synchronize_session=False)
+        db.commit()
+        refs, small_statements = _exception_query_statements({project["id"]})
+    finally:
+        if "original_roles" in locals():
+            for transition_id, allowed_roles in original_roles.items():
+                db.query(WorkflowTransition).filter(WorkflowTransition.id == transition_id).update(
+                    {"allowed_roles": allowed_roles}, synchronize_session=False
+                )
+            db.commit()
+        db.close()
+
+    ineligible_ids = {
+        item["id"] for item in refs
+        if item["object_type"] == "bug" and item["exception_key"] == "owner_ineligible"
+    }
+    assert bugs["case_positive"]["id"] not in ineligible_ids
+    assert bugs["run_positive"]["id"] not in ineligible_ids
+    assert bugs["unlinked_negative"]["id"] in ineligible_ids
+    assert bugs["case_negative"]["id"] in ineligible_ids
+    assert bugs["run_negative"]["id"] in ineligible_ids
+
+    for index in range(6):
+        client.post(
+            "/api/v1/bugs",
+            json={
+                "project_id": project["id"],
+                "title": f"Additional linked tester {index}",
+                "owner_id": tester_id,
+                "test_case_id": own_case["id"],
+                "test_run_id": own_run["id"],
+            },
+        )
+    _, large_statements = _exception_query_statements({project["id"]})
+    assert len(large_statements) <= len(small_statements) + 3
+
+
+def test_integrity_audit_distinguishes_verification_retry_from_true_activation(client: TestClient):
+    project = client.post("/api/v1/projects", json={"name": f"Activation audit {uuid4().hex[:8]}"}).json()
+    verification_bug = client.post("/api/v1/bugs", json={"project_id": project["id"], "title": "Verification retry"}).json()
+    broken_activation = client.post("/api/v1/bugs", json={"project_id": project["id"], "title": "Broken activation"}).json()
+    db = SessionLocal()
+    try:
+        verification_row = db.query(Bug).filter(Bug.id == verification_bug["id"]).one()
+        broken_row = db.query(Bug).filter(Bug.id == broken_activation["id"]).one()
+        verification_row.reopen_count = 1
+        broken_row.reopen_count = 1
+        db.add(_operation("bug", verification_row.id, verification_row.workflow_definition_id, verification_row.current_state_id, datetime.now(), "verification_failed"))
+        activation = _operation("bug", broken_row.id, broken_row.workflow_definition_id, broken_row.current_state_id, datetime.now(), "activate")
+        activation.reason = "reproduced"
+        db.add(activation)
+        db.commit()
+        refs = list_exception_refs(db, {project["id"]})
+    finally:
+        db.close()
+    missing_ids = {item["id"] for item in refs if item["exception_key"] == "missing_reactivation_audit"}
+    assert verification_bug["id"] not in missing_ids
+    assert broken_activation["id"] in missing_ids
+
+
+def test_terminal_membership_integrity_is_checked_and_rules_cannot_disable_it(client: TestClient):
+    project = client.post("/api/v1/projects", json={"name": f"Terminal integrity {uuid4().hex[:8]}"}).json()
+    clean = client.post("/api/v1/tasks", json={"project_id": project["id"], "title": "Clean terminal"}).json()
+    broken = client.post("/api/v1/tasks", json={"project_id": project["id"], "title": "Broken terminal"}).json()
+    db = SessionLocal()
+    try:
+        integrity_rules = db.query(ExceptionRule).filter(ExceptionRule.exception_key == "iteration_history_inconsistent").all()
+        if not integrity_rules:
+            db.add(ExceptionRule(
+                exception_key="iteration_history_inconsistent",
+                label="Configurable rule must not control integrity",
+                object_type="*",
+                threshold_hours=99999,
+                enabled=False,
+            ))
+            db.flush()
+            integrity_rules = db.query(ExceptionRule).filter(ExceptionRule.exception_key == "iteration_history_inconsistent").all()
+        original_rule_values = {rule.id: (rule.enabled, rule.threshold_hours) for rule in integrity_rules}
+        for task_id in (clean["id"], broken["id"]):
+            row = db.query(Task).filter(Task.id == task_id).one()
+            row.current_state_id = _target_state_id(db, row.workflow_definition_id, "complete")
+        db.add(WorkItemIterationHistory(object_type="task", object_id=broken["id"], iteration_id=99999999, enter_reason="illegal"))
+        db.query(ExceptionRule).filter(ExceptionRule.exception_key == "iteration_history_inconsistent").update({"enabled": False, "threshold_hours": 99999})
+        db.commit()
+        refs = list_exception_refs(db, {project["id"]})
+    finally:
+        if "original_rule_values" in locals():
+            for rule_id, (enabled, threshold_hours) in original_rule_values.items():
+                db.query(ExceptionRule).filter(ExceptionRule.id == rule_id).update({"enabled": enabled, "threshold_hours": threshold_hours})
+            db.commit()
+        db.close()
+    inconsistent_ids = {item["id"] for item in refs if item["exception_key"] == "iteration_history_inconsistent"}
+    assert clean["id"] not in inconsistent_ids
+    assert broken["id"] in inconsistent_ids
+
+
+def test_owner_eligibility_uses_object_conditions_and_ignores_informational_actions(client: TestClient):
+    project = client.post("/api/v1/projects", json={"name": f"Conditional role {uuid4().hex[:8]}"}).json()
+    developer_id, _ = _create_user("developer")
+    _add_member(project["id"], developer_id, "developer")
+    task = client.post(
+        "/api/v1/tasks",
+        json={"project_id": project["id"], "title": "Conditional bug fix", "task_type": "bug_fix", "owner_id": developer_id},
+    ).json()
+    db = SessionLocal()
+    try:
+        row = db.query(Task).filter(Task.id == task["id"]).one()
+        row.current_state_id = _target_state_id(db, row.workflow_definition_id, "claim")
+        transitions = db.query(WorkflowTransition).filter(
+            WorkflowTransition.definition_id == row.workflow_definition_id,
+            WorkflowTransition.from_state_id == row.current_state_id,
+        ).all()
+        original_roles = {transition.id: transition.allowed_roles for transition in transitions}
+        for transition in transitions:
+            transition.allowed_roles = "developer" if transition.action_key in {"complete", "add_information"} else "tester"
+        db.commit()
+        refs = list_exception_refs(db, {project["id"]})
+    finally:
+        if "original_roles" in locals():
+            for transition_id, allowed_roles in original_roles.items():
+                db.query(WorkflowTransition).filter(WorkflowTransition.id == transition_id).update({"allowed_roles": allowed_roles})
+            db.commit()
+        db.close()
+    assert any(
+        item["id"] == task["id"] and item["exception_key"] == "owner_ineligible"
+        for item in refs
+    )
+
+
+def test_workbench_aggregates_integrity_details_and_enforces_project_scope(client: TestClient):
+    project = client.post("/api/v1/projects", json={"name": f"Aggregate integrity {uuid4().hex[:8]}"}).json()
+    iteration = client.post("/api/v1/iterations", json={"project_ids": [project["id"]], "name": "Active aggregate"}).json()
+    assert client.post(f"/api/v1/workflow-runtime/iteration/{iteration['id']}/transition", json={"action_key": "start"}).status_code == 200
+    viewer_id, viewer_token = _create_user("developer")
+    invalid_owner_id, _ = _create_user("developer")
+    _, outsider_token = _create_user("developer")
+    _add_member(project["id"], viewer_id, "developer")
+    task = client.post(
+        "/api/v1/tasks",
+        json={"project_id": project["id"], "iteration_id": iteration["id"], "title": "Three violations", "owner_id": invalid_owner_id},
+    ).json()
+    db = SessionLocal()
+    try:
+        db.query(Task).filter(Task.id == task["id"]).update({"create_time": datetime.now() - timedelta(hours=48)})
+        db.add(WorkItemIterationHistory(object_type="task", object_id=task["id"], iteration_id=99999999, enter_reason="illegal"))
+        db.commit()
+    finally:
+        db.close()
+
+    visible = client.get(
+        "/api/v1/dashboard/workbench",
+        headers={"Authorization": f"Bearer {viewer_token}"},
+    ).json()["exception_center"]["items"]
+    hidden = client.get(
+        "/api/v1/dashboard/workbench",
+        headers={"Authorization": f"Bearer {outsider_token}"},
+    ).json()["exception_center"]["items"]
+    item = next(entry for entry in visible if entry["object_type"] == "task" and entry["id"] == task["id"])
+
+    assert {"pending_timeout", "owner_ineligible", "iteration_history_inconsistent"} <= set(item["exception_keys"])
+    assert {detail["exception_key"] for detail in item["exception_details"]} >= {
+        "owner_ineligible", "iteration_history_inconsistent"
+    }
+    assert not any(entry["object_type"] == "task" and entry["id"] == task["id"] for entry in hidden)
+
+
+def test_iteration_transfer_with_structural_history_but_no_operation_link_is_inconsistent(client: TestClient):
+    project = client.post("/api/v1/projects", json={"name": f"Transfer audit {uuid4().hex[:8]}"}).json()
+    task = client.post("/api/v1/tasks", json={"project_id": project["id"], "title": "Unlinked transfer"}).json()
+    now = datetime.now()
+    db = SessionLocal()
+    try:
+        row = db.query(Task).filter(Task.id == task["id"]).one()
+        row.iteration_id = 2002
+        db.add_all([
+            WorkItemIterationHistory(
+                object_type="task", object_id=row.id, iteration_id=2001, enter_reason="linked",
+                entered_at=now - timedelta(hours=2), left_at=now - timedelta(hours=1), leave_reason="deferred",
+            ),
+            WorkItemIterationHistory(
+                object_type="task", object_id=row.id, iteration_id=2002, enter_reason="deferred", entered_at=now,
+            ),
+        ])
+        db.commit()
+        refs = list_exception_refs(db, {project["id"]})
+    finally:
+        db.close()
+    assert any(
+        item["id"] == task["id"] and item["exception_key"] == "iteration_history_inconsistent"
+        for item in refs
+    )
+
+
+def test_terminal_iteration_snapshot_detects_items_added_after_end(client: TestClient):
+    project = client.post("/api/v1/projects", json={"name": f"Snapshot integrity {uuid4().hex[:8]}"}).json()
+    iteration = client.post("/api/v1/iterations", json={"project_ids": [project["id"]], "name": "Snapshot iteration"}).json()
+    assert client.post(f"/api/v1/workflow-runtime/iteration/{iteration['id']}/transition", json={"action_key": "start"}).status_code == 200
+    included = client.post(
+        "/api/v1/tasks",
+        json={"project_id": project["id"], "iteration_id": iteration["id"], "title": "Included terminal task"},
+    ).json()
+    db = SessionLocal()
+    try:
+        included_row = db.query(Task).filter(Task.id == included["id"]).one()
+        included_row.current_state_id = _target_state_id(db, included_row.workflow_definition_id, "complete")
+        db.commit()
+    finally:
+        db.close()
+    assert client.post(f"/api/v1/workflow-runtime/iteration/{iteration['id']}/transition", json={"action_key": "complete"}).status_code == 200
+    late = client.post("/api/v1/tasks", json={"project_id": project["id"], "title": "Late terminal task"}).json()
+    db = SessionLocal()
+    try:
+        late_row = db.query(Task).filter(Task.id == late["id"]).one()
+        late_row.current_state_id = _target_state_id(db, late_row.workflow_definition_id, "complete")
+        late_row.iteration_id = iteration["id"]
+        db.add(WorkItemIterationHistory(
+            object_type="task", object_id=late_row.id, iteration_id=iteration["id"], enter_reason="illegal_after_end",
+            entered_at=datetime.now() + timedelta(seconds=1),
+        ))
+        db.commit()
+        refs = list_exception_refs(db, {project["id"]})
+    finally:
+        db.close()
+    mismatch_ids = {item["id"] for item in refs if item["exception_key"] == "terminal_iteration_snapshot_mismatch"}
+    assert included["id"] not in mismatch_ids
+    assert late["id"] in mismatch_ids
+
+
+def test_backfilled_iteration_completion_time_does_not_invalidate_recorded_snapshot(client: TestClient):
+    project = client.post("/api/v1/projects", json={"name": f"Backfilled completion {uuid4().hex[:8]}"}).json()
+    iteration = client.post(
+        "/api/v1/iterations",
+        json={"project_ids": [project["id"]], "name": "Backfilled completion iteration"},
+    ).json()
+    assert client.post(
+        f"/api/v1/workflow-runtime/iteration/{iteration['id']}/transition",
+        json={"action_key": "start"},
+    ).status_code == 200
+    task = client.post(
+        "/api/v1/tasks",
+        json={"project_id": project["id"], "iteration_id": iteration["id"], "title": "Recorded before completion"},
+    ).json()
+    db = SessionLocal()
+    try:
+        row = db.query(Task).filter(Task.id == task["id"]).one()
+        row.current_state_id = _target_state_id(db, row.workflow_definition_id, "complete")
+        db.commit()
+    finally:
+        db.close()
+    assert client.post(
+        f"/api/v1/workflow-runtime/iteration/{iteration['id']}/transition",
+        json={"action_key": "complete", "payload": {"effective_time": "2026-01-01T18:00:00"}},
+    ).status_code == 200
+
+    db = SessionLocal()
+    try:
+        refs = list_exception_refs(db, {project["id"]})
+    finally:
+        db.close()
+
+    assert not any(
+        item["object_type"] == "task"
+        and item["id"] == task["id"]
+        and item["exception_key"] == "terminal_iteration_snapshot_mismatch"
+        for item in refs
+    )
+
+
+def test_normal_link_unlink_and_defer_create_membership_operations(client: TestClient):
+    project = client.post("/api/v1/projects", json={"name": f"Membership operations {uuid4().hex[:8]}"}).json()
+    source = client.post("/api/v1/iterations", json={"project_ids": [project["id"]], "name": "Source"}).json()
+    target = client.post("/api/v1/iterations", json={"project_ids": [project["id"]], "name": "Target"}).json()
+    deferred = client.post("/api/v1/tasks", json={"project_id": project["id"], "title": "Deferred normally"}).json()
+    unlinked = client.post("/api/v1/tasks", json={"project_id": project["id"], "title": "Unlinked normally"}).json()
+    assert client.post(f"/api/v1/iterations/{source['id']}/tasks", json={"task_ids": [deferred["id"], unlinked["id"]]}).status_code == 200
+    assert client.delete(f"/api/v1/iterations/{source['id']}/tasks/{unlinked['id']}").status_code == 204
+    assert client.post(
+        f"/api/v1/iterations/{source['id']}/defer-work-items",
+        json={"target_iteration_id": target["id"], "task_ids": [deferred["id"]]},
+    ).status_code == 200
+    db = SessionLocal()
+    try:
+        refs = list_exception_refs(db, {project["id"]})
+        histories = db.query(WorkItemIterationHistory).filter(
+            WorkItemIterationHistory.object_type == "task",
+            WorkItemIterationHistory.object_id.in_([deferred["id"], unlinked["id"]]),
+        ).all()
+        operations = {
+            operation.id: (operation.action, operation.operation_kind)
+            for operation in db.query(StatusOperationLog).filter(
+                StatusOperationLog.object_type == "task",
+                StatusOperationLog.object_id.in_([deferred["id"], unlinked["id"]]),
+            ).all()
+        }
+    finally:
+        db.close()
+    assert not any(
+        item["id"] in {deferred["id"], unlinked["id"]} and item["exception_key"] == "iteration_history_inconsistent"
+        for item in refs
+    ), (refs, [(row.object_id, row.enter_reason, row.leave_reason, row.operation_log_id) for row in histories], operations)
+    assert all(history.operation_log_id in operations for history in histories)
+    assert {"iteration_link", "iteration_unlink", "iteration_defer"} <= {action for action, _ in operations.values()}
+    assert {kind for _, kind in operations.values()} == {"membership"}
+
+
+def test_terminal_snapshot_reverse_scan_rejects_post_end_move_and_unlink(client: TestClient):
+    project = client.post("/api/v1/projects", json={"name": f"Reverse snapshot {uuid4().hex[:8]}"}).json()
+    source = client.post("/api/v1/iterations", json={"project_ids": [project["id"]], "name": "Ended source"}).json()
+    target = client.post("/api/v1/iterations", json={"project_ids": [project["id"]], "name": "Active target"}).json()
+    assert client.post(f"/api/v1/workflow-runtime/iteration/{source['id']}/transition", json={"action_key": "start"}).status_code == 200
+    assert client.post(f"/api/v1/workflow-runtime/iteration/{target['id']}/transition", json={"action_key": "start"}).status_code == 200
+    moved = client.post("/api/v1/tasks", json={"project_id": project["id"], "iteration_id": source["id"], "title": "Moved after end"}).json()
+    unlinked = client.post("/api/v1/tasks", json={"project_id": project["id"], "iteration_id": source["id"], "title": "Unlinked after end"}).json()
+    moved_before_end = client.post("/api/v1/tasks", json={"project_id": project["id"], "iteration_id": source["id"], "title": "Moved before end"}).json()
+    db = SessionLocal()
+    try:
+        before_row = db.query(Task).filter(Task.id == moved_before_end["id"]).one()
+        move_work_item_to_iteration(db, before_row, target["id"], reason="updated")
+        for task_id in (moved["id"], unlinked["id"]):
+            row = db.query(Task).filter(Task.id == task_id).one()
+            row.current_state_id = _target_state_id(db, row.workflow_definition_id, "complete")
+        db.commit()
+    finally:
+        db.close()
+    assert client.post(f"/api/v1/workflow-runtime/iteration/{source['id']}/transition", json={"action_key": "complete"}).status_code == 200
+    db = SessionLocal()
+    try:
+        moved_row = db.query(Task).filter(Task.id == moved["id"]).one()
+        unlinked_row = db.query(Task).filter(Task.id == unlinked["id"]).one()
+        move_work_item_to_iteration(db, moved_row, target["id"], reason="updated")
+        move_work_item_to_iteration(db, unlinked_row, None, reason="unlinked")
+        db.flush()
+        snapshot_recorded_at = db.query(IterationCompletionSnapshot.create_time).filter(
+            IterationCompletionSnapshot.iteration_id == source["id"]
+        ).scalar()
+        changed_histories = db.query(WorkItemIterationHistory).filter(
+            WorkItemIterationHistory.object_type == "task",
+            WorkItemIterationHistory.object_id.in_([moved["id"], unlinked["id"]]),
+            WorkItemIterationHistory.iteration_id == source["id"],
+        ).all()
+        for history in changed_histories:
+            history.left_at = snapshot_recorded_at + timedelta(seconds=2)
+        db.query(StatusOperationLog).filter(
+            StatusOperationLog.id.in_({history.operation_log_id for history in changed_histories})
+        ).update(
+            {"create_time": snapshot_recorded_at + timedelta(seconds=2)},
+            synchronize_session=False,
+        )
+        db.commit()
+        refs = list_exception_refs(db, {project["id"]})
+    finally:
+        db.close()
+    mismatch_ids = {item["id"] for item in refs if item["exception_key"] == "terminal_iteration_snapshot_mismatch"}
+    assert moved["id"] in mismatch_ids
+    assert unlinked["id"] in mismatch_ids
+    assert moved_before_end["id"] not in mismatch_ids
+
+
+def test_post_terminal_reactivation_exemption_validates_selected_iterations_actor_and_time(client: TestClient):
+    project = client.post("/api/v1/projects", json={"name": f"Strict reactivation {uuid4().hex[:8]}"}).json()
+    actor_id, _ = _create_user("developer")
+    bug = client.post("/api/v1/bugs", json={"project_id": project["id"], "title": "Strict chain"}).json()
+    source_iteration_id = 31001
+    target_iteration_id = 31002
+    event_time = datetime.now()
+    db = SessionLocal()
+    try:
+        operation = _operation("bug", bug["id"], bug["workflow_definition_id"], bug["current_state_id"], event_time, "activate")
+        operation.actor_id = actor_id
+        operation.reason = "reproduced"
+        operation.selected_values = {
+            "source_iteration_id": source_iteration_id,
+            "target_iteration_id": target_iteration_id,
+            "reopen_reason": "reproduced",
+            "reopen_count_after": 1,
+        }
+        db.add(operation)
+        db.flush()
+        leave = WorkItemIterationHistory(
+            object_type="bug", object_id=bug["id"], iteration_id=source_iteration_id,
+            enter_reason="linked", entered_at=event_time - timedelta(hours=1),
+            left_at=event_time - timedelta(seconds=2), left_by=actor_id,
+            leave_reason="reactivated", operation_log_id=operation.id,
+        )
+        enter = WorkItemIterationHistory(
+            object_type="bug", object_id=bug["id"], iteration_id=target_iteration_id,
+            enter_reason="reactivated", entered_at=event_time - timedelta(seconds=1),
+            entered_by=actor_id, operation_log_id=operation.id,
+        )
+        db.add_all([leave, enter])
+        db.commit()
+        assert _is_valid_post_terminal_reactivation(db, "bug", bug["id"], leave) is True
+
+        operation.selected_values = {**operation.selected_values, "source_iteration_id": source_iteration_id + 9}
+        db.commit()
+        assert _is_valid_post_terminal_reactivation(db, "bug", bug["id"], leave) is False
+        for invalid_value in ("not-a-number", True, 1.5, 0, -1, None):
+            operation.selected_values = {
+                **operation.selected_values,
+                "source_iteration_id": invalid_value,
+                "target_iteration_id": target_iteration_id,
+            }
+            db.commit()
+            assert _is_valid_post_terminal_reactivation(db, "bug", bug["id"], leave) is False
+        for invalid_value in ("not-a-number", True, 1.5, 0, -1, None):
+            operation.selected_values = {
+                **operation.selected_values,
+                "source_iteration_id": source_iteration_id,
+                "target_iteration_id": invalid_value,
+            }
+            db.commit()
+            assert _is_valid_post_terminal_reactivation(db, "bug", bug["id"], leave) is False
+        operation.selected_values = {**operation.selected_values, "source_iteration_id": source_iteration_id, "target_iteration_id": target_iteration_id + 9}
+        db.commit()
+        assert _is_valid_post_terminal_reactivation(db, "bug", bug["id"], leave) is False
+        operation.selected_values = {**operation.selected_values, "target_iteration_id": target_iteration_id}
+        enter.entered_by = actor_id + 9
+        db.commit()
+        assert _is_valid_post_terminal_reactivation(db, "bug", bug["id"], leave) is False
+        enter.entered_by = actor_id
+        enter.entered_at = event_time + timedelta(seconds=10)
+        db.commit()
+        assert _is_valid_post_terminal_reactivation(db, "bug", bug["id"], leave) is False
+    finally:
+        db.close()

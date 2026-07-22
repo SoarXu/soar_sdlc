@@ -36,10 +36,10 @@
     <el-card v-loading="loading" shadow="never" class="project-detail-card">
       <template v-if="activeTab === 'overview'">
         <div class="metrics project-detail-metrics">
-          <el-card shadow="never"><span>需求数</span><strong>{{ metrics.requirement_total || 0 }}</strong></el-card>
-          <el-card shadow="never"><span>任务数</span><strong>{{ tasks.length }}</strong></el-card>
-          <el-card shadow="never"><span>用例数</span><strong>{{ testCases.length }}</strong></el-card>
-          <el-card shadow="never"><span>Bug 数</span><strong>{{ bugs.length }}</strong></el-card>
+          <el-card shadow="never"><span>需求数</span><strong>{{ snapshotCount('requirement', metrics.requirement_total) }}</strong></el-card>
+          <el-card shadow="never"><span>任务数</span><strong>{{ snapshotCount('task', metrics.task_total) }}</strong></el-card>
+          <el-card shadow="never"><span>测试单数</span><strong>{{ snapshotCount('test_run', metrics.test_run_total) }}</strong></el-card>
+          <el-card shadow="never"><span>Bug 数</span><strong>{{ snapshotCount('bug', metrics.bug_total) }}</strong></el-card>
           <el-card shadow="never"><span>迭代进度</span><strong>{{ percent(metrics.progress_rate) }}</strong></el-card>
           <el-card shadow="never"><span>测试覆盖率</span><strong>{{ percent(metrics.test_coverage_rate) }}</strong></el-card>
         </div>
@@ -52,6 +52,19 @@
           <el-descriptions-item label="实际结束">{{ iteration.actual_end_date || '-' }}</el-descriptions-item>
           <el-descriptions-item label="目标" :span="2">{{ iteration.goal || '-' }}</el-descriptions-item>
         </el-descriptions>
+        <el-card v-if="completionSnapshot" shadow="never" class="completion-snapshot-panel">
+          <template #header>结束快照</template>
+          <el-descriptions :column="2" border size="small">
+            <el-descriptions-item label="操作">{{ completionSnapshot.action || '-' }}</el-descriptions-item>
+            <el-descriptions-item label="结束时间">{{ formatDateTime(completionSnapshot.ended_at) }}</el-descriptions-item>
+            <el-descriptions-item label="操作人">{{ userLabel(users, completionSnapshot.actor_id) }}</el-descriptions-item>
+            <el-descriptions-item label="操作记录">#{{ completionSnapshot.operation_log_id || '-' }}</el-descriptions-item>
+            <el-descriptions-item label="需求">{{ snapshotCount('requirement', 0) }} / 已结束 {{ terminalCount('requirement') }}</el-descriptions-item>
+            <el-descriptions-item label="任务">{{ snapshotCount('task', 0) }} / 已结束 {{ terminalCount('task') }}</el-descriptions-item>
+            <el-descriptions-item label="Bug">{{ snapshotCount('bug', 0) }} / 已结束 {{ terminalCount('bug') }}</el-descriptions-item>
+            <el-descriptions-item label="测试单">{{ snapshotCount('test_run', 0) }} / 已结束 {{ terminalCount('test_run') }}</el-descriptions-item>
+          </el-descriptions>
+        </el-card>
       </template>
 
       <template v-else-if="activeTab === 'requirements'">
@@ -169,6 +182,23 @@
           <el-table-column label="负责人" width="140"><template #default="{ row }">{{ userLabel(users, row.owner_id) }}</template></el-table-column>
           <el-table-column label="状态" width="110"><template #default="{ row }">{{ row.status_name || '-' }}</template></el-table-column>
         </el-table>
+        <div v-if="historicalBugs.length" class="iteration-history-section">
+          <h3>后续已重新激活</h3>
+          <el-table :data="historicalBugs" stripe border width="100%">
+            <el-table-column prop="id" label="ID" width="80" />
+            <el-table-column label="Bug 标题" min-width="220" show-overflow-tooltip>
+              <template #default="{ row }">
+                <router-link class="table-link" :to="{ name: 'bug-detail', params: { id: row.id } }">{{ row.title }}</router-link>
+              </template>
+            </el-table-column>
+            <el-table-column prop="status_name_at_leave" label="离开时状态" width="130" />
+            <el-table-column label="后续迭代" min-width="160">
+              <template #default="{ row }">{{ labelById(iterations, row.current_iteration_id, 'name') }}</template>
+            </el-table-column>
+            <el-table-column prop="leave_reason" label="变更原因" width="130" />
+            <el-table-column prop="left_at" label="重新激活时间" width="180" />
+          </el-table>
+        </div>
       </template>
     </el-card>
 
@@ -292,7 +322,6 @@
       </template>
     </el-dialog>
 
-    
 
     <el-dialog v-model="taskEditVisible" title="编辑任务" width="620px">
       <el-form label-position="top">
@@ -312,7 +341,6 @@
       <template #footer><el-button @click="taskEditVisible = false">取消</el-button><el-button type="primary" :loading="saving" @click="submitTaskEdit">保存</el-button></template>
     </el-dialog>
 
-    
 
     <el-dialog v-model="caseExecutionVisible" :title="`执行用例 ${selectedCase?.title || ''}`" width="980px">
       <el-form label-position="top">
@@ -402,6 +430,7 @@ const requirements = ref([])
 const tasks = ref([])
 const testCases = ref([])
 const bugs = ref([])
+const historicalBugs = ref([])
 const iterationWorkflowTransitions = ref({})
 const requirementOperationWidth = computed(() => workflowActionColumnWidth(
   requirements.value.map((row) => iterationWorkflowTransitionsFor('requirement', row.id)),
@@ -412,6 +441,7 @@ const taskOperationWidth = computed(() => workflowActionColumnWidth(
   { minWidth: 220, extraWidth: 130 }
 ))
 const metrics = ref({})
+const completionSnapshot = ref(null)
 const users = ref([])
 const projectMembersById = ref({})
 const availableRequirements = ref([])
@@ -518,6 +548,8 @@ function canDeleteWorkItemFor(projectId) { return canDeleteWorkItem(projectById(
 function canManageTestCaseFor(projectId) { return canManageTestCase(projectById(projectId), currentUser.value, membersForProject(projectId)) }
 function canEditWorkItem(row) { return canExecuteWorkItem(row, currentUser.value, projectById(row.project_id), membersForProject(row.project_id)) }
 function percent(value) { return `${Math.round((value || 0) * 100)}%` }
+function snapshotCount(objectType, fallback = 0) { return completionSnapshot.value?.counts?.[objectType] ?? fallback ?? 0 }
+function terminalCount(objectType) { return completionSnapshot.value?.terminal_counts?.[objectType] ?? 0 }
 function flattenProjects(items) { return items.flatMap((item) => [item, ...flattenProjects(item.children || [])]) }
 function formatDateTime(value) { return value ? new Date(value).toLocaleString('zh-CN', { hour12: false }) : '-' }
 function executionHistoryTitle(item) { return `#${item.id} ${formatDateTime(item.execute_time)}，结果为 ${executionResultLabel(item.result)}` }
@@ -549,6 +581,8 @@ async function loadData() {
     tasks.value = detailRes.data.tasks
     testCases.value = detailRes.data.test_cases
     bugs.value = detailRes.data.bugs || []
+    historicalBugs.value = detailRes.data.historical_bugs || []
+    completionSnapshot.value = detailRes.data.completion_snapshot || null
     metrics.value = detailRes.data.metrics
     users.value = userRes.data
     await loadProjectMembers()
@@ -825,6 +859,20 @@ function buildActualText(execution) {
 </script>
 
 <style scoped>
+.iteration-history-section {
+  margin-top: 20px;
+}
+
+.completion-snapshot-panel {
+  margin-top: 16px;
+}
+
+.iteration-history-section h3 {
+  margin: 0 0 10px;
+  font-size: 15px;
+  letter-spacing: 0;
+}
+
 .defer-work-form {
   margin-top: 16px;
 }

@@ -19,18 +19,28 @@ from app.models.test_case import TestCase
 from app.models.test_case_execution import TestCaseExecutionLog
 from app.models.test_run import TestRun, TestRunCase
 from app.models.user import User
+from app.models.work_item_iteration_history import WorkItemIterationHistory
 from app.models.workflow_definition import WorkflowDefinition, WorkflowState, WorkflowTransition
 from app.services.default_workflow_template_service import ensure_default_workflow_templates
 from app.services.bug_type_service import bug_type_options, get_enabled_bug_type
 from app.services.project_permission_service import (
     actor_role_keys,
     can_admin_action,
+    can_view_project_work_items,
     ensure_authenticated,
     is_project_member,
     is_project_owner,
     is_system_admin,
 )
 from app.services.status_operation_service import create_status_operation
+from app.services.iteration_completion_snapshot_service import create_completion_snapshot
+from app.services.iteration_service import (
+    ensure_iteration_mutable,
+    is_iteration_active,
+    iteration_scoped_project_ids,
+    lock_iterations_for_mutation,
+)
+from app.services.work_item_iteration_history_service import move_work_item_to_iteration
 from app.services.workflow_state_query_service import current_state_name, is_terminal_state
 from app.views.status_operation_view import StatusOperationCreate
 from app.views.workflow_runtime_view import (
@@ -55,6 +65,7 @@ SUPPORTED_VALIDATOR_TYPES = {
     "bug_close_gate", "requirement_terminal_gate", "iteration_terminal_gate", "project_close_gate",
 }
 SUPPORTED_AUTOMATION_TYPES = {"notification"}
+TRANSITION_LOCK_RETRY_LIMIT = 3
 def list_available_transitions(
     db: Session,
     object_type: str,
@@ -79,7 +90,10 @@ def list_available_transitions(
             continue
         if not _can_see_transition(db, object_type, item, transition, actor):
             continue
-        result.append(_transition_read(db, transition))
+        transition_read = _transition_read(db, transition)
+        if object_type == "bug" and transition.action_key == "activate":
+            transition_read = _bug_activation_transition_read(db, item, transition, transition_read)
+        result.append(transition_read)
     return result
 
 
@@ -109,7 +123,7 @@ def execute_transition(
 ):
     ensure_authenticated(actor)
     ensure_default_workflow_templates(db)
-    item = _get_item(db, object_type, object_id)
+    item = _get_item_for_execution(db, object_type, object_id, request)
     transition_context = _get_executable_transition(db, object_type, item, request.transition_id)
     transition, current_state = transition_context
     _ensure_supported_runtime_configuration(transition)
@@ -179,6 +193,13 @@ def execute_transition(
         item.owner_id = next_owner_id
     if handler_routing["source_rule"] != "keep_current" or next_owner_id != original_owner_id:
         selected_values["handler_routing"] = handler_routing
+    if object_type == "bug" and transition.action_key == "activate":
+        selected_values.update({
+            "recommended_owner_id": handler_routing.get("recommended_owner_id"),
+            "resolved_default_owner_id": handler_routing.get("resolved_default_owner_id"),
+            "original_owner_eligible": handler_routing.get("original_owner_eligible", False),
+            "owner_unavailable_reason": handler_routing.get("original_owner_unavailable_reason"),
+        })
     next_owner = _owner_user(db, next_owner_id) if next_owner_id else None
     automation_results.extend(
         _run_transition_automations(
@@ -220,6 +241,35 @@ def execute_transition(
         next_owner_id=next_owner_id,
         next_owner_name=next_owner.full_name if next_owner else None,
     )
+    if object_type == "iteration" and transition.action_key in {"complete", "cancel"}:
+        db.flush()
+        create_completion_snapshot(
+            db,
+            item,
+            action=transition.action_key,
+            actor_id=actor.id if actor else None,
+            operation_log_id=operation.id,
+            ended_at=operation.effective_time,
+        )
+    if object_type == "bug" and transition.action_key == "activate":
+        db.flush()
+        _link_reactivation_history_to_operation(db, item.id, selected_values, operation.id)
+        db.flush()
+        history_ids = [
+            row.id for row in db.query(WorkItemIterationHistory.id).filter(
+                WorkItemIterationHistory.object_type == "bug",
+                WorkItemIterationHistory.object_id == item.id,
+                WorkItemIterationHistory.operation_log_id == operation.id,
+            ).order_by(WorkItemIterationHistory.id.asc()).all()
+        ]
+        audit_trail = {
+            "source_iteration_id": selected_values.get("source_iteration_id"),
+            "target_iteration_id": selected_values.get("target_iteration_id"),
+            "history_ids": history_ids,
+            "reopen_count": item.reopen_count,
+        }
+    else:
+        audit_trail = None
     if next_owner_id != original_owner_id:
         target_type = (transition.handler_rule or {}).get("target_type", "keep_current")
         operation.reason = operation.reason or request.delegate_reason or transition.action_key
@@ -243,6 +293,8 @@ def execute_transition(
         resolved_target_state_id=resolved_target_state.id if resolved_target_state else None,
         selected_values=selected_values,
         override_reason=request.override_reason or request.payload.get("override_reason"),
+        operation_log_id=operation.id,
+        audit_trail=audit_trail,
     )
 
 
@@ -254,6 +306,171 @@ def _get_item(db: Session, object_type: str, object_id: int):
     if not item:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Workflow object not found")
     return item
+
+
+def _get_item_for_transition(db: Session, object_type: str, object_id: int):
+    model = MODEL_BY_TYPE.get(object_type)
+    if not model:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unsupported workflow object type")
+    item = (
+        db.query(model)
+        .filter(model.id == object_id, getattr(model, "deleted", 0) == 0)
+        .with_for_update()
+        .populate_existing()
+        .first()
+    )
+    if not item:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Workflow object not found")
+    return item
+
+
+def _get_item_for_execution(
+    db: Session,
+    object_type: str,
+    object_id: int,
+    request: WorkflowTransitionExecuteRequest,
+):
+    if object_type == "iteration":
+        return _get_item_for_transition(db, object_type, object_id)
+
+    for attempt in range(TRANSITION_LOCK_RETRY_LIMIT):
+        preview = _get_item(db, object_type, object_id)
+        iteration_ids = {getattr(preview, "iteration_id", None)}
+        target_iteration_id = _activation_target_iteration_id(db, object_type, preview, request)
+        iteration_ids.add(target_iteration_id)
+        if object_type == "requirement" and target_iteration_id is not None:
+            iteration_ids.update(
+                iteration_id
+                for iteration_id, in db.query(Task.iteration_id).filter(
+                    Task.requirement_id == preview.id,
+                    Task.deleted == 0,
+                ).all()
+            )
+            iteration_ids.update(
+                iteration_id
+                for iteration_id, in db.query(TestCase.iteration_id).filter(
+                    TestCase.requirement_id == preview.id,
+                    TestCase.deleted == 0,
+                ).all()
+            )
+        locked_iterations = (
+            lock_iterations_for_mutation(db, iteration_ids)
+            if any(iteration_id is not None for iteration_id in iteration_ids)
+            else {}
+        )
+        item = _get_item_for_transition(db, object_type, object_id)
+        refreshed_iteration_id = getattr(item, "iteration_id", None)
+        if refreshed_iteration_id is None or refreshed_iteration_id in locked_iterations:
+            item._transition_locked_iterations = locked_iterations
+            return item
+
+        db.rollback()
+        if attempt + 1 < TRANSITION_LOCK_RETRY_LIMIT:
+            ensure_default_workflow_templates(db)
+
+    raise HTTPException(
+        status_code=status.HTTP_409_CONFLICT,
+        detail={
+            "code": "ITERATION_STATE_CONFLICT",
+            "message": "Iteration membership changed during transition; refresh and retry",
+        },
+    )
+
+
+def _activation_target_iteration_id(
+    db: Session,
+    object_type: str,
+    item,
+    request: WorkflowTransitionExecuteRequest,
+) -> int | None:
+    if object_type not in {"bug", "requirement"}:
+        return None
+    target_iteration_id = _request_target_iteration_id(request.payload or {})
+    if target_iteration_id is None:
+        return None
+    expected_action_key = "activate" if object_type == "bug" else "defer"
+    target_transition = db.query(WorkflowTransition.id).filter(
+        WorkflowTransition.id == request.transition_id,
+        WorkflowTransition.definition_id == item.workflow_definition_id,
+        WorkflowTransition.action_key == expected_action_key,
+        WorkflowTransition.enabled == True,  # noqa: E712
+    ).first()
+    return target_iteration_id if target_transition else None
+
+
+def _request_target_iteration_id(payload: dict[str, Any]) -> int | None:
+    value = payload.get("target_iteration_id")
+    if value is None:
+        value = payload.get("iteration_id")
+    return _parse_target_iteration_id(value) if value is not None else None
+
+
+def _parse_target_iteration_id(value) -> int:
+    if isinstance(value, bool) or isinstance(value, float):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={
+                "code": "INVALID_TARGET_ITERATION_ID",
+                "message": "target_iteration_id must be a positive integer",
+            },
+        )
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={
+                "code": "INVALID_TARGET_ITERATION_ID",
+                "message": "target_iteration_id must be a number",
+            },
+        ) from exc
+    if parsed <= 0 or (isinstance(value, str) and not value.strip().isdigit()):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={
+                "code": "INVALID_TARGET_ITERATION_ID",
+                "message": "target_iteration_id must be a positive integer",
+            },
+        )
+    return parsed
+
+
+def _link_reactivation_history_to_operation(
+    db: Session,
+    bug_id: int,
+    selected_values: dict[str, Any],
+    operation_log_id: int,
+) -> None:
+    source_iteration_id = selected_values.get("source_iteration_id")
+    target_iteration_id = selected_values.get("target_iteration_id")
+    if not source_iteration_id or not target_iteration_id:
+        return
+    source_row = (
+        db.query(WorkItemIterationHistory)
+        .filter(
+            WorkItemIterationHistory.object_type == "bug",
+            WorkItemIterationHistory.object_id == bug_id,
+            WorkItemIterationHistory.iteration_id == source_iteration_id,
+            WorkItemIterationHistory.leave_reason == "reactivated",
+        )
+        .order_by(WorkItemIterationHistory.id.desc())
+        .first()
+    )
+    target_row = (
+        db.query(WorkItemIterationHistory)
+        .filter(
+            WorkItemIterationHistory.object_type == "bug",
+            WorkItemIterationHistory.object_id == bug_id,
+            WorkItemIterationHistory.iteration_id == target_iteration_id,
+            WorkItemIterationHistory.enter_reason == "reactivated",
+            WorkItemIterationHistory.left_at.is_(None),
+        )
+        .order_by(WorkItemIterationHistory.id.desc())
+        .first()
+    )
+    for row in (source_row, target_row):
+        if row:
+            row.operation_log_id = operation_log_id
 
 
 def _resolve_definition_context(db: Session, object_type: str, item):
@@ -353,6 +570,29 @@ def _can_see_transition(db: Session, object_type: str, item, transition: Workflo
     if not _handler_allowed(db, object_type, item, transition, actor):
         return False
     return _role_allowed(db, object_type, item, transition, actor)
+
+
+def owner_has_executable_current_action(db: Session, object_type: str, item, owner: User) -> bool:
+    """Return whether an assigned owner can execute at least one current human action."""
+    human_transitions = current_core_transitions(db, item)
+    if not human_transitions:
+        return True
+    return any(_can_see_transition(db, object_type, item, transition, owner) for transition in human_transitions)
+
+
+def current_core_transitions(db: Session, item) -> list[WorkflowTransition]:
+    transitions = db.query(WorkflowTransition).filter(
+        WorkflowTransition.definition_id == item.workflow_definition_id,
+        WorkflowTransition.from_state_id == item.current_state_id,
+        WorkflowTransition.enabled.is_(True),
+    ).all()
+    return [
+        transition for transition in transitions
+        if not (transition.ui_config or {}).get("hidden")
+        and not (transition.ui_config or {}).get("system_action")
+        and (transition.ui_config or {}).get("action_category", "process") == "process"
+        and _matches_transition_condition(item, transition)
+    ]
 
 
 def _ensure_can_execute(
@@ -634,7 +874,7 @@ def _apply_domain_payload(
         item.verified_by = actor.id if actor else None
         item.reopen_count = (item.reopen_count or 0) + 1
     if object_type == "bug" and transition.action_key == "activate":
-        item.reopen_count = (item.reopen_count or 0) + 1
+        _apply_bug_activation(db, item, request, actor, selected_values)
     if object_type == "iteration":
         effective_time = _parse_effective_time(payload) or datetime.now()
         if transition.action_key == "start":
@@ -653,6 +893,231 @@ def _apply_domain_payload(
             item.actual_end_date = effective_time.date()
         elif transition.action_key == "activate":
             item.actual_end_date = None
+
+
+def _apply_bug_activation(
+    db: Session,
+    bug: Bug,
+    request: WorkflowTransitionExecuteRequest,
+    actor: User | None,
+    selected_values: dict[str, Any],
+) -> None:
+    payload = request.payload or {}
+    reason = str(payload.get("reason") or "").strip()
+    if not reason:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"code": "REOPEN_REASON_REQUIRED", "message": "重新激活原因不能为空"},
+        )
+
+    parsed_target_iteration_id = _request_target_iteration_id(payload)
+    locked_iterations = getattr(bug, "_transition_locked_iterations", {})
+    required_iteration_ids = {
+        iteration_id
+        for iteration_id in (bug.iteration_id, parsed_target_iteration_id)
+        if iteration_id is not None
+    }
+    if not required_iteration_ids.issubset(locked_iterations):
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": "ITERATION_STATE_CONFLICT",
+                "message": "Iteration membership changed during transition; refresh and retry",
+            },
+        )
+    source_iteration = locked_iterations.get(bug.iteration_id)
+    source_is_active = bool(source_iteration and is_iteration_active(db, source_iteration))
+    if not source_is_active and parsed_target_iteration_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"code": "TARGET_ITERATION_REQUIRED", "message": "请选择进行中的目标迭代"},
+        )
+
+    target_iteration = source_iteration
+    if parsed_target_iteration_id:
+        target_iteration = locked_iterations.get(parsed_target_iteration_id)
+        if not target_iteration or not is_iteration_active(db, target_iteration):
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail={"code": "TARGET_ITERATION_NOT_ACTIVE", "message": "目标迭代必须处于进行中"},
+            )
+        if bug.project_id not in iteration_scoped_project_ids(db, target_iteration.id):
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail={"code": "TARGET_ITERATION_OUT_OF_SCOPE", "message": "目标迭代不覆盖 Bug 所属项目"},
+            )
+
+    if not can_view_project_work_items(db, bug.project_id, actor):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={"code": "PROJECT_ACCESS_DENIED", "message": "No access to target iteration project"},
+        )
+
+    original_owner_id = bug.owner_id
+
+    if target_iteration and target_iteration.id != bug.iteration_id:
+        move_work_item_to_iteration(
+            db,
+            bug,
+            target_iteration.id,
+            actor_id=actor.id if actor else None,
+            reason="reactivated",
+            record_same_iteration_transition=True,
+        )
+    elif target_iteration:
+        move_work_item_to_iteration(
+            db,
+            bug,
+            target_iteration.id,
+            actor_id=actor.id if actor else None,
+            reason="reactivated",
+            record_same_iteration_transition=True,
+        )
+
+    before_count = bug.reopen_count or 0
+    bug.reopen_count = before_count + 1
+    selected_values.update(
+        {
+            "reopen_reason": reason,
+            "source_iteration_id": source_iteration.id if source_iteration else None,
+            "target_iteration_id": target_iteration.id if target_iteration else None,
+            "original_owner_id": original_owner_id,
+            "reopen_count_before": before_count,
+            "reopen_count_after": bug.reopen_count,
+        }
+    )
+
+
+def _reactivation_handler_eligibility(
+    db: Session,
+    bug: Bug,
+    user_id: int | None,
+    target_state_id: int | None = None,
+) -> tuple[bool, dict[str, str] | None]:
+    if not user_id:
+        return False, None
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        return False, {"code": "OWNER_NOT_FOUND", "message": "原处理人账号不存在"}
+    if user.deleted:
+        return False, {"code": "OWNER_DELETED", "message": "原处理人账号已删除"}
+    if not user.is_active:
+        return False, {"code": "OWNER_INACTIVE", "message": "原处理人账号已停用"}
+    if not bug.project_id:
+        return False, {"code": "PROJECT_NOT_CONFIGURED", "message": "Bug 未关联有效项目"}
+    if not db.query(ProjectMember.id).filter(
+        ProjectMember.project_id == bug.project_id,
+        ProjectMember.user_id == user_id,
+    ).first():
+        return False, {"code": "OWNER_NOT_PROJECT_MEMBER", "message": "原处理人已离开当前项目"}
+    original_state_id = bug.current_state_id
+    original_owner_id = bug.owner_id
+    try:
+        if target_state_id is not None:
+            bug.current_state_id = target_state_id
+        bug.owner_id = user_id
+        if not owner_has_executable_current_action(db, "bug", bug, user):
+            return False, {
+                "code": "OWNER_ROLE_NOT_ELIGIBLE",
+                "message": "原处理人角色不符合目标状态处理要求",
+            }
+        return True, None
+    finally:
+        bug.current_state_id = original_state_id
+        bug.owner_id = original_owner_id
+
+
+def _reactivation_handler_is_eligible(db: Session, bug: Bug, user_id: int | None, target_state_id: int | None = None) -> bool:
+    eligible, _ = _reactivation_handler_eligibility(db, bug, user_id, target_state_id)
+    return eligible
+
+
+def _transition_allows_unassigned(transition: WorkflowTransition) -> bool:
+    handler_rule = transition.handler_rule or {}
+    if "allow_unassigned" in handler_rule:
+        return handler_rule.get("allow_unassigned") is True
+    return (transition.form_config or {}).get("allow_unassigned") is True
+
+
+def _ensure_reactivation_handler_eligible(db: Session, bug: Bug, user_id: int) -> None:
+    if not _reactivation_handler_is_eligible(db, bug, user_id):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"code": "HANDLER_NOT_ELIGIBLE", "message": "所选处理人无效或不具备项目处理资格"},
+        )
+
+
+def _bug_activation_transition_read(
+    db: Session,
+    bug: Bug,
+    transition: WorkflowTransition,
+    transition_read: WorkflowTransitionActionRead,
+) -> WorkflowTransitionActionRead:
+    source_iteration = (
+        db.query(Iteration).filter(Iteration.id == bug.iteration_id, Iteration.deleted == 0).first()
+        if bug.iteration_id
+        else None
+    )
+    source_is_active = bool(source_iteration and is_iteration_active(db, source_iteration))
+    options = []
+    for iteration in db.query(Iteration).filter(Iteration.deleted == 0).order_by(Iteration.id.desc()).all():
+        if not is_iteration_active(db, iteration):
+            continue
+        if bug.project_id not in iteration_scoped_project_ids(db, iteration.id):
+            continue
+        if source_is_active and iteration.id == bug.iteration_id:
+            continue
+        options.append({"label": iteration.name, "value": iteration.id})
+
+    form_config = dict(transition_read.form_config or {})
+    fields = [dict(field) for field in form_config.get("fields") or []]
+    fields = [field for field in fields if field.get("field") != "target_iteration_id"]
+    target_state = db.query(WorkflowState).filter(WorkflowState.id == transition_read.to_state_id).first()
+    fields[0:0] = [
+        {"field": "source_iteration", "label": "原迭代", "type": "text", "readonly": True,
+         "default_value": source_iteration.name if source_iteration else "未关联迭代"},
+        {"field": "reopen_count", "label": "当前复现次数", "type": "number", "readonly": True,
+         "default_value": bug.reopen_count or 0},
+        {"field": "target_status", "label": "目标状态", "type": "text", "readonly": True,
+         "default_value": target_state.status_name if target_state else None},
+        {
+            "field": "target_iteration_id",
+            "label": "目标进行中迭代",
+            "type": "select",
+            "required": not source_is_active,
+            "options": options,
+        },
+    ]
+    form_config["fields"] = fields
+    form_config["allow_manual_owner"] = True
+    allow_unassigned = _transition_allows_unassigned(transition)
+    form_config["allow_unassigned"] = allow_unassigned
+    ui_config = dict(transition_read.ui_config or {})
+    owner_eligible, unavailable_reason = _reactivation_handler_eligibility(
+        db,
+        bug,
+        bug.owner_id,
+        transition_read.to_state_id,
+    )
+    recommended_owner_id = bug.owner_id if owner_eligible else None
+    ui_config.update(
+        {
+            "allow_unassigned": allow_unassigned,
+            "recommended_owner_id": recommended_owner_id,
+            "resolved_default_owner_id": recommended_owner_id,
+            "original_owner_id": bug.owner_id,
+            "original_owner_eligible": owner_eligible,
+            "original_owner_unavailable_reason": unavailable_reason,
+        }
+    )
+    return transition_read.model_copy(
+        update={
+            "requires_form": True,
+            "form_config": form_config,
+            "ui_config": ui_config,
+        }
+    )
 
 
 def _run_transition_validator(
@@ -821,23 +1286,40 @@ def _require_requirement_relations_complete(
 
 
 def ensure_iteration_items_complete(db: Session, iteration_id: int) -> None:
-    requirements = db.query(Requirement).filter(Requirement.iteration_id == iteration_id, Requirement.deleted == 0).all()
-    blocking_messages: list[str] = []
-    if any(not is_terminal_state(item) for item in requirements):
-        blocking_messages.append("requirement")
-    tasks = db.query(Task).filter(Task.iteration_id == iteration_id, Task.deleted == 0).all()
-    if any(not is_terminal_state(item) for item in tasks):
-        blocking_messages.append("task")
-    bugs = db.query(Bug).filter(Bug.iteration_id == iteration_id, Bug.deleted == 0).all()
-    if any(not is_terminal_state(item) for item in bugs):
-        blocking_messages.append("bug")
-    test_runs = db.query(TestRun).filter(TestRun.iteration_id == iteration_id, TestRun.deleted == 0).all()
-    if any(not _test_run_is_terminal(item) for item in test_runs):
-        blocking_messages.append("test run")
-    if blocking_messages:
+    requirements = db.query(Requirement).filter(Requirement.iteration_id == iteration_id, Requirement.deleted == 0).with_for_update().all()
+    blockers: dict[str, list] = {
+        "requirement": [item for item in requirements if not is_terminal_state(item)],
+        "task": [],
+        "bug": [],
+        "test_run": [],
+    }
+    tasks = db.query(Task).filter(Task.iteration_id == iteration_id, Task.deleted == 0).with_for_update().all()
+    blockers["task"] = [item for item in tasks if not is_terminal_state(item)]
+    bugs = db.query(Bug).filter(Bug.iteration_id == iteration_id, Bug.deleted == 0).with_for_update().all()
+    blockers["bug"] = [item for item in bugs if not is_terminal_state(item)]
+    test_runs = db.query(TestRun).filter(TestRun.iteration_id == iteration_id, TestRun.deleted == 0).with_for_update().all()
+    blockers["test_run"] = [item for item in test_runs if not _test_run_is_terminal(item)]
+    if any(blockers.values()):
+        items = []
+        for object_type, rows in blockers.items():
+            for item in rows:
+                items.append(
+                    {
+                        "object_type": object_type,
+                        "id": item.id,
+                        "title": getattr(item, "title", None) or getattr(item, "name", None),
+                        "status_name": getattr(item, "status_name", None) or getattr(item, "status", None),
+                        "owner_id": getattr(item, "owner_id", None) or getattr(item, "test_owner_id", None),
+                    }
+                )
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Iteration has unfinished {', '.join(blocking_messages)} blockers",
+            detail={
+                "code": "ITERATION_HAS_OPEN_ITEMS",
+                "message": "存在未完成事项，无法结束迭代",
+                "counts": {key: len(value) for key, value in blockers.items()},
+                "items": items,
+            },
         )
 
 
@@ -885,6 +1367,42 @@ def _next_owner_resolution(
 ) -> dict[str, Any]:
     rule = transition.handler_rule or {}
     original_owner_id = getattr(item, "owner_id", None)
+    if object_type == "bug" and transition_action_key == "activate":
+        original_owner_eligible, unavailable_reason = _reactivation_handler_eligibility(
+            db,
+            item,
+            original_owner_id,
+        )
+        recommended_owner_id = original_owner_id if original_owner_eligible else None
+        final_owner_id = recommended_owner_id
+        source_rule = "eligible_original_handler" if original_owner_eligible else "unassigned"
+        manual_override = False
+        if request.next_owner_id is not None:
+            _ensure_reactivation_handler_eligible(db, item, request.next_owner_id)
+            final_owner_id = request.next_owner_id
+            if request.next_owner_id != recommended_owner_id:
+                source_rule = "manual_override"
+                manual_override = True
+        allow_unassigned = _transition_allows_unassigned(transition)
+        if final_owner_id is None and not allow_unassigned:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail={"code": "UNASSIGNED_NOT_ALLOWED", "message": "Please select an eligible handler"},
+            )
+        return {
+            "previous_owner_id": original_owner_id,
+            "source_rule": source_rule,
+            "recommended_owner_id": recommended_owner_id,
+            "resolved_default_owner_id": recommended_owner_id,
+            "final_owner_id": final_owner_id,
+            "manual_override": manual_override,
+            "manual_override_from_owner_id": recommended_owner_id if manual_override else None,
+            "manual_override_to_owner_id": final_owner_id if manual_override else None,
+            "original_owner_eligible": original_owner_eligible,
+            "original_owner_unavailable_reason": unavailable_reason,
+            "allow_unassigned": allow_unassigned,
+            "override_reason": request.override_reason or request.payload.get("override_reason"),
+        }
     target_type = rule.get("target_type", "keep_current")
     default_owner_id, source_rule = _resolve_handler_source(
         db,
@@ -1237,22 +1755,79 @@ def _ensure_manual_owner_allowed(db: Session, project_id: int | None, user_id: i
 
 
 def _defer_requirement_links(db: Session, requirement: Requirement, payload: dict[str, Any], actor: User | None) -> None:
-    target_iteration_id = payload.get("target_iteration_id") or payload.get("iteration_id")
-    if target_iteration_id and requirement.iteration_id == target_iteration_id:
+    parsed_target_iteration_id = _request_target_iteration_id(payload)
+    if parsed_target_iteration_id and requirement.iteration_id == parsed_target_iteration_id:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Target iteration cannot be current iteration")
-    if target_iteration_id:
-        _ensure_iteration_scope(db, requirement.project_id, target_iteration_id)
+    locked_iterations = getattr(requirement, "_transition_locked_iterations", {})
+    tasks = (
+        db.query(Task)
+        .filter(Task.requirement_id == requirement.id, Task.deleted == 0)
+        .order_by(Task.id.asc())
+        .with_for_update()
+        .populate_existing()
+        .all()
+    )
+    test_cases = (
+        db.query(TestCase)
+        .filter(TestCase.requirement_id == requirement.id, TestCase.deleted == 0)
+        .order_by(TestCase.id.asc())
+        .with_for_update()
+        .populate_existing()
+        .all()
+    )
+    required_iteration_ids = {
+        iteration_id
+        for iteration_id in (
+            requirement.iteration_id,
+            parsed_target_iteration_id,
+            *(task.iteration_id for task in tasks),
+            *(test_case.iteration_id for test_case in test_cases),
+        )
+        if iteration_id is not None
+    }
+    if not required_iteration_ids.issubset(locked_iterations):
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": "ITERATION_STATE_CONFLICT",
+                "message": "Iteration membership changed during defer; refresh and retry",
+            },
+        )
+    for iteration in locked_iterations.values():
+        ensure_iteration_mutable(iteration)
+    if parsed_target_iteration_id:
+        target_scope = iteration_scoped_project_ids(db, parsed_target_iteration_id)
+        for item in (requirement, *tasks, *test_cases):
+            if item.project_id not in target_scope:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"{type(item).__name__} is outside target iteration scope",
+                )
 
     from_iteration_id = requirement.iteration_id
-    requirement.iteration_id = target_iteration_id
-    for task in db.query(Task).filter(Task.requirement_id == requirement.id, Task.deleted == 0).all():
-        task.iteration_id = target_iteration_id
+    actor_id = actor.id if actor else None
+    move_work_item_to_iteration(
+        db,
+        requirement,
+        parsed_target_iteration_id,
+        actor_id=actor_id,
+        reason="deferred",
+    )
+    for task in tasks:
+        move_work_item_to_iteration(
+            db,
+            task,
+            parsed_target_iteration_id,
+            actor_id=actor_id,
+            reason="deferred",
+        )
         if not is_terminal_state(task):
             definition = db.query(WorkflowDefinition).filter(WorkflowDefinition.id == task.workflow_definition_id).first()
             if definition and definition.initial_state_id:
                 task.current_state_id = definition.initial_state_id
-    for test_case in db.query(TestCase).filter(TestCase.requirement_id == requirement.id, TestCase.deleted == 0).all():
-        test_case.iteration_id = target_iteration_id
+    for test_case in test_cases:
+        test_case.iteration_id = parsed_target_iteration_id
 
     db.add(
         AuditLog(
@@ -1265,7 +1840,7 @@ def _defer_requirement_links(db: Session, requirement: Requirement, payload: dic
                 "current_state_id": requirement.current_state_id,
                 "status_name": requirement.status_name,
             },
-            after_data={"iteration_id": target_iteration_id},
+            after_data={"iteration_id": parsed_target_iteration_id},
         )
     )
 

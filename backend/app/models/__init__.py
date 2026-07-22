@@ -6,6 +6,7 @@ from app.models.exception_rule import ExceptionRule
 from app.models.field_registry import CustomFieldValue, FormFieldRegistry, FormLayoutConfig
 from app.models.integration_mapping import ExternalIntegrationMapping
 from app.models.iteration import Iteration, IterationProject
+from app.models.iteration_completion_snapshot import IterationCompletionSnapshot
 from app.models.notification import Notification, NotificationChannelConfig, NotificationDeliveryLog
 from app.models.object_watch import ObjectWatch
 from app.models.project import Project
@@ -21,6 +22,7 @@ from app.models.test_case_execution import TestCaseExecutionLog
 from app.models.test_run import TestRun, TestRunCase
 from app.models.user import User
 from app.models.work_item_comment import WorkItemComment
+from app.models.work_item_iteration_history import WorkItemIterationHistory
 from app.models.workflow_component import WorkflowComponent
 from app.models.workflow_definition import WorkflowDefinition, WorkflowState, WorkflowTransition
 
@@ -36,6 +38,7 @@ __all__ = [
     "FormFieldRegistry",
     "FormLayoutConfig",
     "Iteration",
+    "IterationCompletionSnapshot",
     "IterationProject",
     "Notification",
     "NotificationChannelConfig",
@@ -58,6 +61,7 @@ __all__ = [
     "User",
     "UserRole",
     "WorkItemComment",
+    "WorkItemIterationHistory",
     "WorkflowComponent",
     "WorkflowDefinition",
     "WorkflowState",

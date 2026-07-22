@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 
 from app.models.audit_log import AuditLog
 from app.models.bug import Bug
+from app.models.iteration import Iteration, IterationProject
 from app.models.project import Project
 from app.models.relation import ObjectRelation
 from app.models.requirement import Requirement
@@ -14,6 +15,7 @@ from app.models.test_case import TestCase
 from app.models.test_run import TestRun
 from app.models.user import User
 from app.services.current_handler_service import ensure_work_item_action
+from app.services.iteration_service import ensure_iteration_assignment_mutable
 from app.services.project_permission_service import (
     can_admin_action,
     ensure_authenticated,
@@ -24,6 +26,7 @@ from app.services.lifecycle_service import project_lifecycle_phase, requirement_
 from app.services.status_operation_service import list_status_operations
 from app.services.workflow_state_service import initial_workflow_values
 from app.services.workflow_state_query_service import is_terminal_state
+from app.services.work_item_iteration_history_service import move_work_item_to_iteration
 from app.views.task_view import LinkedTaskCreate, TaskCreate, TaskUpdate
 
 
@@ -56,6 +59,8 @@ def get_task(db: Session, task_id: int) -> Task:
 
 def create_task(db: Session, payload: TaskCreate, actor_id: int | None = None) -> Task:
     data = payload.model_dump()
+    ensure_iteration_assignment_mutable(db, None, data.get("iteration_id"))
+    _ensure_task_iteration_scope(db, data.get("project_id"), data.get("iteration_id"))
     data["task_type"] = _resolved_task_type(data.get("task_type"), data.get("requirement_id"))
     data["creator_id"] = actor_id
     data["lifecycle_phase"] = (
@@ -65,6 +70,9 @@ def create_task(db: Session, payload: TaskCreate, actor_id: int | None = None) -
     data.update(initial_workflow_values(db, "task", data.get("project_id")))
     task = Task(**data)
     db.add(task)
+    db.flush()
+    if task.iteration_id:
+        move_work_item_to_iteration(db, task, task.iteration_id, actor_id=actor_id, reason="created")
     db.commit()
     db.refresh(task)
     return task
@@ -81,6 +89,9 @@ def create_linked_task(db: Session, payload: LinkedTaskCreate, actor: User | Non
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Linked source project not found")
     if is_terminal_state(project):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Project is closed")
+    inherited_iteration_id = getattr(source, "iteration_id", None)
+    ensure_iteration_assignment_mutable(db, None, inherited_iteration_id)
+    _ensure_task_iteration_scope(db, project_id, inherited_iteration_id)
 
     inherited_owner_id = _linked_source_owner_id(payload.source_type, source)
     if actor.id != inherited_owner_id and not can_admin_action(db, project_id, actor.id):
@@ -103,7 +114,7 @@ def create_linked_task(db: Session, payload: LinkedTaskCreate, actor: User | Non
     task = Task(
         project_id=project_id,
         source_project_id=getattr(source, "source_project_id", None),
-        iteration_id=getattr(source, "iteration_id", None),
+        iteration_id=inherited_iteration_id,
         requirement_id=source.id if payload.source_type == "requirement" else None,
         title=payload.title,
         task_type=expected_task_type,
@@ -118,6 +129,8 @@ def create_linked_task(db: Session, payload: LinkedTaskCreate, actor: User | Non
     )
     db.add(task)
     db.flush()
+    if task.iteration_id:
+        move_work_item_to_iteration(db, task, task.iteration_id, actor_id=actor.id, reason="linked_task_created")
     db.add(
         ObjectRelation(
             source_type=payload.source_type,
@@ -182,12 +195,25 @@ def linked_task_summaries(db: Session, source_type: str, source_id: int) -> list
 
 def update_task(db: Session, task_id: int, payload: TaskUpdate, actor_id: int | None = None) -> Task:
     task = _get_active_task(db, task_id)
+    ensure_iteration_assignment_mutable(db, task.iteration_id, task.iteration_id)
     ensure_work_item_action(db, task, actor_id, "task")
     ensure_workflow_fields_not_updated(payload.model_fields_set)
     _ensure_project_editable_for_task(db, task)
     data = payload.model_dump(exclude_unset=True)
     data.pop("status", None)
+    target_project_id = data.get("project_id", task.project_id)
+    target_iteration_id = data.get("iteration_id", task.iteration_id)
+    ensure_iteration_assignment_mutable(db, task.iteration_id, target_iteration_id)
+    _ensure_task_iteration_scope(db, target_project_id, target_iteration_id)
     before_data, after_data = _task_change_data(task, data)
+    if "iteration_id" in data:
+        move_work_item_to_iteration(
+            db,
+            task,
+            data.pop("iteration_id"),
+            actor_id=actor_id,
+            reason="updated",
+        )
     for field, value in data.items():
         setattr(task, field, value)
     if before_data:
@@ -224,6 +250,7 @@ def list_task_audit_logs(db: Session, task_id: int) -> list[dict]:
 
 def delete_task(db: Session, task_id: int) -> None:
     task = _get_active_task(db, task_id)
+    ensure_iteration_assignment_mutable(db, task.iteration_id, task.iteration_id)
     _ensure_project_editable_for_task(db, task)
     task.deleted = 1
     task.delete_time = datetime.now()
@@ -235,6 +262,31 @@ def _get_active_task(db: Session, task_id: int) -> Task:
     if not task:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
     return task
+
+
+def _ensure_task_iteration_scope(db: Session, project_id: int | None, iteration_id: int | None) -> None:
+    if not project_id or not iteration_id:
+        return
+    iteration = db.query(Iteration).filter(Iteration.id == iteration_id, Iteration.deleted == 0).first()
+    if not iteration:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Iteration not found")
+    project_ids = {
+        item.project_id
+        for item in db.query(IterationProject).filter(IterationProject.iteration_id == iteration_id).all()
+    }
+    scoped_project_ids = set(project_ids)
+    for iteration_project_id in project_ids:
+        scoped_project_ids.update(_collect_descendant_project_ids(db, iteration_project_id))
+    if project_id not in scoped_project_ids:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Task is outside iteration scope")
+
+
+def _collect_descendant_project_ids(db: Session, project_id: int) -> set[int]:
+    children = db.query(Project).filter(Project.parent_id == project_id, Project.deleted == 0).all()
+    result = {child.id for child in children}
+    for child in children:
+        result.update(_collect_descendant_project_ids(db, child.id))
+    return result
 
 
 def _linked_source(db: Session, source_type: str, source_id: int):

@@ -7,6 +7,15 @@ from openpyxl import Workbook, load_workbook
 from app.core.security import get_password_hash
 from app.db.session import SessionLocal
 from app.models.user import User
+from app.models.iteration import Iteration
+from app.models.requirement import Requirement
+from app.models.work_item_iteration_history import WorkItemIterationHistory
+from app.models.workflow_definition import WorkflowState
+from app.services.requirement_import_service import REQUIREMENT_IMPORT_COLUMNS
+from app.services import requirement_import_service
+from types import SimpleNamespace
+from fastapi import HTTPException
+import pytest
 
 
 def _xlsx(rows: list[list[str | None]]) -> tuple[str, bytes, str]:
@@ -190,6 +199,185 @@ def test_requirement_import_commit_updates_duplicate_requirement(client: TestCli
     assert data["updated_count"] == 1
     updated = client.get(f"/api/v1/requirements/{existing['id']}").json()
     assert updated["priority"] == "1"
+
+
+def test_requirement_import_update_closes_active_iteration_history(client: TestClient):
+    project_name = f"Import planned project-{uuid4().hex[:8]}"
+    project = client.post("/api/v1/projects", json={"name": project_name}).json()
+    iteration = client.post(
+        "/api/v1/iterations",
+        json={"project_ids": [project["id"]], "name": f"Import active history-{uuid4().hex[:8]}"},
+    ).json()
+    existing = client.post(
+        "/api/v1/requirements",
+        json={"project_id": project["id"], "iteration_id": iteration["id"], "title": "Imported planned requirement"},
+    ).json()
+
+    response = client.post(
+        "/api/v1/requirements/import/commit",
+        data={"duplicate_strategy": "update_existing"},
+        files={"file": _xlsx([REQUIREMENT_IMPORT_COLUMNS, [project_name, "Imported planned requirement"]])},
+    )
+
+    assert response.status_code == 200
+    assert client.get(f"/api/v1/requirements/{existing['id']}").json()["iteration_id"] is None
+    db = SessionLocal()
+    try:
+        history = db.query(WorkItemIterationHistory).filter(
+            WorkItemIterationHistory.object_type == "requirement",
+            WorkItemIterationHistory.object_id == existing["id"],
+        ).one()
+        assert history.left_at is not None
+        assert history.leave_reason == "import_updated"
+        assert history.left_by is not None
+    finally:
+        db.close()
+
+
+def test_requirement_import_update_rejects_terminal_iteration(client: TestClient):
+    project_name = f"Import terminal project-{uuid4().hex[:8]}"
+    project = client.post("/api/v1/projects", json={"name": project_name}).json()
+    iteration = client.post(
+        "/api/v1/iterations",
+        json={"project_ids": [project["id"]], "name": f"Import terminal-{uuid4().hex[:8]}"},
+    ).json()
+    existing = client.post(
+        "/api/v1/requirements",
+        json={"project_id": project["id"], "iteration_id": iteration["id"], "title": "Terminal imported requirement"},
+    ).json()
+    db = SessionLocal()
+    try:
+        iteration_row = db.query(Iteration).filter(Iteration.id == iteration["id"]).one()
+        terminal_state = db.query(WorkflowState).filter(
+            WorkflowState.definition_id == iteration_row.workflow_definition_id,
+            WorkflowState.category == "terminal",
+        ).first()
+        iteration_row.current_state_id = terminal_state.id
+        db.commit()
+    finally:
+        db.close()
+
+    response = client.post(
+        "/api/v1/requirements/import/commit",
+        data={"duplicate_strategy": "update_existing"},
+        files={"file": _xlsx([REQUIREMENT_IMPORT_COLUMNS, [project_name, "Terminal imported requirement"]])},
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"]["code"] == "ITERATION_NOT_MUTABLE"
+    assert client.get(f"/api/v1/requirements/{existing['id']}").json()["iteration_id"] == iteration["id"]
+
+
+def test_import_update_refresh_rejects_membership_outside_prelocked_set(monkeypatch):
+    events = []
+    locked_rows = iter([SimpleNamespace(iteration_id=9)])
+
+    class SessionSpy:
+        def rollback(self):
+            pytest.fail("membership conflict must not rollback the batch session")
+
+    monkeypatch.setattr(
+        requirement_import_service,
+        "_get_requirement_for_import_update",
+        lambda db, requirement_id, for_update: events.append("locked") or next(locked_rows),
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        requirement_import_service._lock_requirement_for_import_update(
+            SessionSpy(),
+            1,
+            {7: SimpleNamespace(id=7)},
+        )
+
+    assert exc_info.value.status_code == 409
+    assert exc_info.value.detail["code"] == "ITERATION_STATE_CONFLICT"
+    assert events == ["locked"]
+
+
+def test_import_batch_locks_existing_iterations_once_in_sorted_order(monkeypatch):
+    rows = [
+        SimpleNamespace(project_id=1, title="Later iteration", requirement_type=None, priority="3", owner_id=None, proposer_id=None, review_status="not_required", description=None, acceptance_criteria=None),
+        SimpleNamespace(project_id=1, title="Earlier iteration", requirement_type=None, priority="3", owner_id=None, proposer_id=None, review_status="not_required", description=None, acceptance_criteria=None),
+    ]
+    existing = iter([SimpleNamespace(id=11, iteration_id=9), SimpleNamespace(id=12, iteration_id=3)])
+    events = []
+
+    class SessionSpy:
+        def commit(self):
+            events.append("commit")
+
+    monkeypatch.setattr(requirement_import_service, "_parse_requirement_rows", lambda *args: (rows, []))
+    monkeypatch.setattr(requirement_import_service, "_ensure_rows_create_permission", lambda *args: None)
+    monkeypatch.setattr(requirement_import_service, "_find_existing_requirement", lambda *args: next(existing))
+    monkeypatch.setattr(
+        requirement_import_service,
+        "lock_iterations_for_mutation",
+        lambda db, ids: events.append(("lock", tuple(sorted(ids))))
+        or {iteration_id: SimpleNamespace(id=iteration_id) for iteration_id in ids},
+    )
+    monkeypatch.setattr(
+        requirement_import_service,
+        "_apply_row_to_requirement",
+        lambda db, requirement, row, actor_id, prelocked_iterations: events.append(("apply", requirement.id)),
+    )
+
+    result = requirement_import_service.commit_requirement_import(SessionSpy(), b"ignored", "update_existing")
+
+    assert result["updated_count"] == 2
+    assert events == [("lock", (3, 9)), ("apply", 11), ("apply", 12), "commit"]
+
+
+def test_import_update_membership_change_does_not_persist_earlier_batch_row(client: TestClient, monkeypatch):
+    project_name = f"Batch atomic import-{uuid4().hex[:8]}"
+    project = client.post("/api/v1/projects", json={"name": project_name}).json()
+    client.post(
+        "/api/v1/requirements",
+        json={"project_id": project["id"], "title": "Existing drift row"},
+    )
+    original_find = requirement_import_service._find_existing_requirement
+    find_calls = 0
+
+    def find_with_first_row_flushed(db, project_id, title):
+        nonlocal find_calls
+        find_calls += 1
+        if find_calls == 2:
+            db.flush()
+        return original_find(db, project_id, title)
+
+    monkeypatch.setattr(requirement_import_service, "_find_existing_requirement", find_with_first_row_flushed)
+    monkeypatch.setattr(
+        requirement_import_service,
+        "_lock_requirement_for_import_update",
+        lambda *args: (_ for _ in ()).throw(
+            HTTPException(status_code=409, detail={"code": "ITERATION_STATE_CONFLICT"})
+        ),
+    )
+
+    response = client.post(
+        "/api/v1/requirements/import/commit",
+        data={"duplicate_strategy": "update_existing"},
+        files={
+            "file": _xlsx(
+                [
+                    REQUIREMENT_IMPORT_COLUMNS,
+                    [project_name, "Earlier row must rollback"],
+                    [project_name, "Existing drift row"],
+                ]
+            )
+        },
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"]["code"] == "ITERATION_STATE_CONFLICT"
+    assert find_calls == 2
+    db = SessionLocal()
+    try:
+        assert not db.query(Requirement).filter(
+            Requirement.project_id == project["id"],
+            Requirement.title == "Earlier row must rollback",
+        ).first()
+    finally:
+        db.close()
 
 
 def test_requirement_import_commit_keeps_created_requirement_unassigned(client: TestClient):

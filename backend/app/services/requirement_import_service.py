@@ -12,6 +12,8 @@ from app.models.user import User
 from app.services.lifecycle_service import project_lifecycle_phase
 from app.services.workflow_state_service import initial_workflow_values
 from app.services.project_permission_service import ensure_work_item_create_permission
+from app.services.iteration_service import ensure_iteration_mutable, lock_iterations_for_mutation
+from app.services.work_item_iteration_history_service import move_work_item_to_iteration
 
 
 REQUIREMENT_IMPORT_COLUMNS = [
@@ -96,12 +98,27 @@ def commit_requirement_import(
     if errors:
         return {"created_count": 0, "updated_count": 0, "error_count": len(errors), "errors": errors}
 
+    existing_requirements = [
+        _find_existing_requirement(db, row.project_id, row.title)
+        for row in parsed_rows
+    ]
+    iteration_ids = {
+        requirement.iteration_id
+        for requirement in existing_requirements
+        if requirement is not None and requirement.iteration_id is not None
+    }
+    prelocked_iterations = lock_iterations_for_mutation(db, iteration_ids) if iteration_ids else {}
     created_count = 0
     updated_count = 0
-    for row in parsed_rows:
-        existing = _find_existing_requirement(db, row.project_id, row.title)
+    for row, existing in zip(parsed_rows, existing_requirements):
         if existing and duplicate_strategy == "update_existing":
-            _apply_row_to_requirement(db, existing, row)
+            _apply_row_to_requirement(
+                db,
+                existing,
+                row,
+                actor_id=actor.id if actor else None,
+                prelocked_iterations=prelocked_iterations,
+            )
             updated_count += 1
             continue
         workflow_values = initial_workflow_values(db, "requirement", row.project_id)
@@ -264,9 +281,25 @@ def _find_existing_requirement(db: Session, project_id: int, title: str) -> Requ
     )
 
 
-def _apply_row_to_requirement(db: Session, requirement: Requirement, row: ParsedRequirementRow) -> None:
+def _apply_row_to_requirement(
+    db: Session,
+    requirement: Requirement,
+    row: ParsedRequirementRow,
+    actor_id: int | None = None,
+    prelocked_iterations: dict | None = None,
+) -> None:
+    requirement = _lock_requirement_for_import_update(db, requirement.id, prelocked_iterations or {})
+    if requirement.iteration_id is not None:
+        ensure_iteration_mutable(prelocked_iterations[requirement.iteration_id])
+    if requirement.iteration_id is not None:
+        move_work_item_to_iteration(
+            db,
+            requirement,
+            None,
+            actor_id=actor_id,
+            reason="import_updated",
+        )
     requirement.source_project_id = None
-    requirement.iteration_id = None
     requirement.requirement_type = row.requirement_type
     requirement.priority = row.priority
     if row.owner_id is not None:
@@ -275,6 +308,33 @@ def _apply_row_to_requirement(db: Session, requirement: Requirement, row: Parsed
     requirement.review_status = row.review_status
     requirement.description = row.description
     requirement.acceptance_criteria = row.acceptance_criteria
+
+
+def _lock_requirement_for_import_update(
+    db: Session,
+    requirement_id: int,
+    prelocked_iterations: dict,
+) -> Requirement:
+    requirement = _get_requirement_for_import_update(db, requirement_id, for_update=True)
+    if requirement.iteration_id is None or requirement.iteration_id in prelocked_iterations:
+        return requirement
+    raise HTTPException(
+        status_code=status.HTTP_409_CONFLICT,
+        detail={
+            "code": "ITERATION_STATE_CONFLICT",
+            "message": "Iteration membership changed during import; refresh and retry",
+        },
+    )
+
+
+def _get_requirement_for_import_update(db: Session, requirement_id: int, *, for_update: bool) -> Requirement:
+    query = db.query(Requirement).filter(Requirement.id == requirement_id, Requirement.deleted == 0)
+    if for_update:
+        query = query.with_for_update().populate_existing()
+    requirement = query.first()
+    if not requirement:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Requirement not found")
+    return requirement
 
 
 def _ensure_rows_create_permission(db: Session, rows: list[ParsedRequirementRow], actor: User | None) -> None:

@@ -148,6 +148,7 @@ def client() -> TestClient:
 
 
 TRACKED_TABLES = [
+    "work_item_iteration_history",
     "exception_rules",
     "bug_types",
     "devops_code_review_tasks",

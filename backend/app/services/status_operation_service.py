@@ -81,7 +81,11 @@ def create_status_operation(
 def list_status_operations(db: Session, object_type: str, object_id: int) -> list[dict]:
     operations = (
         db.query(StatusOperationLog)
-        .filter(StatusOperationLog.object_type == object_type, StatusOperationLog.object_id == object_id)
+        .filter(
+            StatusOperationLog.object_type == object_type,
+            StatusOperationLog.object_id == object_id,
+            StatusOperationLog.operation_kind == "state",
+        )
         .order_by(StatusOperationLog.effective_time.asc(), StatusOperationLog.id.asc())
         .all()
     )

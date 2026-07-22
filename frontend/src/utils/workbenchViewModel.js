@@ -166,10 +166,15 @@ export function itemStatusTag(item = {}) {
 
 export function workbenchMetaText(sectionKey, item = {}) {
   if (sectionKey === 'exception_center') {
+    const detailLabels = (item.exception_details || []).map((detail) => {
+      if (!detail.exception_label) return ''
+      return detail.exception_detail ? `${detail.exception_label}：${detail.exception_detail}` : detail.exception_label
+    }).filter(Boolean)
+    const label = [...new Set(detailLabels)].join('；') || item.exception_label || '异常项'
     if (Number(item.overdue_hours) > 0) {
-      return `${item.exception_label || 'Exception'} - overdue ${item.overdue_hours}h`
+      return `${label} - overdue ${item.overdue_hours}h`
     }
-    return item.exception_label || '异常项'
+    return label
   }
   if (sectionKey === 'watched_by_me') {
     return item.watch_source === 'mention' ? '评论提及自动关注' : '手工关注'

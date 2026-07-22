@@ -85,3 +85,4 @@ class BugRead(BugBase):
     update_time: datetime | None = None
     delete_time: datetime | None = None
     linked_tasks: list[LinkedTaskSummary] = Field(default_factory=list)
+    iteration_history: list[dict] = Field(default_factory=list)

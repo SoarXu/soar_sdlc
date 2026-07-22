@@ -54,6 +54,14 @@ def _create_iteration(client: TestClient, project_id: int) -> int:
     return response.json()["id"]
 
 
+def _start_iteration(client: TestClient, iteration_id: int) -> None:
+    response = client.post(
+        f"/api/v1/workflow-runtime/iteration/{iteration_id}/transition",
+        json={"action_key": "start", "payload": {"effective_time": "2026-07-21T09:00:00"}},
+    )
+    assert response.status_code == 200
+
+
 def _add_project_member(project_id: int, user_id: int, project_role: str = "developer") -> None:
     db = SessionLocal()
     try:
@@ -289,6 +297,7 @@ def test_workbench_defaults_to_current_users_non_terminal_items(client: TestClie
     other_id, _ = _create_user("Workbench Other", "developer")
     project_id = _create_project(client)
     iteration_id = _create_iteration(client, project_id)
+    _start_iteration(client, iteration_id)
     _add_project_member(project_id, user_id)
     _add_project_member(project_id, other_id)
     my_requirement = client.post(
@@ -324,11 +333,12 @@ def test_workbench_defaults_to_current_users_non_terminal_items(client: TestClie
     assert ("task", done_task["id"]) not in pending_refs
 
 
-def test_workbench_my_queue_uses_owner_not_project_membership(client: TestClient):
+def test_workbench_my_queue_requires_project_visibility_even_for_current_owner(client: TestClient):
     user_id, user_token = _create_user("Owner Without Membership", "developer")
     teammate_id, teammate_token = _create_user("Project Teammate", "developer")
     project_id = _create_project(client)
     iteration_id = _create_iteration(client, project_id)
+    _start_iteration(client, iteration_id)
     _add_project_member(project_id, teammate_id)
     my_bug = client.post(
         "/api/v1/bugs",
@@ -350,7 +360,7 @@ def test_workbench_my_queue_uses_owner_not_project_membership(client: TestClient
 
     assert owner_response.status_code == 200
     owner_refs = {(item["object_type"], item["id"]) for item in owner_response.json()["pending_handling"]["items"]}
-    assert ("bug", my_bug["id"]) in owner_refs
+    assert ("bug", my_bug["id"]) not in owner_refs
     assert ("task", teammate_task["id"]) not in owner_refs
 
     assert teammate_response.status_code == 200

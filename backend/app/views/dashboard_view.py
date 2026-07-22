@@ -43,6 +43,8 @@ class WorkbenchItem(BaseModel):
     mentioned_in_comment_id: int | None = None
     exception_key: str | None = None
     exception_label: str | None = None
+    exception_keys: list[str] = Field(default_factory=list)
+    exception_details: list[dict] = Field(default_factory=list)
     entered_at: str | None = None
     threshold_hours: int | None = None
     threshold_count: int | None = None

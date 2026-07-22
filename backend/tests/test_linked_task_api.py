@@ -9,6 +9,9 @@ from app.models.project_member import ProjectMember
 from app.models.relation import ObjectRelation
 from app.models.role import Role, UserRole
 from app.models.task import Task
+from app.models.requirement import Requirement
+from app.models.iteration import Iteration
+from app.models.work_item_iteration_history import WorkItemIterationHistory
 from app.models.user import User
 from app.models.workflow_definition import WorkflowState, WorkflowTransition
 
@@ -154,6 +157,67 @@ def test_linked_task_creation_supports_all_sources_and_records_relation_and_audi
             assert audit.after_data["owner_overridden"] is False
     finally:
         db.close()
+
+
+def test_linked_task_validates_inherited_iteration_and_records_history(client: TestClient):
+    handler_id, handler_token = _create_user("Iteration Linked Handler", "developer")
+    project = client.post("/api/v1/projects", json={"name": f"Linked iteration project {uuid4().hex[:8]}"}).json()
+    other_project = client.post("/api/v1/projects", json={"name": f"Other linked project {uuid4().hex[:8]}"}).json()
+    _add_member(project["id"], handler_id, "developer")
+    iteration = client.post("/api/v1/iterations", json={"name": f"Linked iteration {uuid4().hex[:8]}", "project_ids": [project["id"]]}).json()
+    other_iteration = client.post("/api/v1/iterations", json={"name": f"Other iteration {uuid4().hex[:8]}", "project_ids": [other_project["id"]]}).json()
+    requirement = client.post(
+        "/api/v1/requirements",
+        json={"project_id": project["id"], "iteration_id": iteration["id"], "title": f"Linked source {uuid4().hex[:8]}", "owner_id": handler_id},
+    ).json()
+
+    valid = client.post(
+        "/api/v1/tasks/linked",
+        json={"source_type": "requirement", "source_id": requirement["id"], "title": "Valid inherited task"},
+        headers=_auth(handler_token),
+    )
+    assert valid.status_code == 201
+    db = SessionLocal()
+    try:
+        history = db.query(WorkItemIterationHistory).filter(
+            WorkItemIterationHistory.object_type == "task",
+            WorkItemIterationHistory.object_id == valid.json()["id"],
+        ).one()
+        assert history.iteration_id == iteration["id"]
+        assert history.enter_reason == "linked_task_created"
+        db.query(Requirement).filter(Requirement.id == requirement["id"]).update({"iteration_id": other_iteration["id"]})
+        db.commit()
+    finally:
+        db.close()
+
+    out_of_scope = client.post(
+        "/api/v1/tasks/linked",
+        json={"source_type": "requirement", "source_id": requirement["id"], "title": "Out of scope inherited task"},
+        headers=_auth(handler_token),
+    )
+    assert out_of_scope.status_code == 400
+
+    db = SessionLocal()
+    try:
+        requirement_row = db.query(Requirement).filter(Requirement.id == requirement["id"]).one()
+        requirement_row.iteration_id = iteration["id"]
+        iteration_row = db.query(Iteration).filter(Iteration.id == iteration["id"]).one()
+        terminal_state = db.query(WorkflowState).filter(
+            WorkflowState.definition_id == iteration_row.workflow_definition_id,
+            WorkflowState.category == "terminal",
+        ).first()
+        iteration_row.current_state_id = terminal_state.id
+        db.commit()
+    finally:
+        db.close()
+
+    terminal = client.post(
+        "/api/v1/tasks/linked",
+        json={"source_type": "requirement", "source_id": requirement["id"], "title": "Terminal inherited task"},
+        headers=_auth(handler_token),
+    )
+    assert terminal.status_code == 409
+    assert terminal.json()["detail"]["code"] == "ITERATION_NOT_MUTABLE"
 
 
 def test_linked_task_permissions_owner_inheritance_and_override(client: TestClient):

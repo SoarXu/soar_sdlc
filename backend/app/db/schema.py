@@ -141,9 +141,116 @@ def _validate_final_workflow_schema(engine: Engine) -> None:
         )
 
 
+def _history_open_lookup_index_exists(indexes: list[dict], canonical_name: str = "idx_wiih_object") -> bool:
+    return any(
+        index.get("column_names") == ["object_type", "object_id", "left_at"]
+        for index in indexes
+    )
+
+
 def ensure_runtime_schema(engine: Engine) -> None:
     _validate_final_workflow_schema(engine)
     inspector0 = inspect(engine)
+    if "status_operation_log" in inspector0.get_table_names():
+        _ensure_column(
+            engine,
+            "status_operation_log",
+            "operation_kind",
+            "ALTER TABLE status_operation_log ADD COLUMN operation_kind VARCHAR(16) NOT NULL DEFAULT 'state' AFTER action",
+        )
+        with engine.begin() as conn:
+            conn.execute(text(
+                "UPDATE status_operation_log SET operation_kind = 'membership' "
+                "WHERE action LIKE 'iteration\\_%' AND operation_kind <> 'membership'"
+            ))
+    if "iteration_completion_snapshots" not in inspector0.get_table_names():
+        with engine.begin() as conn:
+            conn.execute(text(
+                "CREATE TABLE iteration_completion_snapshots ("
+                "id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,"
+                "iteration_id BIGINT UNSIGNED NOT NULL,"
+                "action VARCHAR(32) NOT NULL,"
+                "ended_at DATETIME NOT NULL,"
+                "actor_id BIGINT UNSIGNED NULL,"
+                "operation_log_id BIGINT UNSIGNED NOT NULL,"
+                "iteration_snapshot JSON NOT NULL,"
+                "counts JSON NOT NULL,"
+                "terminal_counts JSON NOT NULL,"
+                "items JSON NOT NULL,"
+                "gate_result JSON NOT NULL,"
+                "create_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,"
+                "UNIQUE KEY uk_iteration_completion_snapshot_iteration (iteration_id),"
+                "CONSTRAINT fk_iteration_completion_snapshot_iteration FOREIGN KEY (iteration_id) REFERENCES iterations (id) ON DELETE CASCADE"
+                ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='terminal iteration immutable snapshot'"
+            ))
+    else:
+        for foreign_key in inspect(engine).get_foreign_keys("iteration_completion_snapshots"):
+            if foreign_key.get("constrained_columns") == ["operation_log_id"]:
+                with engine.begin() as conn:
+                    conn.execute(text(
+                        f"ALTER TABLE iteration_completion_snapshots DROP FOREIGN KEY {foreign_key['name']}"
+                    ))
+    if "work_item_iteration_history" in inspector0.get_table_names():
+        _ensure_column(
+            engine,
+            "work_item_iteration_history",
+            "title_snapshot",
+            "ALTER TABLE work_item_iteration_history ADD COLUMN title_snapshot VARCHAR(255) NULL COMMENT '离开时标题快照' AFTER leave_reason",
+        )
+        _ensure_column(
+            engine,
+            "work_item_iteration_history",
+            "state_id_snapshot",
+            "ALTER TABLE work_item_iteration_history ADD COLUMN state_id_snapshot BIGINT UNSIGNED NULL COMMENT '离开时状态 ID' AFTER title_snapshot",
+        )
+        _ensure_column(
+            engine,
+            "work_item_iteration_history",
+            "status_name_snapshot",
+            "ALTER TABLE work_item_iteration_history ADD COLUMN status_name_snapshot VARCHAR(100) NULL COMMENT '离开时状态名称' AFTER state_id_snapshot",
+        )
+        _ensure_column(
+            engine,
+            "work_item_iteration_history",
+            "owner_id_snapshot",
+            "ALTER TABLE work_item_iteration_history ADD COLUMN owner_id_snapshot BIGINT UNSIGNED NULL COMMENT '离开时处理人' AFTER status_name_snapshot",
+        )
+        history_indexes = inspector0.get_indexes("work_item_iteration_history")
+        canonical_index = next(
+            (index for index in history_indexes if index.get("name") == "idx_wiih_object"),
+            None,
+        )
+        if canonical_index and canonical_index.get("column_names") != ["object_type", "object_id", "left_at"]:
+            with engine.begin() as conn:
+                conn.execute(text("DROP INDEX idx_wiih_object ON work_item_iteration_history"))
+            history_indexes = [index for index in history_indexes if index.get("name") != "idx_wiih_object"]
+        if not _history_open_lookup_index_exists(history_indexes):
+            with engine.begin() as conn:
+                conn.execute(
+                    text(
+                        "CREATE INDEX idx_wiih_object "
+                        "ON work_item_iteration_history (object_type, object_id, left_at)"
+                    )
+                )
+        with engine.begin() as conn:
+            for object_type, table_name in (("requirement", "requirements"), ("task", "tasks"), ("bug", "bugs")):
+                if table_name not in inspector0.get_table_names():
+                    continue
+                conn.execute(
+                    text(
+                        "INSERT INTO work_item_iteration_history "
+                        "(object_type, object_id, iteration_id, entered_at, enter_reason, migrated) "
+                        f"SELECT :object_type, item.id, item.iteration_id, COALESCE(item.create_time, CURRENT_TIMESTAMP), "
+                        "'migration', 1 "
+                        f"FROM {table_name} item "
+                        "WHERE item.iteration_id IS NOT NULL AND item.deleted = 0 "
+                        "AND NOT EXISTS ("
+                        "SELECT 1 FROM work_item_iteration_history history "
+                        "WHERE history.object_type = :object_type AND history.object_id = item.id"
+                        ")"
+                    ),
+                    {"object_type": object_type},
+                )
     if "workflow_component_registry" not in inspector0.get_table_names():
         with engine.begin() as conn:
             conn.execute(text(

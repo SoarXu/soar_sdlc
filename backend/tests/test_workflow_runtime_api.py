@@ -1,6 +1,9 @@
 from uuid import uuid4
+from types import SimpleNamespace
 
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
+import pytest
 
 from app.core.security import create_access_token, get_password_hash
 from app.db.session import SessionLocal
@@ -9,10 +12,250 @@ from app.models.notification import Notification
 from app.models.project_member import ProjectMember
 from app.models.relation import ObjectRelation
 from app.models.requirement import Requirement
+from app.models.work_item_iteration_history import WorkItemIterationHistory
 from app.models.role import Role, UserRole
 from app.models.test_run import TestRun as RunModel
 from app.models.user import User
 from app.models.workflow_definition import WorkflowTransition
+from app.services import iteration_service, workflow_runtime_service
+
+
+def test_transition_item_loader_requests_a_database_row_lock():
+    class QuerySpy:
+        def __init__(self):
+            self.locked = False
+            self.populated_existing = False
+            self.item = object()
+
+        def filter(self, *args):
+            return self
+
+        def with_for_update(self):
+            self.locked = True
+            return self
+
+        def populate_existing(self):
+            self.populated_existing = True
+            return self
+
+        def first(self):
+            return self.item
+
+    class SessionSpy:
+        def __init__(self):
+            self.query_spy = QuerySpy()
+
+        def query(self, model):
+            return self.query_spy
+
+    db = SessionSpy()
+
+    item = workflow_runtime_service._get_item_for_transition(db, "bug", 1)
+
+    assert item is db.query_spy.item
+    assert db.query_spy.locked is True
+    assert db.query_spy.populated_existing is True
+
+
+def test_execute_transition_uses_ordered_execution_item_loader(monkeypatch):
+    class LockObserved(Exception):
+        pass
+
+    monkeypatch.setattr(workflow_runtime_service, "ensure_default_workflow_templates", lambda db: None)
+    monkeypatch.setattr(
+        workflow_runtime_service,
+        "_get_item_for_execution",
+        lambda *args: (_ for _ in ()).throw(LockObserved()),
+    )
+
+    with pytest.raises(LockObserved):
+        workflow_runtime_service.execute_transition(
+            object(),
+            "bug",
+            1,
+            SimpleNamespace(transition_id=1),
+            SimpleNamespace(id=1),
+        )
+
+
+def test_bug_activation_locks_iterations_before_reloading_bug(monkeypatch):
+    events = []
+    preview = SimpleNamespace(iteration_id=9)
+    reloaded = SimpleNamespace(iteration_id=9)
+
+    monkeypatch.setattr(
+        workflow_runtime_service,
+        "_get_item",
+        lambda *args: events.append("preview") or preview,
+    )
+    monkeypatch.setattr(
+        workflow_runtime_service,
+        "_activation_target_iteration_id",
+        lambda *args: 3,
+    )
+    monkeypatch.setattr(
+        workflow_runtime_service,
+        "lock_iterations_for_mutation",
+        lambda db, ids: events.append(("iterations", tuple(sorted(ids))))
+        or {iteration_id: SimpleNamespace(id=iteration_id) for iteration_id in ids if iteration_id is not None},
+    )
+    monkeypatch.setattr(
+        workflow_runtime_service,
+        "_get_item_for_transition",
+        lambda *args: events.append("item") or reloaded,
+    )
+
+    result = workflow_runtime_service._get_item_for_execution(
+        object(),
+        "bug",
+        1,
+        SimpleNamespace(transition_id=7, payload={"target_iteration_id": 3}),
+    )
+
+    assert result is reloaded
+    assert events == ["preview", ("iterations", (3, 9)), "item"]
+
+
+def test_transition_membership_change_rolls_back_and_retries_lock_order(monkeypatch):
+    events = []
+    previews = iter([SimpleNamespace(iteration_id=9), SimpleNamespace(iteration_id=5)])
+    reloads = iter([SimpleNamespace(iteration_id=5), SimpleNamespace(iteration_id=5)])
+
+    class SessionSpy:
+        def rollback(self):
+            events.append("rollback")
+
+    monkeypatch.setattr(
+        workflow_runtime_service,
+        "_get_item",
+        lambda *args: events.append("preview") or next(previews),
+    )
+    monkeypatch.setattr(workflow_runtime_service, "_activation_target_iteration_id", lambda *args: None)
+    monkeypatch.setattr(
+        workflow_runtime_service,
+        "lock_iterations_for_mutation",
+        lambda db, ids: events.append(("iterations", tuple(sorted(i for i in ids if i is not None))))
+        or {iteration_id: SimpleNamespace(id=iteration_id) for iteration_id in ids if iteration_id is not None},
+    )
+    monkeypatch.setattr(
+        workflow_runtime_service,
+        "_get_item_for_transition",
+        lambda *args: events.append("item") or next(reloads),
+    )
+    monkeypatch.setattr(
+        workflow_runtime_service,
+        "ensure_default_workflow_templates",
+        lambda db: events.append("templates"),
+    )
+
+    item = workflow_runtime_service._get_item_for_execution(
+        SessionSpy(),
+        "bug",
+        1,
+        SimpleNamespace(transition_id=7, payload={}),
+    )
+
+    assert item.iteration_id == 5
+    assert events == [
+        "preview", ("iterations", (9,)), "item", "rollback", "templates",
+        "preview", ("iterations", (5,)), "item",
+    ]
+
+
+def test_persistent_transition_membership_change_returns_stable_conflict(monkeypatch):
+    rollbacks = []
+
+    class SessionSpy:
+        def rollback(self):
+            rollbacks.append(True)
+
+    monkeypatch.setattr(
+        workflow_runtime_service,
+        "_get_item",
+        lambda *args: SimpleNamespace(iteration_id=9),
+    )
+    monkeypatch.setattr(workflow_runtime_service, "_activation_target_iteration_id", lambda *args: None)
+    monkeypatch.setattr(
+        workflow_runtime_service,
+        "lock_iterations_for_mutation",
+        lambda db, ids: {9: SimpleNamespace(id=9)},
+    )
+    monkeypatch.setattr(
+        workflow_runtime_service,
+        "_get_item_for_transition",
+        lambda *args: SimpleNamespace(iteration_id=5),
+    )
+    monkeypatch.setattr(workflow_runtime_service, "ensure_default_workflow_templates", lambda db: None)
+
+    with pytest.raises(HTTPException) as exc_info:
+        workflow_runtime_service._get_item_for_execution(
+            SessionSpy(),
+            "bug",
+            1,
+            SimpleNamespace(transition_id=7, payload={}),
+        )
+
+    error = exc_info.value
+    assert error.status_code == 409
+    assert error.detail["code"] == "ITERATION_STATE_CONFLICT"
+    assert len(rollbacks) == 3
+
+
+def test_iteration_mutation_locks_are_acquired_in_id_order(monkeypatch):
+    locked_ids = []
+    monkeypatch.setattr(
+        iteration_service,
+        "_get_active_iteration",
+        lambda db, iteration_id, for_update: locked_ids.append(iteration_id) or SimpleNamespace(id=iteration_id),
+    )
+
+    iteration_service.lock_iterations_for_mutation(object(), {9, None, 3})
+
+    assert locked_ids == [3, 9]
+
+
+def test_iteration_transition_locks_its_item_directly_once(monkeypatch):
+    calls = []
+    iteration = SimpleNamespace(id=4)
+    monkeypatch.setattr(
+        workflow_runtime_service,
+        "_get_item",
+        lambda *args: pytest.fail("iteration transition performed an unlocked preview"),
+    )
+    monkeypatch.setattr(
+        workflow_runtime_service,
+        "lock_iterations_for_mutation",
+        lambda *args: pytest.fail("iteration transition locked its row twice"),
+    )
+    monkeypatch.setattr(
+        workflow_runtime_service,
+        "_get_item_for_transition",
+        lambda *args: calls.append("item") or iteration,
+    )
+
+    result = workflow_runtime_service._get_item_for_execution(
+        object(),
+        "iteration",
+        4,
+        SimpleNamespace(transition_id=1, payload={}),
+    )
+
+    assert result is iteration
+    assert calls == ["item"]
+
+
+def test_list_available_transitions_uses_nonlocking_item_loader(monkeypatch):
+    item = object()
+    monkeypatch.setattr(workflow_runtime_service, "ensure_default_workflow_templates", lambda db: None)
+    monkeypatch.setattr(workflow_runtime_service, "_get_item", lambda *args: item)
+    monkeypatch.setattr(
+        workflow_runtime_service,
+        "_get_item_for_transition",
+        lambda *args: pytest.fail("list_available_transitions acquired a row lock"),
+    )
+    monkeypatch.setattr(workflow_runtime_service, "_resolve_definition_context", lambda *args: None)
+
+    assert workflow_runtime_service.list_available_transitions(object(), "bug", 1, None) == []
 
 
 def _create_user(full_name: str, role_key: str | None = None) -> tuple[int, str]:
@@ -590,6 +833,131 @@ def test_runtime_requirement_defer_moves_tasks_and_test_cases(client: TestClient
     assert client.get(f"/api/v1/requirements/{requirement['id']}").json()["iteration_id"] == target_iteration["id"]
     assert client.get(f"/api/v1/tasks/{task['id']}").json()["iteration_id"] == target_iteration["id"]
     assert client.get(f"/api/v1/test-cases/{test_case['id']}").json()["iteration_id"] == target_iteration["id"]
+    db = SessionLocal()
+    try:
+        histories = db.query(WorkItemIterationHistory).filter(
+            WorkItemIterationHistory.object_id.in_([requirement["id"], task["id"]]),
+            WorkItemIterationHistory.iteration_id.in_([current_iteration["id"], target_iteration["id"]]),
+        ).all()
+        assert len(histories) == 4
+        assert sum(row.left_at is not None for row in histories) == 2
+        assert {row.leave_reason for row in histories if row.left_at is not None} == {"deferred"}
+        assert all(row.left_by == owner_id for row in histories if row.left_at is not None)
+        assert {row.enter_reason for row in histories if row.left_at is None} == {"deferred"}
+    finally:
+        db.close()
+
+
+@pytest.mark.parametrize("terminal_side", ["source", "target"])
+def test_requirement_defer_rejects_terminal_source_or_target_iteration(client: TestClient, terminal_side: str):
+    _, project_id = _create_project_with_requirement_workflow(client)
+    owner_id, owner_token = _create_user("Terminal Defer Owner", "developer")
+    _add_project_member(project_id, owner_id, "developer")
+    source = client.post("/api/v1/iterations", json={"name": f"Source {uuid4().hex[:8]}", "project_ids": [project_id]}).json()
+    target = client.post("/api/v1/iterations", json={"name": f"Target {uuid4().hex[:8]}", "project_ids": [project_id]}).json()
+    requirement = client.post(
+        "/api/v1/requirements",
+        json={"project_id": project_id, "iteration_id": source["id"], "title": f"Terminal defer {uuid4().hex[:8]}", "owner_id": owner_id},
+    ).json()
+    assert client.post(
+        f"/api/v1/workflow-runtime/requirement/{requirement['id']}/transition",
+        json={"action_key": "claim"}, headers={"Authorization": f"Bearer {owner_token}"},
+    ).status_code == 200
+    terminal_id = source["id"] if terminal_side == "source" else target["id"]
+    db = SessionLocal()
+    try:
+        iteration = db.query(iteration_service.Iteration).filter(iteration_service.Iteration.id == terminal_id).one()
+        terminal_state_id = db.query(workflow_runtime_service.WorkflowState.id).filter(
+            workflow_runtime_service.WorkflowState.definition_id == iteration.workflow_definition_id,
+            workflow_runtime_service.WorkflowState.category == "terminal",
+        ).first()[0]
+        iteration.current_state_id = terminal_state_id
+        db.commit()
+    finally:
+        db.close()
+
+    deferred = client.post(
+        f"/api/v1/workflow-runtime/requirement/{requirement['id']}/transition",
+        json={"action_key": "defer", "payload": {"target_iteration_id": target["id"]}},
+        headers={"Authorization": f"Bearer {owner_token}"},
+    )
+
+    assert deferred.status_code == 409
+    assert deferred.json()["detail"]["code"] == "ITERATION_NOT_MUTABLE"
+
+
+def test_requirement_defer_rejects_nonnumeric_target_iteration_id(client: TestClient):
+    _, project_id = _create_project_with_requirement_workflow(client)
+    owner_id, owner_token = _create_user("Invalid Defer Target Owner", "developer")
+    _add_project_member(project_id, owner_id, "developer")
+    source = client.post("/api/v1/iterations", json={"name": f"Invalid source {uuid4().hex[:8]}", "project_ids": [project_id]}).json()
+    requirement = client.post(
+        "/api/v1/requirements",
+        json={"project_id": project_id, "iteration_id": source["id"], "title": f"Invalid defer {uuid4().hex[:8]}", "owner_id": owner_id},
+    ).json()
+    assert client.post(
+        f"/api/v1/workflow-runtime/requirement/{requirement['id']}/transition",
+        json={"action_key": "claim"}, headers={"Authorization": f"Bearer {owner_token}"},
+    ).status_code == 200
+
+    deferred = client.post(
+        f"/api/v1/workflow-runtime/requirement/{requirement['id']}/transition",
+        json={"action_key": "defer", "payload": {"target_iteration_id": "not-a-number"}},
+        headers={"Authorization": f"Bearer {owner_token}"},
+    )
+
+    assert deferred.status_code == 422
+    assert deferred.json()["detail"]["code"] == "INVALID_TARGET_ITERATION_ID"
+
+
+def test_requirement_defer_accepts_legacy_iteration_id_alias(client: TestClient):
+    _, project_id = _create_project_with_requirement_workflow(client)
+    owner_id, owner_token = _create_user("Legacy Defer Owner", "developer")
+    _add_project_member(project_id, owner_id, "developer")
+    source = client.post("/api/v1/iterations", json={"name": f"Legacy source {uuid4().hex[:8]}", "project_ids": [project_id]}).json()
+    target = client.post("/api/v1/iterations", json={"name": f"Legacy target {uuid4().hex[:8]}", "project_ids": [project_id]}).json()
+    requirement = client.post(
+        "/api/v1/requirements",
+        json={"project_id": project_id, "iteration_id": source["id"], "title": f"Legacy defer {uuid4().hex[:8]}", "owner_id": owner_id},
+    ).json()
+    assert client.post(
+        f"/api/v1/workflow-runtime/requirement/{requirement['id']}/transition",
+        json={"action_key": "claim"}, headers={"Authorization": f"Bearer {owner_token}"},
+    ).status_code == 200
+
+    deferred = client.post(
+        f"/api/v1/workflow-runtime/requirement/{requirement['id']}/transition",
+        json={"action_key": "defer", "payload": {"iteration_id": target["id"]}},
+        headers={"Authorization": f"Bearer {owner_token}"},
+    )
+
+    assert deferred.status_code == 200
+    assert client.get(f"/api/v1/requirements/{requirement['id']}").json()["iteration_id"] == target["id"]
+
+
+@pytest.mark.parametrize("invalid_target", [True, 1.5])
+def test_requirement_defer_rejects_boolean_and_float_target_iteration_id(client: TestClient, invalid_target):
+    _, project_id = _create_project_with_requirement_workflow(client)
+    owner_id, owner_token = _create_user("Strict Target Owner", "developer")
+    _add_project_member(project_id, owner_id, "developer")
+    source = client.post("/api/v1/iterations", json={"name": f"Strict source {uuid4().hex[:8]}", "project_ids": [project_id]}).json()
+    requirement = client.post(
+        "/api/v1/requirements",
+        json={"project_id": project_id, "iteration_id": source["id"], "title": f"Strict defer {uuid4().hex[:8]}", "owner_id": owner_id},
+    ).json()
+    assert client.post(
+        f"/api/v1/workflow-runtime/requirement/{requirement['id']}/transition",
+        json={"action_key": "claim"}, headers={"Authorization": f"Bearer {owner_token}"},
+    ).status_code == 200
+
+    deferred = client.post(
+        f"/api/v1/workflow-runtime/requirement/{requirement['id']}/transition",
+        json={"action_key": "defer", "payload": {"iteration_id": invalid_target}},
+        headers={"Authorization": f"Bearer {owner_token}"},
+    )
+
+    assert deferred.status_code == 422
+    assert deferred.json()["detail"]["code"] == "INVALID_TARGET_ITERATION_ID"
 
 
 def test_runtime_routes_bug_type_to_target_status_and_records_resolution(client: TestClient):

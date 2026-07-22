@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 
 import {
   buildWorkbenchViewModel,
@@ -64,6 +65,7 @@ import {
   const viewModel = buildWorkbenchViewModel({
     pending_handling: { label: '待处理', items: [{ id: 1, object_type: 'task' }], total: 1 },
     unassigned: { label: '未分派', items: [{ id: 2, object_type: 'bug' }], total: 1 },
+    unplanned: { label: '待规划', items: [{ id: 6, object_type: 'requirement' }], total: 1 },
     exception_center: { label: '异常中心', items: [], total: 0 },
     created_by_me: { label: '我发起的', items: [{ id: 3, object_type: 'requirement' }], total: 1 },
     watched_by_me: { label: '我关注的', items: [{ id: 4, object_type: 'task' }], total: 1 },
@@ -77,7 +79,15 @@ import {
     'following'
   ])
   assert.equal(viewModel.summaryCards[0].value, 1)
+  assert.equal('unplanned' in viewModel.queueSectionsByKey, false)
+  assert.equal(viewModel.summaryCards.some((card) => card.key === 'unplanned'), false)
   assert.equal(viewModel.summaryCards.length, 4)
+}
+
+{
+  const dashboardSource = readFileSync(new URL('../views/DashboardView.vue', import.meta.url), 'utf8')
+
+  assert.doesNotMatch(dashboardSource, /include[_A-Z]?history|history[_A-Z]?switch|iteration[_A-Z]?range/i)
 }
 
 {

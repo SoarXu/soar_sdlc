@@ -275,11 +275,14 @@ def _exception_center_items(
             "owner_ineligible",
             "iteration_history_inconsistent",
             "missing_reactivation_audit",
+            "terminal_iteration_snapshot_mismatch",
         }
     ]
     integrity_refs = [*_terminal_iteration_open_item_refs(db, scoped_project_ids), *integrity_refs]
     integrity_items = _load_workbench_items_by_refs(db, projects, iteration_names, integrity_refs)
-    return _dedup_and_sort_workbench_items([*active_items, *integrity_items])
+    # Active items were loaded from the complete ref set, so keep them as the
+    # final value when the same object is also present in the integrity scan.
+    return _dedup_and_sort_workbench_items([*integrity_items, *active_items])
 
 
 def _terminal_iteration_open_item_refs(

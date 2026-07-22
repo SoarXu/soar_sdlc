@@ -166,7 +166,10 @@ export function itemStatusTag(item = {}) {
 
 export function workbenchMetaText(sectionKey, item = {}) {
   if (sectionKey === 'exception_center') {
-    const detailLabels = (item.exception_details || []).map(detail => detail.exception_label).filter(Boolean)
+    const detailLabels = (item.exception_details || []).map((detail) => {
+      if (!detail.exception_label) return ''
+      return detail.exception_detail ? `${detail.exception_label}：${detail.exception_detail}` : detail.exception_label
+    }).filter(Boolean)
     const label = [...new Set(detailLabels)].join('；') || item.exception_label || '异常项'
     if (Number(item.overdue_hours) > 0) {
       return `${label} - overdue ${item.overdue_hours}h`

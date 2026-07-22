@@ -120,11 +120,11 @@ import {
     workbenchMetaText('exception_center', {
       exception_label: 'Current owner is ineligible',
       exception_details: [
-        { exception_key: 'owner_ineligible', exception_label: 'Current owner is ineligible' },
-        { exception_key: 'iteration_history_inconsistent', exception_label: 'Iteration history is inconsistent' }
+        { exception_key: 'owner_ineligible', exception_label: 'Current owner is ineligible', exception_detail: 'Owner lacks a core action' },
+        { exception_key: 'iteration_history_inconsistent', exception_label: 'Iteration history is inconsistent', exception_detail: 'Open history does not match' }
       ]
     }),
-    'Current owner is ineligible；Iteration history is inconsistent'
+    'Current owner is ineligible：Owner lacks a core action；Iteration history is inconsistent：Open history does not match'
   )
 }
 

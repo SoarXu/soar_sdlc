@@ -502,16 +502,19 @@ def test_owner_eligibility_uses_object_conditions_and_ignores_informational_acti
 
 def test_workbench_aggregates_integrity_details_and_enforces_project_scope(client: TestClient):
     project = client.post("/api/v1/projects", json={"name": f"Aggregate integrity {uuid4().hex[:8]}"}).json()
+    iteration = client.post("/api/v1/iterations", json={"project_ids": [project["id"]], "name": "Active aggregate"}).json()
+    assert client.post(f"/api/v1/workflow-runtime/iteration/{iteration['id']}/transition", json={"action_key": "start"}).status_code == 200
     viewer_id, viewer_token = _create_user("developer")
     invalid_owner_id, _ = _create_user("developer")
     _, outsider_token = _create_user("developer")
     _add_member(project["id"], viewer_id, "developer")
     task = client.post(
         "/api/v1/tasks",
-        json={"project_id": project["id"], "title": "Two integrity violations", "owner_id": invalid_owner_id},
+        json={"project_id": project["id"], "iteration_id": iteration["id"], "title": "Three violations", "owner_id": invalid_owner_id},
     ).json()
     db = SessionLocal()
     try:
+        db.query(Task).filter(Task.id == task["id"]).update({"create_time": datetime.now() - timedelta(hours=48)})
         db.add(WorkItemIterationHistory(object_type="task", object_id=task["id"], iteration_id=99999999, enter_reason="illegal"))
         db.commit()
     finally:
@@ -527,7 +530,7 @@ def test_workbench_aggregates_integrity_details_and_enforces_project_scope(clien
     ).json()["exception_center"]["items"]
     item = next(entry for entry in visible if entry["object_type"] == "task" and entry["id"] == task["id"])
 
-    assert {"owner_ineligible", "iteration_history_inconsistent"} <= set(item["exception_keys"])
+    assert {"pending_timeout", "owner_ineligible", "iteration_history_inconsistent"} <= set(item["exception_keys"])
     assert {detail["exception_key"] for detail in item["exception_details"]} >= {
         "owner_ineligible", "iteration_history_inconsistent"
     }
@@ -559,3 +562,74 @@ def test_iteration_transfer_with_structural_history_but_no_operation_link_is_inc
         item["id"] == task["id"] and item["exception_key"] == "iteration_history_inconsistent"
         for item in refs
     )
+
+
+def test_terminal_iteration_snapshot_detects_items_added_after_end(client: TestClient):
+    project = client.post("/api/v1/projects", json={"name": f"Snapshot integrity {uuid4().hex[:8]}"}).json()
+    iteration = client.post("/api/v1/iterations", json={"project_ids": [project["id"]], "name": "Snapshot iteration"}).json()
+    assert client.post(f"/api/v1/workflow-runtime/iteration/{iteration['id']}/transition", json={"action_key": "start"}).status_code == 200
+    included = client.post(
+        "/api/v1/tasks",
+        json={"project_id": project["id"], "iteration_id": iteration["id"], "title": "Included terminal task"},
+    ).json()
+    db = SessionLocal()
+    try:
+        included_row = db.query(Task).filter(Task.id == included["id"]).one()
+        included_row.current_state_id = _target_state_id(db, included_row.workflow_definition_id, "complete")
+        db.commit()
+    finally:
+        db.close()
+    assert client.post(f"/api/v1/workflow-runtime/iteration/{iteration['id']}/transition", json={"action_key": "complete"}).status_code == 200
+    late = client.post("/api/v1/tasks", json={"project_id": project["id"], "title": "Late terminal task"}).json()
+    db = SessionLocal()
+    try:
+        late_row = db.query(Task).filter(Task.id == late["id"]).one()
+        late_row.current_state_id = _target_state_id(db, late_row.workflow_definition_id, "complete")
+        late_row.iteration_id = iteration["id"]
+        db.add(WorkItemIterationHistory(
+            object_type="task", object_id=late_row.id, iteration_id=iteration["id"], enter_reason="illegal_after_end",
+            entered_at=datetime.now() + timedelta(seconds=1),
+        ))
+        db.commit()
+        refs = list_exception_refs(db, {project["id"]})
+    finally:
+        db.close()
+    mismatch_ids = {item["id"] for item in refs if item["exception_key"] == "terminal_iteration_snapshot_mismatch"}
+    assert included["id"] not in mismatch_ids
+    assert late["id"] in mismatch_ids
+
+
+def test_normal_link_unlink_and_defer_create_membership_operations(client: TestClient):
+    project = client.post("/api/v1/projects", json={"name": f"Membership operations {uuid4().hex[:8]}"}).json()
+    source = client.post("/api/v1/iterations", json={"project_ids": [project["id"]], "name": "Source"}).json()
+    target = client.post("/api/v1/iterations", json={"project_ids": [project["id"]], "name": "Target"}).json()
+    deferred = client.post("/api/v1/tasks", json={"project_id": project["id"], "title": "Deferred normally"}).json()
+    unlinked = client.post("/api/v1/tasks", json={"project_id": project["id"], "title": "Unlinked normally"}).json()
+    assert client.post(f"/api/v1/iterations/{source['id']}/tasks", json={"task_ids": [deferred["id"], unlinked["id"]]}).status_code == 200
+    assert client.delete(f"/api/v1/iterations/{source['id']}/tasks/{unlinked['id']}").status_code == 204
+    assert client.post(
+        f"/api/v1/iterations/{source['id']}/defer-work-items",
+        json={"target_iteration_id": target["id"], "task_ids": [deferred["id"]]},
+    ).status_code == 200
+    db = SessionLocal()
+    try:
+        refs = list_exception_refs(db, {project["id"]})
+        histories = db.query(WorkItemIterationHistory).filter(
+            WorkItemIterationHistory.object_type == "task",
+            WorkItemIterationHistory.object_id.in_([deferred["id"], unlinked["id"]]),
+        ).all()
+        operations = {
+            operation.id: operation.action
+            for operation in db.query(StatusOperationLog).filter(
+                StatusOperationLog.object_type == "task",
+                StatusOperationLog.object_id.in_([deferred["id"], unlinked["id"]]),
+            ).all()
+        }
+    finally:
+        db.close()
+    assert not any(
+        item["id"] in {deferred["id"], unlinked["id"]} and item["exception_key"] == "iteration_history_inconsistent"
+        for item in refs
+    ), (refs, [(row.object_id, row.enter_reason, row.leave_reason, row.operation_log_id) for row in histories], operations)
+    assert all(history.operation_log_id in operations for history in histories)
+    assert {"iteration_link", "iteration_unlink", "iteration_defer"} <= set(operations.values())

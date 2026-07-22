@@ -417,7 +417,7 @@ def _link_reactivation_history_to_operation(
 ) -> None:
     source_iteration_id = selected_values.get("source_iteration_id")
     target_iteration_id = selected_values.get("target_iteration_id")
-    if not source_iteration_id or not target_iteration_id or source_iteration_id == target_iteration_id:
+    if not source_iteration_id or not target_iteration_id:
         return
     source_row = (
         db.query(WorkItemIterationHistory)
@@ -426,7 +426,6 @@ def _link_reactivation_history_to_operation(
             WorkItemIterationHistory.object_id == bug_id,
             WorkItemIterationHistory.iteration_id == source_iteration_id,
             WorkItemIterationHistory.leave_reason == "reactivated",
-            WorkItemIterationHistory.operation_log_id.is_(None),
         )
         .order_by(WorkItemIterationHistory.id.desc())
         .first()
@@ -439,7 +438,6 @@ def _link_reactivation_history_to_operation(
             WorkItemIterationHistory.iteration_id == target_iteration_id,
             WorkItemIterationHistory.enter_reason == "reactivated",
             WorkItemIterationHistory.left_at.is_(None),
-            WorkItemIterationHistory.operation_log_id.is_(None),
         )
         .order_by(WorkItemIterationHistory.id.desc())
         .first()
@@ -550,21 +548,25 @@ def _can_see_transition(db: Session, object_type: str, item, transition: Workflo
 
 def owner_has_executable_current_action(db: Session, object_type: str, item, owner: User) -> bool:
     """Return whether an assigned owner can execute at least one current human action."""
+    human_transitions = current_core_transitions(db, item)
+    if not human_transitions:
+        return True
+    return any(_can_see_transition(db, object_type, item, transition, owner) for transition in human_transitions)
+
+
+def current_core_transitions(db: Session, item) -> list[WorkflowTransition]:
     transitions = db.query(WorkflowTransition).filter(
         WorkflowTransition.definition_id == item.workflow_definition_id,
         WorkflowTransition.from_state_id == item.current_state_id,
         WorkflowTransition.enabled.is_(True),
     ).all()
-    human_transitions = [
+    return [
         transition for transition in transitions
         if not (transition.ui_config or {}).get("hidden")
         and not (transition.ui_config or {}).get("system_action")
         and (transition.ui_config or {}).get("action_category", "process") == "process"
         and _matches_transition_condition(item, transition)
     ]
-    if not human_transitions:
-        return True
-    return any(_can_see_transition(db, object_type, item, transition, owner) for transition in human_transitions)
 
 
 def _ensure_can_execute(

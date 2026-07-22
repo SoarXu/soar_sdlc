@@ -4,14 +4,15 @@ from sqlalchemy.orm import Session
 
 from app.models.bug import Bug
 from app.models.requirement import Requirement
+from app.models.iteration import Iteration
+from app.models.iteration_completion_snapshot import IterationCompletionSnapshot
 from app.models.status_operation import StatusOperationLog
 from app.models.task import Task
 from app.models.user import User
 from app.models.project_member import ProjectMember
 from app.models.work_item_iteration_history import WorkItemIterationHistory
-from app.models.workflow_definition import WorkflowTransition
 from app.services.exception_rule_service import ensure_default_exception_rules, resolve_exception_rule
-from app.services.workflow_runtime_service import owner_has_executable_current_action
+from app.services.workflow_runtime_service import current_core_transitions, owner_has_executable_current_action
 from app.services.workflow_state_query_service import (
     current_state_name,
     current_state_supports_entry_action,
@@ -25,6 +26,7 @@ INTEGRITY_LABELS = {
     "owner_ineligible": "当前处理人无执行资格",
     "iteration_history_inconsistent": "迭代归属审计链不完整",
     "missing_reactivation_audit": "Bug 重激活审计链不完整",
+    "terminal_iteration_snapshot_mismatch": "终态迭代结束快照不一致",
 }
 
 
@@ -176,6 +178,7 @@ def _latest_state_time(
         StatusOperationLog.object_type == object_type,
         StatusOperationLog.object_id == object_id,
         StatusOperationLog.to_state_id == current_state_id,
+        ~StatusOperationLog.action.like("iteration_%"),
     ).order_by(StatusOperationLog.effective_time.desc(), StatusOperationLog.id.desc()).first()
     return operation.effective_time if operation else fallback
 
@@ -223,16 +226,14 @@ def _add_integrity_exceptions(db: Session, add_integrity, object_type: str, item
         add_integrity(object_type, item, "owner_ineligible", entered_at, "处理人账号、项目成员身份或当前动作资格无效")
     if _iteration_history_is_inconsistent(db, object_type, item):
         add_integrity(object_type, item, "iteration_history_inconsistent", entered_at, "当前归属、开放历史或转移操作记录不一致")
+    if _terminal_snapshot_is_inconsistent(db, object_type, item):
+        add_integrity(object_type, item, "terminal_iteration_snapshot_mismatch", entered_at, "事项不在结束快照内、结束后进入或当前事实与快照不一致")
     if object_type == "bug" and _bug_activation_audit_is_inconsistent(db, item):
         add_integrity("bug", item, "missing_reactivation_audit", entered_at, "activate 次数、原因或关联的离开/进入历史不完整")
 
 
 def _state_requires_owner(db: Session, item) -> bool:
-    transitions = db.query(WorkflowTransition).filter(
-        WorkflowTransition.definition_id == item.workflow_definition_id,
-        WorkflowTransition.from_state_id == item.current_state_id,
-        WorkflowTransition.enabled.is_(True),
-    ).all()
+    transitions = current_core_transitions(db, item)
     return any(
         (transition.ui_config or {}).get("requires_owner") is True
         or (transition.ui_config or {}).get("handler_scope") == "current_handler"
@@ -264,8 +265,9 @@ def _iteration_history_is_inconsistent(db: Session, object_type: str, item) -> b
             return True
         if index and rows[index - 1].left_at and rows[index - 1].left_at > row.entered_at:
             return True
-    if len(rows) > 1:
-        for row in rows:
+    rows_requiring_operation = rows if len(rows) > 1 else [row for row in rows if row.left_at is not None]
+    if rows_requiring_operation:
+        for row in rows_requiring_operation:
             if row.operation_log_id is None:
                 return True
             operation = db.query(StatusOperationLog).filter(
@@ -276,7 +278,13 @@ def _iteration_history_is_inconsistent(db: Session, object_type: str, item) -> b
             if not operation:
                 return True
             history_reasons = {row.enter_reason, row.leave_reason}
-            expected_action = "activate" if "reactivated" in history_reasons else "defer" if "deferred" in history_reasons else None
+            expected_action = (
+                "activate" if "reactivated" in history_reasons
+                else "iteration_defer" if "deferred" in history_reasons
+                else "iteration_unlink" if "unlinked" in history_reasons
+                else "iteration_move" if history_reasons & {"updated", "iteration_project_scope_removed"}
+                else None
+            )
             if expected_action and operation.action != expected_action:
                 return True
     return False
@@ -316,3 +324,32 @@ def _bug_activation_audit_is_inconsistent(db: Session, bug: Bug) -> bool:
         if not has_leave or not has_enter:
             return True
     return False
+
+
+def _terminal_snapshot_is_inconsistent(db: Session, object_type: str, item) -> bool:
+    if not item.iteration_id:
+        return False
+    iteration = db.query(Iteration).filter(Iteration.id == item.iteration_id, Iteration.deleted == 0).first()
+    if not iteration or not is_terminal_state(iteration):
+        return False
+    snapshot = db.query(IterationCompletionSnapshot).filter(
+        IterationCompletionSnapshot.iteration_id == item.iteration_id
+    ).first()
+    if not snapshot:
+        return True
+    snapshot_items = (snapshot.items or {}).get(object_type, [])
+    snapshot_item = next((row for row in snapshot_items if row.get("id") == item.id), None)
+    if not snapshot_item:
+        return True
+    open_history = db.query(WorkItemIterationHistory).filter(
+        WorkItemIterationHistory.object_type == object_type,
+        WorkItemIterationHistory.object_id == item.id,
+        WorkItemIterationHistory.iteration_id == item.iteration_id,
+        WorkItemIterationHistory.left_at.is_(None),
+    ).first()
+    if open_history and open_history.entered_at > snapshot.ended_at:
+        return True
+    return any((
+        snapshot_item.get("state_id") != getattr(item, "current_state_id", None),
+        snapshot_item.get("owner_id") != getattr(item, "owner_id", None),
+    ))

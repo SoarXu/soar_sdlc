@@ -13,6 +13,7 @@ from app.models.workflow_definition import WorkflowState, WorkflowTransition
 from app.models.work_item_iteration_history import WorkItemIterationHistory
 from app.services.lifecycle_service import project_lifecycle_phase
 from app.services.status_operation_service import create_status_operation, list_status_operations
+from app.services.iteration_completion_snapshot_service import get_completion_snapshot
 from app.services.workflow_state_query_service import is_terminal_state, non_terminal_state_clause
 from app.services.workflow_state_service import initial_system_workflow_values
 from app.services.work_item_iteration_history_service import move_work_item_to_iteration
@@ -228,9 +229,10 @@ def get_iteration_detail(db: Session, iteration_id: int) -> dict:
         .all()
     )
     historical_bugs = _historical_bugs(db, iteration_id, {bug.id for bug in bugs})
+    completion_snapshot = get_completion_snapshot(db, iteration_id)
     covered_requirement_ids = {case.requirement_id for case in test_cases if case.requirement_id}
-    requirement_total = len(requirements)
-    closed_requirement_total = len([item for item in requirements if is_terminal_state(item)])
+    requirement_total = int((completion_snapshot or {}).get("counts", {}).get("requirement", len(requirements)))
+    closed_requirement_total = int((completion_snapshot or {}).get("terminal_counts", {}).get("requirement", len([item for item in requirements if is_terminal_state(item)])))
     detail_project_ids = _merge_detail_project_ids(project_ids, requirements, tasks_by_id.values(), test_cases, bugs)
     return {
         "iteration": _iteration_to_dict(iteration, project_ids),
@@ -240,6 +242,7 @@ def get_iteration_detail(db: Session, iteration_id: int) -> dict:
         "test_cases": [_model_to_dict(item) for item in test_cases],
         "bugs": [_model_to_dict(item) for item in bugs],
         "historical_bugs": historical_bugs,
+        "completion_snapshot": completion_snapshot,
         "metrics": {
             "requirement_total": requirement_total,
             "closed_requirement_total": closed_requirement_total,

@@ -32,6 +32,7 @@ from app.services.project_permission_service import (
     is_system_admin,
 )
 from app.services.status_operation_service import create_status_operation
+from app.services.iteration_completion_snapshot_service import create_completion_snapshot
 from app.services.iteration_service import (
     ensure_iteration_mutable,
     is_iteration_active,
@@ -232,6 +233,16 @@ def execute_transition(
         next_owner_id=next_owner_id,
         next_owner_name=next_owner.full_name if next_owner else None,
     )
+    if object_type == "iteration" and transition.action_key in {"complete", "cancel"}:
+        db.flush()
+        create_completion_snapshot(
+            db,
+            item,
+            action=transition.action_key,
+            actor_id=actor.id if actor else None,
+            operation_log_id=operation.id,
+            ended_at=operation.effective_time,
+        )
     if object_type == "bug" and transition.action_key == "activate":
         db.flush()
         _link_reactivation_history_to_operation(db, item.id, selected_values, operation.id)

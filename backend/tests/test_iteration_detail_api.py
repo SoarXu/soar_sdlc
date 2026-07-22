@@ -493,6 +493,9 @@ def test_iteration_cancel_uses_runtime_and_complete_gate(client: TestClient):
     assert canceled.status_code == 200
     assert "status" not in canceled.json()
     assert canceled.json()["state_category"] == "terminal"
+    snapshot = client.get(f"/api/v1/iterations/{iteration_id}/detail").json()["completion_snapshot"]
+    assert snapshot["action"] == "cancel"
+    assert snapshot["counts"]["requirement"] == 1
 
 
 def test_iteration_finish_is_blocked_by_open_bug_without_other_work_items(client: TestClient):
@@ -506,7 +509,57 @@ def test_iteration_finish_is_blocked_by_open_bug_without_other_work_items(client
     )
 
     assert finished.status_code == 400
-    assert client.get(f"/api/v1/iterations/{iteration_id}/detail").json()["iteration"]["state_category"] == "normal"
+    detail = client.get(f"/api/v1/iterations/{iteration_id}/detail").json()
+    assert detail["iteration"]["state_category"] == "normal"
+    assert detail["completion_snapshot"] is None
+
+
+def test_terminal_iteration_detail_uses_persisted_completion_snapshot(client: TestClient):
+    project_id = _create_project(client)
+    iteration_id = _create_iteration(client, [project_id], status="active")
+    requirement_id = _create_requirement(client, project_id, "Snapshot requirement", owner_id=1)
+    task_id = _create_task(client, project_id, "Snapshot task", owner_id=1)
+    assert client.post(
+        f"/api/v1/iterations/{iteration_id}/requirements",
+        json={"requirement_ids": [requirement_id]},
+    ).status_code == 200
+    assert client.post(
+        f"/api/v1/iterations/{iteration_id}/tasks",
+        json={"task_ids": [task_id]},
+    ).status_code == 200
+    _set_requirement_status(requirement_id, "completed")
+    _set_task_status(task_id, "completed")
+
+    completed = client.post(
+        f"/api/v1/workflow-runtime/iteration/{iteration_id}/transition",
+        json={"action_key": "complete", "payload": {"effective_time": "2026-07-22T12:00:00"}},
+    )
+
+    assert completed.status_code == 200, completed.text
+    detail = client.get(f"/api/v1/iterations/{iteration_id}/detail").json()
+    snapshot = detail["completion_snapshot"]
+    assert snapshot["action"] == "complete"
+    assert snapshot["operation_log_id"]
+    assert snapshot["counts"] == {"requirement": 1, "task": 1, "bug": 0, "test_run": 0}
+    assert snapshot["items"]["requirement"] == [{
+        "id": requirement_id,
+        "title": "Snapshot requirement",
+        "state_id": detail["requirements"][0]["current_state_id"],
+        "status_name": detail["requirements"][0]["status_name"],
+        "owner_id": 1,
+    }]
+    assert detail["metrics"]["requirement_total"] == 1
+
+    db = SessionLocal()
+    try:
+        db.query(Requirement).filter(Requirement.id == requirement_id).update({Requirement.iteration_id: None})
+        db.commit()
+    finally:
+        db.close()
+
+    historical_detail = client.get(f"/api/v1/iterations/{iteration_id}/detail").json()
+    assert historical_detail["metrics"]["requirement_total"] == 1
+    assert historical_detail["completion_snapshot"]["items"]["requirement"][0]["id"] == requirement_id
 
 
 def test_iteration_finish_is_blocked_by_open_test_run(client: TestClient):

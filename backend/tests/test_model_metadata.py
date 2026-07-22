@@ -10,6 +10,7 @@ EXPECTED_TABLES = {
     "projects",
     "project_members",
     "iterations",
+    "iteration_completion_snapshots",
     "requirements",
     "tasks",
     "test_cases",
@@ -90,6 +91,12 @@ def test_project_and_iteration_workflow_identity_is_required():
         table = Base.metadata.tables[table_name]
         assert table.columns["workflow_definition_id"].nullable is False
         assert table.columns["current_state_id"].nullable is False
+
+
+def test_iteration_completion_snapshot_is_unique_per_iteration_and_audited():
+    table = Base.metadata.tables["iteration_completion_snapshots"]
+    assert {"iteration_id", "operation_log_id", "counts", "items", "gate_result"} <= set(table.columns.keys())
+    assert any(constraint.name == "uk_iteration_completion_snapshot_iteration" for constraint in table.constraints)
 
 
 def test_workflow_identity_has_no_legacy_string_columns():

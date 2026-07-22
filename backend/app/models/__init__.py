@@ -6,6 +6,7 @@ from app.models.exception_rule import ExceptionRule
 from app.models.field_registry import CustomFieldValue, FormFieldRegistry, FormLayoutConfig
 from app.models.integration_mapping import ExternalIntegrationMapping
 from app.models.iteration import Iteration, IterationProject
+from app.models.iteration_completion_snapshot import IterationCompletionSnapshot
 from app.models.notification import Notification, NotificationChannelConfig, NotificationDeliveryLog
 from app.models.object_watch import ObjectWatch
 from app.models.project import Project
@@ -37,6 +38,7 @@ __all__ = [
     "FormFieldRegistry",
     "FormLayoutConfig",
     "Iteration",
+    "IterationCompletionSnapshot",
     "IterationProject",
     "Notification",
     "NotificationChannelConfig",

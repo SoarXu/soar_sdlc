@@ -151,6 +151,33 @@ def _history_open_lookup_index_exists(indexes: list[dict], canonical_name: str =
 def ensure_runtime_schema(engine: Engine) -> None:
     _validate_final_workflow_schema(engine)
     inspector0 = inspect(engine)
+    if "iteration_completion_snapshots" not in inspector0.get_table_names():
+        with engine.begin() as conn:
+            conn.execute(text(
+                "CREATE TABLE iteration_completion_snapshots ("
+                "id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,"
+                "iteration_id BIGINT UNSIGNED NOT NULL,"
+                "action VARCHAR(32) NOT NULL,"
+                "ended_at DATETIME NOT NULL,"
+                "actor_id BIGINT UNSIGNED NULL,"
+                "operation_log_id BIGINT UNSIGNED NOT NULL,"
+                "iteration_snapshot JSON NOT NULL,"
+                "counts JSON NOT NULL,"
+                "terminal_counts JSON NOT NULL,"
+                "items JSON NOT NULL,"
+                "gate_result JSON NOT NULL,"
+                "create_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,"
+                "UNIQUE KEY uk_iteration_completion_snapshot_iteration (iteration_id),"
+                "CONSTRAINT fk_iteration_completion_snapshot_iteration FOREIGN KEY (iteration_id) REFERENCES iterations (id) ON DELETE CASCADE"
+                ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='terminal iteration immutable snapshot'"
+            ))
+    else:
+        for foreign_key in inspect(engine).get_foreign_keys("iteration_completion_snapshots"):
+            if foreign_key.get("constrained_columns") == ["operation_log_id"]:
+                with engine.begin() as conn:
+                    conn.execute(text(
+                        f"ALTER TABLE iteration_completion_snapshots DROP FOREIGN KEY {foreign_key['name']}"
+                    ))
     if "work_item_iteration_history" in inspector0.get_table_names():
         _ensure_column(
             engine,

@@ -238,6 +238,14 @@ def test_closed_bug_reactivates_into_active_iteration_and_retains_eligible_handl
     assert [row["iteration_id"] for row in detail["iteration_history"]] == [source_iteration_id, target_iteration_id]
     assert detail["iteration_history"][0]["status_name_at_leave"] == "已关闭"
     source_detail = client.get(f"/api/v1/iterations/{source_iteration_id}/detail").json()
+    assert source_detail["completion_snapshot"]["counts"]["bug"] == 1
+    assert source_detail["completion_snapshot"]["items"]["bug"] == [{
+        "id": bug["id"],
+        "title": "Recurring bug",
+        "state_id": source_detail["completion_snapshot"]["items"]["bug"][0]["state_id"],
+        "status_name": "已关闭",
+        "owner_id": handler_id,
+    }]
     historical_bug = next(item for item in source_detail["historical_bugs"] if item["id"] == bug["id"])
     assert historical_bug["status_name_at_leave"] == "已关闭"
     assert historical_bug["current_iteration_id"] == target_iteration_id

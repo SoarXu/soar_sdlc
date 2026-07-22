@@ -2,6 +2,9 @@ from uuid import uuid4
 
 from fastapi.testclient import TestClient
 
+from app.db.session import SessionLocal
+from app.models.test_run import TestRun as RunModel
+
 
 def _create_project(client: TestClient) -> int:
     response = client.post("/api/v1/projects", json={"name": f"Testing Project {uuid4().hex[:8]}"})
@@ -77,6 +80,42 @@ def test_test_run_rejects_cases_outside_its_project_or_missing(client: TestClien
     for case_id, expected_status in ((other_case.json()["id"], 400), (deleted_case.json()["id"], 404), (999999999, 404)):
         response = client.post(f"/api/v1/test-runs/{run.json()['id']}/cases", json={"test_case_ids": [case_id]})
         assert response.status_code == expected_status, response.text
+
+
+def test_test_run_with_historical_iteration_scope_violation_rejects_case_selection(client: TestClient):
+    scoped_project_id = _create_project(client)
+    out_of_scope_project_id = _create_project(client)
+    iteration = client.post(
+        "/api/v1/iterations",
+        json={"project_ids": [scoped_project_id], "name": f"Scoped iteration {uuid4().hex[:8]}"},
+    )
+    assert iteration.status_code == 200
+    out_of_scope_case = client.post(
+        "/api/v1/test-cases",
+        json={"project_id": out_of_scope_project_id, "title": "Out of scope historical case"},
+    )
+    assert out_of_scope_case.status_code == 200
+
+    db = SessionLocal()
+    try:
+        historical_run = RunModel(
+            project_id=out_of_scope_project_id,
+            iteration_id=iteration.json()["id"],
+            name="Historical scope violation",
+        )
+        db.add(historical_run)
+        db.commit()
+        db.refresh(historical_run)
+        test_run_id = historical_run.id
+    finally:
+        db.close()
+
+    response = client.post(
+        f"/api/v1/test-runs/{test_run_id}/cases",
+        json={"test_case_ids": [out_of_scope_case.json()["id"]]},
+    )
+
+    assert response.status_code == 400, response.text
 
 
 def test_failed_test_result_can_create_bug_with_requirement_owner(client: TestClient):

@@ -11,6 +11,7 @@ from app.models.project_member import ProjectMember
 from app.models.role import Role, UserRole
 from app.models.user import User
 from app.models.workflow_definition import WorkflowTransition
+from app.services.exception_center_service import list_exception_refs
 
 
 def _create_project(client: TestClient) -> int:
@@ -268,6 +269,11 @@ def test_closed_bug_reactivates_into_active_iteration_and_retains_eligible_handl
         assert rows[1].left_at is None
         assert rows[0].operation_log_id is not None
         assert rows[1].operation_log_id == rows[0].operation_log_id
+        refs = list_exception_refs(db, {project_id})
+        assert not any(
+            item["id"] == bug["id"] and item["exception_key"] == "terminal_iteration_snapshot_mismatch"
+            for item in refs
+        )
     finally:
         db.close()
 

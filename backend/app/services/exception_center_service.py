@@ -327,6 +327,21 @@ def _bug_activation_audit_is_inconsistent(db: Session, bug: Bug) -> bool:
 
 
 def _terminal_snapshot_is_inconsistent(db: Session, object_type: str, item) -> bool:
+    closed_histories = db.query(WorkItemIterationHistory).filter(
+        WorkItemIterationHistory.object_type == object_type,
+        WorkItemIterationHistory.object_id == item.id,
+        WorkItemIterationHistory.left_at.isnot(None),
+    ).all()
+    for history in closed_histories:
+        source_snapshot = db.query(IterationCompletionSnapshot).filter(
+            IterationCompletionSnapshot.iteration_id == history.iteration_id
+        ).first()
+        if not source_snapshot or history.left_at <= source_snapshot.ended_at:
+            continue
+        if _is_valid_post_terminal_reactivation(db, object_type, item.id, history):
+            continue
+        return True
+
     if not item.iteration_id:
         return False
     iteration = db.query(Iteration).filter(Iteration.id == item.iteration_id, Iteration.deleted == 0).first()
@@ -353,3 +368,30 @@ def _terminal_snapshot_is_inconsistent(db: Session, object_type: str, item) -> b
         snapshot_item.get("state_id") != getattr(item, "current_state_id", None),
         snapshot_item.get("owner_id") != getattr(item, "owner_id", None),
     ))
+
+
+def _is_valid_post_terminal_reactivation(
+    db: Session,
+    object_type: str,
+    object_id: int,
+    leave_history: WorkItemIterationHistory,
+) -> bool:
+    if object_type != "bug" or leave_history.leave_reason != "reactivated" or not leave_history.operation_log_id:
+        return False
+    operation = db.query(StatusOperationLog).filter(
+        StatusOperationLog.id == leave_history.operation_log_id,
+        StatusOperationLog.object_type == "bug",
+        StatusOperationLog.object_id == object_id,
+        StatusOperationLog.action == "activate",
+    ).first()
+    if not operation:
+        return False
+    selected = operation.selected_values if isinstance(operation.selected_values, dict) else {}
+    if not (operation.reason or selected.get("reopen_reason")):
+        return False
+    return bool(db.query(WorkItemIterationHistory.id).filter(
+        WorkItemIterationHistory.object_type == "bug",
+        WorkItemIterationHistory.object_id == object_id,
+        WorkItemIterationHistory.enter_reason == "reactivated",
+        WorkItemIterationHistory.operation_log_id == operation.id,
+    ).first())

@@ -7,6 +7,7 @@ from app.core.security import create_access_token, get_password_hash
 from app.db.session import SessionLocal
 from app.models.bug import Bug
 from app.models.exception_rule import ExceptionRule
+from app.models.iteration_completion_snapshot import IterationCompletionSnapshot
 from app.models.project_member import ProjectMember
 from app.models.requirement import Requirement
 from app.models.role import Role, UserRole
@@ -17,6 +18,7 @@ from app.models.work_item_iteration_history import WorkItemIterationHistory
 from app.models.workflow_definition import WorkflowTransition
 from app.services.exception_center_service import list_exception_refs
 from app.services.exception_center_service import _latest_state_time
+from app.services.work_item_iteration_history_service import move_work_item_to_iteration
 
 
 EXPECTED_KEYS = {
@@ -633,3 +635,48 @@ def test_normal_link_unlink_and_defer_create_membership_operations(client: TestC
     ), (refs, [(row.object_id, row.enter_reason, row.leave_reason, row.operation_log_id) for row in histories], operations)
     assert all(history.operation_log_id in operations for history in histories)
     assert {"iteration_link", "iteration_unlink", "iteration_defer"} <= set(operations.values())
+
+
+def test_terminal_snapshot_reverse_scan_rejects_post_end_move_and_unlink(client: TestClient):
+    project = client.post("/api/v1/projects", json={"name": f"Reverse snapshot {uuid4().hex[:8]}"}).json()
+    source = client.post("/api/v1/iterations", json={"project_ids": [project["id"]], "name": "Ended source"}).json()
+    target = client.post("/api/v1/iterations", json={"project_ids": [project["id"]], "name": "Active target"}).json()
+    assert client.post(f"/api/v1/workflow-runtime/iteration/{source['id']}/transition", json={"action_key": "start"}).status_code == 200
+    assert client.post(f"/api/v1/workflow-runtime/iteration/{target['id']}/transition", json={"action_key": "start"}).status_code == 200
+    moved = client.post("/api/v1/tasks", json={"project_id": project["id"], "iteration_id": source["id"], "title": "Moved after end"}).json()
+    unlinked = client.post("/api/v1/tasks", json={"project_id": project["id"], "iteration_id": source["id"], "title": "Unlinked after end"}).json()
+    moved_before_end = client.post("/api/v1/tasks", json={"project_id": project["id"], "iteration_id": source["id"], "title": "Moved before end"}).json()
+    db = SessionLocal()
+    try:
+        before_row = db.query(Task).filter(Task.id == moved_before_end["id"]).one()
+        move_work_item_to_iteration(db, before_row, target["id"], reason="updated")
+        for task_id in (moved["id"], unlinked["id"]):
+            row = db.query(Task).filter(Task.id == task_id).one()
+            row.current_state_id = _target_state_id(db, row.workflow_definition_id, "complete")
+        db.commit()
+    finally:
+        db.close()
+    assert client.post(f"/api/v1/workflow-runtime/iteration/{source['id']}/transition", json={"action_key": "complete"}).status_code == 200
+    db = SessionLocal()
+    try:
+        moved_row = db.query(Task).filter(Task.id == moved["id"]).one()
+        unlinked_row = db.query(Task).filter(Task.id == unlinked["id"]).one()
+        move_work_item_to_iteration(db, moved_row, target["id"], reason="updated")
+        move_work_item_to_iteration(db, unlinked_row, None, reason="unlinked")
+        db.flush()
+        ended_at = db.query(IterationCompletionSnapshot.ended_at).filter(
+            IterationCompletionSnapshot.iteration_id == source["id"]
+        ).scalar()
+        db.query(WorkItemIterationHistory).filter(
+            WorkItemIterationHistory.object_type == "task",
+            WorkItemIterationHistory.object_id.in_([moved["id"], unlinked["id"]]),
+            WorkItemIterationHistory.iteration_id == source["id"],
+        ).update({"left_at": ended_at + timedelta(seconds=1)}, synchronize_session=False)
+        db.commit()
+        refs = list_exception_refs(db, {project["id"]})
+    finally:
+        db.close()
+    mismatch_ids = {item["id"] for item in refs if item["exception_key"] == "terminal_iteration_snapshot_mismatch"}
+    assert moved["id"] in mismatch_ids
+    assert unlinked["id"] in mismatch_ids
+    assert moved_before_end["id"] not in mismatch_ids

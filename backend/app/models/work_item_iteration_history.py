@@ -9,7 +9,7 @@ from app.db.session import Base
 class WorkItemIterationHistory(Base):
     __tablename__ = "work_item_iteration_history"
     __table_args__ = (
-        Index("ix_work_item_iteration_history_open_lookup", "object_type", "object_id", "left_at"),
+        Index("idx_wiih_object", "object_type", "object_id", "left_at"),
     )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)

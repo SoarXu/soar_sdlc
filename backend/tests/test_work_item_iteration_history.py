@@ -7,6 +7,7 @@ from app.db.session import Base, SessionLocal
 from app.models.requirement import Requirement
 from app.models.work_item_iteration_history import WorkItemIterationHistory
 from app.services.work_item_iteration_history_service import move_work_item_to_iteration
+from app.db import schema
 
 
 def _create_project(client: TestClient) -> int:
@@ -36,10 +37,16 @@ def _create_requirement(client: TestClient, project_id: int) -> int:
 def test_iteration_membership_history_is_registered_in_model_metadata():
     assert "work_item_iteration_history" in Base.metadata.tables
     index_columns = {
-        tuple(column.name for column in index.columns)
+        (index.name, tuple(column.name for column in index.columns))
         for index in Base.metadata.tables["work_item_iteration_history"].indexes
     }
-    assert ("object_type", "object_id", "left_at") in index_columns
+    assert ("idx_wiih_object", ("object_type", "object_id", "left_at")) in index_columns
+
+
+def test_history_open_lookup_schema_recognizes_existing_same_column_index():
+    indexes = [{"name": "legacy_open_lookup", "column_names": ["object_type", "object_id", "left_at"]}]
+
+    assert schema._history_open_lookup_index_exists(indexes) is True
 
 
 def test_link_and_unlink_requirement_open_and_close_membership_history(client: TestClient):

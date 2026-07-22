@@ -28,7 +28,6 @@ REQUIREMENT_IMPORT_COLUMNS = [
 REQUIRED_COLUMNS = ["项目名称", "需求标题"]
 REQUIREMENT_TYPE_VALUES = ["功能", "接口", "性能", "安全", "体验", "改进", "其他"]
 PRIORITY_VALUES = {"1", "2", "3", "4", "5"}
-IMPORT_MEMBERSHIP_LOCK_RETRY_LIMIT = 3
 
 
 @dataclass
@@ -296,13 +295,11 @@ def _apply_row_to_requirement(
 
 
 def _lock_requirement_for_import_update(db: Session, requirement_id: int) -> tuple[Requirement, dict]:
-    for _ in range(IMPORT_MEMBERSHIP_LOCK_RETRY_LIMIT):
-        preview = _get_requirement_for_import_update(db, requirement_id, for_update=False)
-        locked_iterations = lock_iterations_for_mutation(db, {preview.iteration_id})
-        requirement = _get_requirement_for_import_update(db, requirement_id, for_update=True)
-        if requirement.iteration_id is None or requirement.iteration_id in locked_iterations:
-            return requirement, locked_iterations
-        db.rollback()
+    preview = _get_requirement_for_import_update(db, requirement_id, for_update=False)
+    locked_iterations = lock_iterations_for_mutation(db, {preview.iteration_id})
+    requirement = _get_requirement_for_import_update(db, requirement_id, for_update=True)
+    if requirement.iteration_id is None or requirement.iteration_id in locked_iterations:
+        return requirement, locked_iterations
     raise HTTPException(
         status_code=status.HTTP_409_CONFLICT,
         detail={

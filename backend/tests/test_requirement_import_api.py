@@ -267,10 +267,10 @@ def test_requirement_import_update_rejects_terminal_iteration(client: TestClient
     assert client.get(f"/api/v1/requirements/{existing['id']}").json()["iteration_id"] == iteration["id"]
 
 
-def test_import_update_membership_change_rolls_back_and_retries(monkeypatch):
+def test_import_update_membership_change_returns_conflict_without_local_rollback(monkeypatch):
     events = []
-    rows = iter([SimpleNamespace(iteration_id=7), SimpleNamespace(iteration_id=9)])
-    locked_rows = iter([SimpleNamespace(iteration_id=9), SimpleNamespace(iteration_id=9)])
+    rows = iter([SimpleNamespace(iteration_id=7)])
+    locked_rows = iter([SimpleNamespace(iteration_id=9)])
 
     class SessionSpy:
         def rollback(self):
@@ -289,40 +289,47 @@ def test_import_update_membership_change_rolls_back_and_retries(monkeypatch):
         or {iteration_id: SimpleNamespace(id=iteration_id) for iteration_id in ids},
     )
 
-    requirement, locked_iterations = requirement_import_service._lock_requirement_for_import_update(SessionSpy(), 1)
-
-    assert requirement.iteration_id == 9
-    assert set(locked_iterations) == {9}
-    assert events == [
-        "preview", ("iterations", (7,)), "locked", "rollback",
-        "preview", ("iterations", (9,)), "locked",
-    ]
-
-
-def test_import_update_persistent_membership_change_returns_conflict(monkeypatch):
-    rollbacks = []
-
-    class SessionSpy:
-        def rollback(self):
-            rollbacks.append(True)
-
-    monkeypatch.setattr(
-        requirement_import_service,
-        "_get_requirement_for_import_update",
-        lambda db, requirement_id, for_update: SimpleNamespace(iteration_id=9 if not for_update else 10),
-    )
-    monkeypatch.setattr(
-        requirement_import_service,
-        "lock_iterations_for_mutation",
-        lambda db, ids: {iteration_id: SimpleNamespace(id=iteration_id) for iteration_id in ids},
-    )
-
     with pytest.raises(HTTPException) as exc_info:
         requirement_import_service._lock_requirement_for_import_update(SessionSpy(), 1)
 
     assert exc_info.value.status_code == 409
     assert exc_info.value.detail["code"] == "ITERATION_STATE_CONFLICT"
-    assert len(rollbacks) == 3
+    assert events == ["preview", ("iterations", (7,)), "locked"]
+
+
+def test_import_update_membership_change_does_not_persist_earlier_batch_row(client: TestClient, monkeypatch):
+    project_name = f"Batch atomic import-{uuid4().hex[:8]}"
+    project = client.post("/api/v1/projects", json={"name": project_name}).json()
+    client.post(
+        "/api/v1/requirements",
+        json={"project_id": project["id"], "title": "Existing drift row"},
+    )
+    monkeypatch.setattr(
+        requirement_import_service,
+        "_lock_requirement_for_import_update",
+        lambda *args: (_ for _ in ()).throw(
+            HTTPException(status_code=409, detail={"code": "ITERATION_STATE_CONFLICT"})
+        ),
+    )
+
+    response = client.post(
+        "/api/v1/requirements/import/commit",
+        data={"duplicate_strategy": "update_existing"},
+        files={
+            "file": _xlsx(
+                [
+                    REQUIREMENT_IMPORT_COLUMNS,
+                    [project_name, "Earlier row must rollback"],
+                    [project_name, "Existing drift row"],
+                ]
+            )
+        },
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"]["code"] == "ITERATION_STATE_CONFLICT"
+    titles = {item["title"] for item in client.get("/api/v1/requirements").json()}
+    assert "Earlier row must rollback" not in titles
 
 
 def test_requirement_import_commit_keeps_created_requirement_unassigned(client: TestClient):

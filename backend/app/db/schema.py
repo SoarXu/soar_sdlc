@@ -141,6 +141,14 @@ def _validate_final_workflow_schema(engine: Engine) -> None:
         )
 
 
+def _history_open_lookup_index_exists(indexes: list[dict], canonical_name: str = "idx_wiih_object") -> bool:
+    return any(
+        index.get("name") == canonical_name
+        or index.get("column_names") == ["object_type", "object_id", "left_at"]
+        for index in indexes
+    )
+
+
 def ensure_runtime_schema(engine: Engine) -> None:
     _validate_final_workflow_schema(engine)
     inspector0 = inspect(engine)
@@ -169,12 +177,12 @@ def ensure_runtime_schema(engine: Engine) -> None:
             "owner_id_snapshot",
             "ALTER TABLE work_item_iteration_history ADD COLUMN owner_id_snapshot BIGINT UNSIGNED NULL COMMENT '离开时处理人' AFTER status_name_snapshot",
         )
-        history_index_names = {index["name"] for index in inspector0.get_indexes("work_item_iteration_history")}
-        if "ix_work_item_iteration_history_open_lookup" not in history_index_names:
+        history_indexes = inspector0.get_indexes("work_item_iteration_history")
+        if not _history_open_lookup_index_exists(history_indexes):
             with engine.begin() as conn:
                 conn.execute(
                     text(
-                        "CREATE INDEX ix_work_item_iteration_history_open_lookup "
+                        "CREATE INDEX idx_wiih_object "
                         "ON work_item_iteration_history (object_type, object_id, left_at)"
                     )
                 )

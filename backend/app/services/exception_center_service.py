@@ -13,6 +13,8 @@ from app.models.iteration_completion_snapshot import IterationCompletionSnapshot
 from app.models.project import Project
 from app.models.status_operation import StatusOperationLog
 from app.models.task import Task
+from app.models.test_case import TestCase
+from app.models.test_run import TestRun
 from app.models.user import User
 from app.models.project_member import ProjectMember
 from app.models.role import Role, UserRole
@@ -45,6 +47,7 @@ class _ScanContext:
     users: dict[int, User]
     member_roles: dict[tuple[int, int], set[str]]
     global_roles: dict[int, set[str]]
+    bug_tester_ids: dict[int, set[int]]
     projects: dict[int, Project]
     snapshots: dict[int, IterationCompletionSnapshot]
     iterations: dict[int, Iteration]
@@ -117,6 +120,32 @@ def _load_scan_context(
         project.id: project for project in db.query(Project).filter(Project.id.in_(project_ids)).all()
     } if project_ids else {}
 
+    bug_items = items_by_type.get("bug", [])
+    test_case_ids = {bug.test_case_id for bug in bug_items if bug.test_case_id}
+    test_run_ids = {bug.test_run_id for bug in bug_items if bug.test_run_id}
+    test_cases = {
+        test_case.id: test_case
+        for test_case in db.query(TestCase).filter(
+            TestCase.id.in_(test_case_ids),
+            TestCase.deleted == 0,
+        ).all()
+    } if test_case_ids else {}
+    test_runs = {
+        test_run.id: test_run
+        for test_run in db.query(TestRun).filter(
+            TestRun.id.in_(test_run_ids),
+            TestRun.deleted == 0,
+        ).all()
+    } if test_run_ids else {}
+    bug_tester_ids: dict[int, set[int]] = defaultdict(set)
+    for bug in bug_items:
+        test_case = test_cases.get(bug.test_case_id)
+        test_run = test_runs.get(bug.test_run_id)
+        if test_case and test_case.default_tester_id:
+            bug_tester_ids[bug.id].add(test_case.default_tester_id)
+        if test_run and test_run.test_owner_id:
+            bug_tester_ids[bug.id].add(test_run.test_owner_id)
+
     iteration_ids = {
         iteration_id
         for iteration_id in [
@@ -157,6 +186,7 @@ def _load_scan_context(
         users=users,
         member_roles=dict(member_roles),
         global_roles=dict(global_roles),
+        bug_tester_ids=dict(bug_tester_ids),
         projects=projects,
         snapshots=snapshots,
         iterations=iterations,
@@ -407,8 +437,11 @@ def _owner_is_eligible_from_context(context: _ScanContext, object_type: str, ite
     project = context.projects.get(item.project_id)
     if (project and project.owner_id == owner.id) or "project_owner" in identities:
         identities.add("project_owner")
-    if object_type == "bug" and getattr(item, "verified_by", None) == owner.id:
-        identities.add("tester")
+    if "system_admin" in identities:
+        identities.add("project_owner")
+    if object_type == "bug":
+        if getattr(item, "verified_by", None) == owner.id or owner.id in context.bug_tester_ids.get(item.id, set()):
+            identities.add("tester")
 
     for transition in transitions:
         ui_config = transition.ui_config or {}

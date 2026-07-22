@@ -405,8 +405,10 @@ def test_exception_center_detects_owner_without_current_workflow_action_role(cli
     project = client.post("/api/v1/projects", json={"name": f"Role eligibility {uuid4().hex[:8]}"}).json()
     developer_id, _ = _create_user("developer")
     owner_id, _ = _create_user("project_owner")
+    system_admin_id, _ = _create_user("system_admin")
     _add_member(project["id"], developer_id, "developer")
     _add_member(project["id"], owner_id, "project_owner")
+    _add_member(project["id"], system_admin_id, "developer")
     invalid_task = client.post(
         "/api/v1/tasks",
         json={"project_id": project["id"], "title": "Wrong current role", "owner_id": developer_id},
@@ -418,6 +420,10 @@ def test_exception_center_detects_owner_without_current_workflow_action_role(cli
     owner_task = client.post(
         "/api/v1/tasks",
         json={"project_id": project["id"], "title": "Project owner action", "owner_id": owner_id},
+    ).json()
+    system_admin_task = client.post(
+        "/api/v1/tasks",
+        json={"project_id": project["id"], "title": "System admin owner action", "owner_id": system_admin_id},
     ).json()
 
     db = SessionLocal()
@@ -454,6 +460,96 @@ def test_exception_center_detects_owner_without_current_workflow_action_role(cli
     assert invalid_task["id"] in ineligible_ids(invalid_refs)
     assert matching_task["id"] not in ineligible_ids(matching_refs)
     assert owner_task["id"] not in ineligible_ids(owner_refs)
+    assert system_admin_task["id"] not in ineligible_ids(owner_refs)
+
+
+def test_exception_scan_batches_bug_tester_identities_without_cross_object_leakage(client: TestClient):
+    project = client.post("/api/v1/projects", json={"name": f"Tester identities {uuid4().hex[:8]}"}).json()
+    tester_id, _ = _create_user("developer")
+    other_id, _ = _create_user("developer")
+    _add_member(project["id"], tester_id, "developer")
+    _add_member(project["id"], other_id, "developer")
+    own_case = client.post(
+        "/api/v1/test-cases",
+        json={"project_id": project["id"], "title": "Owned case", "default_tester_id": tester_id},
+    ).json()
+    other_case = client.post(
+        "/api/v1/test-cases",
+        json={"project_id": project["id"], "title": "Other case", "default_tester_id": other_id},
+    ).json()
+    own_run = client.post(
+        "/api/v1/test-runs",
+        json={"project_id": project["id"], "name": "Owned run", "test_owner_id": tester_id},
+    ).json()
+    other_run = client.post(
+        "/api/v1/test-runs",
+        json={"project_id": project["id"], "name": "Other run", "test_owner_id": other_id},
+    ).json()
+    bugs = {
+        "case_positive": client.post(
+            "/api/v1/bugs",
+            json={"project_id": project["id"], "title": "Case tester", "owner_id": tester_id, "test_case_id": own_case["id"]},
+        ).json(),
+        "run_positive": client.post(
+            "/api/v1/bugs",
+            json={"project_id": project["id"], "title": "Run tester", "owner_id": tester_id, "test_run_id": own_run["id"]},
+        ).json(),
+        "unlinked_negative": client.post(
+            "/api/v1/bugs",
+            json={"project_id": project["id"], "title": "Unlinked tester", "owner_id": tester_id},
+        ).json(),
+        "case_negative": client.post(
+            "/api/v1/bugs",
+            json={"project_id": project["id"], "title": "Other case tester", "owner_id": tester_id, "test_case_id": other_case["id"]},
+        ).json(),
+        "run_negative": client.post(
+            "/api/v1/bugs",
+            json={"project_id": project["id"], "title": "Other run tester", "owner_id": tester_id, "test_run_id": other_run["id"]},
+        ).json(),
+    }
+    db = SessionLocal()
+    try:
+        row = db.query(Bug).filter(Bug.id == bugs["case_positive"]["id"]).one()
+        transitions = db.query(WorkflowTransition).filter(
+            WorkflowTransition.definition_id == row.workflow_definition_id,
+            WorkflowTransition.from_state_id == row.current_state_id,
+        )
+        original_roles = {transition.id: transition.allowed_roles for transition in transitions.all()}
+        transitions.update({"allowed_roles": "tester"}, synchronize_session=False)
+        db.commit()
+        refs, small_statements = _exception_query_statements({project["id"]})
+    finally:
+        if "original_roles" in locals():
+            for transition_id, allowed_roles in original_roles.items():
+                db.query(WorkflowTransition).filter(WorkflowTransition.id == transition_id).update(
+                    {"allowed_roles": allowed_roles}, synchronize_session=False
+                )
+            db.commit()
+        db.close()
+
+    ineligible_ids = {
+        item["id"] for item in refs
+        if item["object_type"] == "bug" and item["exception_key"] == "owner_ineligible"
+    }
+    assert bugs["case_positive"]["id"] not in ineligible_ids
+    assert bugs["run_positive"]["id"] not in ineligible_ids
+    assert bugs["unlinked_negative"]["id"] in ineligible_ids
+    assert bugs["case_negative"]["id"] in ineligible_ids
+    assert bugs["run_negative"]["id"] in ineligible_ids
+
+    for index in range(6):
+        client.post(
+            "/api/v1/bugs",
+            json={
+                "project_id": project["id"],
+                "title": f"Additional linked tester {index}",
+                "owner_id": tester_id,
+                "test_case_id": own_case["id"],
+                "test_run_id": own_run["id"],
+            },
+        )
+    _, large_statements = _exception_query_statements({project["id"]})
+    assert len(large_statements) <= len(small_statements) + 3
 
 
 def test_integrity_audit_distinguishes_verification_retry_from_true_activation(client: TestClient):

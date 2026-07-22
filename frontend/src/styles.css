@@ -782,6 +782,24 @@ body {
   margin-left: 0;
 }
 
+.project-list-actions {
+  gap: 6px;
+  min-height: 28px;
+}
+
+.project-list-actions .workflow-action-buttons-list,
+.project-list-actions .workflow-primary-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.project-list-actions .el-button {
+  min-height: 28px;
+  padding: 4px 6px;
+  line-height: 20px;
+}
+
 .project-tree-table .el-table__body .el-table__cell:first-child .cell {
   display: flex;
   align-items: center;

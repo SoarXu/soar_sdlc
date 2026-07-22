@@ -11,6 +11,10 @@ function transitionIdOf(action) {
   return Number(action?.transition_id) || 0
 }
 
+function actionKeyOf(action) {
+  return action?.action_key || ''
+}
+
 export async function replaceWorkflowTransitionMap(fetchBatch, projectIds = [], replaceMap = () => {}) {
   replaceMap({})
   const items = [...new Set(projectIds.filter((id) => id !== null && id !== undefined))]
@@ -72,10 +76,17 @@ export function visibleDetailActions(actions = []) {
   return sortWorkflowActions(actions)
 }
 
-export function splitListActions(actions = []) {
+export function splitListActions(actions = [], objectType = '') {
   const visibleActions = visibleListActions(actions)
+  const directProjectActions = objectType === 'project'
+    ? new Set(['start', 'suspend', 'close'])
+    : new Set()
   return {
-    primaryActions: visibleActions.filter((action) => listDisplayOf(action) === 'primary'),
-    moreActions: visibleActions.filter((action) => listDisplayOf(action) !== 'primary')
+    primaryActions: visibleActions.filter((action) => (
+      listDisplayOf(action) === 'primary' || directProjectActions.has(actionKeyOf(action))
+    )),
+    moreActions: visibleActions.filter((action) => (
+      listDisplayOf(action) !== 'primary' && !directProjectActions.has(actionKeyOf(action))
+    ))
   }
 }

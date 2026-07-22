@@ -55,29 +55,36 @@
         <el-table-column label="操作" :width="programOperationWidth" fixed="right">
           <template #default="{ row }">
             <template v-if="row.nodeType === 'program'">
-              <el-button v-if="row.status === 'planning' || row.status === 'paused'" link type="success" @click="openStatusDialog(row, 'program', 'start')">启动</el-button>
-              <el-button v-if="row.status === 'active'" link type="warning" @click="openStatusDialog(row, 'program', 'suspend')">挂起</el-button>
-              <el-button v-if="row.status === 'active' || row.status === 'paused'" link type="danger" @click="openStatusDialog(row, 'program', 'close')">关闭</el-button>
-              <el-button v-if="row.status === 'closed'" link type="success" @click="openStatusDialog(row, 'program', 'activate')">激活</el-button>
-              <el-button link type="primary" @click="openEdit(row)">编辑</el-button>
-              <el-button link type="success" @click="openCreate(row.id)">新增项目集</el-button>
-              <el-button link type="success" @click="openProjectCreate(row.id)">新增项目</el-button>
-              <el-popconfirm title="确认删除该项目集？子项目集及下属项目将一并删除。" @confirm="removeProgram(row.id)">
-                <template #reference><el-button link type="danger">删除</el-button></template>
-              </el-popconfirm>
+              <div class="table-actions project-list-actions">
+                <el-button v-if="row.status === 'planning' || row.status === 'paused'" link type="success" @click="openStatusDialog(row, 'program', 'start')">启动</el-button>
+                <el-button v-if="row.status === 'active'" link type="warning" @click="openStatusDialog(row, 'program', 'suspend')">挂起</el-button>
+                <el-button v-if="row.status === 'active' || row.status === 'paused'" link type="danger" @click="openStatusDialog(row, 'program', 'close')">关闭</el-button>
+                <el-button v-if="row.status === 'closed'" link type="success" @click="openStatusDialog(row, 'program', 'activate')">激活</el-button>
+                <el-button link type="primary" @click="openEdit(row)">编辑</el-button>
+                <el-button link type="success" @click="openCreate(row.id)">新增项目集</el-button>
+                <el-button link type="success" @click="openProjectCreate(row.id)">新增项目</el-button>
+                <el-popconfirm title="确认删除该项目集？子项目集及下属项目将一并删除。" @confirm="removeProgram(row.id)">
+                  <template #reference><el-button link type="danger">删除</el-button></template>
+                </el-popconfirm>
+              </div>
             </template>
             <template v-else>
-              <WorkflowActionButtons
-                object-type="project"
-                :object-id="row.id"
-                mode="list"
-                :transitions="projectWorkflowTransitions[row.id] || []"
-                :auto-load="false"
-                :users="users"
-                @executed="loadData"
-              />
-              <el-button link type="primary" @click="openProjectEdit(row.id)">编辑</el-button>
-              <el-button link type="success" @click="openSubProjectCreate(row)">新增项目</el-button>
+              <div class="table-actions project-list-actions">
+                <WorkflowActionButtons
+                  object-type="project"
+                  :object-id="row.id"
+                  mode="list"
+                  :transitions="projectWorkflowTransitions[row.id] || []"
+                  :auto-load="false"
+                  :users="users"
+                  @executed="loadData"
+                >
+                  <template #after-primary>
+                    <el-button link type="primary" @click="openProjectEdit(row.id)">编辑</el-button>
+                    <el-button link type="success" @click="openSubProjectCreate(row)">新增项目</el-button>
+                  </template>
+                </WorkflowActionButtons>
+              </div>
             </template>
           </template>
         </el-table-column>
@@ -320,7 +327,7 @@ const {
 const programOperationWidth = computed(() => workflowActionColumnWidth(
   flatProjects.value
     .map((row) => projectWorkflowTransitions.value[row.id] || []),
-  { minWidth: 440, extraWidth: 150 }
+  { minWidth: 600, extraWidth: 150 }
 ))
 
 function statusLabel(row) {

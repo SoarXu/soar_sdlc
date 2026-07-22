@@ -4,6 +4,7 @@ import { readFile } from 'node:fs/promises'
 const programsView = await readFile(new URL('./ProgramsView.vue', import.meta.url), 'utf8')
 const projectsView = await readFile(new URL('./ProjectsView.vue', import.meta.url), 'utf8')
 const workflowActionButtons = await readFile(new URL('../components/WorkflowActionButtons.vue', import.meta.url), 'utf8')
+const styles = await readFile(new URL('../styles.css', import.meta.url), 'utf8')
 
 function templateBlock(source, marker, nextMarker) {
   const start = source.indexOf(marker)
@@ -71,3 +72,16 @@ assert.ok(
   projectListAfterPrimaryActions.includes('openEdit(row)'),
   'project list must place Edit in WorkflowActionButtons after-primary content'
 )
+
+assert.match(
+  workflowActionButtons,
+  /splitListActions\(actions\.value, props\.objectType\)/,
+  'workflow action buttons must split list actions by object type'
+)
+
+assert.match(projectsView, /class="table-actions project-list-actions"/)
+assert.match(programsView, /class="table-actions project-list-actions"/)
+assert.match(styles, /\.project-list-actions \.(?:el-button|workflow-action-buttons-list)/)
+assert.match(styles, /\.project-list-actions \.el-button[\s\S]*?min-height: 28px/)
+assert.match(projectsView, /label="分派规则方案"/)
+assert.match(projectsView, /if \(!configId\) return '默认系统工作流'/)

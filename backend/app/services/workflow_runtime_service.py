@@ -215,6 +215,9 @@ def execute_transition(
     )
     if automation_results:
         selected_values["automation_results"] = automation_results
+    status_payload = _status_payload(request)
+    if object_type == "project":
+        status_payload.delegate_reason = None
     operation = create_status_operation(
         db,
         object_type=object_type,
@@ -227,7 +230,7 @@ def execute_transition(
         to_state_id=resolved_target_state.id,
         from_state_name=current_state.status_name,
         to_state_name=resolved_target_state.status_name,
-        payload=_status_payload(request),
+        payload=status_payload,
         actor_id=actor.id if actor else None,
         actor_name=actor.full_name if actor else None,
         is_delegated=delegated,

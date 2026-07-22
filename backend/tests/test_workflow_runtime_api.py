@@ -708,7 +708,11 @@ def test_project_manager_starts_another_owners_project_without_delegate_audit(cl
 
     started = client.post(
         f"/api/v1/workflow-runtime/project/{project['id']}/transition",
-        json={"action_key": "start", "payload": {"effective_time": "2026-07-23"}},
+        json={
+            "action_key": "start",
+            "delegate_reason": "not a delegated work item",
+            "payload": {"effective_time": "2026-07-23"},
+        },
         headers={"Authorization": f"Bearer {manager_token}"},
     )
 

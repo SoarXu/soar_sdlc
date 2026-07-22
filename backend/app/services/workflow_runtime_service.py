@@ -548,6 +548,23 @@ def _can_see_transition(db: Session, object_type: str, item, transition: Workflo
     return _role_allowed(db, object_type, item, transition, actor)
 
 
+def owner_has_executable_current_action(db: Session, object_type: str, item, owner: User) -> bool:
+    """Return whether an assigned owner can execute at least one current human action."""
+    transitions = db.query(WorkflowTransition).filter(
+        WorkflowTransition.definition_id == item.workflow_definition_id,
+        WorkflowTransition.from_state_id == item.current_state_id,
+        WorkflowTransition.enabled.is_(True),
+    ).all()
+    human_transitions = [
+        transition for transition in transitions
+        if not (transition.ui_config or {}).get("hidden")
+        and not (transition.ui_config or {}).get("system_action")
+    ]
+    if not human_transitions:
+        return True
+    return any(_can_see_transition(db, object_type, item, transition, owner) for transition in human_transitions)
+
+
 def _ensure_can_execute(
     db: Session,
     object_type: str,

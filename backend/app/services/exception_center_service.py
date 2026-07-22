@@ -11,6 +11,7 @@ from app.models.project_member import ProjectMember
 from app.models.work_item_iteration_history import WorkItemIterationHistory
 from app.models.workflow_definition import WorkflowTransition
 from app.services.exception_rule_service import ensure_default_exception_rules, resolve_exception_rule
+from app.services.workflow_runtime_service import owner_has_executable_current_action
 from app.services.workflow_state_query_service import (
     current_state_name,
     current_state_supports_entry_action,
@@ -192,7 +193,7 @@ def _add_integrity_exceptions(db: Session, add_if_due, object_type: str, item, e
         return
     if item.owner_id is None and _state_requires_owner(db, item):
         add_if_due(object_type, item, "owner_required_missing", entered_at)
-    elif item.owner_id is not None and not _owner_is_eligible(db, item.project_id, item.owner_id):
+    elif item.owner_id is not None and not _owner_is_eligible(db, object_type, item):
         add_if_due(object_type, item, "owner_ineligible", entered_at)
     if _iteration_history_is_inconsistent(db, object_type, item):
         add_if_due(object_type, item, "iteration_history_inconsistent", entered_at)
@@ -215,12 +216,12 @@ def _state_requires_owner(db: Session, item) -> bool:
     )
 
 
-def _owner_is_eligible(db: Session, project_id: int | None, owner_id: int) -> bool:
-    user = db.query(User).filter(User.id == owner_id, User.deleted == 0, User.is_active.is_(True)).first()
+def _owner_is_eligible(db: Session, object_type: str, item) -> bool:
+    user = db.query(User).filter(User.id == item.owner_id, User.deleted == 0, User.is_active.is_(True)).first()
     return bool(user and db.query(ProjectMember).filter(
-        ProjectMember.project_id == project_id,
-        ProjectMember.user_id == owner_id,
-    ).first())
+        ProjectMember.project_id == item.project_id,
+        ProjectMember.user_id == item.owner_id,
+    ).first() and owner_has_executable_current_action(db, object_type, item, user))
 
 
 def _iteration_history_is_inconsistent(db: Session, object_type: str, item) -> bool:

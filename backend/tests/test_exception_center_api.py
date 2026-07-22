@@ -350,3 +350,58 @@ def test_exception_center_reports_integrity_and_routing_violations_without_flagg
     assert ("task", history_mismatch["id"], "iteration_history_inconsistent") in refs_by_key
     assert ("bug", unaudited_reopen["id"], "missing_reactivation_audit") in refs_by_key
     assert not any(item["id"] == normal_backlog["id"] for item in refs)
+
+
+def test_exception_center_detects_owner_without_current_workflow_action_role(client: TestClient):
+    project = client.post("/api/v1/projects", json={"name": f"Role eligibility {uuid4().hex[:8]}"}).json()
+    developer_id, _ = _create_user("developer")
+    owner_id, _ = _create_user("project_owner")
+    _add_member(project["id"], developer_id, "developer")
+    _add_member(project["id"], owner_id, "project_owner")
+    invalid_task = client.post(
+        "/api/v1/tasks",
+        json={"project_id": project["id"], "title": "Wrong current role", "owner_id": developer_id},
+    ).json()
+    matching_task = client.post(
+        "/api/v1/tasks",
+        json={"project_id": project["id"], "title": "Matching current role", "owner_id": developer_id},
+    ).json()
+    owner_task = client.post(
+        "/api/v1/tasks",
+        json={"project_id": project["id"], "title": "Project owner action", "owner_id": owner_id},
+    ).json()
+
+    db = SessionLocal()
+    try:
+        task = db.query(Task).filter(Task.id == invalid_task["id"]).one()
+        transition_query = db.query(WorkflowTransition).filter(
+            WorkflowTransition.definition_id == task.workflow_definition_id,
+            WorkflowTransition.from_state_id == task.current_state_id,
+        )
+        original_roles = {transition.id: transition.allowed_roles for transition in transition_query.all()}
+        transition_query.update({"allowed_roles": "tester"}, synchronize_session=False)
+        db.commit()
+        invalid_refs = list_exception_refs(db, {project["id"]})
+
+        transition_query.update({"allowed_roles": "developer"}, synchronize_session=False)
+        db.commit()
+        matching_refs = list_exception_refs(db, {project["id"]})
+
+        transition_query.update({"allowed_roles": "project_owner"}, synchronize_session=False)
+        db.commit()
+        owner_refs = list_exception_refs(db, {project["id"]})
+    finally:
+        if "original_roles" in locals():
+            for transition_id, allowed_roles in original_roles.items():
+                db.query(WorkflowTransition).filter(WorkflowTransition.id == transition_id).update(
+                    {"allowed_roles": allowed_roles}, synchronize_session=False
+                )
+            db.commit()
+        db.close()
+
+    def ineligible_ids(refs):
+        return {item["id"] for item in refs if item["object_type"] == "task" and item["exception_key"] == "owner_ineligible"}
+
+    assert invalid_task["id"] in ineligible_ids(invalid_refs)
+    assert matching_task["id"] not in ineligible_ids(matching_refs)
+    assert owner_task["id"] not in ineligible_ids(owner_refs)

@@ -15,13 +15,14 @@ from app.models.role import Role, UserRole
 from app.models.test_run import TestRun as RunModel
 from app.models.user import User
 from app.models.workflow_definition import WorkflowTransition
-from app.services import workflow_runtime_service
+from app.services import iteration_service, workflow_runtime_service
 
 
 def test_transition_item_loader_requests_a_database_row_lock():
     class QuerySpy:
         def __init__(self):
             self.locked = False
+            self.populated_existing = False
             self.item = object()
 
         def filter(self, *args):
@@ -29,6 +30,10 @@ def test_transition_item_loader_requests_a_database_row_lock():
 
         def with_for_update(self):
             self.locked = True
+            return self
+
+        def populate_existing(self):
+            self.populated_existing = True
             return self
 
         def first(self):
@@ -47,21 +52,17 @@ def test_transition_item_loader_requests_a_database_row_lock():
 
     assert item is db.query_spy.item
     assert db.query_spy.locked is True
+    assert db.query_spy.populated_existing is True
 
 
-def test_execute_transition_uses_locking_item_loader(monkeypatch):
+def test_execute_transition_uses_ordered_execution_item_loader(monkeypatch):
     class LockObserved(Exception):
         pass
 
     monkeypatch.setattr(workflow_runtime_service, "ensure_default_workflow_templates", lambda db: None)
     monkeypatch.setattr(
         workflow_runtime_service,
-        "_get_item",
-        lambda *args: pytest.fail("execute_transition used the non-locking loader"),
-    )
-    monkeypatch.setattr(
-        workflow_runtime_service,
-        "_get_item_for_transition",
+        "_get_item_for_execution",
         lambda *args: (_ for _ in ()).throw(LockObserved()),
     )
 
@@ -73,6 +74,86 @@ def test_execute_transition_uses_locking_item_loader(monkeypatch):
             SimpleNamespace(transition_id=1),
             SimpleNamespace(id=1),
         )
+
+
+def test_bug_activation_locks_iterations_before_reloading_bug(monkeypatch):
+    events = []
+    preview = SimpleNamespace(iteration_id=9)
+    reloaded = SimpleNamespace(iteration_id=9)
+
+    monkeypatch.setattr(
+        workflow_runtime_service,
+        "_get_item",
+        lambda *args: events.append("preview") or preview,
+    )
+    monkeypatch.setattr(
+        workflow_runtime_service,
+        "_activation_target_iteration_id",
+        lambda *args: 3,
+    )
+    monkeypatch.setattr(
+        workflow_runtime_service,
+        "lock_iterations_for_mutation",
+        lambda db, ids: events.append(("iterations", tuple(sorted(ids)))) or {},
+    )
+    monkeypatch.setattr(
+        workflow_runtime_service,
+        "_get_item_for_transition",
+        lambda *args: events.append("item") or reloaded,
+    )
+
+    result = workflow_runtime_service._get_item_for_execution(
+        object(),
+        "bug",
+        1,
+        SimpleNamespace(transition_id=7, payload={"target_iteration_id": 3}),
+    )
+
+    assert result is reloaded
+    assert events == ["preview", ("iterations", (3, 9)), "item"]
+
+
+def test_iteration_mutation_locks_are_acquired_in_id_order(monkeypatch):
+    locked_ids = []
+    monkeypatch.setattr(
+        iteration_service,
+        "_get_active_iteration",
+        lambda db, iteration_id, for_update: locked_ids.append(iteration_id) or SimpleNamespace(id=iteration_id),
+    )
+
+    iteration_service.lock_iterations_for_mutation(object(), {9, None, 3})
+
+    assert locked_ids == [3, 9]
+
+
+def test_iteration_transition_locks_its_item_directly_once(monkeypatch):
+    calls = []
+    iteration = SimpleNamespace(id=4)
+    monkeypatch.setattr(
+        workflow_runtime_service,
+        "_get_item",
+        lambda *args: pytest.fail("iteration transition performed an unlocked preview"),
+    )
+    monkeypatch.setattr(
+        workflow_runtime_service,
+        "lock_iterations_for_mutation",
+        lambda *args: pytest.fail("iteration transition locked its row twice"),
+    )
+    monkeypatch.setattr(
+        workflow_runtime_service,
+        "_get_item_for_transition",
+        lambda *args: calls.append("item") or iteration,
+    )
+
+    result = workflow_runtime_service._get_item_for_execution(
+        object(),
+        "iteration",
+        4,
+        SimpleNamespace(transition_id=1, payload={}),
+    )
+
+    assert result is iteration
+    assert calls == ["item"]
 
 
 def test_list_available_transitions_uses_nonlocking_item_loader(monkeypatch):

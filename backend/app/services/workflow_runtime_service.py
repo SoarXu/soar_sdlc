@@ -119,7 +119,7 @@ def execute_transition(
 ):
     ensure_authenticated(actor)
     ensure_default_workflow_templates(db)
-    item = _get_item_for_transition(db, object_type, object_id)
+    item = _get_item_for_execution(db, object_type, object_id, request)
     transition_context = _get_executable_transition(db, object_type, item, request.transition_id)
     transition, current_state = transition_context
     _ensure_supported_runtime_configuration(transition)
@@ -277,11 +277,49 @@ def _get_item_for_transition(db: Session, object_type: str, object_id: int):
         db.query(model)
         .filter(model.id == object_id, getattr(model, "deleted", 0) == 0)
         .with_for_update()
+        .populate_existing()
         .first()
     )
     if not item:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Workflow object not found")
     return item
+
+
+def _get_item_for_execution(
+    db: Session,
+    object_type: str,
+    object_id: int,
+    request: WorkflowTransitionExecuteRequest,
+):
+    if object_type == "iteration":
+        return _get_item_for_transition(db, object_type, object_id)
+
+    preview = _get_item(db, object_type, object_id)
+    iteration_ids = {getattr(preview, "iteration_id", None)}
+    iteration_ids.add(_activation_target_iteration_id(db, object_type, preview, request))
+    if any(iteration_id is not None for iteration_id in iteration_ids):
+        lock_iterations_for_mutation(db, iteration_ids)
+    return _get_item_for_transition(db, object_type, object_id)
+
+
+def _activation_target_iteration_id(
+    db: Session,
+    object_type: str,
+    item,
+    request: WorkflowTransitionExecuteRequest,
+) -> int | None:
+    if object_type != "bug":
+        return None
+    target_iteration_id = (request.payload or {}).get("target_iteration_id")
+    if not target_iteration_id:
+        return None
+    activation_transition = db.query(WorkflowTransition.id).filter(
+        WorkflowTransition.id == request.transition_id,
+        WorkflowTransition.definition_id == item.workflow_definition_id,
+        WorkflowTransition.action_key == "activate",
+        WorkflowTransition.enabled == True,  # noqa: E712
+    ).first()
+    return int(target_iteration_id) if activation_transition else None
 
 
 def _link_reactivation_history_to_operation(

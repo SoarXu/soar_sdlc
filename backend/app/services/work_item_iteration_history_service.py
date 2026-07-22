@@ -146,6 +146,7 @@ def _create_membership_operation(
         object_type=object_type,
         object_id=item.id,
         action=action,
+        operation_kind="membership",
         workflow_definition_id=getattr(item, "workflow_definition_id", None),
         from_state_id=getattr(item, "current_state_id", None),
         to_state_id=getattr(item, "current_state_id", None),

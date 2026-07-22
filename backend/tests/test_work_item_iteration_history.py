@@ -1,3 +1,4 @@
+from datetime import datetime
 from uuid import uuid4
 
 from fastapi.testclient import TestClient
@@ -5,6 +6,7 @@ from sqlalchemy import text
 
 from app.db.session import Base, SessionLocal
 from app.models.requirement import Requirement
+from app.models.status_operation import StatusOperationLog
 from app.models.work_item_iteration_history import WorkItemIterationHistory
 from app.services.work_item_iteration_history_service import move_work_item_to_iteration
 from app.db import schema
@@ -97,6 +99,42 @@ def test_link_and_unlink_requirement_open_and_close_membership_history(client: T
         assert row.left_at is not None
     finally:
         db.close()
+
+
+def test_iteration_membership_changes_do_not_replace_latest_status_operation(client: TestClient):
+    project_id = _create_project(client)
+    iteration_id = _create_iteration(client, project_id)
+    requirement_id = _create_requirement(client, project_id)
+    db = SessionLocal()
+    try:
+        requirement = db.query(Requirement).filter(Requirement.id == requirement_id).one()
+        db.add(StatusOperationLog(
+            object_type="requirement",
+            object_id=requirement.id,
+            action="manual_state_action",
+            workflow_definition_id=requirement.workflow_definition_id,
+            from_state_id=requirement.current_state_id,
+            to_state_id=requirement.current_state_id,
+            from_state_name=requirement.status_name,
+            to_state_name=requirement.status_name,
+            from_status=requirement.status_name,
+            to_status=requirement.status_name,
+            effective_time=datetime(2026, 7, 1, 9, 0, 0),
+            next_owner_id=77,
+        ))
+        db.commit()
+    finally:
+        db.close()
+
+    assert client.post(
+        f"/api/v1/iterations/{iteration_id}/requirements",
+        json={"requirement_ids": [requirement_id]},
+    ).status_code == 200
+    history = client.get(f"/api/v1/requirements/{requirement_id}/status-operations").json()
+
+    assert [operation["action"] for operation in history] == ["manual_state_action"]
+    assert history[-1]["effective_time"].startswith("2026-07-01T09:00:00")
+    assert history[-1]["next_owner_id"] == 77
 
 
 def test_requirement_patch_closes_current_membership_history(client: TestClient):

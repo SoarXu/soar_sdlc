@@ -222,7 +222,11 @@ def test_closed_bug_reactivates_into_active_iteration_and_retains_eligible_handl
         json={
             "action_key": "activate",
             "next_owner_id": handler_id,
-            "payload": {"reason": "Issue reproduced", "target_iteration_id": target_iteration_id},
+            "payload": {
+                "reason": "Issue reproduced",
+                "target_iteration_id": target_iteration_id,
+                "effective_time": "2026-01-01T09:00:00",
+            },
         },
         headers={"Authorization": f"Bearer {reporter_token}"},
     )

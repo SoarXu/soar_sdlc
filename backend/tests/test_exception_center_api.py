@@ -2,9 +2,10 @@ from datetime import datetime, timedelta
 from uuid import uuid4
 
 from fastapi.testclient import TestClient
+from sqlalchemy import event
 
 from app.core.security import create_access_token, get_password_hash
-from app.db.session import SessionLocal
+from app.db.session import SessionLocal, engine
 from app.models.bug import Bug
 from app.models.exception_rule import ExceptionRule
 from app.models.iteration_completion_snapshot import IterationCompletionSnapshot
@@ -95,6 +96,51 @@ def _operation(
         to_status="legacy_target",
         effective_time=entered_at,
     )
+
+
+def _exception_query_statements(project_ids: set[int] | None) -> tuple[list[dict], list[str]]:
+    statements: list[str] = []
+
+    def record_statement(_connection, _cursor, statement, _parameters, _context, _executemany):
+        if statement.lstrip().upper().startswith("SELECT"):
+            statements.append(" ".join(statement.lower().split()))
+
+    event.listen(engine, "before_cursor_execute", record_statement)
+    db = SessionLocal()
+    try:
+        return list_exception_refs(db, project_ids), statements
+    finally:
+        db.close()
+        event.remove(engine, "before_cursor_execute", record_statement)
+
+
+def test_exception_scan_short_circuits_empty_scope_without_reading_work_items(client: TestClient):
+    refs, statements = _exception_query_statements(set())
+
+    assert refs == []
+    assert not any(f" from {table} " in statement for statement in statements for table in ("requirements", "tasks", "bugs"))
+
+
+def test_exception_scan_filters_work_items_in_sql_and_query_count_is_batch_bounded(client: TestClient):
+    scoped = client.post("/api/v1/projects", json={"name": f"Scoped scan {uuid4().hex[:8]}"}).json()
+    outside = client.post("/api/v1/projects", json={"name": f"Outside scan {uuid4().hex[:8]}"}).json()
+    client.post("/api/v1/tasks", json={"project_id": scoped["id"], "title": "Scoped task"})
+    outside_task = client.post("/api/v1/tasks", json={"project_id": outside["id"], "title": "Outside task"}).json()
+
+    refs, small_statements = _exception_query_statements({scoped["id"]})
+    work_item_statements = [
+        statement for statement in small_statements
+        if any(f" from {table} " in statement for table in ("requirements", "tasks", "bugs"))
+    ]
+    assert work_item_statements
+    assert all("project_id in" in statement for statement in work_item_statements)
+    assert not any(item["object_type"] == "task" and item["id"] == outside_task["id"] for item in refs)
+
+    for index in range(6):
+        client.post("/api/v1/tasks", json={"project_id": scoped["id"], "title": f"Batch task {index}"})
+    _, large_statements = _exception_query_statements({scoped["id"]})
+
+    assert len(large_statements) <= len(small_statements) + 3
 
 
 def test_latest_state_entry_time_matches_state_id_not_legacy_status(client: TestClient):
@@ -601,6 +647,46 @@ def test_terminal_iteration_snapshot_detects_items_added_after_end(client: TestC
     assert late["id"] in mismatch_ids
 
 
+def test_backfilled_iteration_completion_time_does_not_invalidate_recorded_snapshot(client: TestClient):
+    project = client.post("/api/v1/projects", json={"name": f"Backfilled completion {uuid4().hex[:8]}"}).json()
+    iteration = client.post(
+        "/api/v1/iterations",
+        json={"project_ids": [project["id"]], "name": "Backfilled completion iteration"},
+    ).json()
+    assert client.post(
+        f"/api/v1/workflow-runtime/iteration/{iteration['id']}/transition",
+        json={"action_key": "start"},
+    ).status_code == 200
+    task = client.post(
+        "/api/v1/tasks",
+        json={"project_id": project["id"], "iteration_id": iteration["id"], "title": "Recorded before completion"},
+    ).json()
+    db = SessionLocal()
+    try:
+        row = db.query(Task).filter(Task.id == task["id"]).one()
+        row.current_state_id = _target_state_id(db, row.workflow_definition_id, "complete")
+        db.commit()
+    finally:
+        db.close()
+    assert client.post(
+        f"/api/v1/workflow-runtime/iteration/{iteration['id']}/transition",
+        json={"action_key": "complete", "payload": {"effective_time": "2026-01-01T18:00:00"}},
+    ).status_code == 200
+
+    db = SessionLocal()
+    try:
+        refs = list_exception_refs(db, {project["id"]})
+    finally:
+        db.close()
+
+    assert not any(
+        item["object_type"] == "task"
+        and item["id"] == task["id"]
+        and item["exception_key"] == "terminal_iteration_snapshot_mismatch"
+        for item in refs
+    )
+
+
 def test_normal_link_unlink_and_defer_create_membership_operations(client: TestClient):
     project = client.post("/api/v1/projects", json={"name": f"Membership operations {uuid4().hex[:8]}"}).json()
     source = client.post("/api/v1/iterations", json={"project_ids": [project["id"]], "name": "Source"}).json()
@@ -621,7 +707,7 @@ def test_normal_link_unlink_and_defer_create_membership_operations(client: TestC
             WorkItemIterationHistory.object_id.in_([deferred["id"], unlinked["id"]]),
         ).all()
         operations = {
-            operation.id: operation.action
+            operation.id: (operation.action, operation.operation_kind)
             for operation in db.query(StatusOperationLog).filter(
                 StatusOperationLog.object_type == "task",
                 StatusOperationLog.object_id.in_([deferred["id"], unlinked["id"]]),
@@ -634,7 +720,8 @@ def test_normal_link_unlink_and_defer_create_membership_operations(client: TestC
         for item in refs
     ), (refs, [(row.object_id, row.enter_reason, row.leave_reason, row.operation_log_id) for row in histories], operations)
     assert all(history.operation_log_id in operations for history in histories)
-    assert {"iteration_link", "iteration_unlink", "iteration_defer"} <= set(operations.values())
+    assert {"iteration_link", "iteration_unlink", "iteration_defer"} <= {action for action, _ in operations.values()}
+    assert {kind for _, kind in operations.values()} == {"membership"}
 
 
 def test_terminal_snapshot_reverse_scan_rejects_post_end_move_and_unlink(client: TestClient):
@@ -664,14 +751,22 @@ def test_terminal_snapshot_reverse_scan_rejects_post_end_move_and_unlink(client:
         move_work_item_to_iteration(db, moved_row, target["id"], reason="updated")
         move_work_item_to_iteration(db, unlinked_row, None, reason="unlinked")
         db.flush()
-        ended_at = db.query(IterationCompletionSnapshot.ended_at).filter(
+        snapshot_recorded_at = db.query(IterationCompletionSnapshot.create_time).filter(
             IterationCompletionSnapshot.iteration_id == source["id"]
         ).scalar()
-        db.query(WorkItemIterationHistory).filter(
+        changed_histories = db.query(WorkItemIterationHistory).filter(
             WorkItemIterationHistory.object_type == "task",
             WorkItemIterationHistory.object_id.in_([moved["id"], unlinked["id"]]),
             WorkItemIterationHistory.iteration_id == source["id"],
-        ).update({"left_at": ended_at + timedelta(seconds=1)}, synchronize_session=False)
+        ).all()
+        for history in changed_histories:
+            history.left_at = snapshot_recorded_at + timedelta(seconds=2)
+        db.query(StatusOperationLog).filter(
+            StatusOperationLog.id.in_({history.operation_log_id for history in changed_histories})
+        ).update(
+            {"create_time": snapshot_recorded_at + timedelta(seconds=2)},
+            synchronize_session=False,
+        )
         db.commit()
         refs = list_exception_refs(db, {project["id"]})
     finally:
@@ -744,7 +839,7 @@ def test_post_terminal_reactivation_exemption_validates_selected_iterations_acto
         db.commit()
         assert _is_valid_post_terminal_reactivation(db, "bug", bug["id"], leave) is False
         enter.entered_by = actor_id
-        enter.entered_at = event_time + timedelta(seconds=1)
+        enter.entered_at = event_time + timedelta(seconds=10)
         db.commit()
         assert _is_valid_post_terminal_reactivation(db, "bug", bug["id"], leave) is False
     finally:

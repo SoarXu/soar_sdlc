@@ -151,6 +151,18 @@ def _history_open_lookup_index_exists(indexes: list[dict], canonical_name: str =
 def ensure_runtime_schema(engine: Engine) -> None:
     _validate_final_workflow_schema(engine)
     inspector0 = inspect(engine)
+    if "status_operation_log" in inspector0.get_table_names():
+        _ensure_column(
+            engine,
+            "status_operation_log",
+            "operation_kind",
+            "ALTER TABLE status_operation_log ADD COLUMN operation_kind VARCHAR(16) NOT NULL DEFAULT 'state' AFTER action",
+        )
+        with engine.begin() as conn:
+            conn.execute(text(
+                "UPDATE status_operation_log SET operation_kind = 'membership' "
+                "WHERE action LIKE 'iteration\\_%' AND operation_kind <> 'membership'"
+            ))
     if "iteration_completion_snapshots" not in inspector0.get_table_names():
         with engine.begin() as conn:
             conn.execute(text(

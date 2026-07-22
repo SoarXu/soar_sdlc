@@ -447,6 +447,7 @@ CREATE TABLE IF NOT EXISTS object_relation (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='对象关联表';
 
 CREATE TABLE IF NOT EXISTS status_operation_log (
+  operation_kind VARCHAR(16) NOT NULL DEFAULT 'state' COMMENT 'state or membership',
   id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '记录 ID',
   object_type VARCHAR(64) NOT NULL COMMENT '对象类型：program、project',
   object_id BIGINT UNSIGNED NOT NULL COMMENT '对象 ID',

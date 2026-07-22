@@ -387,11 +387,27 @@ def _is_valid_post_terminal_reactivation(
     if not operation:
         return False
     selected = operation.selected_values if isinstance(operation.selected_values, dict) else {}
-    if not (operation.reason or selected.get("reopen_reason")):
+    source_iteration_id = selected.get("source_iteration_id")
+    target_iteration_id = selected.get("target_iteration_id")
+    if not source_iteration_id or not target_iteration_id:
         return False
-    return bool(db.query(WorkItemIterationHistory.id).filter(
+    if int(source_iteration_id) != leave_history.iteration_id:
+        return False
+    if not operation.actor_id or not operation.reason or not selected.get("reopen_reason"):
+        return False
+    enter_history = db.query(WorkItemIterationHistory).filter(
         WorkItemIterationHistory.object_type == "bug",
         WorkItemIterationHistory.object_id == object_id,
+        WorkItemIterationHistory.iteration_id == int(target_iteration_id),
         WorkItemIterationHistory.enter_reason == "reactivated",
         WorkItemIterationHistory.operation_log_id == operation.id,
-    ).first())
+    ).first()
+    if not enter_history:
+        return False
+    if leave_history.left_by != operation.actor_id or enter_history.entered_by != operation.actor_id:
+        return False
+    if not leave_history.left_at or leave_history.left_at > enter_history.entered_at:
+        return False
+    if leave_history.left_at > operation.effective_time or enter_history.entered_at > operation.effective_time:
+        return False
+    return True

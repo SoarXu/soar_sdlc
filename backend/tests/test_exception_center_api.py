@@ -17,7 +17,7 @@ from app.models.user import User
 from app.models.work_item_iteration_history import WorkItemIterationHistory
 from app.models.workflow_definition import WorkflowTransition
 from app.services.exception_center_service import list_exception_refs
-from app.services.exception_center_service import _latest_state_time
+from app.services.exception_center_service import _is_valid_post_terminal_reactivation, _latest_state_time
 from app.services.work_item_iteration_history_service import move_work_item_to_iteration
 
 
@@ -680,3 +680,56 @@ def test_terminal_snapshot_reverse_scan_rejects_post_end_move_and_unlink(client:
     assert moved["id"] in mismatch_ids
     assert unlinked["id"] in mismatch_ids
     assert moved_before_end["id"] not in mismatch_ids
+
+
+def test_post_terminal_reactivation_exemption_validates_selected_iterations_actor_and_time(client: TestClient):
+    project = client.post("/api/v1/projects", json={"name": f"Strict reactivation {uuid4().hex[:8]}"}).json()
+    actor_id, _ = _create_user("developer")
+    bug = client.post("/api/v1/bugs", json={"project_id": project["id"], "title": "Strict chain"}).json()
+    source_iteration_id = 31001
+    target_iteration_id = 31002
+    event_time = datetime.now()
+    db = SessionLocal()
+    try:
+        operation = _operation("bug", bug["id"], bug["workflow_definition_id"], bug["current_state_id"], event_time, "activate")
+        operation.actor_id = actor_id
+        operation.reason = "reproduced"
+        operation.selected_values = {
+            "source_iteration_id": source_iteration_id,
+            "target_iteration_id": target_iteration_id,
+            "reopen_reason": "reproduced",
+            "reopen_count_after": 1,
+        }
+        db.add(operation)
+        db.flush()
+        leave = WorkItemIterationHistory(
+            object_type="bug", object_id=bug["id"], iteration_id=source_iteration_id,
+            enter_reason="linked", entered_at=event_time - timedelta(hours=1),
+            left_at=event_time - timedelta(seconds=2), left_by=actor_id,
+            leave_reason="reactivated", operation_log_id=operation.id,
+        )
+        enter = WorkItemIterationHistory(
+            object_type="bug", object_id=bug["id"], iteration_id=target_iteration_id,
+            enter_reason="reactivated", entered_at=event_time - timedelta(seconds=1),
+            entered_by=actor_id, operation_log_id=operation.id,
+        )
+        db.add_all([leave, enter])
+        db.commit()
+        assert _is_valid_post_terminal_reactivation(db, "bug", bug["id"], leave) is True
+
+        operation.selected_values = {**operation.selected_values, "source_iteration_id": source_iteration_id + 9}
+        db.commit()
+        assert _is_valid_post_terminal_reactivation(db, "bug", bug["id"], leave) is False
+        operation.selected_values = {**operation.selected_values, "source_iteration_id": source_iteration_id, "target_iteration_id": target_iteration_id + 9}
+        db.commit()
+        assert _is_valid_post_terminal_reactivation(db, "bug", bug["id"], leave) is False
+        operation.selected_values = {**operation.selected_values, "target_iteration_id": target_iteration_id}
+        enter.entered_by = actor_id + 9
+        db.commit()
+        assert _is_valid_post_terminal_reactivation(db, "bug", bug["id"], leave) is False
+        enter.entered_by = actor_id
+        enter.entered_at = event_time + timedelta(seconds=1)
+        db.commit()
+        assert _is_valid_post_terminal_reactivation(db, "bug", bug["id"], leave) is False
+    finally:
+        db.close()

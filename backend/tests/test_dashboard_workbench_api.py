@@ -135,9 +135,16 @@ def test_workbench_returns_default_queue_sections_for_pending_and_unassigned(cli
 def test_workbench_queue_uses_state_category_and_status_name(client: TestClient):
     developer_id, developer_token = _create_user_with_role(f"state_queue_{uuid4().hex[:6]}", "developer")
     project_id = _create_project(client, "State identity queue project")
+    iteration_id = _create_iteration(client, project_id, "State identity queue iteration")
+    _start_iteration(client, iteration_id)
     task = client.post(
         "/api/v1/tasks",
-        json={"project_id": project_id, "title": "State identity queue task", "owner_id": developer_id},
+        json={
+            "project_id": project_id,
+            "iteration_id": iteration_id,
+            "title": "State identity queue task",
+            "owner_id": developer_id,
+        },
     ).json()
     _add_project_member(project_id, developer_id, "developer")
 
@@ -304,27 +311,29 @@ def test_workbench_returns_created_watched_mentioned_and_exception_center(client
 def test_authenticated_creates_immediately_appear_in_created_by_me(client: TestClient):
     user_id, token = _create_user_with_role(f"creator_user_{uuid4().hex[:6]}", "tester")
     project_id = _create_project(client, "Creator tracking project")
+    iteration_id = _create_iteration(client, project_id, "Creator tracking iteration")
+    _start_iteration(client, iteration_id)
     _add_project_member(project_id, user_id, "tester")
     headers = {"Authorization": f"Bearer {token}"}
 
     requirement = client.post(
         "/api/v1/requirements",
-        json={"project_id": project_id, "title": f"Created requirement {uuid4().hex[:8]}"},
+        json={"project_id": project_id, "iteration_id": iteration_id, "title": f"Created requirement {uuid4().hex[:8]}"},
         headers=headers,
     )
     task = client.post(
         "/api/v1/tasks",
-        json={"project_id": project_id, "title": f"Created task {uuid4().hex[:8]}"},
+        json={"project_id": project_id, "iteration_id": iteration_id, "title": f"Created task {uuid4().hex[:8]}"},
         headers=headers,
     )
     bug = client.post(
         "/api/v1/bugs",
-        json={"project_id": project_id, "title": f"Created bug {uuid4().hex[:8]}"},
+        json={"project_id": project_id, "iteration_id": iteration_id, "title": f"Created bug {uuid4().hex[:8]}"},
         headers=headers,
     )
     test_run = client.post(
         "/api/v1/test-runs",
-        json={"project_id": project_id, "name": f"Created test run {uuid4().hex[:8]}"},
+        json={"project_id": project_id, "iteration_id": iteration_id, "name": f"Created test run {uuid4().hex[:8]}"},
         headers=headers,
     )
 
@@ -338,8 +347,198 @@ def test_authenticated_creates_immediately_appear_in_created_by_me(client: TestC
         ("requirement", requirement.json()["id"]),
         ("task", task.json()["id"]),
         ("bug", bug.json()["id"]),
-        ("test_run", test_run.json()["id"]),
     } <= created_refs
+    assert ("test_run", test_run.json()["id"]) not in created_refs
+
+
+def test_workbench_scopes_execution_to_active_iterations_and_excludes_uniterated_items(client: TestClient):
+    user_id, token = _create_user_with_role(f"active_scope_{uuid4().hex[:6]}", "product_manager")
+    project_id = _create_project(client, "Active scope project")
+    _add_project_member(project_id, user_id, "product_manager")
+    planning_iteration_id = _create_iteration(client, project_id, "Planning iteration")
+    active_iteration_id = _create_iteration(client, project_id, "Active iteration")
+    _start_iteration(client, active_iteration_id)
+    headers = {"Authorization": f"Bearer {token}"}
+
+    active_requirement = client.post(
+        "/api/v1/requirements",
+        json={
+            "project_id": project_id,
+            "iteration_id": active_iteration_id,
+            "title": "Active assigned requirement",
+            "owner_id": user_id,
+        },
+        headers=headers,
+    ).json()
+    active_unassigned_task = client.post(
+        "/api/v1/tasks",
+        json={
+            "project_id": project_id,
+            "iteration_id": active_iteration_id,
+            "title": "Active unassigned task",
+        },
+        headers=headers,
+    ).json()
+    planning_task = client.post(
+        "/api/v1/tasks",
+        json={
+            "project_id": project_id,
+            "iteration_id": planning_iteration_id,
+            "title": "Planning assigned task",
+            "owner_id": user_id,
+        },
+        headers=headers,
+    ).json()
+    uniterated_requirement = client.post(
+        "/api/v1/requirements",
+        json={
+            "project_id": project_id,
+            "title": "Uniterated requirement",
+            "owner_id": user_id,
+        },
+        headers=headers,
+    ).json()
+    uniterated_task = client.post(
+        "/api/v1/tasks",
+        json={"project_id": project_id, "title": "Uniterated task"},
+        headers=headers,
+    ).json()
+    uniterated_bug = client.post(
+        "/api/v1/bugs",
+        json={"project_id": project_id, "title": "Uniterated bug", "owner_id": user_id},
+        headers=headers,
+    ).json()
+
+    db = SessionLocal()
+    try:
+        db.add(
+            ObjectWatch(
+                object_type="task",
+                object_id=uniterated_task["id"],
+                user_id=user_id,
+                source="manual",
+                enabled=True,
+            )
+        )
+        db.add(
+            WorkItemComment(
+                object_type="bug",
+                object_id=uniterated_bug["id"],
+                author_id=user_id,
+                body="@active_scope",
+                mentioned_user_ids=[user_id],
+                mentions_metadata=[{"user_id": user_id, "display_name": "Active scope user"}],
+            )
+        )
+        db.commit()
+    finally:
+        db.close()
+
+    data = client.get("/api/v1/dashboard/workbench", headers=headers).json()
+    pending_refs = {(item["object_type"], item["id"]) for item in data["pending_handling"]["items"]}
+    unassigned_refs = {(item["object_type"], item["id"]) for item in data["unassigned"]["items"]}
+    created_refs = {(item["object_type"], item["id"]) for item in data["created_by_me"]["items"]}
+
+    assert "unplanned" not in data
+    assert pending_refs == {("requirement", active_requirement["id"])}
+    assert unassigned_refs == {("task", active_unassigned_task["id"])}
+    assert ("requirement", active_requirement["id"]) in created_refs
+    assert ("task", planning_task["id"]) not in created_refs
+    uniterated_refs = {
+        ("requirement", uniterated_requirement["id"]),
+        ("task", uniterated_task["id"]),
+        ("bug", uniterated_bug["id"]),
+    }
+    for section in (
+        "pending_handling",
+        "unassigned",
+        "created_by_me",
+        "watched_by_me",
+        "mentioned_me",
+        "exception_center",
+    ):
+        section_refs = {(item["object_type"], item["id"]) for item in data[section]["items"]}
+        assert uniterated_refs.isdisjoint(section_refs)
+
+
+def test_workbench_empty_project_scope_is_not_all_projects(client: TestClient):
+    _, outsider_token = _create_user_with_role(f"scope_outsider_{uuid4().hex[:6]}", "developer")
+    project_id = _create_project(client, "Invisible workbench project")
+    iteration_id = _create_iteration(client, project_id, "Invisible active iteration")
+    _start_iteration(client, iteration_id)
+    task = client.post(
+        "/api/v1/tasks",
+        json={"project_id": project_id, "iteration_id": iteration_id, "title": "Invisible unassigned task"},
+    ).json()
+
+    data = client.get(
+        "/api/v1/dashboard/workbench",
+        headers={"Authorization": f"Bearer {outsider_token}"},
+    ).json()
+    visible_refs = {
+        (item["object_type"], item["id"])
+        for section in ("pending_handling", "unassigned", "exception_center")
+        for item in data[section]["items"]
+    }
+
+    assert ("task", task["id"]) not in visible_refs
+
+
+def test_system_admin_workbench_has_explicit_all_project_scope(client: TestClient):
+    _, admin_token = _create_user_with_role(f"scope_admin_{uuid4().hex[:6]}", "system_admin")
+    project_id = _create_project(client, "Admin workbench project")
+    iteration_id = _create_iteration(client, project_id, "Admin active iteration")
+    _start_iteration(client, iteration_id)
+    task = client.post(
+        "/api/v1/tasks",
+        json={"project_id": project_id, "iteration_id": iteration_id, "title": "Admin visible unassigned task"},
+    ).json()
+
+    data = client.get(
+        "/api/v1/dashboard/workbench",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    ).json()
+
+    assert ("task", task["id"]) in {
+        (item["object_type"], item["id"]) for item in data["unassigned"]["items"]
+    }
+
+
+def test_terminal_iteration_open_item_is_only_reported_as_integrity_exception(client: TestClient):
+    user_id, token = _create_user_with_role(f"integrity_user_{uuid4().hex[:6]}", "developer")
+    project_id = _create_project(client, "Integrity exception project")
+    _add_project_member(project_id, user_id, "developer")
+    iteration_id = _create_iteration(client, project_id, "Completed integrity iteration")
+    _start_iteration(client, iteration_id)
+    completed = client.post(
+        f"/api/v1/workflow-runtime/iteration/{iteration_id}/transition",
+        json={"action_key": "complete"},
+    )
+    assert completed.status_code == 200
+    task = client.post(
+        "/api/v1/tasks",
+        json={"project_id": project_id, "title": "Legacy open task", "owner_id": user_id},
+    ).json()
+    db = SessionLocal()
+    try:
+        db.query(Task).filter(Task.id == task["id"]).update({"iteration_id": iteration_id})
+        db.commit()
+    finally:
+        db.close()
+
+    data = client.get(
+        "/api/v1/dashboard/workbench",
+        headers={"Authorization": f"Bearer {token}"},
+    ).json()
+    pending_refs = {(item["object_type"], item["id"]) for item in data["pending_handling"]["items"]}
+    exception_item = next(
+        item
+        for item in data["exception_center"]["items"]
+        if item["object_type"] == "task" and item["id"] == task["id"]
+    )
+
+    assert ("task", task["id"]) not in pending_refs
+    assert exception_item["exception_key"] == "terminal_iteration_open_item"
 
 
 def test_workbench_move_endpoint_is_removed(client: TestClient):

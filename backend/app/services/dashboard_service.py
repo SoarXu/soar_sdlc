@@ -14,6 +14,7 @@ from app.models.test_case import TestCase
 from app.models.test_run import TestRun
 from app.models.user import User
 from app.models.work_item_comment import WorkItemComment
+from app.models.workflow_definition import WorkflowTransition
 from app.services.exception_center_service import list_exception_refs
 from app.services.project_team_service import workbench_project_ids_for_user
 from app.services.workflow_state_query_service import current_state_name, is_terminal_state, non_terminal_state_clause
@@ -43,17 +44,37 @@ def get_workbench(db: Session, user_id: int | None = None) -> WorkbenchResponse:
     scoped_project_ids = _expand_project_scope_ids(db, team_project_ids) if team_project_ids else set()
     projects = {item.id: item for item in db.query(Project).filter(Project.deleted == 0).all()}
     iteration_names = {item.id: item.name for item in db.query(Iteration).filter(Iteration.deleted == 0).all()}
-    queue_scope_ids = scoped_project_ids if user_id and view_mode != "all" else set()
-    pending_items = _pending_handling_items(db, projects, iteration_names, user_id, queue_scope_ids)
-    unassigned_items = _unassigned_items(db, projects, iteration_names, queue_scope_ids)
-    created_items = _created_by_me_items(db, projects, iteration_names, user_id)
-    watched_items = _watched_by_me_items(db, projects, iteration_names, user_id)
-    mentioned_items = _mentioned_me_items(db, projects, iteration_names, user_id)
-    exception_items = _exception_center_items(db, projects, iteration_names, queue_scope_ids)
+    active_iteration_ids = _active_iteration_ids(db)
+    project_scope_ids = None if user_id and view_mode == "all" else scoped_project_ids
+    pending_items = _pending_handling_items(
+        db, projects, iteration_names, user_id, project_scope_ids, active_iteration_ids
+    )
+    unassigned_items = _unassigned_items(
+        db, projects, iteration_names, project_scope_ids, active_iteration_ids
+    )
+    created_items = _created_by_me_items(
+        db, projects, iteration_names, user_id, project_scope_ids, active_iteration_ids
+    )
+    watched_items = _watched_by_me_items(
+        db, projects, iteration_names, user_id, project_scope_ids, active_iteration_ids
+    )
+    mentioned_items = _mentioned_me_items(
+        db, projects, iteration_names, user_id, project_scope_ids, active_iteration_ids
+    )
+    exception_items = _exception_center_items(
+        db, projects, iteration_names, project_scope_ids, active_iteration_ids
+    )
     review_tasks = _filter_review_tasks_for_role(_review_tasks(db), user_id, view_mode)
     owner_ids = {
         item.owner_id
-        for section in [pending_items, unassigned_items, created_items, watched_items, mentioned_items, exception_items]
+        for section in [
+            pending_items,
+            unassigned_items,
+            created_items,
+            watched_items,
+            mentioned_items,
+            exception_items,
+        ]
         for item in section
         if item.owner_id
     }
@@ -79,29 +100,31 @@ def _pending_handling_items(
     projects: dict[int, Project],
     iteration_names: dict[int, str],
     user_id: int | None,
-    scoped_project_ids: set[int],
+    scoped_project_ids: set[int] | None,
+    active_iteration_ids: set[int],
 ) -> list[WorkbenchItem]:
     if not user_id:
         return []
     items = [
         _requirement_item(item, projects, iteration_names)
         for item in db.query(Requirement).filter(Requirement.deleted == 0, Requirement.owner_id == user_id).all()
-        if not is_terminal_state(item) and _in_project_scope(item.project_id, scoped_project_ids)
+        if not is_terminal_state(item)
+        and item.iteration_id in active_iteration_ids
+        and _in_project_scope(item.project_id, scoped_project_ids)
     ]
     items.extend(
         _task_item(item, projects, iteration_names)
         for item in db.query(Task).filter(Task.deleted == 0, Task.owner_id == user_id).all()
-        if not is_terminal_state(item) and _in_project_scope(item.project_id, scoped_project_ids)
+        if not is_terminal_state(item)
+        and item.iteration_id in active_iteration_ids
+        and _in_project_scope(item.project_id, scoped_project_ids)
     )
     items.extend(
         _bug_item(item, projects, iteration_names)
         for item in db.query(Bug).filter(Bug.deleted == 0, Bug.owner_id == user_id).all()
-        if not is_terminal_state(item) and _in_project_scope(item.project_id, scoped_project_ids)
-    )
-    items.extend(
-        _test_case_item(item, projects, iteration_names)
-        for item in db.query(TestCase).filter(TestCase.deleted == 0, TestCase.default_tester_id == user_id).all()
-        if _in_project_scope(item.project_id, scoped_project_ids)
+        if not is_terminal_state(item)
+        and item.iteration_id in active_iteration_ids
+        and _in_project_scope(item.project_id, scoped_project_ids)
     )
     return _sort_workbench_items(items)
 
@@ -110,22 +133,29 @@ def _unassigned_items(
     db: Session,
     projects: dict[int, Project],
     iteration_names: dict[int, str],
-    scoped_project_ids: set[int],
+    scoped_project_ids: set[int] | None,
+    active_iteration_ids: set[int],
 ) -> list[WorkbenchItem]:
     items = [
         _requirement_item(item, projects, iteration_names)
         for item in db.query(Requirement).filter(Requirement.deleted == 0, Requirement.owner_id.is_(None)).all()
-        if not is_terminal_state(item) and _in_project_scope(item.project_id, scoped_project_ids)
+        if not is_terminal_state(item)
+        and item.iteration_id in active_iteration_ids
+        and _in_project_scope(item.project_id, scoped_project_ids)
     ]
     items.extend(
         _task_item(item, projects, iteration_names)
         for item in db.query(Task).filter(Task.deleted == 0, Task.owner_id.is_(None)).all()
-        if not is_terminal_state(item) and _in_project_scope(item.project_id, scoped_project_ids)
+        if not is_terminal_state(item)
+        and item.iteration_id in active_iteration_ids
+        and _in_project_scope(item.project_id, scoped_project_ids)
     )
     items.extend(
         _bug_item(item, projects, iteration_names)
         for item in db.query(Bug).filter(Bug.deleted == 0, Bug.owner_id.is_(None)).all()
-        if not is_terminal_state(item) and _in_project_scope(item.project_id, scoped_project_ids)
+        if not is_terminal_state(item)
+        and item.iteration_id in active_iteration_ids
+        and _in_project_scope(item.project_id, scoped_project_ids)
     )
     return _sort_workbench_items(items)
 
@@ -135,30 +165,29 @@ def _created_by_me_items(
     projects: dict[int, Project],
     iteration_names: dict[int, str],
     user_id: int | None,
+    scoped_project_ids: set[int] | None,
+    active_iteration_ids: set[int],
 ) -> list[WorkbenchItem]:
     if not user_id:
         return []
     items = [
         _requirement_item(item, projects, iteration_names)
         for item in db.query(Requirement).filter(Requirement.deleted == 0).all()
-        if item.creator_id == user_id or item.proposer_id == user_id
+        if (item.creator_id == user_id or item.proposer_id == user_id)
+        and item.iteration_id in active_iteration_ids
+        and _in_project_scope(item.project_id, scoped_project_ids)
     ]
     items.extend(
         _task_item(item, projects, iteration_names)
         for item in db.query(Task).filter(Task.deleted == 0, Task.creator_id == user_id).all()
+        if item.iteration_id in active_iteration_ids and _in_project_scope(item.project_id, scoped_project_ids)
     )
     items.extend(
         _bug_item(item, projects, iteration_names)
         for item in db.query(Bug).filter(Bug.deleted == 0).all()
-        if item.creator_id == user_id or item.reporter_id == user_id
-    )
-    items.extend(
-        _test_case_item(item, projects, iteration_names)
-        for item in db.query(TestCase).filter(TestCase.deleted == 0, TestCase.creator_id == user_id).all()
-    )
-    items.extend(
-        _test_run_item(item, projects, iteration_names)
-        for item in db.query(TestRun).filter(TestRun.deleted == 0, TestRun.creator_id == user_id).all()
+        if (item.creator_id == user_id or item.reporter_id == user_id)
+        and item.iteration_id in active_iteration_ids
+        and _in_project_scope(item.project_id, scoped_project_ids)
     )
     return _dedup_and_sort_workbench_items(items)
 
@@ -168,6 +197,8 @@ def _watched_by_me_items(
     projects: dict[int, Project],
     iteration_names: dict[int, str],
     user_id: int | None,
+    scoped_project_ids: set[int] | None,
+    active_iteration_ids: set[int],
 ) -> list[WorkbenchItem]:
     if not user_id:
         return []
@@ -182,7 +213,11 @@ def _watched_by_me_items(
         .order_by(ObjectWatch.id.desc())
         .all()
     ]
-    return _load_workbench_items_by_refs(db, projects, iteration_names, refs)
+    return _filter_active_scoped_items(
+        _load_workbench_items_by_refs(db, projects, iteration_names, refs),
+        scoped_project_ids,
+        active_iteration_ids,
+    )
 
 
 def _mentioned_me_items(
@@ -190,6 +225,8 @@ def _mentioned_me_items(
     projects: dict[int, Project],
     iteration_names: dict[int, str],
     user_id: int | None,
+    scoped_project_ids: set[int] | None,
+    active_iteration_ids: set[int],
 ) -> list[WorkbenchItem]:
     if not user_id:
         return []
@@ -205,17 +242,66 @@ def _mentioned_me_items(
                 "mentioned_in_comment_id": comment.id,
             }
         )
-    return _load_workbench_items_by_refs(db, projects, iteration_names, refs)
+    return _filter_active_scoped_items(
+        _load_workbench_items_by_refs(db, projects, iteration_names, refs),
+        scoped_project_ids,
+        active_iteration_ids,
+    )
 
 
 def _exception_center_items(
     db: Session,
     projects: dict[int, Project],
     iteration_names: dict[int, str],
-    scoped_project_ids: set[int],
+    scoped_project_ids: set[int] | None,
+    active_iteration_ids: set[int],
 ) -> list[WorkbenchItem]:
-    refs = list_exception_refs(db, scoped_project_ids if scoped_project_ids else None)
-    return _load_workbench_items_by_refs(db, projects, iteration_names, refs)
+    refs = list_exception_refs(db, scoped_project_ids)
+    active_items = _filter_active_scoped_items(
+        _load_workbench_items_by_refs(db, projects, iteration_names, refs),
+        scoped_project_ids,
+        active_iteration_ids,
+    )
+    integrity_items = _load_workbench_items_by_refs(
+        db,
+        projects,
+        iteration_names,
+        _terminal_iteration_open_item_refs(db, scoped_project_ids),
+    )
+    return _dedup_and_sort_workbench_items([*active_items, *integrity_items])
+
+
+def _terminal_iteration_open_item_refs(
+    db: Session,
+    scoped_project_ids: set[int] | None,
+) -> list[dict]:
+    terminal_iteration_ids = {
+        iteration.id
+        for iteration in db.query(Iteration).filter(Iteration.deleted == 0).all()
+        if is_terminal_state(iteration)
+    }
+    if not terminal_iteration_ids:
+        return []
+    refs = []
+    for object_type, model in (("requirement", Requirement), ("task", Task), ("bug", Bug)):
+        rows = db.query(model).filter(
+            model.deleted == 0,
+            model.iteration_id.in_(terminal_iteration_ids),
+        ).all()
+        for item in rows:
+            if is_terminal_state(item) or not _in_project_scope(item.project_id, scoped_project_ids):
+                continue
+            refs.append(
+                {
+                    "object_type": object_type,
+                    "id": item.id,
+                    "exception_key": "terminal_iteration_open_item",
+                    "exception_label": "已结束迭代存在未完成事项",
+                    "entered_at": _datetime_value(item.create_time),
+                    "overdue_hours": 0,
+                }
+            )
+    return refs
 
 
 def _load_workbench_items_by_refs(
@@ -273,6 +359,40 @@ def _load_workbench_items_by_refs(
 
 def _count_active(db: Session, model) -> int:
     return db.query(func.count(model.id)).filter(model.deleted == 0).scalar() or 0
+
+
+def _active_iteration_ids(db: Session) -> set[int]:
+    return {
+        row.id
+        for row in (
+            db.query(Iteration.id)
+            .join(
+                WorkflowTransition,
+                (WorkflowTransition.definition_id == Iteration.workflow_definition_id)
+                & (WorkflowTransition.from_state_id == Iteration.current_state_id),
+            )
+            .filter(
+                Iteration.deleted == 0,
+                WorkflowTransition.enabled.is_(True),
+                WorkflowTransition.action_key.in_(("complete", "cancel")),
+            )
+            .distinct()
+            .all()
+        )
+    }
+
+
+def _filter_active_scoped_items(
+    items: list[WorkbenchItem],
+    scoped_project_ids: set[int] | None,
+    active_iteration_ids: set[int],
+) -> list[WorkbenchItem]:
+    return [
+        item
+        for item in items
+        if item.iteration_id in active_iteration_ids
+        and _in_project_scope(item.project_id, scoped_project_ids)
+    ]
 
 
 def _expand_project_scope_ids(db: Session, project_ids: set[int]) -> set[int]:
@@ -486,7 +606,7 @@ def _datetime_value(value) -> str | None:
 
 
 def _in_project_scope(project_id: int | None, scoped_project_ids: set[int] | None) -> bool:
-    if not scoped_project_ids:
+    if scoped_project_ids is None:
         return True
     return bool(project_id and project_id in scoped_project_ids)
 

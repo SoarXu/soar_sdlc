@@ -9,6 +9,7 @@ from app.models.project import Project
 from app.models.requirement import Requirement
 from app.models.task import Task
 from app.models.test_case import TestCase
+from app.models.test_run import TestRun
 from app.models.workflow_definition import WorkflowState, WorkflowTransition
 from app.models.work_item_iteration_history import WorkItemIterationHistory
 from app.services.lifecycle_service import project_lifecycle_phase
@@ -230,9 +231,18 @@ def get_iteration_detail(db: Session, iteration_id: int) -> dict:
     )
     historical_bugs = _historical_bugs(db, iteration_id, {bug.id for bug in bugs})
     completion_snapshot = get_completion_snapshot(db, iteration_id)
+    test_runs = db.query(TestRun).filter(TestRun.deleted == 0, TestRun.iteration_id == iteration_id).all()
     covered_requirement_ids = {case.requirement_id for case in test_cases if case.requirement_id}
-    requirement_total = int((completion_snapshot or {}).get("counts", {}).get("requirement", len(requirements)))
-    closed_requirement_total = int((completion_snapshot or {}).get("terminal_counts", {}).get("requirement", len([item for item in requirements if is_terminal_state(item)])))
+    snapshot_counts = (completion_snapshot or {}).get("counts", {})
+    snapshot_terminal_counts = (completion_snapshot or {}).get("terminal_counts", {})
+    requirement_total = int(snapshot_counts.get("requirement", len(requirements)))
+    closed_requirement_total = int(snapshot_terminal_counts.get("requirement", len([item for item in requirements if is_terminal_state(item)])))
+    task_total = int(snapshot_counts.get("task", len(tasks_by_id)))
+    closed_task_total = int(snapshot_terminal_counts.get("task", len([item for item in tasks_by_id.values() if is_terminal_state(item)])))
+    bug_total = int(snapshot_counts.get("bug", len(bugs)))
+    closed_bug_total = int(snapshot_terminal_counts.get("bug", len([item for item in bugs if is_terminal_state(item)])))
+    test_run_total = int(snapshot_counts.get("test_run", len(test_runs)))
+    closed_test_run_total = int(snapshot_terminal_counts.get("test_run", len([item for item in test_runs if item.status in {"finished", "completed", "canceled", "closed"}])))
     detail_project_ids = _merge_detail_project_ids(project_ids, requirements, tasks_by_id.values(), test_cases, bugs)
     return {
         "iteration": _iteration_to_dict(iteration, project_ids),
@@ -246,6 +256,12 @@ def get_iteration_detail(db: Session, iteration_id: int) -> dict:
         "metrics": {
             "requirement_total": requirement_total,
             "closed_requirement_total": closed_requirement_total,
+            "task_total": task_total,
+            "closed_task_total": closed_task_total,
+            "bug_total": bug_total,
+            "closed_bug_total": closed_bug_total,
+            "test_run_total": test_run_total,
+            "closed_test_run_total": closed_test_run_total,
             "progress_rate": _rate(closed_requirement_total, requirement_total),
             "covered_requirement_total": len(covered_requirement_ids),
             "test_coverage_rate": _rate(len(covered_requirement_ids), requirement_total),

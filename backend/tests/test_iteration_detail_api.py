@@ -429,6 +429,37 @@ def test_terminal_iteration_rejects_ordinary_work_item_updates_and_deletes(clien
         assert deleted.json()["detail"]["code"] == "ITERATION_NOT_MUTABLE"
 
 
+def test_terminal_iteration_rejects_test_run_create_update_move_and_delete(client: TestClient):
+    project_id = _create_project(client)
+    terminal_iteration_id = _create_iteration(client, [project_id])
+    active_iteration_id = _create_iteration(client, [project_id])
+    movable_run = client.post(
+        "/api/v1/test-runs",
+        json={"project_id": project_id, "iteration_id": active_iteration_id, "name": "Movable test run", "status": "completed"},
+    )
+    assert movable_run.status_code == 200
+    terminal_run = client.post(
+        "/api/v1/test-runs",
+        json={"project_id": project_id, "iteration_id": terminal_iteration_id, "name": "Terminal test run", "status": "completed"},
+    )
+    assert terminal_run.status_code == 200
+    _mark_iteration_terminal(terminal_iteration_id)
+
+    responses = [
+        client.post(
+            "/api/v1/test-runs",
+            json={"project_id": project_id, "iteration_id": terminal_iteration_id, "name": "Forbidden test run"},
+        ),
+        client.patch(f"/api/v1/test-runs/{terminal_run.json()['id']}", json={"name": "Forbidden rename"}),
+        client.delete(f"/api/v1/test-runs/{terminal_run.json()['id']}"),
+        client.patch(f"/api/v1/test-runs/{movable_run.json()['id']}", json={"iteration_id": terminal_iteration_id}),
+    ]
+
+    for response in responses:
+        assert response.status_code == 409, response.text
+        assert response.json()["detail"]["code"] == "ITERATION_NOT_MUTABLE"
+
+
 def test_iteration_project_scope_removal_closes_work_item_history_with_actor_and_reason(client: TestClient):
     retained_project_id = _create_project(client, "Retained project")
     removed_project_id = _create_project(client, "Removed project")
@@ -560,6 +591,33 @@ def test_terminal_iteration_detail_uses_persisted_completion_snapshot(client: Te
     historical_detail = client.get(f"/api/v1/iterations/{iteration_id}/detail").json()
     assert historical_detail["metrics"]["requirement_total"] == 1
     assert historical_detail["completion_snapshot"]["items"]["requirement"][0]["id"] == requirement_id
+
+
+def test_terminal_iteration_detail_exposes_all_headline_totals_from_snapshot(client: TestClient):
+    project_id = _create_project(client)
+    iteration_id = _create_iteration(client, [project_id], status="active")
+    test_run = client.post(
+        "/api/v1/test-runs",
+        json={
+            "project_id": project_id,
+            "iteration_id": iteration_id,
+            "name": "Completed snapshot test run",
+            "status": "completed",
+        },
+    )
+    assert test_run.status_code == 200
+
+    completed = client.post(
+        f"/api/v1/workflow-runtime/iteration/{iteration_id}/transition",
+        json={"action_key": "complete", "payload": {"effective_time": "2026-07-22T12:00:00"}},
+    )
+    assert completed.status_code == 200, completed.text
+
+    detail = client.get(f"/api/v1/iterations/{iteration_id}/detail").json()
+    assert detail["completion_snapshot"]["counts"]["test_run"] == 1
+    assert detail["completion_snapshot"]["terminal_counts"]["test_run"] == 1
+    assert detail["metrics"]["test_run_total"] == 1
+    assert detail["metrics"]["closed_test_run_total"] == 1
 
 
 def test_iteration_finish_is_blocked_by_open_test_run(client: TestClient):

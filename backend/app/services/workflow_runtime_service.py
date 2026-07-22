@@ -1181,18 +1181,18 @@ def _require_requirement_relations_complete(
 
 
 def ensure_iteration_items_complete(db: Session, iteration_id: int) -> None:
-    requirements = db.query(Requirement).filter(Requirement.iteration_id == iteration_id, Requirement.deleted == 0).all()
+    requirements = db.query(Requirement).filter(Requirement.iteration_id == iteration_id, Requirement.deleted == 0).with_for_update().all()
     blockers: dict[str, list] = {
         "requirement": [item for item in requirements if not is_terminal_state(item)],
         "task": [],
         "bug": [],
         "test_run": [],
     }
-    tasks = db.query(Task).filter(Task.iteration_id == iteration_id, Task.deleted == 0).all()
+    tasks = db.query(Task).filter(Task.iteration_id == iteration_id, Task.deleted == 0).with_for_update().all()
     blockers["task"] = [item for item in tasks if not is_terminal_state(item)]
-    bugs = db.query(Bug).filter(Bug.iteration_id == iteration_id, Bug.deleted == 0).all()
+    bugs = db.query(Bug).filter(Bug.iteration_id == iteration_id, Bug.deleted == 0).with_for_update().all()
     blockers["bug"] = [item for item in bugs if not is_terminal_state(item)]
-    test_runs = db.query(TestRun).filter(TestRun.iteration_id == iteration_id, TestRun.deleted == 0).all()
+    test_runs = db.query(TestRun).filter(TestRun.iteration_id == iteration_id, TestRun.deleted == 0).with_for_update().all()
     blockers["test_run"] = [item for item in test_runs if not _test_run_is_terminal(item)]
     if any(blockers.values()):
         items = []

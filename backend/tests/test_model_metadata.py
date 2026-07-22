@@ -1,4 +1,5 @@
 from app.db.session import Base
+from pathlib import Path
 import app.models  # noqa: F401
 
 
@@ -97,6 +98,18 @@ def test_iteration_completion_snapshot_is_unique_per_iteration_and_audited():
     table = Base.metadata.tables["iteration_completion_snapshots"]
     assert {"iteration_id", "operation_log_id", "counts", "items", "gate_result"} <= set(table.columns.keys())
     assert any(constraint.name == "uk_iteration_completion_snapshot_iteration" for constraint in table.constraints)
+
+
+def test_iteration_completion_snapshot_has_an_alembic_revision():
+    versions_dir = Path(__file__).parents[1] / "alembic" / "versions"
+    revision = next(versions_dir.glob("*_iteration_completion_snapshots.py"), None)
+
+    assert revision is not None
+    source = revision.read_text(encoding="utf-8")
+    assert 'down_revision: Union[str, None] = "20260720_003"' in source
+    assert '"iteration_completion_snapshots"' in source
+    assert '"uk_iteration_completion_snapshot_iteration"' in source
+    assert "def downgrade()" in source
 
 
 def test_workflow_identity_has_no_legacy_string_columns():

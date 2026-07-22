@@ -92,7 +92,7 @@ def list_available_transitions(
             continue
         transition_read = _transition_read(db, transition)
         if object_type == "bug" and transition.action_key == "activate":
-            transition_read = _bug_activation_transition_read(db, item, transition_read)
+            transition_read = _bug_activation_transition_read(db, item, transition, transition_read)
         result.append(transition_read)
     return result
 
@@ -195,8 +195,10 @@ def execute_transition(
         selected_values["handler_routing"] = handler_routing
     if object_type == "bug" and transition.action_key == "activate":
         selected_values.update({
-            "recommended_owner_id": next_owner_id,
+            "recommended_owner_id": handler_routing.get("recommended_owner_id"),
+            "resolved_default_owner_id": handler_routing.get("resolved_default_owner_id"),
             "original_owner_eligible": handler_routing.get("original_owner_eligible", False),
+            "owner_unavailable_reason": handler_routing.get("original_owner_unavailable_reason"),
         })
     next_owner = _owner_user(db, next_owner_id) if next_owner_id else None
     automation_results.extend(
@@ -987,27 +989,55 @@ def _apply_bug_activation(
     )
 
 
-def _reactivation_handler_is_eligible(db: Session, bug: Bug, user_id: int | None, target_state_id: int | None = None) -> bool:
-    if not bug.project_id or not user_id:
-        return False
-    user = db.query(User).filter(User.id == user_id, User.deleted == 0, User.is_active.is_(True)).first()
+def _reactivation_handler_eligibility(
+    db: Session,
+    bug: Bug,
+    user_id: int | None,
+    target_state_id: int | None = None,
+) -> tuple[bool, dict[str, str] | None]:
+    if not user_id:
+        return False, None
+    user = db.query(User).filter(User.id == user_id).first()
     if not user:
-        return False
+        return False, {"code": "OWNER_NOT_FOUND", "message": "原处理人账号不存在"}
+    if user.deleted:
+        return False, {"code": "OWNER_DELETED", "message": "原处理人账号已删除"}
+    if not user.is_active:
+        return False, {"code": "OWNER_INACTIVE", "message": "原处理人账号已停用"}
+    if not bug.project_id:
+        return False, {"code": "PROJECT_NOT_CONFIGURED", "message": "Bug 未关联有效项目"}
     if not db.query(ProjectMember.id).filter(
         ProjectMember.project_id == bug.project_id,
         ProjectMember.user_id == user_id,
     ).first():
-        return False
+        return False, {"code": "OWNER_NOT_PROJECT_MEMBER", "message": "原处理人已离开当前项目"}
     original_state_id = bug.current_state_id
     original_owner_id = bug.owner_id
     try:
         if target_state_id is not None:
             bug.current_state_id = target_state_id
         bug.owner_id = user_id
-        return owner_has_executable_current_action(db, "bug", bug, user)
+        if not owner_has_executable_current_action(db, "bug", bug, user):
+            return False, {
+                "code": "OWNER_ROLE_NOT_ELIGIBLE",
+                "message": "原处理人角色不符合目标状态处理要求",
+            }
+        return True, None
     finally:
         bug.current_state_id = original_state_id
         bug.owner_id = original_owner_id
+
+
+def _reactivation_handler_is_eligible(db: Session, bug: Bug, user_id: int | None, target_state_id: int | None = None) -> bool:
+    eligible, _ = _reactivation_handler_eligibility(db, bug, user_id, target_state_id)
+    return eligible
+
+
+def _transition_allows_unassigned(transition: WorkflowTransition) -> bool:
+    handler_rule = transition.handler_rule or {}
+    if "allow_unassigned" in handler_rule:
+        return handler_rule.get("allow_unassigned") is True
+    return (transition.form_config or {}).get("allow_unassigned") is True
 
 
 def _ensure_reactivation_handler_eligible(db: Session, bug: Bug, user_id: int) -> None:
@@ -1021,6 +1051,7 @@ def _ensure_reactivation_handler_eligible(db: Session, bug: Bug, user_id: int) -
 def _bug_activation_transition_read(
     db: Session,
     bug: Bug,
+    transition: WorkflowTransition,
     transition_read: WorkflowTransitionActionRead,
 ) -> WorkflowTransitionActionRead:
     source_iteration = (
@@ -1060,13 +1091,24 @@ def _bug_activation_transition_read(
     ]
     form_config["fields"] = fields
     form_config["allow_manual_owner"] = True
+    allow_unassigned = _transition_allows_unassigned(transition)
+    form_config["allow_unassigned"] = allow_unassigned
     ui_config = dict(transition_read.ui_config or {})
-    owner_eligible = _reactivation_handler_is_eligible(db, bug, bug.owner_id, transition_read.to_state_id)
+    owner_eligible, unavailable_reason = _reactivation_handler_eligibility(
+        db,
+        bug,
+        bug.owner_id,
+        transition_read.to_state_id,
+    )
+    recommended_owner_id = bug.owner_id if owner_eligible else None
     ui_config.update(
         {
-            "recommended_owner_id": bug.owner_id if owner_eligible else None,
+            "allow_unassigned": allow_unassigned,
+            "recommended_owner_id": recommended_owner_id,
+            "resolved_default_owner_id": recommended_owner_id,
             "original_owner_id": bug.owner_id,
             "original_owner_eligible": owner_eligible,
+            "original_owner_unavailable_reason": unavailable_reason,
         }
     )
     return transition_read.model_copy(
@@ -1326,20 +1368,22 @@ def _next_owner_resolution(
     rule = transition.handler_rule or {}
     original_owner_id = getattr(item, "owner_id", None)
     if object_type == "bug" and transition_action_key == "activate":
-        original_owner_eligible = _reactivation_handler_is_eligible(db, item, original_owner_id)
-        final_owner_id = original_owner_id if original_owner_eligible else None
+        original_owner_eligible, unavailable_reason = _reactivation_handler_eligibility(
+            db,
+            item,
+            original_owner_id,
+        )
+        recommended_owner_id = original_owner_id if original_owner_eligible else None
+        final_owner_id = recommended_owner_id
         source_rule = "eligible_original_handler" if original_owner_eligible else "unassigned"
         manual_override = False
         if request.next_owner_id is not None:
             _ensure_reactivation_handler_eligible(db, item, request.next_owner_id)
             final_owner_id = request.next_owner_id
-            if request.next_owner_id != original_owner_id:
+            if request.next_owner_id != recommended_owner_id:
                 source_rule = "manual_override"
                 manual_override = True
-        allow_unassigned = bool(
-            (transition.handler_rule or {}).get("allow_unassigned") is True
-            or (transition.form_config or {}).get("allow_unassigned") is True
-        )
+        allow_unassigned = _transition_allows_unassigned(transition)
         if final_owner_id is None and not allow_unassigned:
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -1348,10 +1392,14 @@ def _next_owner_resolution(
         return {
             "previous_owner_id": original_owner_id,
             "source_rule": source_rule,
-            "resolved_default_owner_id": original_owner_id,
+            "recommended_owner_id": recommended_owner_id,
+            "resolved_default_owner_id": recommended_owner_id,
             "final_owner_id": final_owner_id,
             "manual_override": manual_override,
+            "manual_override_from_owner_id": recommended_owner_id if manual_override else None,
+            "manual_override_to_owner_id": final_owner_id if manual_override else None,
             "original_owner_eligible": original_owner_eligible,
+            "original_owner_unavailable_reason": unavailable_reason,
             "allow_unassigned": allow_unassigned,
             "override_reason": request.override_reason or request.payload.get("override_reason"),
         }

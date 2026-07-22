@@ -127,15 +127,15 @@
           show-icon
         />
         <el-alert
-          v-else-if="activeAction?.ui_config?.original_owner_id"
-          title="原处理人不可用，请重新选择或保持未分派"
+          v-else-if="hasReactivationOwnerPolicy"
+          :title="originalOwnerUnavailableMessage"
           type="warning"
           :closable="false"
           show-icon
         />
 
-        <el-form-item v-if="allowManualOwner" label="下一处理人">
-          <el-select v-model="nextOwnerId" clearable filterable placeholder="不指定则按规则自动分配">
+        <el-form-item v-if="allowManualOwner" label="下一处理人" :required="reactivationRequiresOwner">
+          <el-select v-model="nextOwnerId" clearable filterable :placeholder="ownerSelectionPlaceholder">
             <el-option v-for="user in users" :key="user.id" :label="user.full_name || user.username" :value="user.id" />
           </el-select>
         </el-form-item>
@@ -146,7 +146,7 @@
       </el-form>
       <template #footer>
         <el-button @click="dialogVisible = false">取消</el-button>
-        <el-button :type="buttonType(activeAction)" :loading="Boolean(submittingAction)" :disabled="noActiveTargetIteration" @click="submitActiveAction">
+        <el-button :type="buttonType(activeAction)" :loading="Boolean(submittingAction)" :disabled="submitDisabled" @click="submitActiveAction">
           {{ submitText }}
         </el-button>
       </template>
@@ -238,6 +238,28 @@ const noActiveTargetIteration = computed(() => {
 const dialogTitle = computed(() => activeAction.value?.form_config?.title || activeAction.value?.action_name || '执行流转')
 const submitText = computed(() => activeAction.value?.form_config?.submit_text || activeAction.value?.action_name || '确认')
 const allowManualOwner = computed(() => actionAllowsManualOwner(activeAction.value))
+const hasReactivationOwnerPolicy = computed(() => (
+  Object.prototype.hasOwnProperty.call(activeAction.value?.ui_config || {}, 'allow_unassigned')
+))
+const reactivationAllowsUnassigned = computed(() => activeAction.value?.ui_config?.allow_unassigned === true)
+const reactivationRequiresOwner = computed(() => (
+  allowManualOwner.value && hasReactivationOwnerPolicy.value && !reactivationAllowsUnassigned.value
+))
+const missingRequiredOwner = computed(() => (
+  reactivationRequiresOwner.value
+    && (nextOwnerId.value === null || nextOwnerId.value === undefined || nextOwnerId.value === '')
+))
+const submitDisabled = computed(() => noActiveTargetIteration.value || missingRequiredOwner.value)
+const originalOwnerUnavailableMessage = computed(() => {
+  const reason = activeAction.value?.ui_config?.original_owner_unavailable_reason?.message
+  if (reactivationAllowsUnassigned.value) {
+    return reason ? `${reason}，可重新选择处理人，也可保持未分派` : '可选择处理人，也可保持未分派'
+  }
+  return reason ? `${reason}，请选择处理人` : '请选择处理人'
+})
+const ownerSelectionPlaceholder = computed(() => (
+  reactivationRequiresOwner.value ? '请选择处理人' : '可保持未分派'
+))
 const needsTargetStateSelection = computed(() => actionNeedsTargetStateSelection(activeAction.value))
 const showOverrideReason = computed(() => needsTargetStateSelection.value && Boolean(selectedTargetStateId.value))
 const targetStateOptions = computed(() => {
@@ -309,7 +331,9 @@ function resetForm(action) {
   for (const field of action?.form_config?.fields || []) {
     formPayload[field.field] = field.default_value ?? null
   }
-  nextOwnerId.value = action?.ui_config?.recommended_owner_id ?? null
+  nextOwnerId.value = action?.ui_config?.recommended_owner_id
+    ?? action?.ui_config?.resolved_default_owner_id
+    ?? null
   delegateReason.value = ''
   selectedTargetStateId.value = null
   overrideReason.value = ''
@@ -357,6 +381,10 @@ function validatePayload() {
   }
   if (activeAction.value?.routing_mode === 'manual_allowed' && !selectedTargetStateId.value) {
     ElMessage.warning('请选择目标状态')
+    return false
+  }
+  if (missingRequiredOwner.value) {
+    ElMessage.warning('请选择处理人')
     return false
   }
   for (const field of formFields.value) {

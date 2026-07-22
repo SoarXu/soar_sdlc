@@ -12,7 +12,10 @@ from app.models.role import Role, UserRole
 from app.models.user import User
 from app.models.workflow_definition import WorkflowTransition
 from app.services.exception_center_service import list_exception_refs
-from app.services.workflow_runtime_service import _reactivation_handler_is_eligible
+from app.services.workflow_runtime_service import (
+    _reactivation_handler_eligibility,
+    _reactivation_handler_is_eligible,
+)
 
 
 def _create_project(client: TestClient) -> int:
@@ -204,6 +207,16 @@ def test_closed_bug_reactivates_into_active_iteration_and_retains_eligible_handl
         json={"action_key": "complete"},
     )
     assert completed.status_code == 200
+    db = SessionLocal()
+    try:
+        transition = db.query(WorkflowTransition).filter(
+            WorkflowTransition.definition_id == bug["workflow_definition_id"],
+            WorkflowTransition.action_key == "activate",
+        ).one()
+        transition.handler_rule = {**(transition.handler_rule or {}), "allow_unassigned": True}
+        db.commit()
+    finally:
+        db.close()
 
     actions = client.get(
         f"/api/v1/workflow-runtime/bug/{bug['id']}/transitions",
@@ -216,7 +229,10 @@ def test_closed_bug_reactivates_into_active_iteration_and_retains_eligible_handl
     assert target_field["required"] is True
     assert {option["value"] for option in target_field["options"]} == {target_iteration_id}
     assert activate_action["form_config"]["allow_manual_owner"] is True
+    assert activate_action["ui_config"]["allow_unassigned"] is True
     assert activate_action["ui_config"]["recommended_owner_id"] == handler_id
+    assert activate_action["ui_config"]["resolved_default_owner_id"] == handler_id
+    assert activate_action["ui_config"]["original_owner_unavailable_reason"] is None
 
     reactivated = client.post(
         f"/api/v1/workflow-runtime/bug/{bug['id']}/transition",
@@ -244,6 +260,8 @@ def test_closed_bug_reactivates_into_active_iteration_and_retains_eligible_handl
     handler_routing = reactivated.json()["selected_values"]["handler_routing"]
     assert handler_routing["source_rule"] == "eligible_original_handler"
     assert handler_routing["manual_override"] is False
+    assert handler_routing["resolved_default_owner_id"] == handler_id
+    assert reactivated.json()["selected_values"]["recommended_owner_id"] == handler_id
     detail = client.get(f"/api/v1/bugs/{bug['id']}").json()
     assert detail["iteration_id"] == target_iteration_id
     assert detail["reopen_count"] == 1
@@ -378,7 +396,7 @@ def test_bug_reactivation_drops_original_handler_who_is_not_a_project_member(cli
             WorkflowTransition.definition_id == bug["workflow_definition_id"],
             WorkflowTransition.action_key == "activate",
         ).one()
-        transition.form_config = {**(transition.form_config or {}), "allow_unassigned": False}
+        transition.handler_rule = {**(transition.handler_rule or {}), "allow_unassigned": False}
         db.commit()
     finally:
         db.close()
@@ -391,6 +409,12 @@ def test_bug_reactivation_drops_original_handler_who_is_not_a_project_member(cli
     assert activate_action["ui_config"]["original_owner_id"] == former_handler_id
     assert activate_action["ui_config"]["original_owner_eligible"] is False
     assert activate_action["ui_config"]["recommended_owner_id"] is None
+    assert activate_action["ui_config"]["resolved_default_owner_id"] is None
+    assert activate_action["ui_config"]["allow_unassigned"] is False
+    assert activate_action["ui_config"]["original_owner_unavailable_reason"] == {
+        "code": "OWNER_NOT_PROJECT_MEMBER",
+        "message": "原处理人已离开当前项目",
+    }
 
     blocked = client.post(
         f"/api/v1/workflow-runtime/bug/{bug['id']}/transition",
@@ -409,7 +433,7 @@ def test_bug_reactivation_drops_original_handler_who_is_not_a_project_member(cli
             WorkflowTransition.definition_id == bug["workflow_definition_id"],
             WorkflowTransition.action_key == "activate",
         ).one()
-        transition.form_config = {**(transition.form_config or {}), "allow_unassigned": True}
+        transition.handler_rule = {**(transition.handler_rule or {}), "allow_unassigned": True}
         db.commit()
     finally:
         db.close()
@@ -424,6 +448,15 @@ def test_bug_reactivation_drops_original_handler_who_is_not_a_project_member(cli
 
     assert reactivated.status_code == 200, reactivated.text
     assert reactivated.json()["owner_id"] is None
+    selected_values = reactivated.json()["selected_values"]
+    assert selected_values["recommended_owner_id"] is None
+    assert selected_values["owner_unavailable_reason"]["code"] == "OWNER_NOT_PROJECT_MEMBER"
+    handler_routing = selected_values["handler_routing"]
+    assert handler_routing["resolved_default_owner_id"] is None
+    assert handler_routing["final_owner_id"] is None
+    assert handler_routing["manual_override"] is False
+    assert handler_routing["manual_override_from_owner_id"] is None
+    assert handler_routing["manual_override_to_owner_id"] is None
     db = SessionLocal()
     try:
         source_history = db.execute(
@@ -436,6 +469,120 @@ def test_bug_reactivation_drops_original_handler_who_is_not_a_project_member(cli
         assert source_history.owner_id_snapshot == former_handler_id
     finally:
         db.close()
+
+
+def test_bug_reactivation_audits_eligible_recommended_owner_manual_override(client: TestClient):
+    reporter_id, reporter_token = _create_user("developer")
+    recommended_owner_id, _ = _create_user("developer")
+    selected_owner_id, _ = _create_user("developer")
+    project_id = _create_project(client)
+    for user_id in (reporter_id, recommended_owner_id, selected_owner_id):
+        _add_member(project_id, user_id, "developer")
+    source_iteration_id = _create_iteration(client, project_id, "Eligible override source", active=True)
+    target_iteration_id = _create_iteration(client, project_id, "Eligible override target", active=True)
+    bug = client.post(
+        "/api/v1/bugs",
+        json={
+            "project_id": project_id,
+            "iteration_id": source_iteration_id,
+            "title": "Eligible override audit",
+            "owner_id": recommended_owner_id,
+            "reporter_id": reporter_id,
+        },
+        headers={"Authorization": f"Bearer {reporter_token}"},
+    ).json()
+    _set_bug_closed(bug["id"])
+    assert client.post(
+        f"/api/v1/workflow-runtime/iteration/{source_iteration_id}/transition",
+        json={"action_key": "complete"},
+    ).status_code == 200
+
+    reactivated = client.post(
+        f"/api/v1/workflow-runtime/bug/{bug['id']}/transition",
+        json={
+            "action_key": "activate",
+            "next_owner_id": selected_owner_id,
+            "payload": {"reason": "Manual reassignment", "target_iteration_id": target_iteration_id},
+        },
+        headers={"Authorization": f"Bearer {reporter_token}"},
+    )
+
+    assert reactivated.status_code == 200, reactivated.text
+    selected_values = reactivated.json()["selected_values"]
+    assert selected_values["recommended_owner_id"] == recommended_owner_id
+    assert selected_values["owner_unavailable_reason"] is None
+    routing = selected_values["handler_routing"]
+    assert routing["resolved_default_owner_id"] == recommended_owner_id
+    assert routing["final_owner_id"] == selected_owner_id
+    assert routing["manual_override"] is True
+    assert routing["manual_override_from_owner_id"] == recommended_owner_id
+    assert routing["manual_override_to_owner_id"] == selected_owner_id
+
+
+def test_bug_reactivation_audits_unavailable_original_owner_manual_override(client: TestClient):
+    reporter_id, reporter_token = _create_user("developer")
+    inactive_owner_id, _ = _create_user("developer")
+    selected_owner_id, _ = _create_user("developer")
+    project_id = _create_project(client)
+    for user_id in (reporter_id, inactive_owner_id, selected_owner_id):
+        _add_member(project_id, user_id, "developer")
+    source_iteration_id = _create_iteration(client, project_id, "Unavailable override source", active=True)
+    target_iteration_id = _create_iteration(client, project_id, "Unavailable override target", active=True)
+    bug = client.post(
+        "/api/v1/bugs",
+        json={
+            "project_id": project_id,
+            "iteration_id": source_iteration_id,
+            "title": "Unavailable override audit",
+            "owner_id": inactive_owner_id,
+            "reporter_id": reporter_id,
+        },
+        headers={"Authorization": f"Bearer {reporter_token}"},
+    ).json()
+    _set_bug_closed(bug["id"])
+    assert client.post(
+        f"/api/v1/workflow-runtime/iteration/{source_iteration_id}/transition",
+        json={"action_key": "complete"},
+    ).status_code == 200
+    db = SessionLocal()
+    try:
+        db.query(User).filter(User.id == inactive_owner_id).update({"is_active": False})
+        db.commit()
+    finally:
+        db.close()
+
+    actions = client.get(
+        f"/api/v1/workflow-runtime/bug/{bug['id']}/transitions",
+        headers={"Authorization": f"Bearer {reporter_token}"},
+    ).json()
+    activate_action = next(item for item in actions if item["action_key"] == "activate")
+    assert activate_action["ui_config"]["recommended_owner_id"] is None
+    assert activate_action["ui_config"]["resolved_default_owner_id"] is None
+    assert activate_action["ui_config"]["original_owner_unavailable_reason"] == {
+        "code": "OWNER_INACTIVE",
+        "message": "原处理人账号已停用",
+    }
+
+    reactivated = client.post(
+        f"/api/v1/workflow-runtime/bug/{bug['id']}/transition",
+        json={
+            "action_key": "activate",
+            "next_owner_id": selected_owner_id,
+            "payload": {"reason": "Manual reassignment", "target_iteration_id": target_iteration_id},
+        },
+        headers={"Authorization": f"Bearer {reporter_token}"},
+    )
+
+    assert reactivated.status_code == 200, reactivated.text
+    selected_values = reactivated.json()["selected_values"]
+    assert selected_values["recommended_owner_id"] is None
+    assert selected_values["owner_unavailable_reason"]["code"] == "OWNER_INACTIVE"
+    routing = selected_values["handler_routing"]
+    assert routing["resolved_default_owner_id"] is None
+    assert routing["final_owner_id"] == selected_owner_id
+    assert routing["manual_override"] is True
+    assert routing["manual_override_from_owner_id"] is None
+    assert routing["manual_override_to_owner_id"] == selected_owner_id
 
 
 def test_bug_reactivation_rejects_reporter_without_target_project_access(client: TestClient):
@@ -490,7 +637,14 @@ def test_reactivation_handler_eligibility_uses_target_state_core_action_roles(cl
         db.commit()
 
         assert _reactivation_handler_is_eligible(db, row, developer_id) is False
+        eligible, reason = _reactivation_handler_eligibility(db, row, developer_id)
+        assert eligible is False
+        assert reason == {
+            "code": "OWNER_ROLE_NOT_ELIGIBLE",
+            "message": "原处理人角色不符合目标状态处理要求",
+        }
         assert _reactivation_handler_is_eligible(db, row, admin_id) is True
+        assert _reactivation_handler_eligibility(db, row, admin_id) == (True, None)
     finally:
         if "original_roles" in locals():
             for transition_id, roles in original_roles.items():
@@ -498,4 +652,26 @@ def test_reactivation_handler_eligibility_uses_target_state_core_action_roles(cl
                     {"allowed_roles": roles}, synchronize_session=False
                 )
             db.commit()
+        db.close()
+
+
+def test_reactivation_handler_eligibility_reports_deleted_owner(client: TestClient):
+    deleted_owner_id, _ = _create_user("developer")
+    project_id = _create_project(client)
+    _add_member(project_id, deleted_owner_id, "developer")
+    bug = client.post(
+        "/api/v1/bugs",
+        json={"project_id": project_id, "title": "Deleted owner reason", "owner_id": deleted_owner_id},
+    ).json()
+    db = SessionLocal()
+    try:
+        db.query(User).filter(User.id == deleted_owner_id).update({"deleted": 1})
+        db.commit()
+        row = db.query(Bug).filter(Bug.id == bug["id"]).one()
+
+        assert _reactivation_handler_eligibility(db, row, deleted_owner_id) == (
+            False,
+            {"code": "OWNER_DELETED", "message": "原处理人账号已删除"},
+        )
+    finally:
         db.close()

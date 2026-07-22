@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta
+from unittest.mock import Mock
 from uuid import uuid4
 
 from fastapi.testclient import TestClient
@@ -13,6 +14,7 @@ from app.models.task import Task
 from app.models.user import User
 from app.models.workflow_definition import WorkflowState, WorkflowTransition
 from app.models.work_item_comment import WorkItemComment
+from app.services.dashboard_service import _terminal_iteration_open_item_refs
 
 
 def _create_user_with_role(username: str, role_key: str) -> tuple[int, str]:
@@ -225,6 +227,14 @@ def test_workbench_returns_created_watched_mentioned_and_exception_center(client
             "priority": "1",
         },
     ).json()
+    watched_test_case = client.post(
+        "/api/v1/test-cases",
+        json={"project_id": project_id, "iteration_id": iteration_id, "title": "Watched test case"},
+    ).json()
+    mentioned_test_run = client.post(
+        "/api/v1/test-runs",
+        json={"project_id": project_id, "iteration_id": iteration_id, "name": "Mentioned test run"},
+    ).json()
 
     db = SessionLocal()
     try:
@@ -262,9 +272,70 @@ def test_workbench_returns_created_watched_mentioned_and_exception_center(client
             )
         )
         db.add(
+            ObjectWatch(
+                object_type="requirement",
+                object_id=created_requirement["id"],
+                user_id=developer_id,
+                source="manual",
+                enabled=True,
+            )
+        )
+        db.add(
+            ObjectWatch(
+                object_type="bug",
+                object_id=mentioned_bug["id"],
+                user_id=developer_id,
+                source="manual",
+                enabled=True,
+            )
+        )
+        db.add(
+            ObjectWatch(
+                object_type="test_case",
+                object_id=watched_test_case["id"],
+                user_id=developer_id,
+                source="manual",
+                enabled=True,
+            )
+        )
+        db.add(
+            ObjectWatch(
+                object_type="test_run",
+                object_id=mentioned_test_run["id"],
+                user_id=developer_id,
+                source="manual",
+                enabled=True,
+            )
+        )
+        db.add(
             WorkItemComment(
                 object_type="bug",
                 object_id=mentioned_bug["id"],
+                author_id=developer_id,
+                body="@follow",
+                mentioned_user_ids=[developer_id],
+                mentions_metadata=[{"user_id": developer_id, "display_name": "Follow Developer"}],
+            )
+        )
+        for object_type, object_id in (
+            ("requirement", created_requirement["id"]),
+            ("task", watched_task["id"]),
+            ("test_case", watched_test_case["id"]),
+        ):
+            db.add(
+                WorkItemComment(
+                    object_type=object_type,
+                    object_id=object_id,
+                    author_id=developer_id,
+                    body="@follow",
+                    mentioned_user_ids=[developer_id],
+                    mentions_metadata=[{"user_id": developer_id, "display_name": "Follow Developer"}],
+                )
+            )
+        db.add(
+            WorkItemComment(
+                object_type="test_run",
+                object_id=mentioned_test_run["id"],
                 author_id=developer_id,
                 body="@follow",
                 mentioned_user_ids=[developer_id],
@@ -289,9 +360,27 @@ def test_workbench_returns_created_watched_mentioned_and_exception_center(client
     assert data["created_by_me"]["label"] == "我发起的"
     assert created_requirement["id"] in {item["id"] for item in data["created_by_me"]["items"]}
     assert data["watched_by_me"]["label"] == "我关注的"
-    assert watched_task["id"] in {item["id"] for item in data["watched_by_me"]["items"]}
+    watched_refs = {(item["object_type"], item["id"]) for item in data["watched_by_me"]["items"]}
+    assert {
+        ("requirement", created_requirement["id"]),
+        ("task", watched_task["id"]),
+        ("bug", mentioned_bug["id"]),
+    } <= watched_refs
+    assert {
+        ("test_case", watched_test_case["id"]),
+        ("test_run", mentioned_test_run["id"]),
+    }.isdisjoint(watched_refs)
     assert data["mentioned_me"]["label"] == "提到我的"
-    assert mentioned_bug["id"] in {item["id"] for item in data["mentioned_me"]["items"]}
+    mentioned_refs = {(item["object_type"], item["id"]) for item in data["mentioned_me"]["items"]}
+    assert {
+        ("requirement", created_requirement["id"]),
+        ("task", watched_task["id"]),
+        ("bug", mentioned_bug["id"]),
+    } <= mentioned_refs
+    assert {
+        ("test_case", watched_test_case["id"]),
+        ("test_run", mentioned_test_run["id"]),
+    }.isdisjoint(mentioned_refs)
     assert "project_board" not in data
     assert "iterations" not in data
     assert data["exception_center"]["label"] == "异常中心"
@@ -482,6 +571,14 @@ def test_workbench_empty_project_scope_is_not_all_projects(client: TestClient):
     }
 
     assert ("task", task["id"]) not in visible_refs
+
+
+def test_terminal_iteration_integrity_scan_short_circuits_empty_project_scope():
+    db = Mock()
+    db.query.side_effect = AssertionError("empty project scope must not query historical work items")
+
+    assert _terminal_iteration_open_item_refs(db, set()) == []
+    db.query.assert_not_called()
 
 
 def test_system_admin_workbench_has_explicit_all_project_scope(client: TestClient):

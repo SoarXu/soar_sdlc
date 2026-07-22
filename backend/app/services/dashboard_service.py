@@ -1,4 +1,4 @@
-from sqlalchemy import func
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.models.bug import Bug
@@ -10,20 +10,26 @@ from app.models.project import Project
 from app.models.requirement import Requirement
 from app.models.role import Role, UserRole
 from app.models.task import Task
-from app.models.test_case import TestCase
-from app.models.test_run import TestRun
 from app.models.user import User
 from app.models.work_item_comment import WorkItemComment
 from app.models.workflow_definition import WorkflowTransition
 from app.services.exception_center_service import list_exception_refs
 from app.services.project_team_service import workbench_project_ids_for_user
-from app.services.workflow_state_query_service import current_state_name, is_terminal_state, non_terminal_state_clause
+from app.services.workflow_state_query_service import (
+    current_state_name,
+    is_terminal_state,
+    non_terminal_state_clause,
+    terminal_state_clause,
+)
 from app.views.dashboard_view import (
     DashboardSummary,
     WorkbenchItem,
     WorkbenchResponse,
     WorkbenchSection,
 )
+
+
+WORKBENCH_OBJECT_TYPES = {"requirement", "task", "bug"}
 
 
 def get_dashboard_summary(db: Session) -> DashboardSummary:
@@ -275,22 +281,24 @@ def _terminal_iteration_open_item_refs(
     db: Session,
     scoped_project_ids: set[int] | None,
 ) -> list[dict]:
-    terminal_iteration_ids = {
-        iteration.id
-        for iteration in db.query(Iteration).filter(Iteration.deleted == 0).all()
-        if is_terminal_state(iteration)
-    }
-    if not terminal_iteration_ids:
+    if scoped_project_ids == set():
         return []
+
+    terminal_iteration_ids = select(Iteration.id).where(
+        Iteration.deleted == 0,
+        terminal_state_clause(Iteration),
+    )
     refs = []
     for object_type, model in (("requirement", Requirement), ("task", Task), ("bug", Bug)):
-        rows = db.query(model).filter(
+        filters = [
             model.deleted == 0,
             model.iteration_id.in_(terminal_iteration_ids),
-        ).all()
+            non_terminal_state_clause(model),
+        ]
+        if scoped_project_ids is not None:
+            filters.append(model.project_id.in_(scoped_project_ids))
+        rows = db.query(model.id, model.create_time).filter(*filters).all()
         for item in rows:
-            if is_terminal_state(item) or not _in_project_scope(item.project_id, scoped_project_ids):
-                continue
             refs.append(
                 {
                     "object_type": object_type,
@@ -314,6 +322,8 @@ def _load_workbench_items_by_refs(
     metadata_by_ref: dict[tuple[str, int], dict] = {}
     for ref in refs:
         object_type = ref["object_type"]
+        if object_type not in WORKBENCH_OBJECT_TYPES:
+            continue
         grouped_ids.setdefault(object_type, set()).add(ref["id"])
         metadata_by_ref.setdefault((object_type, ref["id"]), {}).update(ref)
 
@@ -327,13 +337,6 @@ def _load_workbench_items_by_refs(
     if grouped_ids.get("bug"):
         for item in db.query(Bug).filter(Bug.deleted == 0, Bug.id.in_(grouped_ids["bug"])).all():
             items_by_ref[("bug", item.id)] = _bug_item(item, projects, iteration_names)
-    if grouped_ids.get("test_case"):
-        for item in db.query(TestCase).filter(TestCase.deleted == 0, TestCase.id.in_(grouped_ids["test_case"])).all():
-            items_by_ref[("test_case", item.id)] = _test_case_item(item, projects, iteration_names)
-    if grouped_ids.get("test_run"):
-        for item in db.query(TestRun).filter(TestRun.deleted == 0, TestRun.id.in_(grouped_ids["test_run"])).all():
-            items_by_ref[("test_run", item.id)] = _test_run_item(item, projects, iteration_names)
-
     result: list[WorkbenchItem] = []
     seen: set[tuple[str, int]] = set()
     for ref in refs:
@@ -511,36 +514,6 @@ def _task_item(
     )
 
 
-def _test_case_item(
-    item: TestCase,
-    projects: dict[int, Project],
-    iteration_names: dict[int, str],
-    iteration_id: int | None = None,
-) -> WorkbenchItem:
-    resolved_iteration_id = iteration_id if iteration_id is not None else item.iteration_id
-    return WorkbenchItem(
-        id=item.id,
-        object_type="test_case",
-        title=item.title,
-        project_id=item.project_id,
-        project_name=_project_name(projects, item.project_id),
-        iteration_id=resolved_iteration_id,
-        iteration_name=_iteration_name(iteration_names, resolved_iteration_id),
-        lifecycle_phase=item.lifecycle_phase,
-        owner_id=item.default_tester_id,
-        handler_id=item.default_tester_id,
-        iteration_group_key=str(resolved_iteration_id) if resolved_iteration_id else "uniterated",
-        status=item.status,
-        create_time=_datetime_value(item.create_time),
-        creator_id=item.creator_id,
-        last_execute_time=_datetime_value(item.last_execute_time),
-        last_execute_result=item.last_execute_result,
-        steps_json=item.steps_json,
-        requirement_id=item.requirement_id,
-        test_case_id=item.id,
-    )
-
-
 def _bug_item(item: Bug, projects: dict[int, Project], iteration_names: dict[int, str]) -> WorkbenchItem:
     return WorkbenchItem(
         id=item.id,
@@ -567,25 +540,6 @@ def _bug_item(item: Bug, projects: dict[int, Project], iteration_names: dict[int
         test_case_id=item.test_case_id,
         bug_type=item.bug_type,
         severity=item.severity,
-    )
-
-
-def _test_run_item(item: TestRun, projects: dict[int, Project], iteration_names: dict[int, str]) -> WorkbenchItem:
-    return WorkbenchItem(
-        id=item.id,
-        object_type="test_run",
-        title=item.name,
-        project_id=item.project_id,
-        project_name=_project_name(projects, item.project_id),
-        iteration_id=item.iteration_id,
-        iteration_name=_iteration_name(iteration_names, item.iteration_id),
-        iteration_group_key=str(item.iteration_id) if item.iteration_id else "uniterated",
-        lifecycle_phase=item.lifecycle_phase,
-        owner_id=item.test_owner_id,
-        handler_id=item.test_owner_id,
-        status=item.status,
-        create_time=_datetime_value(item.create_time),
-        creator_id=item.creator_id,
     )
 
 

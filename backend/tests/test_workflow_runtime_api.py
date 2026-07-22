@@ -13,6 +13,38 @@ from app.models.role import Role, UserRole
 from app.models.test_run import TestRun as RunModel
 from app.models.user import User
 from app.models.workflow_definition import WorkflowTransition
+from app.services import workflow_runtime_service
+
+
+def test_transition_item_loader_requests_a_database_row_lock():
+    class QuerySpy:
+        def __init__(self):
+            self.locked = False
+            self.item = object()
+
+        def filter(self, *args):
+            return self
+
+        def with_for_update(self):
+            self.locked = True
+            return self
+
+        def first(self):
+            return self.item
+
+    class SessionSpy:
+        def __init__(self):
+            self.query_spy = QuerySpy()
+
+        def query(self, model):
+            return self.query_spy
+
+    db = SessionSpy()
+
+    item = workflow_runtime_service._get_item_for_transition(db, "bug", 1)
+
+    assert item is db.query_spy.item
+    assert db.query_spy.locked is True
 
 
 def _create_user(full_name: str, role_key: str | None = None) -> tuple[int, str]:

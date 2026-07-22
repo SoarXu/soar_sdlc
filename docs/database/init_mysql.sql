@@ -658,6 +658,29 @@ CREATE TABLE IF NOT EXISTS devops_code_review_tasks (
   UNIQUE KEY uk_devops_review_commit (commit_id),
   KEY idx_devops_review_status (status)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='DevOps Code Review 任务表';
+
+CREATE TABLE IF NOT EXISTS work_item_iteration_history (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  object_type VARCHAR(32) NOT NULL COMMENT 'requirement、task、bug',
+  object_id BIGINT UNSIGNED NOT NULL COMMENT '工作项 ID',
+  iteration_id BIGINT UNSIGNED NOT NULL COMMENT '迭代 ID',
+  entered_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '进入迭代时间',
+  entered_by BIGINT UNSIGNED NULL COMMENT '进入操作人',
+  enter_reason VARCHAR(64) NOT NULL COMMENT '进入原因',
+  left_at DATETIME NULL COMMENT '离开迭代时间',
+  left_by BIGINT UNSIGNED NULL COMMENT '离开操作人',
+  leave_reason VARCHAR(64) NULL COMMENT '离开原因',
+  title_snapshot VARCHAR(255) NULL COMMENT '离开时标题快照',
+  state_id_snapshot BIGINT UNSIGNED NULL COMMENT '离开时状态 ID',
+  status_name_snapshot VARCHAR(100) NULL COMMENT '离开时状态名称',
+  owner_id_snapshot BIGINT UNSIGNED NULL COMMENT '离开时处理人',
+  operation_log_id BIGINT UNSIGNED NULL COMMENT '关联状态操作日志',
+  migrated TINYINT(1) NOT NULL DEFAULT 0 COMMENT '是否迁移生成',
+  PRIMARY KEY (id),
+  KEY idx_wiih_object (object_type, object_id, left_at),
+  KEY idx_wiih_iteration (iteration_id, left_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='工作项迭代归属历史';
+
 INSERT INTO roles (role_key, role_name, description, is_system, enabled)
 VALUES
   ('system_admin', '系统管理员', '系统初始化、用户、角色、基础配置', 1, 1),

@@ -11,10 +11,12 @@ from app.models.task import Task
 from app.models.test_case import TestCase
 from app.models.user import User
 from app.services.current_handler_service import ensure_work_item_action
+from app.services.iteration_service import ensure_iteration_assignment_mutable
 from app.services.project_permission_service import ensure_workflow_fields_not_updated
 from app.services.lifecycle_service import project_lifecycle_phase
 from app.services.status_operation_service import list_status_operations
 from app.services.task_service import linked_task_summaries
+from app.services.work_item_iteration_history_service import move_work_item_to_iteration
 from app.services.workflow_state_service import initial_workflow_values
 from app.services.workflow_state_query_service import is_terminal_state
 from app.views.requirement_view import RequirementCreate, RequirementUpdate
@@ -36,11 +38,15 @@ def get_requirement(db: Session, requirement_id: int) -> Requirement:
 def create_requirement(db: Session, payload: RequirementCreate, actor_id: int | None = None) -> Requirement:
     data = payload.model_dump()
     data["creator_id"] = actor_id
+    ensure_iteration_assignment_mutable(db, None, data.get("iteration_id"))
     _ensure_requirement_iteration_scope(db, data.get("project_id"), data.get("iteration_id"))
     data.update(initial_workflow_values(db, "requirement", data.get("project_id")))
     data["lifecycle_phase"] = project_lifecycle_phase(db, data.get("project_id"))
     requirement = Requirement(**data)
     db.add(requirement)
+    db.flush()
+    if requirement.iteration_id:
+        move_work_item_to_iteration(db, requirement, requirement.iteration_id, actor_id=actor_id, reason="created")
     db.commit()
     db.refresh(requirement)
     return requirement
@@ -55,8 +61,17 @@ def update_requirement(db: Session, requirement_id: int, payload: RequirementUpd
     data.pop("status", None)
     target_project_id = data.get("project_id", requirement.project_id)
     target_iteration_id = data.get("iteration_id", requirement.iteration_id)
+    ensure_iteration_assignment_mutable(db, requirement.iteration_id, target_iteration_id)
     _ensure_requirement_iteration_scope(db, target_project_id, target_iteration_id)
     before_data, after_data = _requirement_change_data(requirement, data)
+    if "iteration_id" in data:
+        move_work_item_to_iteration(
+            db,
+            requirement,
+            data.pop("iteration_id"),
+            actor_id=actor_id,
+            reason="updated",
+        )
     for field, value in data.items():
         setattr(requirement, field, value)
     if before_data:

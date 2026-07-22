@@ -7,6 +7,38 @@ from app.jobs.iteration_jobs import run_auto_start_due_iterations
 from app.models.requirement import Requirement
 from app.models.task import Task
 from app.models.workflow_definition import WorkflowState, WorkflowTransition
+from app.services import iteration_service
+
+
+def test_iteration_loader_can_request_a_database_row_lock():
+    class QuerySpy:
+        def __init__(self):
+            self.locked = False
+            self.item = object()
+
+        def filter(self, *args):
+            return self
+
+        def with_for_update(self):
+            self.locked = True
+            return self
+
+        def first(self):
+            return self.item
+
+    class SessionSpy:
+        def __init__(self):
+            self.query_spy = QuerySpy()
+
+        def query(self, model):
+            return self.query_spy
+
+    db = SessionSpy()
+
+    item = iteration_service._get_active_iteration(db, 1, for_update=True)
+
+    assert item is db.query_spy.item
+    assert db.query_spy.locked is True
 
 
 def test_iteration_creation_uses_system_workflow_initial_state(client: TestClient):
@@ -307,7 +339,45 @@ def test_iteration_finish_is_blocked_by_unfinished_direct_items(client: TestClie
     )
 
     assert finished.status_code == 400
+    detail = finished.json()["detail"]
+    assert detail["code"] == "ITERATION_HAS_OPEN_ITEMS"
+    assert detail["counts"] == {"requirement": 1, "task": 1, "bug": 1, "test_run": 0}
+    assert {(item["object_type"], item["title"]) for item in detail["items"]} == {
+        ("requirement", "Open requirement"),
+        ("task", "Open task"),
+        ("bug", "Open bug"),
+    }
     assert client.get(f"/api/v1/iterations/{iteration_id}/detail").json()["iteration"]["state_category"] == "normal"
+
+
+def test_terminal_iteration_rejects_scope_mutations(client: TestClient):
+    project_id = _create_project(client)
+    iteration_id = _create_iteration(client, [project_id], status="active")
+    linked_requirement_id = _create_requirement(client, project_id, "Terminal linked requirement")
+    unplanned_requirement_id = _create_requirement(client, project_id, "Terminal new requirement")
+    assert client.post(
+        f"/api/v1/iterations/{iteration_id}/requirements",
+        json={"requirement_ids": [linked_requirement_id]},
+    ).status_code == 200
+    _set_requirement_status(linked_requirement_id, "completed")
+    completed = client.post(
+        f"/api/v1/workflow-runtime/iteration/{iteration_id}/transition",
+        json={"action_key": "complete", "payload": {"effective_time": "2026-07-21T18:00:00"}},
+    )
+    assert completed.status_code == 200
+
+    responses = [
+        client.patch(f"/api/v1/iterations/{iteration_id}", json={"name": "Changed terminal iteration"}),
+        client.post(
+            f"/api/v1/iterations/{iteration_id}/requirements",
+            json={"requirement_ids": [unplanned_requirement_id]},
+        ),
+        client.delete(f"/api/v1/iterations/{iteration_id}/requirements/{linked_requirement_id}"),
+    ]
+
+    for response in responses:
+        assert response.status_code == 409
+        assert response.json()["detail"]["code"] == "ITERATION_NOT_MUTABLE"
 
 
 def test_iteration_cancel_uses_runtime_and_complete_gate(client: TestClient):

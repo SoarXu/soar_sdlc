@@ -79,6 +79,22 @@
       </template>
     </el-card>
 
+    <el-card v-if="bug.iteration_history?.length" shadow="never" class="detail-panel">
+      <template #header>迭代轨迹</template>
+      <el-table :data="bug.iteration_history" stripe border>
+        <el-table-column prop="iteration_name" label="迭代" min-width="180" />
+        <el-table-column prop="enter_reason" label="进入原因" width="130" />
+        <el-table-column label="进入时间" width="180">
+          <template #default="{ row }">{{ formatDateTime(row.entered_at) }}</template>
+        </el-table-column>
+        <el-table-column prop="status_name_at_leave" label="离开时状态" width="130" />
+        <el-table-column prop="leave_reason" label="离开原因" width="130" />
+        <el-table-column label="离开时间" width="180">
+          <template #default="{ row }">{{ formatDateTime(row.left_at) }}</template>
+        </el-table-column>
+      </el-table>
+    </el-card>
+
     <el-card shadow="never" class="detail-panel">
       <template #header>
         <div class="detail-card-header">

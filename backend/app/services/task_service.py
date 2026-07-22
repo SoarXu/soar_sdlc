@@ -14,6 +14,7 @@ from app.models.test_case import TestCase
 from app.models.test_run import TestRun
 from app.models.user import User
 from app.services.current_handler_service import ensure_work_item_action
+from app.services.iteration_service import ensure_iteration_assignment_mutable
 from app.services.project_permission_service import (
     can_admin_action,
     ensure_authenticated,
@@ -24,6 +25,7 @@ from app.services.lifecycle_service import project_lifecycle_phase, requirement_
 from app.services.status_operation_service import list_status_operations
 from app.services.workflow_state_service import initial_workflow_values
 from app.services.workflow_state_query_service import is_terminal_state
+from app.services.work_item_iteration_history_service import move_work_item_to_iteration
 from app.views.task_view import LinkedTaskCreate, TaskCreate, TaskUpdate
 
 
@@ -56,6 +58,7 @@ def get_task(db: Session, task_id: int) -> Task:
 
 def create_task(db: Session, payload: TaskCreate, actor_id: int | None = None) -> Task:
     data = payload.model_dump()
+    ensure_iteration_assignment_mutable(db, None, data.get("iteration_id"))
     data["task_type"] = _resolved_task_type(data.get("task_type"), data.get("requirement_id"))
     data["creator_id"] = actor_id
     data["lifecycle_phase"] = (
@@ -65,6 +68,9 @@ def create_task(db: Session, payload: TaskCreate, actor_id: int | None = None) -
     data.update(initial_workflow_values(db, "task", data.get("project_id")))
     task = Task(**data)
     db.add(task)
+    db.flush()
+    if task.iteration_id:
+        move_work_item_to_iteration(db, task, task.iteration_id, actor_id=actor_id, reason="created")
     db.commit()
     db.refresh(task)
     return task
@@ -118,6 +124,8 @@ def create_linked_task(db: Session, payload: LinkedTaskCreate, actor: User | Non
     )
     db.add(task)
     db.flush()
+    if task.iteration_id:
+        move_work_item_to_iteration(db, task, task.iteration_id, actor_id=actor.id, reason="linked_task_created")
     db.add(
         ObjectRelation(
             source_type=payload.source_type,
@@ -187,7 +195,17 @@ def update_task(db: Session, task_id: int, payload: TaskUpdate, actor_id: int | 
     _ensure_project_editable_for_task(db, task)
     data = payload.model_dump(exclude_unset=True)
     data.pop("status", None)
+    if "iteration_id" in data:
+        ensure_iteration_assignment_mutable(db, task.iteration_id, data.get("iteration_id"))
     before_data, after_data = _task_change_data(task, data)
+    if "iteration_id" in data:
+        move_work_item_to_iteration(
+            db,
+            task,
+            data.pop("iteration_id"),
+            actor_id=actor_id,
+            reason="updated",
+        )
     for field, value in data.items():
         setattr(task, field, value)
     if before_data:

@@ -734,9 +734,12 @@ def test_iteration_complete_and_cancel_block_on_direct_items(client: TestClient)
     )
 
     assert complete.status_code == 400
-    assert "requirement" in complete.json()["detail"].lower() or "bug" in complete.json()["detail"].lower()
+    assert complete.json()["detail"]["code"] == "ITERATION_HAS_OPEN_ITEMS"
+    assert complete.json()["detail"]["counts"]["requirement"] == 1
+    assert complete.json()["detail"]["counts"]["bug"] == 1
     assert cancel.status_code == 400
-    assert "task" in cancel.json()["detail"].lower() or "bug" in cancel.json()["detail"].lower()
+    assert cancel.json()["detail"]["code"] == "ITERATION_HAS_OPEN_ITEMS"
+    assert cancel.json()["detail"]["counts"]["task"] == 1
 
 
 def test_project_close_blocks_on_direct_scoped_objects(client: TestClient):

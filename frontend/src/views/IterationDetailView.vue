@@ -169,6 +169,23 @@
           <el-table-column label="负责人" width="140"><template #default="{ row }">{{ userLabel(users, row.owner_id) }}</template></el-table-column>
           <el-table-column label="状态" width="110"><template #default="{ row }">{{ row.status_name || '-' }}</template></el-table-column>
         </el-table>
+        <div v-if="historicalBugs.length" class="iteration-history-section">
+          <h3>后续已重新激活</h3>
+          <el-table :data="historicalBugs" stripe border width="100%">
+            <el-table-column prop="id" label="ID" width="80" />
+            <el-table-column label="Bug 标题" min-width="220" show-overflow-tooltip>
+              <template #default="{ row }">
+                <router-link class="table-link" :to="{ name: 'bug-detail', params: { id: row.id } }">{{ row.title }}</router-link>
+              </template>
+            </el-table-column>
+            <el-table-column prop="status_name_at_leave" label="离开时状态" width="130" />
+            <el-table-column label="后续迭代" min-width="160">
+              <template #default="{ row }">{{ labelById(iterations, row.current_iteration_id, 'name') }}</template>
+            </el-table-column>
+            <el-table-column prop="leave_reason" label="变更原因" width="130" />
+            <el-table-column prop="left_at" label="重新激活时间" width="180" />
+          </el-table>
+        </div>
       </template>
     </el-card>
 
@@ -292,7 +309,6 @@
       </template>
     </el-dialog>
 
-    
 
     <el-dialog v-model="taskEditVisible" title="编辑任务" width="620px">
       <el-form label-position="top">
@@ -312,7 +328,6 @@
       <template #footer><el-button @click="taskEditVisible = false">取消</el-button><el-button type="primary" :loading="saving" @click="submitTaskEdit">保存</el-button></template>
     </el-dialog>
 
-    
 
     <el-dialog v-model="caseExecutionVisible" :title="`执行用例 ${selectedCase?.title || ''}`" width="980px">
       <el-form label-position="top">
@@ -402,6 +417,7 @@ const requirements = ref([])
 const tasks = ref([])
 const testCases = ref([])
 const bugs = ref([])
+const historicalBugs = ref([])
 const iterationWorkflowTransitions = ref({})
 const requirementOperationWidth = computed(() => workflowActionColumnWidth(
   requirements.value.map((row) => iterationWorkflowTransitionsFor('requirement', row.id)),
@@ -549,6 +565,7 @@ async function loadData() {
     tasks.value = detailRes.data.tasks
     testCases.value = detailRes.data.test_cases
     bugs.value = detailRes.data.bugs || []
+    historicalBugs.value = detailRes.data.historical_bugs || []
     metrics.value = detailRes.data.metrics
     users.value = userRes.data
     await loadProjectMembers()
@@ -825,6 +842,16 @@ function buildActualText(execution) {
 </script>
 
 <style scoped>
+.iteration-history-section {
+  margin-top: 20px;
+}
+
+.iteration-history-section h3 {
+  margin: 0 0 10px;
+  font-size: 15px;
+  letter-spacing: 0;
+}
+
 .defer-work-form {
   margin-top: 16px;
 }

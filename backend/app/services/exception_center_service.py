@@ -171,7 +171,7 @@ def _elapsed_hours(entered_at: datetime | None, now: datetime) -> float:
 
 
 def _in_scope(project_id: int | None, scoped_project_ids: set[int] | None) -> bool:
-    if not scoped_project_ids:
+    if scoped_project_ids is None:
         return True
     return bool(project_id and project_id in scoped_project_ids)
 

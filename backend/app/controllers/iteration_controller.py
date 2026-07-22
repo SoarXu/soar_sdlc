@@ -90,7 +90,7 @@ def defer_iteration_work_items(
 ):
     _ensure_can_manage_iteration(db, iteration_id, current_user)
     _ensure_can_manage_iteration(db, payload.target_iteration_id, current_user)
-    return defer_work_items(db, iteration_id, payload)
+    return defer_work_items(db, iteration_id, payload, actor_id=current_user.id if current_user else None)
 
 
 @router.get("/{iteration_id}/available-requirements")
@@ -106,7 +106,12 @@ def post_iteration_requirements(
     current_user: User | None = Depends(get_optional_current_user),
 ):
     _ensure_can_manage_iteration(db, iteration_id, current_user)
-    return link_requirements(db, iteration_id, payload.requirement_ids)
+    return link_requirements(
+        db,
+        iteration_id,
+        payload.requirement_ids,
+        actor_id=current_user.id if current_user else None,
+    )
 
 
 @router.delete("/{iteration_id}/requirements/{requirement_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -117,7 +122,7 @@ def delete_iteration_requirement(
     current_user: User | None = Depends(get_optional_current_user),
 ):
     _ensure_can_manage_iteration(db, iteration_id, current_user)
-    unlink_requirement(db, iteration_id, requirement_id)
+    unlink_requirement(db, iteration_id, requirement_id, actor_id=current_user.id if current_user else None)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
@@ -134,7 +139,7 @@ def post_iteration_tasks(
     current_user: User | None = Depends(get_optional_current_user),
 ):
     _ensure_can_manage_iteration(db, iteration_id, current_user)
-    return link_tasks(db, iteration_id, payload.task_ids)
+    return link_tasks(db, iteration_id, payload.task_ids, actor_id=current_user.id if current_user else None)
 
 
 @router.delete("/{iteration_id}/tasks/{task_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -145,7 +150,7 @@ def delete_iteration_task(
     current_user: User | None = Depends(get_optional_current_user),
 ):
     _ensure_can_manage_iteration(db, iteration_id, current_user)
-    unlink_task(db, iteration_id, task_id)
+    unlink_task(db, iteration_id, task_id, actor_id=current_user.id if current_user else None)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 

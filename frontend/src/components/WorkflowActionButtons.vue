@@ -106,6 +106,21 @@
           />
         </el-form-item>
 
+        <el-alert
+          v-if="activeAction?.ui_config?.original_owner_id && activeAction?.ui_config?.original_owner_eligible"
+          title="原处理人仍有效，将默认保留"
+          type="info"
+          :closable="false"
+          show-icon
+        />
+        <el-alert
+          v-else-if="activeAction?.ui_config?.original_owner_id"
+          title="原处理人不可用，请重新选择或保持未分派"
+          type="warning"
+          :closable="false"
+          show-icon
+        />
+
         <el-form-item v-if="allowManualOwner" label="下一处理人">
           <el-select v-model="nextOwnerId" clearable filterable placeholder="不指定则按规则自动分配">
             <el-option v-for="user in users" :key="user.id" :label="user.full_name || user.username" :value="user.id" />
@@ -121,6 +136,32 @@
         <el-button :type="buttonType(activeAction)" :loading="Boolean(submittingAction)" @click="submitActiveAction">
           {{ submitText }}
         </el-button>
+      </template>
+    </el-dialog>
+
+    <el-dialog v-model="blockerDialogVisible" title="存在未完成事项，无法结束迭代" width="760px">
+      <el-alert :title="blockerCountsText" type="warning" :closable="false" show-icon />
+      <div class="workflow-blocker-filter">
+        <el-segmented v-model="blockerTypeFilter" :options="blockerTypeOptions" />
+      </div>
+      <el-table :data="blockerRows" border class="workflow-blocker-table">
+        <el-table-column label="类型" width="100">
+          <template #default="{ row }">{{ blockerTypeLabel(row.object_type) }}</template>
+        </el-table-column>
+        <el-table-column prop="id" label="ID" width="90" />
+        <el-table-column label="标题" min-width="220" show-overflow-tooltip>
+          <template #default="{ row }">
+            <router-link v-if="blockerDetailRoute(row)" class="table-link" :to="blockerDetailRoute(row)">
+              {{ row.title }}
+            </router-link>
+            <span v-else>{{ row.title }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column prop="status_name" label="状态" width="120" />
+        <el-table-column prop="owner_id" label="当前处理人 ID" width="130" />
+      </el-table>
+      <template #footer>
+        <el-button type="primary" @click="blockerDialogVisible = false">知道了</el-button>
       </template>
     </el-dialog>
   </div>
@@ -167,6 +208,9 @@ const selectedTargetStateId = ref(null)
 const overrideReason = ref('')
 const delegateReasonRequired = ref(false)
 const loadedUsers = ref([])
+const blockerDialogVisible = ref(false)
+const blockerDetail = ref({ counts: {}, items: [] })
+const blockerTypeFilter = ref('all')
 
 const actions = computed(() => props.transitions ?? loadedTransitions.value)
 const listSplit = computed(() => splitListActions(actions.value))
@@ -189,6 +233,41 @@ const targetStatePlaceholder = computed(() => (
     : '默认按规则自动流转，可按需覆盖'
 ))
 const users = computed(() => props.users.length ? props.users : loadedUsers.value)
+const blockerCountsText = computed(() => {
+  const counts = blockerDetail.value?.counts || {}
+  return `需求 ${counts.requirement || 0} 项，任务 ${counts.task || 0} 项，Bug ${counts.bug || 0} 项，测试单 ${counts.test_run || 0} 项`
+})
+const blockerTypeOptions = computed(() => {
+  const rows = blockerDetail.value?.items || []
+  return [
+    { label: `全部 ${rows.length}`, value: 'all' },
+    ...['requirement', 'task', 'bug', 'test_run']
+      .map((value) => ({
+        label: `${blockerTypeLabel(value)} ${rows.filter((row) => row.object_type === value).length}`,
+        value
+      }))
+      .filter((option) => option.label.endsWith(' 0') === false)
+  ]
+})
+const blockerRows = computed(() => {
+  const rows = blockerDetail.value?.items || []
+  return blockerTypeFilter.value === 'all'
+    ? rows
+    : rows.filter((row) => row.object_type === blockerTypeFilter.value)
+})
+
+function blockerTypeLabel(value) {
+  return { requirement: '需求', task: '任务', bug: 'Bug', test_run: '测试单' }[value] || value
+}
+
+function blockerDetailRoute(row) {
+  const routeName = {
+    requirement: 'requirement-detail',
+    task: 'task-detail',
+    bug: 'bug-detail'
+  }[row.object_type]
+  return routeName ? { name: routeName, params: { id: row.id } } : null
+}
 
 function buttonType(action) {
   return action?.button_type || action?.ui_config?.button_type || 'primary'
@@ -213,7 +292,7 @@ function resetForm(action) {
   for (const field of action?.form_config?.fields || []) {
     formPayload[field.field] = field.default_value ?? null
   }
-  nextOwnerId.value = null
+  nextOwnerId.value = action?.ui_config?.recommended_owner_id ?? null
   delegateReason.value = ''
   selectedTargetStateId.value = null
   overrideReason.value = ''
@@ -308,6 +387,14 @@ async function submitAction(action) {
     emit('executed', data)
     if (props.autoLoad && props.objectId) await loadTransitions()
   } catch (error) {
+    const detail = error?.response?.data?.detail
+    if (detail?.code === 'ITERATION_HAS_OPEN_ITEMS') {
+      blockerDetail.value = detail
+      blockerTypeFilter.value = 'all'
+      dialogVisible.value = false
+      blockerDialogVisible.value = true
+      return
+    }
     if (isDelegateReasonRequiredError(error)) {
       activeAction.value = action
       delegateReasonRequired.value = true
@@ -354,5 +441,9 @@ onMounted(loadTransitions)
 
 .workflow-primary-actions {
   gap: 4px;
+}
+
+.workflow-blocker-filter {
+  margin: 16px 0 12px;
 }
 </style>

@@ -10,6 +10,7 @@ from app.models.requirement import Requirement
 from app.models.test_case import TestCase
 from app.models.test_run import TestRun, TestRunCase
 from app.services.current_handler_service import ensure_work_item_action
+from app.services.iteration_service import ensure_iteration_assignment_mutable
 from app.services.project_permission_service import ensure_workflow_fields_not_updated
 from app.services.lifecycle_service import (
     project_lifecycle_phase,
@@ -18,6 +19,7 @@ from app.services.lifecycle_service import (
 )
 from app.services.status_operation_service import list_status_operations
 from app.services.task_service import linked_task_summaries
+from app.services.work_item_iteration_history_service import list_iteration_history, move_work_item_to_iteration
 from app.services.workflow_state_service import initial_workflow_values
 from app.services.workflow_state_query_service import is_terminal_state
 from app.views.bug_view import BugCreate, BugFromTestRunCaseRequest, BugUpdate
@@ -27,18 +29,21 @@ def list_bugs(db: Session) -> list[Bug]:
     bugs = db.query(Bug).filter(Bug.deleted == 0).order_by(Bug.id.desc()).all()
     for bug in bugs:
         bug.linked_tasks = linked_task_summaries(db, "bug", bug.id)
+        bug.iteration_history = list_iteration_history(db, "bug", bug.id)
     return bugs
 
 
 def get_bug(db: Session, bug_id: int) -> Bug:
     bug = _get_active_bug(db, bug_id)
     bug.linked_tasks = linked_task_summaries(db, "bug", bug.id)
+    bug.iteration_history = list_iteration_history(db, "bug", bug.id)
     return bug
 
 
 def create_bug(db: Session, payload: BugCreate, actor_id: int | None = None) -> Bug:
     data = payload.model_dump()
     data["creator_id"] = actor_id
+    ensure_iteration_assignment_mutable(db, None, data.get("iteration_id"))
     if data.get("iteration_id"):
         _ensure_iteration_can_accept_bug(db, data["iteration_id"], data.get("project_id"))
     data["lifecycle_phase"] = (
@@ -49,6 +54,9 @@ def create_bug(db: Session, payload: BugCreate, actor_id: int | None = None) -> 
     data.update(initial_workflow_values(db, "bug", data.get("project_id")))
     bug = Bug(**data)
     db.add(bug)
+    db.flush()
+    if bug.iteration_id:
+        move_work_item_to_iteration(db, bug, bug.iteration_id, actor_id=actor_id, reason="created")
     db.commit()
     db.refresh(bug)
     return bug
@@ -109,8 +117,18 @@ def update_bug(db: Session, bug_id: int, payload: BugUpdate, actor_id: int | Non
     data.pop("resolution", None)
     data.pop("verify_result", None)
     data.pop("close_reason", None)
+    if "iteration_id" in data:
+        ensure_iteration_assignment_mutable(db, bug.iteration_id, data.get("iteration_id"))
     if data.get("iteration_id"):
         _ensure_iteration_can_accept_bug(db, data["iteration_id"], data.get("project_id", bug.project_id))
+    if "iteration_id" in data:
+        move_work_item_to_iteration(
+            db,
+            bug,
+            data.pop("iteration_id"),
+            actor_id=actor_id,
+            reason="updated",
+        )
     for field, value in data.items():
         setattr(bug, field, value)
     db.commit()

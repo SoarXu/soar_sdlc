@@ -144,6 +144,50 @@ def _validate_final_workflow_schema(engine: Engine) -> None:
 def ensure_runtime_schema(engine: Engine) -> None:
     _validate_final_workflow_schema(engine)
     inspector0 = inspect(engine)
+    if "work_item_iteration_history" in inspector0.get_table_names():
+        _ensure_column(
+            engine,
+            "work_item_iteration_history",
+            "title_snapshot",
+            "ALTER TABLE work_item_iteration_history ADD COLUMN title_snapshot VARCHAR(255) NULL COMMENT '离开时标题快照' AFTER leave_reason",
+        )
+        _ensure_column(
+            engine,
+            "work_item_iteration_history",
+            "state_id_snapshot",
+            "ALTER TABLE work_item_iteration_history ADD COLUMN state_id_snapshot BIGINT UNSIGNED NULL COMMENT '离开时状态 ID' AFTER title_snapshot",
+        )
+        _ensure_column(
+            engine,
+            "work_item_iteration_history",
+            "status_name_snapshot",
+            "ALTER TABLE work_item_iteration_history ADD COLUMN status_name_snapshot VARCHAR(100) NULL COMMENT '离开时状态名称' AFTER state_id_snapshot",
+        )
+        _ensure_column(
+            engine,
+            "work_item_iteration_history",
+            "owner_id_snapshot",
+            "ALTER TABLE work_item_iteration_history ADD COLUMN owner_id_snapshot BIGINT UNSIGNED NULL COMMENT '离开时处理人' AFTER status_name_snapshot",
+        )
+        with engine.begin() as conn:
+            for object_type, table_name in (("requirement", "requirements"), ("task", "tasks"), ("bug", "bugs")):
+                if table_name not in inspector0.get_table_names():
+                    continue
+                conn.execute(
+                    text(
+                        "INSERT INTO work_item_iteration_history "
+                        "(object_type, object_id, iteration_id, entered_at, enter_reason, migrated) "
+                        f"SELECT :object_type, item.id, item.iteration_id, COALESCE(item.create_time, CURRENT_TIMESTAMP), "
+                        "'migration', 1 "
+                        f"FROM {table_name} item "
+                        "WHERE item.iteration_id IS NOT NULL AND item.deleted = 0 "
+                        "AND NOT EXISTS ("
+                        "SELECT 1 FROM work_item_iteration_history history "
+                        "WHERE history.object_type = :object_type AND history.object_id = item.id"
+                        ")"
+                    ),
+                    {"object_type": object_type},
+                )
     if "workflow_component_registry" not in inspector0.get_table_names():
         with engine.begin() as conn:
             conn.execute(text(

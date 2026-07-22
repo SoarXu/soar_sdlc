@@ -852,8 +852,7 @@ def _apply_bug_activation(
             detail={"code": "REOPEN_REASON_REQUIRED", "message": "重新激活原因不能为空"},
         )
 
-    target_iteration_id = payload.get("target_iteration_id")
-    parsed_target_iteration_id = int(target_iteration_id) if target_iteration_id else None
+    parsed_target_iteration_id = _request_target_iteration_id(payload)
     locked_iterations = getattr(bug, "_transition_locked_iterations", {})
     required_iteration_ids = {
         iteration_id
@@ -871,7 +870,7 @@ def _apply_bug_activation(
         )
     source_iteration = locked_iterations.get(bug.iteration_id)
     source_is_active = bool(source_iteration and is_iteration_active(db, source_iteration))
-    if not source_is_active and not target_iteration_id:
+    if not source_is_active and parsed_target_iteration_id is None:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail={"code": "TARGET_ITERATION_REQUIRED", "message": "请选择进行中的目标迭代"},

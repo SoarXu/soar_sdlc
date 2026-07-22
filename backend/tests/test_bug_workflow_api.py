@@ -1,5 +1,6 @@
 from uuid import uuid4
 
+import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import text
 
@@ -261,6 +262,67 @@ def test_closed_bug_reactivates_into_active_iteration_and_retains_eligible_handl
         assert rows[1].operation_log_id == rows[0].operation_log_id
     finally:
         db.close()
+
+
+def test_closed_bug_reactivation_accepts_legacy_iteration_id_alias(client: TestClient):
+    reporter_id, reporter_token = _create_user("developer")
+    project_id = _create_project(client)
+    _add_member(project_id, reporter_id, "developer")
+    source_iteration_id = _create_iteration(client, project_id, "Legacy bug source", active=True)
+    target_iteration_id = _create_iteration(client, project_id, "Legacy bug target", active=True)
+    bug = client.post(
+        "/api/v1/bugs",
+        json={
+            "project_id": project_id,
+            "iteration_id": source_iteration_id,
+            "title": "Legacy reactivation bug",
+            "owner_id": reporter_id,
+            "reporter_id": reporter_id,
+        },
+        headers={"Authorization": f"Bearer {reporter_token}"},
+    ).json()
+    _set_bug_closed(bug["id"])
+    assert client.post(
+        f"/api/v1/workflow-runtime/iteration/{source_iteration_id}/transition",
+        json={"action_key": "complete"},
+    ).status_code == 200
+
+    reactivated = client.post(
+        f"/api/v1/workflow-runtime/bug/{bug['id']}/transition",
+        json={"action_key": "activate", "payload": {"reason": "Legacy target", "iteration_id": target_iteration_id}},
+        headers={"Authorization": f"Bearer {reporter_token}"},
+    )
+
+    assert reactivated.status_code == 200, reactivated.text
+    assert reactivated.json()["selected_values"]["target_iteration_id"] == target_iteration_id
+    assert client.get(f"/api/v1/bugs/{bug['id']}").json()["iteration_id"] == target_iteration_id
+
+
+@pytest.mark.parametrize("invalid_target", [True, 1.5])
+def test_bug_reactivation_rejects_invalid_legacy_iteration_id(client: TestClient, invalid_target):
+    reporter_id, reporter_token = _create_user("developer")
+    project_id = _create_project(client)
+    _add_member(project_id, reporter_id, "developer")
+    source_iteration_id = _create_iteration(client, project_id, "Invalid bug source", active=True)
+    bug = client.post(
+        "/api/v1/bugs",
+        json={"project_id": project_id, "iteration_id": source_iteration_id, "title": "Invalid target bug", "owner_id": reporter_id},
+        headers={"Authorization": f"Bearer {reporter_token}"},
+    ).json()
+    _set_bug_closed(bug["id"])
+    assert client.post(
+        f"/api/v1/workflow-runtime/iteration/{source_iteration_id}/transition",
+        json={"action_key": "complete"},
+    ).status_code == 200
+
+    reactivated = client.post(
+        f"/api/v1/workflow-runtime/bug/{bug['id']}/transition",
+        json={"action_key": "activate", "payload": {"reason": "Invalid target", "iteration_id": invalid_target}},
+        headers={"Authorization": f"Bearer {reporter_token}"},
+    )
+
+    assert reactivated.status_code == 422
+    assert reactivated.json()["detail"]["code"] == "INVALID_TARGET_ITERATION_ID"
 
 
 def test_bug_reactivation_drops_original_handler_who_is_not_a_project_member(client: TestClient):

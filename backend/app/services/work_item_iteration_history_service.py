@@ -26,6 +26,7 @@ def move_work_item_to_iteration(
     operation_log_id: int | None = None,
 ) -> None:
     object_type = OBJECT_TYPE_BY_MODEL[type(item)]
+    db.refresh(item, with_for_update=True)
     current_iteration_id = getattr(item, "iteration_id", None)
     open_rows = (
         db.query(WorkItemIterationHistory)
@@ -34,6 +35,7 @@ def move_work_item_to_iteration(
             WorkItemIterationHistory.object_id == item.id,
             WorkItemIterationHistory.left_at.is_(None),
         )
+        .with_for_update()
         .all()
     )
     if current_iteration_id == target_iteration_id:

@@ -164,6 +164,18 @@ def test_bug_create_and_update_reject_closed_iteration(client: TestClient):
     assert updated_with_finished_iteration.json()["detail"]["code"] == "ITERATION_NOT_MUTABLE"
 
 
+def test_bug_project_only_update_rejects_existing_iteration_scope_mismatch(client: TestClient):
+    scoped_project_id = _create_project(client)
+    other_project_id = _create_project(client)
+    iteration_id = _create_iteration(client, scoped_project_id, "Scoped bug iteration", active=False)
+    bug = _create_bug(client, project_id=scoped_project_id, iteration_id=iteration_id)
+
+    updated = client.patch(f"/api/v1/bugs/{bug['id']}", json={"project_id": other_project_id})
+
+    assert updated.status_code == 400
+    assert client.get(f"/api/v1/bugs/{bug['id']}").json()["project_id"] == scoped_project_id
+
+
 def test_closed_bug_reactivates_into_active_iteration_and_retains_eligible_handler(client: TestClient):
     reporter_id, reporter_token = _create_user("developer")
     handler_id, _ = _create_user("developer")

@@ -33,6 +33,7 @@ from app.services.project_permission_service import (
 )
 from app.services.status_operation_service import create_status_operation
 from app.services.iteration_service import (
+    ensure_iteration_mutable,
     is_iteration_active,
     iteration_scoped_project_ids,
     lock_iterations_for_mutation,
@@ -298,7 +299,23 @@ def _get_item_for_execution(
     for attempt in range(TRANSITION_LOCK_RETRY_LIMIT):
         preview = _get_item(db, object_type, object_id)
         iteration_ids = {getattr(preview, "iteration_id", None)}
-        iteration_ids.add(_activation_target_iteration_id(db, object_type, preview, request))
+        target_iteration_id = _activation_target_iteration_id(db, object_type, preview, request)
+        iteration_ids.add(target_iteration_id)
+        if object_type == "requirement" and target_iteration_id is not None:
+            iteration_ids.update(
+                iteration_id
+                for iteration_id, in db.query(Task.iteration_id).filter(
+                    Task.requirement_id == preview.id,
+                    Task.deleted == 0,
+                ).all()
+            )
+            iteration_ids.update(
+                iteration_id
+                for iteration_id, in db.query(TestCase.iteration_id).filter(
+                    TestCase.requirement_id == preview.id,
+                    TestCase.deleted == 0,
+                ).all()
+            )
         locked_iterations = (
             lock_iterations_for_mutation(db, iteration_ids)
             if any(iteration_id is not None for iteration_id in iteration_ids)
@@ -329,18 +346,19 @@ def _activation_target_iteration_id(
     item,
     request: WorkflowTransitionExecuteRequest,
 ) -> int | None:
-    if object_type != "bug":
+    if object_type not in {"bug", "requirement"}:
         return None
     target_iteration_id = (request.payload or {}).get("target_iteration_id")
     if not target_iteration_id:
         return None
-    activation_transition = db.query(WorkflowTransition.id).filter(
+    expected_action_key = "activate" if object_type == "bug" else "defer"
+    target_transition = db.query(WorkflowTransition.id).filter(
         WorkflowTransition.id == request.transition_id,
         WorkflowTransition.definition_id == item.workflow_definition_id,
-        WorkflowTransition.action_key == "activate",
+        WorkflowTransition.action_key == expected_action_key,
         WorkflowTransition.enabled == True,  # noqa: E712
     ).first()
-    return int(target_iteration_id) if activation_transition else None
+    return int(target_iteration_id) if target_transition else None
 
 
 def _link_reactivation_history_to_operation(
@@ -1570,19 +1588,77 @@ def _defer_requirement_links(db: Session, requirement: Requirement, payload: dic
     target_iteration_id = payload.get("target_iteration_id") or payload.get("iteration_id")
     if target_iteration_id and requirement.iteration_id == target_iteration_id:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Target iteration cannot be current iteration")
-    if target_iteration_id:
-        _ensure_iteration_scope(db, requirement.project_id, target_iteration_id)
+    parsed_target_iteration_id = int(target_iteration_id) if target_iteration_id else None
+    locked_iterations = getattr(requirement, "_transition_locked_iterations", {})
+    tasks = (
+        db.query(Task)
+        .filter(Task.requirement_id == requirement.id, Task.deleted == 0)
+        .order_by(Task.id.asc())
+        .with_for_update()
+        .populate_existing()
+        .all()
+    )
+    test_cases = (
+        db.query(TestCase)
+        .filter(TestCase.requirement_id == requirement.id, TestCase.deleted == 0)
+        .order_by(TestCase.id.asc())
+        .with_for_update()
+        .populate_existing()
+        .all()
+    )
+    required_iteration_ids = {
+        iteration_id
+        for iteration_id in (
+            requirement.iteration_id,
+            parsed_target_iteration_id,
+            *(task.iteration_id for task in tasks),
+            *(test_case.iteration_id for test_case in test_cases),
+        )
+        if iteration_id is not None
+    }
+    if not required_iteration_ids.issubset(locked_iterations):
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": "ITERATION_STATE_CONFLICT",
+                "message": "Iteration membership changed during defer; refresh and retry",
+            },
+        )
+    for iteration in locked_iterations.values():
+        ensure_iteration_mutable(iteration)
+    if parsed_target_iteration_id:
+        target_scope = iteration_scoped_project_ids(db, parsed_target_iteration_id)
+        for item in (requirement, *tasks, *test_cases):
+            if item.project_id not in target_scope:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"{type(item).__name__} is outside target iteration scope",
+                )
 
     from_iteration_id = requirement.iteration_id
-    requirement.iteration_id = target_iteration_id
-    for task in db.query(Task).filter(Task.requirement_id == requirement.id, Task.deleted == 0).all():
-        task.iteration_id = target_iteration_id
+    actor_id = actor.id if actor else None
+    move_work_item_to_iteration(
+        db,
+        requirement,
+        parsed_target_iteration_id,
+        actor_id=actor_id,
+        reason="deferred",
+    )
+    for task in tasks:
+        move_work_item_to_iteration(
+            db,
+            task,
+            parsed_target_iteration_id,
+            actor_id=actor_id,
+            reason="deferred",
+        )
         if not is_terminal_state(task):
             definition = db.query(WorkflowDefinition).filter(WorkflowDefinition.id == task.workflow_definition_id).first()
             if definition and definition.initial_state_id:
                 task.current_state_id = definition.initial_state_id
-    for test_case in db.query(TestCase).filter(TestCase.requirement_id == requirement.id, TestCase.deleted == 0).all():
-        test_case.iteration_id = target_iteration_id
+    for test_case in test_cases:
+        test_case.iteration_id = parsed_target_iteration_id
 
     db.add(
         AuditLog(
@@ -1595,7 +1671,7 @@ def _defer_requirement_links(db: Session, requirement: Requirement, payload: dic
                 "current_state_id": requirement.current_state_id,
                 "status_name": requirement.status_name,
             },
-            after_data={"iteration_id": target_iteration_id},
+            after_data={"iteration_id": parsed_target_iteration_id},
         )
     )
 

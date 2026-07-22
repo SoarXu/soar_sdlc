@@ -118,10 +118,11 @@ def update_bug(db: Session, bug_id: int, payload: BugUpdate, actor_id: int | Non
     data.pop("resolution", None)
     data.pop("verify_result", None)
     data.pop("close_reason", None)
-    if "iteration_id" in data:
-        ensure_iteration_assignment_mutable(db, bug.iteration_id, data.get("iteration_id"))
-    if data.get("iteration_id"):
-        _ensure_iteration_can_accept_bug(db, data["iteration_id"], data.get("project_id", bug.project_id))
+    target_project_id = data.get("project_id", bug.project_id)
+    target_iteration_id = data.get("iteration_id", bug.iteration_id)
+    ensure_iteration_assignment_mutable(db, bug.iteration_id, target_iteration_id)
+    if target_iteration_id:
+        _ensure_iteration_can_accept_bug(db, target_iteration_id, target_project_id)
     if "iteration_id" in data:
         move_work_item_to_iteration(
             db,

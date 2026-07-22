@@ -7,6 +7,10 @@ from openpyxl import Workbook, load_workbook
 from app.core.security import get_password_hash
 from app.db.session import SessionLocal
 from app.models.user import User
+from app.models.iteration import Iteration
+from app.models.work_item_iteration_history import WorkItemIterationHistory
+from app.models.workflow_definition import WorkflowState
+from app.services.requirement_import_service import REQUIREMENT_IMPORT_COLUMNS
 
 
 def _xlsx(rows: list[list[str | None]]) -> tuple[str, bytes, str]:
@@ -190,6 +194,73 @@ def test_requirement_import_commit_updates_duplicate_requirement(client: TestCli
     assert data["updated_count"] == 1
     updated = client.get(f"/api/v1/requirements/{existing['id']}").json()
     assert updated["priority"] == "1"
+
+
+def test_requirement_import_update_closes_active_iteration_history(client: TestClient):
+    project_name = f"Import planned project-{uuid4().hex[:8]}"
+    project = client.post("/api/v1/projects", json={"name": project_name}).json()
+    iteration = client.post(
+        "/api/v1/iterations",
+        json={"project_ids": [project["id"]], "name": f"Import active history-{uuid4().hex[:8]}"},
+    ).json()
+    existing = client.post(
+        "/api/v1/requirements",
+        json={"project_id": project["id"], "iteration_id": iteration["id"], "title": "Imported planned requirement"},
+    ).json()
+
+    response = client.post(
+        "/api/v1/requirements/import/commit",
+        data={"duplicate_strategy": "update_existing"},
+        files={"file": _xlsx([REQUIREMENT_IMPORT_COLUMNS, [project_name, "Imported planned requirement"]])},
+    )
+
+    assert response.status_code == 200
+    assert client.get(f"/api/v1/requirements/{existing['id']}").json()["iteration_id"] is None
+    db = SessionLocal()
+    try:
+        history = db.query(WorkItemIterationHistory).filter(
+            WorkItemIterationHistory.object_type == "requirement",
+            WorkItemIterationHistory.object_id == existing["id"],
+        ).one()
+        assert history.left_at is not None
+        assert history.leave_reason == "import_updated"
+        assert history.left_by is not None
+    finally:
+        db.close()
+
+
+def test_requirement_import_update_rejects_terminal_iteration(client: TestClient):
+    project_name = f"Import terminal project-{uuid4().hex[:8]}"
+    project = client.post("/api/v1/projects", json={"name": project_name}).json()
+    iteration = client.post(
+        "/api/v1/iterations",
+        json={"project_ids": [project["id"]], "name": f"Import terminal-{uuid4().hex[:8]}"},
+    ).json()
+    existing = client.post(
+        "/api/v1/requirements",
+        json={"project_id": project["id"], "iteration_id": iteration["id"], "title": "Terminal imported requirement"},
+    ).json()
+    db = SessionLocal()
+    try:
+        iteration_row = db.query(Iteration).filter(Iteration.id == iteration["id"]).one()
+        terminal_state = db.query(WorkflowState).filter(
+            WorkflowState.definition_id == iteration_row.workflow_definition_id,
+            WorkflowState.category == "terminal",
+        ).first()
+        iteration_row.current_state_id = terminal_state.id
+        db.commit()
+    finally:
+        db.close()
+
+    response = client.post(
+        "/api/v1/requirements/import/commit",
+        data={"duplicate_strategy": "update_existing"},
+        files={"file": _xlsx([REQUIREMENT_IMPORT_COLUMNS, [project_name, "Terminal imported requirement"]])},
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"]["code"] == "ITERATION_NOT_MUTABLE"
+    assert client.get(f"/api/v1/requirements/{existing['id']}").json()["iteration_id"] == iteration["id"]
 
 
 def test_requirement_import_commit_keeps_created_requirement_unassigned(client: TestClient):

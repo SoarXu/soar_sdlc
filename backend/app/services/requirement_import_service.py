@@ -12,6 +12,8 @@ from app.models.user import User
 from app.services.lifecycle_service import project_lifecycle_phase
 from app.services.workflow_state_service import initial_workflow_values
 from app.services.project_permission_service import ensure_work_item_create_permission
+from app.services.iteration_service import ensure_iteration_assignment_mutable
+from app.services.work_item_iteration_history_service import move_work_item_to_iteration
 
 
 REQUIREMENT_IMPORT_COLUMNS = [
@@ -101,7 +103,7 @@ def commit_requirement_import(
     for row in parsed_rows:
         existing = _find_existing_requirement(db, row.project_id, row.title)
         if existing and duplicate_strategy == "update_existing":
-            _apply_row_to_requirement(db, existing, row)
+            _apply_row_to_requirement(db, existing, row, actor_id=actor.id if actor else None)
             updated_count += 1
             continue
         workflow_values = initial_workflow_values(db, "requirement", row.project_id)
@@ -264,9 +266,22 @@ def _find_existing_requirement(db: Session, project_id: int, title: str) -> Requ
     )
 
 
-def _apply_row_to_requirement(db: Session, requirement: Requirement, row: ParsedRequirementRow) -> None:
+def _apply_row_to_requirement(
+    db: Session,
+    requirement: Requirement,
+    row: ParsedRequirementRow,
+    actor_id: int | None = None,
+) -> None:
+    ensure_iteration_assignment_mutable(db, requirement.iteration_id, None)
+    if requirement.iteration_id is not None:
+        move_work_item_to_iteration(
+            db,
+            requirement,
+            None,
+            actor_id=actor_id,
+            reason="import_updated",
+        )
     requirement.source_project_id = None
-    requirement.iteration_id = None
     requirement.requirement_type = row.requirement_type
     requirement.priority = row.priority
     if row.owner_id is not None:

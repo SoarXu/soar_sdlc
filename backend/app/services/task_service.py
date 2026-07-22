@@ -89,6 +89,9 @@ def create_linked_task(db: Session, payload: LinkedTaskCreate, actor: User | Non
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Linked source project not found")
     if is_terminal_state(project):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Project is closed")
+    inherited_iteration_id = getattr(source, "iteration_id", None)
+    ensure_iteration_assignment_mutable(db, None, inherited_iteration_id)
+    _ensure_task_iteration_scope(db, project_id, inherited_iteration_id)
 
     inherited_owner_id = _linked_source_owner_id(payload.source_type, source)
     if actor.id != inherited_owner_id and not can_admin_action(db, project_id, actor.id):
@@ -111,7 +114,7 @@ def create_linked_task(db: Session, payload: LinkedTaskCreate, actor: User | Non
     task = Task(
         project_id=project_id,
         source_project_id=getattr(source, "source_project_id", None),
-        iteration_id=getattr(source, "iteration_id", None),
+        iteration_id=inherited_iteration_id,
         requirement_id=source.id if payload.source_type == "requirement" else None,
         title=payload.title,
         task_type=expected_task_type,

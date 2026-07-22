@@ -4,6 +4,9 @@ from fastapi.testclient import TestClient
 
 from app.db.session import SessionLocal
 from app.models.bug import Bug
+from app.models.iteration import Iteration
+from app.models import test_case as test_case_models
+from app.models.work_item_iteration_history import WorkItemIterationHistory
 from app.models.workflow_definition import WorkflowState
 
 
@@ -154,6 +157,16 @@ def test_failed_test_case_execution_creates_bug_with_case_iteration_and_can_edit
     assert data["owner_id"] == 1
     assert "submit order" in data["reproduce_steps"]
     assert "HTTP 500" in data["reproduce_steps"]
+    db = SessionLocal()
+    try:
+        history = db.query(WorkItemIterationHistory).filter(
+            WorkItemIterationHistory.object_type == "bug",
+            WorkItemIterationHistory.object_id == data["id"],
+        ).one()
+        assert history.iteration_id == iteration_id
+        assert history.enter_reason == "test_case_bug_created"
+    finally:
+        db.close()
     updated = client.patch(f"/api/v1/bugs/{data['id']}", json={"iteration_id": next_iteration.json()["id"]})
     assert updated.status_code == 200
     assert updated.json()["iteration_id"] == next_iteration.json()["id"]
@@ -177,6 +190,44 @@ def test_failed_test_case_bug_uses_requirement_iteration_when_case_has_no_direct
 
     assert bug.status_code == 200
     assert bug.json()["iteration_id"] == iteration_id
+
+
+def test_test_case_bug_rejects_terminal_or_out_of_scope_inherited_iteration(client: TestClient):
+    project_id = _create_project(client)
+    other_project_id = _create_project(client)
+    case_id = _create_test_case(client, project_id)
+    assert client.post(
+        f"/api/v1/test-cases/{case_id}/executions",
+        json={"steps_result_json": [{"step": "x", "expected": "y", "result": "failed", "actual": "z"}]},
+    ).status_code == 200
+    other_iteration = client.post(
+        "/api/v1/iterations",
+        json={"project_ids": [other_project_id], "name": f"Out scope {uuid4().hex[:8]}"},
+    ).json()
+    db = SessionLocal()
+    try:
+        db.query(test_case_models.TestCase).filter(test_case_models.TestCase.id == case_id).update(
+            {"iteration_id": other_iteration["id"]}
+        )
+        db.commit()
+    finally:
+        db.close()
+    assert client.post(f"/api/v1/test-cases/{case_id}/bugs", json={"title": "Out scope bug"}).status_code == 400
+
+    db = SessionLocal()
+    try:
+        iteration = db.query(Iteration).filter(Iteration.id == other_iteration["id"]).one()
+        terminal_state = db.query(WorkflowState).filter(
+            WorkflowState.definition_id == iteration.workflow_definition_id,
+            WorkflowState.category == "terminal",
+        ).first()
+        iteration.current_state_id = terminal_state.id
+        db.commit()
+    finally:
+        db.close()
+    terminal = client.post(f"/api/v1/test-cases/{case_id}/bugs", json={"title": "Terminal bug"})
+    assert terminal.status_code == 409
+    assert terminal.json()["detail"]["code"] == "ITERATION_NOT_MUTABLE"
 
 
 def test_passed_test_case_execution_cannot_create_bug(client: TestClient):

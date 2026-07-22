@@ -12,6 +12,7 @@ from app.models.notification import Notification
 from app.models.project_member import ProjectMember
 from app.models.relation import ObjectRelation
 from app.models.requirement import Requirement
+from app.models.work_item_iteration_history import WorkItemIterationHistory
 from app.models.role import Role, UserRole
 from app.models.test_run import TestRun as RunModel
 from app.models.user import User
@@ -832,6 +833,57 @@ def test_runtime_requirement_defer_moves_tasks_and_test_cases(client: TestClient
     assert client.get(f"/api/v1/requirements/{requirement['id']}").json()["iteration_id"] == target_iteration["id"]
     assert client.get(f"/api/v1/tasks/{task['id']}").json()["iteration_id"] == target_iteration["id"]
     assert client.get(f"/api/v1/test-cases/{test_case['id']}").json()["iteration_id"] == target_iteration["id"]
+    db = SessionLocal()
+    try:
+        histories = db.query(WorkItemIterationHistory).filter(
+            WorkItemIterationHistory.object_id.in_([requirement["id"], task["id"]]),
+            WorkItemIterationHistory.iteration_id.in_([current_iteration["id"], target_iteration["id"]]),
+        ).all()
+        assert len(histories) == 4
+        assert sum(row.left_at is not None for row in histories) == 2
+        assert {row.leave_reason for row in histories if row.left_at is not None} == {"deferred"}
+        assert all(row.left_by == owner_id for row in histories if row.left_at is not None)
+        assert {row.enter_reason for row in histories if row.left_at is None} == {"deferred"}
+    finally:
+        db.close()
+
+
+@pytest.mark.parametrize("terminal_side", ["source", "target"])
+def test_requirement_defer_rejects_terminal_source_or_target_iteration(client: TestClient, terminal_side: str):
+    _, project_id = _create_project_with_requirement_workflow(client)
+    owner_id, owner_token = _create_user("Terminal Defer Owner", "developer")
+    _add_project_member(project_id, owner_id, "developer")
+    source = client.post("/api/v1/iterations", json={"name": f"Source {uuid4().hex[:8]}", "project_ids": [project_id]}).json()
+    target = client.post("/api/v1/iterations", json={"name": f"Target {uuid4().hex[:8]}", "project_ids": [project_id]}).json()
+    requirement = client.post(
+        "/api/v1/requirements",
+        json={"project_id": project_id, "iteration_id": source["id"], "title": f"Terminal defer {uuid4().hex[:8]}", "owner_id": owner_id},
+    ).json()
+    assert client.post(
+        f"/api/v1/workflow-runtime/requirement/{requirement['id']}/transition",
+        json={"action_key": "claim"}, headers={"Authorization": f"Bearer {owner_token}"},
+    ).status_code == 200
+    terminal_id = source["id"] if terminal_side == "source" else target["id"]
+    db = SessionLocal()
+    try:
+        iteration = db.query(iteration_service.Iteration).filter(iteration_service.Iteration.id == terminal_id).one()
+        terminal_state_id = db.query(workflow_runtime_service.WorkflowState.id).filter(
+            workflow_runtime_service.WorkflowState.definition_id == iteration.workflow_definition_id,
+            workflow_runtime_service.WorkflowState.category == "terminal",
+        ).first()[0]
+        iteration.current_state_id = terminal_state_id
+        db.commit()
+    finally:
+        db.close()
+
+    deferred = client.post(
+        f"/api/v1/workflow-runtime/requirement/{requirement['id']}/transition",
+        json={"action_key": "defer", "payload": {"target_iteration_id": target["id"]}},
+        headers={"Authorization": f"Bearer {owner_token}"},
+    )
+
+    assert deferred.status_code == 409
+    assert deferred.json()["detail"]["code"] == "ITERATION_NOT_MUTABLE"
 
 
 def test_runtime_routes_bug_type_to_target_status_and_records_resolution(client: TestClient):

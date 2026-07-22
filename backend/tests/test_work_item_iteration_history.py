@@ -4,6 +4,9 @@ from fastapi.testclient import TestClient
 from sqlalchemy import text
 
 from app.db.session import Base, SessionLocal
+from app.models.requirement import Requirement
+from app.models.work_item_iteration_history import WorkItemIterationHistory
+from app.services.work_item_iteration_history_service import move_work_item_to_iteration
 
 
 def _create_project(client: TestClient) -> int:
@@ -109,3 +112,61 @@ def test_requirement_patch_closes_current_membership_history(client: TestClient)
         assert row.left_at is not None
     finally:
         db.close()
+
+
+def test_membership_move_locks_and_refreshes_stale_work_item_before_history_change(client: TestClient):
+    project_id = _create_project(client)
+    source_iteration_id = _create_iteration(client, project_id)
+    target_iteration_id = _create_iteration(client, project_id)
+    created = client.post(
+        "/api/v1/requirements",
+        json={"project_id": project_id, "iteration_id": source_iteration_id, "title": f"Concurrent history-{uuid4().hex[:8]}"},
+    )
+    assert created.status_code == 200
+    requirement_id = created.json()["id"]
+
+    stale_db = SessionLocal()
+    mover_db = SessionLocal()
+    try:
+        stale_item = stale_db.query(Requirement).filter(Requirement.id == requirement_id).one()
+        moving_requirement = mover_db.query(Requirement).filter(Requirement.id == requirement_id).one()
+        move_work_item_to_iteration(
+            mover_db,
+            moving_requirement,
+            target_iteration_id,
+            actor_id=1,
+            reason="first_move",
+        )
+        mover_db.commit()
+        first_target_history_id = mover_db.query(WorkItemIterationHistory.id).filter(
+            WorkItemIterationHistory.object_type == "requirement",
+            WorkItemIterationHistory.object_id == requirement_id,
+            WorkItemIterationHistory.iteration_id == target_iteration_id,
+        ).scalar()
+
+        assert stale_item.iteration_id == source_iteration_id
+        move_work_item_to_iteration(
+            stale_db,
+            stale_item,
+            target_iteration_id,
+            actor_id=1,
+            reason="stale_duplicate_move",
+        )
+        stale_db.commit()
+
+        open_target_rows = stale_db.query(WorkItemIterationHistory).filter(
+            WorkItemIterationHistory.object_type == "requirement",
+            WorkItemIterationHistory.object_id == requirement_id,
+            WorkItemIterationHistory.iteration_id == target_iteration_id,
+            WorkItemIterationHistory.left_at.is_(None),
+        ).all()
+        assert len(open_target_rows) == 1
+        all_target_rows = stale_db.query(WorkItemIterationHistory).filter(
+            WorkItemIterationHistory.object_type == "requirement",
+            WorkItemIterationHistory.object_id == requirement_id,
+            WorkItemIterationHistory.iteration_id == target_iteration_id,
+        ).all()
+        assert [row.id for row in all_target_rows] == [first_target_history_id]
+    finally:
+        stale_db.close()
+        mover_db.close()

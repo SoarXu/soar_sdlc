@@ -143,8 +143,7 @@ def _validate_final_workflow_schema(engine: Engine) -> None:
 
 def _history_open_lookup_index_exists(indexes: list[dict], canonical_name: str = "idx_wiih_object") -> bool:
     return any(
-        index.get("name") == canonical_name
-        or index.get("column_names") == ["object_type", "object_id", "left_at"]
+        index.get("column_names") == ["object_type", "object_id", "left_at"]
         for index in indexes
     )
 
@@ -178,6 +177,14 @@ def ensure_runtime_schema(engine: Engine) -> None:
             "ALTER TABLE work_item_iteration_history ADD COLUMN owner_id_snapshot BIGINT UNSIGNED NULL COMMENT '离开时处理人' AFTER status_name_snapshot",
         )
         history_indexes = inspector0.get_indexes("work_item_iteration_history")
+        canonical_index = next(
+            (index for index in history_indexes if index.get("name") == "idx_wiih_object"),
+            None,
+        )
+        if canonical_index and canonical_index.get("column_names") != ["object_type", "object_id", "left_at"]:
+            with engine.begin() as conn:
+                conn.execute(text("DROP INDEX idx_wiih_object ON work_item_iteration_history"))
+            history_indexes = [index for index in history_indexes if index.get("name") != "idx_wiih_object"]
         if not _history_open_lookup_index_exists(history_indexes):
             with engine.begin() as conn:
                 conn.execute(

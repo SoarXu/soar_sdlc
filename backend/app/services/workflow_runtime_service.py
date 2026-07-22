@@ -348,8 +348,8 @@ def _activation_target_iteration_id(
 ) -> int | None:
     if object_type not in {"bug", "requirement"}:
         return None
-    target_iteration_id = (request.payload or {}).get("target_iteration_id")
-    if not target_iteration_id:
+    target_iteration_id = _request_target_iteration_id(request.payload or {})
+    if target_iteration_id is None:
         return None
     expected_action_key = "activate" if object_type == "bug" else "defer"
     target_transition = db.query(WorkflowTransition.id).filter(
@@ -358,12 +358,27 @@ def _activation_target_iteration_id(
         WorkflowTransition.action_key == expected_action_key,
         WorkflowTransition.enabled == True,  # noqa: E712
     ).first()
-    return _parse_target_iteration_id(target_iteration_id) if target_transition else None
+    return target_iteration_id if target_transition else None
+
+
+def _request_target_iteration_id(payload: dict[str, Any]) -> int | None:
+    value = payload.get("target_iteration_id")
+    if value is None:
+        value = payload.get("iteration_id")
+    return _parse_target_iteration_id(value) if value is not None else None
 
 
 def _parse_target_iteration_id(value) -> int:
+    if isinstance(value, bool) or isinstance(value, float):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={
+                "code": "INVALID_TARGET_ITERATION_ID",
+                "message": "target_iteration_id must be a positive integer",
+            },
+        )
     try:
-        return int(value)
+        parsed = int(value)
     except (TypeError, ValueError) as exc:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -372,6 +387,15 @@ def _parse_target_iteration_id(value) -> int:
                 "message": "target_iteration_id must be a number",
             },
         ) from exc
+    if parsed <= 0 or (isinstance(value, str) and not value.strip().isdigit()):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={
+                "code": "INVALID_TARGET_ITERATION_ID",
+                "message": "target_iteration_id must be a positive integer",
+            },
+        )
+    return parsed
 
 
 def _link_reactivation_history_to_operation(
@@ -1598,10 +1622,9 @@ def _ensure_manual_owner_allowed(db: Session, project_id: int | None, user_id: i
 
 
 def _defer_requirement_links(db: Session, requirement: Requirement, payload: dict[str, Any], actor: User | None) -> None:
-    target_iteration_id = payload.get("target_iteration_id") or payload.get("iteration_id")
-    if target_iteration_id and requirement.iteration_id == target_iteration_id:
+    parsed_target_iteration_id = _request_target_iteration_id(payload)
+    if parsed_target_iteration_id and requirement.iteration_id == parsed_target_iteration_id:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Target iteration cannot be current iteration")
-    parsed_target_iteration_id = _parse_target_iteration_id(target_iteration_id) if target_iteration_id else None
     locked_iterations = getattr(requirement, "_transition_locked_iterations", {})
     tasks = (
         db.query(Task)

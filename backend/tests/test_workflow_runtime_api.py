@@ -910,6 +910,56 @@ def test_requirement_defer_rejects_nonnumeric_target_iteration_id(client: TestCl
     assert deferred.json()["detail"]["code"] == "INVALID_TARGET_ITERATION_ID"
 
 
+def test_requirement_defer_accepts_legacy_iteration_id_alias(client: TestClient):
+    _, project_id = _create_project_with_requirement_workflow(client)
+    owner_id, owner_token = _create_user("Legacy Defer Owner", "developer")
+    _add_project_member(project_id, owner_id, "developer")
+    source = client.post("/api/v1/iterations", json={"name": f"Legacy source {uuid4().hex[:8]}", "project_ids": [project_id]}).json()
+    target = client.post("/api/v1/iterations", json={"name": f"Legacy target {uuid4().hex[:8]}", "project_ids": [project_id]}).json()
+    requirement = client.post(
+        "/api/v1/requirements",
+        json={"project_id": project_id, "iteration_id": source["id"], "title": f"Legacy defer {uuid4().hex[:8]}", "owner_id": owner_id},
+    ).json()
+    assert client.post(
+        f"/api/v1/workflow-runtime/requirement/{requirement['id']}/transition",
+        json={"action_key": "claim"}, headers={"Authorization": f"Bearer {owner_token}"},
+    ).status_code == 200
+
+    deferred = client.post(
+        f"/api/v1/workflow-runtime/requirement/{requirement['id']}/transition",
+        json={"action_key": "defer", "payload": {"iteration_id": target["id"]}},
+        headers={"Authorization": f"Bearer {owner_token}"},
+    )
+
+    assert deferred.status_code == 200
+    assert client.get(f"/api/v1/requirements/{requirement['id']}").json()["iteration_id"] == target["id"]
+
+
+@pytest.mark.parametrize("invalid_target", [True, 1.5])
+def test_requirement_defer_rejects_boolean_and_float_target_iteration_id(client: TestClient, invalid_target):
+    _, project_id = _create_project_with_requirement_workflow(client)
+    owner_id, owner_token = _create_user("Strict Target Owner", "developer")
+    _add_project_member(project_id, owner_id, "developer")
+    source = client.post("/api/v1/iterations", json={"name": f"Strict source {uuid4().hex[:8]}", "project_ids": [project_id]}).json()
+    requirement = client.post(
+        "/api/v1/requirements",
+        json={"project_id": project_id, "iteration_id": source["id"], "title": f"Strict defer {uuid4().hex[:8]}", "owner_id": owner_id},
+    ).json()
+    assert client.post(
+        f"/api/v1/workflow-runtime/requirement/{requirement['id']}/transition",
+        json={"action_key": "claim"}, headers={"Authorization": f"Bearer {owner_token}"},
+    ).status_code == 200
+
+    deferred = client.post(
+        f"/api/v1/workflow-runtime/requirement/{requirement['id']}/transition",
+        json={"action_key": "defer", "payload": {"iteration_id": invalid_target}},
+        headers={"Authorization": f"Bearer {owner_token}"},
+    )
+
+    assert deferred.status_code == 422
+    assert deferred.json()["detail"]["code"] == "INVALID_TARGET_ITERATION_ID"
+
+
 def test_runtime_routes_bug_type_to_target_status_and_records_resolution(client: TestClient):
     project_id = client.post(
         "/api/v1/projects",

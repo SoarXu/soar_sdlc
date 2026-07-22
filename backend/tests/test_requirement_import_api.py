@@ -268,9 +268,8 @@ def test_requirement_import_update_rejects_terminal_iteration(client: TestClient
     assert client.get(f"/api/v1/requirements/{existing['id']}").json()["iteration_id"] == iteration["id"]
 
 
-def test_import_update_membership_change_returns_conflict_without_local_rollback(monkeypatch):
+def test_import_update_refresh_rejects_membership_outside_prelocked_set(monkeypatch):
     events = []
-    rows = iter([SimpleNamespace(iteration_id=7)])
     locked_rows = iter([SimpleNamespace(iteration_id=9)])
 
     class SessionSpy:
@@ -280,22 +279,52 @@ def test_import_update_membership_change_returns_conflict_without_local_rollback
     monkeypatch.setattr(
         requirement_import_service,
         "_get_requirement_for_import_update",
-        lambda db, requirement_id, for_update: events.append("locked" if for_update else "preview")
-        or next(locked_rows if for_update else rows),
-    )
-    monkeypatch.setattr(
-        requirement_import_service,
-        "lock_iterations_for_mutation",
-        lambda db, ids: events.append(("iterations", tuple(sorted(ids))))
-        or {iteration_id: SimpleNamespace(id=iteration_id) for iteration_id in ids},
+        lambda db, requirement_id, for_update: events.append("locked") or next(locked_rows),
     )
 
     with pytest.raises(HTTPException) as exc_info:
-        requirement_import_service._lock_requirement_for_import_update(SessionSpy(), 1)
+        requirement_import_service._lock_requirement_for_import_update(
+            SessionSpy(),
+            1,
+            {7: SimpleNamespace(id=7)},
+        )
 
     assert exc_info.value.status_code == 409
     assert exc_info.value.detail["code"] == "ITERATION_STATE_CONFLICT"
-    assert events == ["preview", ("iterations", (7,)), "locked"]
+    assert events == ["locked"]
+
+
+def test_import_batch_locks_existing_iterations_once_in_sorted_order(monkeypatch):
+    rows = [
+        SimpleNamespace(project_id=1, title="Later iteration", requirement_type=None, priority="3", owner_id=None, proposer_id=None, review_status="not_required", description=None, acceptance_criteria=None),
+        SimpleNamespace(project_id=1, title="Earlier iteration", requirement_type=None, priority="3", owner_id=None, proposer_id=None, review_status="not_required", description=None, acceptance_criteria=None),
+    ]
+    existing = iter([SimpleNamespace(id=11, iteration_id=9), SimpleNamespace(id=12, iteration_id=3)])
+    events = []
+
+    class SessionSpy:
+        def commit(self):
+            events.append("commit")
+
+    monkeypatch.setattr(requirement_import_service, "_parse_requirement_rows", lambda *args: (rows, []))
+    monkeypatch.setattr(requirement_import_service, "_ensure_rows_create_permission", lambda *args: None)
+    monkeypatch.setattr(requirement_import_service, "_find_existing_requirement", lambda *args: next(existing))
+    monkeypatch.setattr(
+        requirement_import_service,
+        "lock_iterations_for_mutation",
+        lambda db, ids: events.append(("lock", tuple(sorted(ids))))
+        or {iteration_id: SimpleNamespace(id=iteration_id) for iteration_id in ids},
+    )
+    monkeypatch.setattr(
+        requirement_import_service,
+        "_apply_row_to_requirement",
+        lambda db, requirement, row, actor_id, prelocked_iterations: events.append(("apply", requirement.id)),
+    )
+
+    result = requirement_import_service.commit_requirement_import(SessionSpy(), b"ignored", "update_existing")
+
+    assert result["updated_count"] == 2
+    assert events == [("lock", (3, 9)), ("apply", 11), ("apply", 12), "commit"]
 
 
 def test_import_update_membership_change_does_not_persist_earlier_batch_row(client: TestClient, monkeypatch):

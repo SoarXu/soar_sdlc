@@ -49,6 +49,12 @@ def test_history_open_lookup_schema_recognizes_existing_same_column_index():
     assert schema._history_open_lookup_index_exists(indexes) is True
 
 
+def test_history_open_lookup_schema_rejects_same_name_with_wrong_columns():
+    indexes = [{"name": "idx_wiih_object", "column_names": ["object_id", "object_type", "left_at"]}]
+
+    assert schema._history_open_lookup_index_exists(indexes) is False
+
+
 def test_link_and_unlink_requirement_open_and_close_membership_history(client: TestClient):
     project_id = _create_project(client)
     iteration_id = _create_iteration(client, project_id)

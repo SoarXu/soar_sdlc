@@ -697,6 +697,28 @@ def test_runtime_manager_delegate_requires_reason_and_records_snapshot(client: T
     assert history[-1]["delegate_reason"] == "urgent release"
 
 
+def test_project_manager_starts_another_owners_project_without_delegate_audit(client: TestClient):
+    owner_id, _ = _create_user("Project Lifecycle Owner", "developer")
+    manager_id, manager_token = _create_user("Project Lifecycle Manager", "project_owner")
+    project = client.post(
+        "/api/v1/projects",
+        json={"name": f"Project Lifecycle {uuid4().hex[:8]}", "owner_id": owner_id},
+    ).json()
+    _add_project_member(project["id"], manager_id, "project_owner")
+
+    started = client.post(
+        f"/api/v1/workflow-runtime/project/{project['id']}/transition",
+        json={"action_key": "start", "payload": {"effective_time": "2026-07-23"}},
+        headers={"Authorization": f"Bearer {manager_token}"},
+    )
+
+    assert started.status_code == 200, started.text
+    history = client.get(f"/api/v1/projects/{project['id']}/status-operations").json()
+    assert history[-1]["is_delegated"] is False
+    assert history[-1]["delegate_reason"] is None
+    assert history[-1]["delegated_owner_id"] is None
+
+
 def test_runtime_hides_transitions_from_non_handler_and_allows_manager_delegate(client: TestClient):
     _, project_id = _create_project_with_bug_workflow(client)
     owner_id, _ = _create_user("Runtime Owner", "developer")

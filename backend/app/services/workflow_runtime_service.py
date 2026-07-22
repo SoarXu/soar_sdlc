@@ -132,7 +132,7 @@ def execute_transition(
     if (transition.ui_config or {}).get("command_type"):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Non-status command must use its dedicated endpoint")
 
-    delegated = _is_delegated(db, item, actor)
+    delegated = object_type != "project" and _is_delegated(db, item, actor)
     delegated_owner = _owner_user(db, getattr(item, "owner_id", None)) if delegated else None
     original_owner_id = getattr(item, "owner_id", None)
     selected_values = _selected_values(request)
@@ -233,7 +233,7 @@ def execute_transition(
         is_delegated=delegated,
         delegated_owner_id=delegated_owner.id if delegated_owner else getattr(item, "owner_id", None) if delegated else None,
         delegated_owner_name=delegated_owner.full_name if delegated_owner else None,
-        delegate_reason=request.delegate_reason,
+        delegate_reason=request.delegate_reason if object_type != "project" else None,
         selected_values=selected_values,
         default_target_status=default_target_status,
         resolved_target_status=resolved_target_status,
@@ -603,7 +603,7 @@ def _ensure_can_execute(
     actor: User | None,
     request: WorkflowTransitionExecuteRequest,
 ) -> None:
-    delegated = _is_delegated(db, item, actor)
+    delegated = object_type != "project" and _is_delegated(db, item, actor)
     if not _matches_ownerless_visibility(object_type, item, transition):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Workflow transition not available for current handler state")
     if not _handler_allowed(db, object_type, item, transition, actor):

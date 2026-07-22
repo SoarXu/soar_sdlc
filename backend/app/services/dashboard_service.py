@@ -268,13 +268,23 @@ def _exception_center_items(
         scoped_project_ids,
         active_iteration_ids,
     )
+    integrity_refs = [
+        ref for ref in refs
+        if ref.get("exception_key") in {
+            "owner_required_missing",
+            "owner_ineligible",
+            "iteration_history_inconsistent",
+            "missing_reactivation_audit",
+        }
+    ]
+    integrity_scan_items = _load_workbench_items_by_refs(db, projects, iteration_names, integrity_refs)
     integrity_items = _load_workbench_items_by_refs(
         db,
         projects,
         iteration_names,
         _terminal_iteration_open_item_refs(db, scoped_project_ids),
     )
-    return _dedup_and_sort_workbench_items([*active_items, *integrity_items])
+    return _dedup_and_sort_workbench_items([*active_items, *integrity_scan_items, *integrity_items])
 
 
 def _terminal_iteration_open_item_refs(

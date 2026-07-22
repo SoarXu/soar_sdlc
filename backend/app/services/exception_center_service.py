@@ -6,6 +6,10 @@ from app.models.bug import Bug
 from app.models.requirement import Requirement
 from app.models.status_operation import StatusOperationLog
 from app.models.task import Task
+from app.models.user import User
+from app.models.project_member import ProjectMember
+from app.models.work_item_iteration_history import WorkItemIterationHistory
+from app.models.workflow_definition import WorkflowTransition
 from app.services.exception_rule_service import ensure_default_exception_rules, resolve_exception_rule
 from app.services.workflow_state_query_service import (
     current_state_name,
@@ -89,6 +93,7 @@ def list_exception_refs(
             ).first()
             if has_active_bug:
                 add_if_due("requirement", requirement, "completed_requirement_active_bug", entered_at)
+        _add_integrity_exceptions(db, add_if_due, "requirement", requirement, entered_at)
 
     for task in db.query(Task).filter(Task.deleted == 0).all():
         if not _in_scope(task.project_id, scoped_project_ids):
@@ -102,6 +107,7 @@ def list_exception_refs(
             add_if_due("task", task, "fixing_timeout", entered_at)
         if _is_high_priority(task.priority) and not is_terminal_state(task):
             add_if_due("task", task, "high_priority_unprocessed", entered_at)
+        _add_integrity_exceptions(db, add_if_due, "task", task, entered_at)
 
     for bug in db.query(Bug).filter(Bug.deleted == 0).all():
         if not _in_scope(bug.project_id, scoped_project_ids):
@@ -125,6 +131,7 @@ def list_exception_refs(
             add_if_due("bug", bug, "repeated_activation", activated_at, current_count=bug.reopen_count)
         if _is_high_priority(bug.priority or bug.severity) and not is_terminal_state(bug):
             add_if_due("bug", bug, "high_priority_unprocessed", entered_at)
+        _add_integrity_exceptions(db, add_if_due, "bug", bug, entered_at)
 
     return refs
 
@@ -178,3 +185,50 @@ def _in_scope(project_id: int | None, scoped_project_ids: set[int] | None) -> bo
 
 def _is_high_priority(priority: str | None) -> bool:
     return str(priority or "").lower() in {"1", "high", "urgent"}
+
+
+def _add_integrity_exceptions(db: Session, add_if_due, object_type: str, item, entered_at: datetime | None) -> None:
+    if is_terminal_state(item):
+        return
+    if item.owner_id is None and _state_requires_owner(db, item):
+        add_if_due(object_type, item, "owner_required_missing", entered_at)
+    elif item.owner_id is not None and not _owner_is_eligible(db, item.project_id, item.owner_id):
+        add_if_due(object_type, item, "owner_ineligible", entered_at)
+    if _iteration_history_is_inconsistent(db, object_type, item):
+        add_if_due(object_type, item, "iteration_history_inconsistent", entered_at)
+    if object_type == "bug" and (item.reopen_count or 0) > 0 and not _latest_action_time(
+        db, "bug", item.id, "activate", None
+    ):
+        add_if_due("bug", item, "missing_reactivation_audit", entered_at)
+
+
+def _state_requires_owner(db: Session, item) -> bool:
+    transitions = db.query(WorkflowTransition).filter(
+        WorkflowTransition.definition_id == item.workflow_definition_id,
+        WorkflowTransition.from_state_id == item.current_state_id,
+        WorkflowTransition.enabled.is_(True),
+    ).all()
+    return any(
+        (transition.ui_config or {}).get("requires_owner") is True
+        or (transition.ui_config or {}).get("handler_scope") == "current_handler"
+        for transition in transitions
+    )
+
+
+def _owner_is_eligible(db: Session, project_id: int | None, owner_id: int) -> bool:
+    user = db.query(User).filter(User.id == owner_id, User.deleted == 0, User.is_active.is_(True)).first()
+    return bool(user and db.query(ProjectMember).filter(
+        ProjectMember.project_id == project_id,
+        ProjectMember.user_id == owner_id,
+    ).first())
+
+
+def _iteration_history_is_inconsistent(db: Session, object_type: str, item) -> bool:
+    rows = db.query(WorkItemIterationHistory).filter(
+        WorkItemIterationHistory.object_type == object_type,
+        WorkItemIterationHistory.object_id == item.id,
+        WorkItemIterationHistory.left_at.is_(None),
+    ).all()
+    if item.iteration_id is None:
+        return bool(rows)
+    return len(rows) != 1 or rows[0].iteration_id != item.iteration_id

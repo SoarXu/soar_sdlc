@@ -16,6 +16,10 @@ DEFAULT_EXCEPTION_RULES = [
     ("repeated_activation", "重复激活", "bug", None, 2, 70),
     ("high_priority_unprocessed", "高优先级未处理", "*", 4, None, 80),
     ("completed_requirement_active_bug", "已完成需求存在活动 Bug", "requirement", 0, None, 90),
+    ("owner_required_missing", "Current state requires an owner", "*", 0, None, 100),
+    ("owner_ineligible", "Current owner is ineligible", "*", 0, None, 101),
+    ("iteration_history_inconsistent", "Iteration history is inconsistent", "*", 0, None, 102),
+    ("missing_reactivation_audit", "Bug reactivation audit is missing", "bug", 0, None, 103),
 ]
 
 

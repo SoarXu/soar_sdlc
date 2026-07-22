@@ -12,6 +12,7 @@ from app.models.role import Role, UserRole
 from app.models.status_operation import StatusOperationLog
 from app.models.task import Task
 from app.models.user import User
+from app.models.work_item_iteration_history import WorkItemIterationHistory
 from app.models.workflow_definition import WorkflowTransition
 from app.services.exception_center_service import list_exception_refs
 from app.services.exception_center_service import _latest_state_time
@@ -292,3 +293,60 @@ def test_completed_requirement_with_active_bug_is_reported_without_reopening(cli
     )
     assert stored_state_id == completed_state_id
     assert bug["current_state_id"] is not None
+
+
+def test_exception_center_reports_integrity_and_routing_violations_without_flagging_normal_backlog(client: TestClient):
+    project = client.post("/api/v1/projects", json={"name": f"Integrity Project {uuid4().hex[:8]}"}).json()
+    owner_id, _ = _create_user()
+    _add_member(project["id"], owner_id)
+    iteration = client.post(
+        "/api/v1/iterations",
+        json={"project_ids": [project["id"]], "name": f"Integrity iteration {uuid4().hex[:8]}"},
+    ).json()
+    ownerless_processing = client.post(
+        "/api/v1/tasks",
+        json={"project_id": project["id"], "title": "Ownerless processing", "owner_id": owner_id},
+    ).json()
+    invalid_owner = client.post(
+        "/api/v1/tasks",
+        json={"project_id": project["id"], "title": "Invalid owner", "owner_id": owner_id},
+    ).json()
+    history_mismatch = client.post(
+        "/api/v1/tasks",
+        json={"project_id": project["id"], "title": "History mismatch"},
+    ).json()
+    unaudited_reopen = client.post(
+        "/api/v1/bugs",
+        json={"project_id": project["id"], "title": "Unaudited reopen"},
+    ).json()
+    normal_backlog = client.post(
+        "/api/v1/requirements",
+        json={"project_id": project["id"], "title": "Normal unplanned backlog"},
+    ).json()
+
+    db = SessionLocal()
+    try:
+        ownerless_row = db.query(Task).filter(Task.id == ownerless_processing["id"]).one()
+        ownerless_row.current_state_id = _target_state_id(db, ownerless_row.workflow_definition_id, "claim")
+        ownerless_row.owner_id = None
+        db.query(ProjectMember).filter(
+            ProjectMember.project_id == project["id"], ProjectMember.user_id == owner_id
+        ).delete()
+        mismatch_row = db.query(Task).filter(Task.id == history_mismatch["id"]).one()
+        mismatch_row.iteration_id = iteration["id"]
+        db.add_all([
+            WorkItemIterationHistory(object_type="task", object_id=mismatch_row.id, iteration_id=iteration["id"] + 999999, enter_reason="legacy"),
+            WorkItemIterationHistory(object_type="task", object_id=mismatch_row.id, iteration_id=iteration["id"], enter_reason="legacy"),
+        ])
+        db.query(Bug).filter(Bug.id == unaudited_reopen["id"]).update({"reopen_count": 1})
+        db.commit()
+        refs = list_exception_refs(db, {project["id"]})
+    finally:
+        db.close()
+
+    refs_by_key = {(item["object_type"], item["id"], item["exception_key"]) for item in refs}
+    assert ("task", ownerless_processing["id"], "owner_required_missing") in refs_by_key
+    assert ("task", invalid_owner["id"], "owner_ineligible") in refs_by_key
+    assert ("task", history_mismatch["id"], "iteration_history_inconsistent") in refs_by_key
+    assert ("bug", unaudited_reopen["id"], "missing_reactivation_audit") in refs_by_key
+    assert not any(item["id"] == normal_backlog["id"] for item in refs)

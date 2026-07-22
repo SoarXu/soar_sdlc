@@ -1,6 +1,7 @@
 from uuid import uuid4
 from types import SimpleNamespace
 
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
 import pytest
 
@@ -94,7 +95,8 @@ def test_bug_activation_locks_iterations_before_reloading_bug(monkeypatch):
     monkeypatch.setattr(
         workflow_runtime_service,
         "lock_iterations_for_mutation",
-        lambda db, ids: events.append(("iterations", tuple(sorted(ids)))) or {},
+        lambda db, ids: events.append(("iterations", tuple(sorted(ids))))
+        or {iteration_id: SimpleNamespace(id=iteration_id) for iteration_id in ids if iteration_id is not None},
     )
     monkeypatch.setattr(
         workflow_runtime_service,
@@ -111,6 +113,91 @@ def test_bug_activation_locks_iterations_before_reloading_bug(monkeypatch):
 
     assert result is reloaded
     assert events == ["preview", ("iterations", (3, 9)), "item"]
+
+
+def test_transition_membership_change_rolls_back_and_retries_lock_order(monkeypatch):
+    events = []
+    previews = iter([SimpleNamespace(iteration_id=9), SimpleNamespace(iteration_id=5)])
+    reloads = iter([SimpleNamespace(iteration_id=5), SimpleNamespace(iteration_id=5)])
+
+    class SessionSpy:
+        def rollback(self):
+            events.append("rollback")
+
+    monkeypatch.setattr(
+        workflow_runtime_service,
+        "_get_item",
+        lambda *args: events.append("preview") or next(previews),
+    )
+    monkeypatch.setattr(workflow_runtime_service, "_activation_target_iteration_id", lambda *args: None)
+    monkeypatch.setattr(
+        workflow_runtime_service,
+        "lock_iterations_for_mutation",
+        lambda db, ids: events.append(("iterations", tuple(sorted(i for i in ids if i is not None))))
+        or {iteration_id: SimpleNamespace(id=iteration_id) for iteration_id in ids if iteration_id is not None},
+    )
+    monkeypatch.setattr(
+        workflow_runtime_service,
+        "_get_item_for_transition",
+        lambda *args: events.append("item") or next(reloads),
+    )
+    monkeypatch.setattr(
+        workflow_runtime_service,
+        "ensure_default_workflow_templates",
+        lambda db: events.append("templates"),
+    )
+
+    item = workflow_runtime_service._get_item_for_execution(
+        SessionSpy(),
+        "bug",
+        1,
+        SimpleNamespace(transition_id=7, payload={}),
+    )
+
+    assert item.iteration_id == 5
+    assert events == [
+        "preview", ("iterations", (9,)), "item", "rollback", "templates",
+        "preview", ("iterations", (5,)), "item",
+    ]
+
+
+def test_persistent_transition_membership_change_returns_stable_conflict(monkeypatch):
+    rollbacks = []
+
+    class SessionSpy:
+        def rollback(self):
+            rollbacks.append(True)
+
+    monkeypatch.setattr(
+        workflow_runtime_service,
+        "_get_item",
+        lambda *args: SimpleNamespace(iteration_id=9),
+    )
+    monkeypatch.setattr(workflow_runtime_service, "_activation_target_iteration_id", lambda *args: None)
+    monkeypatch.setattr(
+        workflow_runtime_service,
+        "lock_iterations_for_mutation",
+        lambda db, ids: {9: SimpleNamespace(id=9)},
+    )
+    monkeypatch.setattr(
+        workflow_runtime_service,
+        "_get_item_for_transition",
+        lambda *args: SimpleNamespace(iteration_id=5),
+    )
+    monkeypatch.setattr(workflow_runtime_service, "ensure_default_workflow_templates", lambda db: None)
+
+    with pytest.raises(HTTPException) as exc_info:
+        workflow_runtime_service._get_item_for_execution(
+            SessionSpy(),
+            "bug",
+            1,
+            SimpleNamespace(transition_id=7, payload={}),
+        )
+
+    error = exc_info.value
+    assert error.status_code == 409
+    assert error.detail["code"] == "ITERATION_STATE_CONFLICT"
+    assert len(rollbacks) == 3
 
 
 def test_iteration_mutation_locks_are_acquired_in_id_order(monkeypatch):

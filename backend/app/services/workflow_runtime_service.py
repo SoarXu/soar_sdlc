@@ -62,6 +62,7 @@ SUPPORTED_VALIDATOR_TYPES = {
     "bug_close_gate", "requirement_terminal_gate", "iteration_terminal_gate", "project_close_gate",
 }
 SUPPORTED_AUTOMATION_TYPES = {"notification"}
+TRANSITION_LOCK_RETRY_LIMIT = 3
 def list_available_transitions(
     db: Session,
     object_type: str,
@@ -294,12 +295,32 @@ def _get_item_for_execution(
     if object_type == "iteration":
         return _get_item_for_transition(db, object_type, object_id)
 
-    preview = _get_item(db, object_type, object_id)
-    iteration_ids = {getattr(preview, "iteration_id", None)}
-    iteration_ids.add(_activation_target_iteration_id(db, object_type, preview, request))
-    if any(iteration_id is not None for iteration_id in iteration_ids):
-        lock_iterations_for_mutation(db, iteration_ids)
-    return _get_item_for_transition(db, object_type, object_id)
+    for attempt in range(TRANSITION_LOCK_RETRY_LIMIT):
+        preview = _get_item(db, object_type, object_id)
+        iteration_ids = {getattr(preview, "iteration_id", None)}
+        iteration_ids.add(_activation_target_iteration_id(db, object_type, preview, request))
+        locked_iterations = (
+            lock_iterations_for_mutation(db, iteration_ids)
+            if any(iteration_id is not None for iteration_id in iteration_ids)
+            else {}
+        )
+        item = _get_item_for_transition(db, object_type, object_id)
+        refreshed_iteration_id = getattr(item, "iteration_id", None)
+        if refreshed_iteration_id is None or refreshed_iteration_id in locked_iterations:
+            item._transition_locked_iterations = locked_iterations
+            return item
+
+        db.rollback()
+        if attempt + 1 < TRANSITION_LOCK_RETRY_LIMIT:
+            ensure_default_workflow_templates(db)
+
+    raise HTTPException(
+        status_code=status.HTTP_409_CONFLICT,
+        detail={
+            "code": "ITERATION_STATE_CONFLICT",
+            "message": "Iteration membership changed during transition; refresh and retry",
+        },
+    )
 
 
 def _activation_target_iteration_id(
@@ -778,10 +799,21 @@ def _apply_bug_activation(
 
     target_iteration_id = payload.get("target_iteration_id")
     parsed_target_iteration_id = int(target_iteration_id) if target_iteration_id else None
-    locked_iterations = lock_iterations_for_mutation(
-        db,
-        {bug.iteration_id, parsed_target_iteration_id},
-    )
+    locked_iterations = getattr(bug, "_transition_locked_iterations", {})
+    required_iteration_ids = {
+        iteration_id
+        for iteration_id in (bug.iteration_id, parsed_target_iteration_id)
+        if iteration_id is not None
+    }
+    if not required_iteration_ids.issubset(locked_iterations):
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": "ITERATION_STATE_CONFLICT",
+                "message": "Iteration membership changed during transition; refresh and retry",
+            },
+        )
     source_iteration = locked_iterations.get(bug.iteration_id)
     source_is_active = bool(source_iteration and is_iteration_active(db, source_iteration))
     if not source_is_active and not target_iteration_id:

@@ -295,3 +295,15 @@ def test_bug_reactivation_drops_original_handler_who_is_not_a_project_member(cli
 
     assert reactivated.status_code == 200, reactivated.text
     assert reactivated.json()["owner_id"] is None
+    db = SessionLocal()
+    try:
+        source_history = db.execute(
+            text(
+                "select owner_id_snapshot from work_item_iteration_history "
+                "where object_type = 'bug' and object_id = :object_id and iteration_id = :iteration_id"
+            ),
+            {"object_id": bug["id"], "iteration_id": source_iteration_id},
+        ).one()
+        assert source_history.owner_id_snapshot == former_handler_id
+    finally:
+        db.close()

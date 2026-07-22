@@ -5,7 +5,10 @@ from fastapi.testclient import TestClient
 from app.db.session import SessionLocal
 from app.jobs.iteration_jobs import run_auto_start_due_iterations
 from app.models.requirement import Requirement
+from app.models.bug import Bug
+from app.models.iteration import Iteration
 from app.models.task import Task
+from app.models.work_item_iteration_history import WorkItemIterationHistory
 from app.models.workflow_definition import WorkflowState, WorkflowTransition
 from app.services import iteration_service
 
@@ -134,6 +137,21 @@ def _create_bug(client: TestClient, project_id: int, iteration_id: int, title: s
     )
     assert response.status_code == 200
     return response.json()["id"]
+
+
+def _mark_iteration_terminal(iteration_id: int) -> None:
+    db = SessionLocal()
+    try:
+        iteration = db.query(Iteration).filter(Iteration.id == iteration_id).one()
+        terminal_state = db.query(WorkflowState).filter(
+            WorkflowState.definition_id == iteration.workflow_definition_id,
+            WorkflowState.category == "terminal",
+        ).first()
+        assert terminal_state is not None
+        iteration.current_state_id = terminal_state.id
+        db.commit()
+    finally:
+        db.close()
 
 
 def _set_requirement_status(requirement_id: int, status: str) -> None:
@@ -378,6 +396,76 @@ def test_terminal_iteration_rejects_scope_mutations(client: TestClient):
     for response in responses:
         assert response.status_code == 409
         assert response.json()["detail"]["code"] == "ITERATION_NOT_MUTABLE"
+
+
+def test_terminal_iteration_rejects_ordinary_work_item_updates_and_deletes(client: TestClient):
+    project_id = _create_project(client)
+    iteration_id = _create_iteration(client, [project_id])
+    requirement_id = _create_requirement(client, project_id, "Immutable requirement")
+    task_id = _create_task(client, project_id, "Immutable task")
+    bug_id = _create_bug(client, project_id, iteration_id, "Immutable bug")
+    assert client.post(
+        f"/api/v1/iterations/{iteration_id}/requirements",
+        json={"requirement_ids": [requirement_id]},
+    ).status_code == 200
+    assert client.post(
+        f"/api/v1/iterations/{iteration_id}/tasks",
+        json={"task_ids": [task_id]},
+    ).status_code == 200
+    _mark_iteration_terminal(iteration_id)
+
+    for endpoint, object_id in (
+        ("requirements", requirement_id),
+        ("tasks", task_id),
+        ("bugs", bug_id),
+    ):
+        for payload in ({"title": "Forbidden title"}, {"owner_id": None}):
+            response = client.patch(f"/api/v1/{endpoint}/{object_id}", json=payload)
+            assert response.status_code == 409, (endpoint, payload, response.text)
+            assert response.json()["detail"]["code"] == "ITERATION_NOT_MUTABLE"
+
+        deleted = client.delete(f"/api/v1/{endpoint}/{object_id}")
+        assert deleted.status_code == 409, (endpoint, deleted.text)
+        assert deleted.json()["detail"]["code"] == "ITERATION_NOT_MUTABLE"
+
+
+def test_iteration_project_scope_removal_closes_work_item_history_with_actor_and_reason(client: TestClient):
+    retained_project_id = _create_project(client, "Retained project")
+    removed_project_id = _create_project(client, "Removed project")
+    iteration_id = _create_iteration(client, [retained_project_id, removed_project_id])
+    requirement_id = _create_requirement(client, removed_project_id, "Removed requirement")
+    task_id = _create_task(client, removed_project_id, "Removed task")
+    bug_id = _create_bug(client, removed_project_id, iteration_id, "Removed bug")
+    assert client.post(
+        f"/api/v1/iterations/{iteration_id}/requirements",
+        json={"requirement_ids": [requirement_id]},
+    ).status_code == 200
+    assert client.post(
+        f"/api/v1/iterations/{iteration_id}/tasks",
+        json={"task_ids": [task_id]},
+    ).status_code == 200
+
+    updated = client.patch(
+        f"/api/v1/iterations/{iteration_id}",
+        json={"project_ids": [retained_project_id]},
+    )
+
+    assert updated.status_code == 200, updated.text
+    db = SessionLocal()
+    try:
+        assert db.query(Requirement).filter(Requirement.id == requirement_id).one().iteration_id is None
+        assert db.query(Task).filter(Task.id == task_id).one().iteration_id is None
+        assert db.query(Bug).filter(Bug.id == bug_id).one().iteration_id is None
+        histories = db.query(WorkItemIterationHistory).filter(
+            WorkItemIterationHistory.iteration_id == iteration_id,
+            WorkItemIterationHistory.object_id.in_([requirement_id, task_id, bug_id]),
+        ).all()
+        assert len(histories) == 3
+        assert all(row.left_at is not None for row in histories)
+        assert all(row.left_by is not None for row in histories)
+        assert {row.leave_reason for row in histories} == {"iteration_project_scope_removed"}
+    finally:
+        db.close()
 
 
 def test_iteration_cancel_uses_runtime_and_complete_gate(client: TestClient):

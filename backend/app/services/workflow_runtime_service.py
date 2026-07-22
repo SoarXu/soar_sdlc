@@ -69,7 +69,7 @@ def list_available_transitions(
     actor: User | None,
 ) -> list[WorkflowTransitionActionRead]:
     ensure_default_workflow_templates(db)
-    item = _get_item_for_transition(db, object_type, object_id)
+    item = _get_item(db, object_type, object_id)
     definition_context = _resolve_definition_context(db, object_type, item)
     if not definition_context:
         return []
@@ -119,7 +119,7 @@ def execute_transition(
 ):
     ensure_authenticated(actor)
     ensure_default_workflow_templates(db)
-    item = _get_item(db, object_type, object_id)
+    item = _get_item_for_transition(db, object_type, object_id)
     transition_context = _get_executable_transition(db, object_type, item, request.transition_id)
     transition, current_state = transition_context
     _ensure_supported_runtime_configuration(transition)
@@ -768,8 +768,6 @@ def _apply_bug_activation(
 
     original_owner_id = bug.owner_id
     owner_eligible = _reactivation_handler_is_eligible(db, bug.project_id, original_owner_id)
-    if not owner_eligible:
-        bug.owner_id = None
 
     if target_iteration and target_iteration.id != bug.iteration_id:
         move_work_item_to_iteration(
@@ -787,6 +785,9 @@ def _apply_bug_activation(
             actor_id=actor.id if actor else None,
             reason="reactivated",
         )
+
+    if not owner_eligible:
+        bug.owner_id = None
 
     before_count = bug.reopen_count or 0
     bug.reopen_count = before_count + 1

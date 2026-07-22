@@ -63,7 +63,12 @@ def patch_iteration(
     target_project_ids = _payload_project_ids(payload)
     if target_project_ids:
         _ensure_can_manage_projects(db, target_project_ids, current_user)
-    return update_iteration(db, iteration_id, payload)
+    return update_iteration(
+        db,
+        iteration_id,
+        payload,
+        actor_id=current_user.id if current_user else None,
+    )
 
 
 @router.get("/{iteration_id}/detail")

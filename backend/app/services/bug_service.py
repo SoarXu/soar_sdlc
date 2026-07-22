@@ -110,6 +110,7 @@ def create_bug_from_test_run_case(
 
 def update_bug(db: Session, bug_id: int, payload: BugUpdate, actor_id: int | None = None) -> Bug:
     bug = _get_active_bug(db, bug_id)
+    ensure_iteration_assignment_mutable(db, bug.iteration_id, bug.iteration_id)
     ensure_work_item_action(db, bug, actor_id, "Bug")
     ensure_workflow_fields_not_updated(payload.model_fields_set)
     data = payload.model_dump(exclude_unset=True)
@@ -143,6 +144,7 @@ def list_bug_status_operations(db: Session, bug_id: int) -> list[dict]:
 
 def delete_bug(db: Session, bug_id: int) -> None:
     bug = _get_active_bug(db, bug_id)
+    ensure_iteration_assignment_mutable(db, bug.iteration_id, bug.iteration_id)
     bug.deleted = 1
     bug.delete_time = datetime.now()
     db.commit()

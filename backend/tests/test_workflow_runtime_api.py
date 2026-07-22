@@ -1,6 +1,8 @@
 from uuid import uuid4
+from types import SimpleNamespace
 
 from fastapi.testclient import TestClient
+import pytest
 
 from app.core.security import create_access_token, get_password_hash
 from app.db.session import SessionLocal
@@ -45,6 +47,46 @@ def test_transition_item_loader_requests_a_database_row_lock():
 
     assert item is db.query_spy.item
     assert db.query_spy.locked is True
+
+
+def test_execute_transition_uses_locking_item_loader(monkeypatch):
+    class LockObserved(Exception):
+        pass
+
+    monkeypatch.setattr(workflow_runtime_service, "ensure_default_workflow_templates", lambda db: None)
+    monkeypatch.setattr(
+        workflow_runtime_service,
+        "_get_item",
+        lambda *args: pytest.fail("execute_transition used the non-locking loader"),
+    )
+    monkeypatch.setattr(
+        workflow_runtime_service,
+        "_get_item_for_transition",
+        lambda *args: (_ for _ in ()).throw(LockObserved()),
+    )
+
+    with pytest.raises(LockObserved):
+        workflow_runtime_service.execute_transition(
+            object(),
+            "bug",
+            1,
+            SimpleNamespace(transition_id=1),
+            SimpleNamespace(id=1),
+        )
+
+
+def test_list_available_transitions_uses_nonlocking_item_loader(monkeypatch):
+    item = object()
+    monkeypatch.setattr(workflow_runtime_service, "ensure_default_workflow_templates", lambda db: None)
+    monkeypatch.setattr(workflow_runtime_service, "_get_item", lambda *args: item)
+    monkeypatch.setattr(
+        workflow_runtime_service,
+        "_get_item_for_transition",
+        lambda *args: pytest.fail("list_available_transitions acquired a row lock"),
+    )
+    monkeypatch.setattr(workflow_runtime_service, "_resolve_definition_context", lambda *args: None)
+
+    assert workflow_runtime_service.list_available_transitions(object(), "bug", 1, None) == []
 
 
 def _create_user(full_name: str, role_key: str | None = None) -> tuple[int, str]:

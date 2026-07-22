@@ -99,7 +99,12 @@ def create_iteration(db: Session, payload: IterationCreate) -> dict:
     }
 
 
-def update_iteration(db: Session, iteration_id: int, payload: IterationUpdate) -> dict:
+def update_iteration(
+    db: Session,
+    iteration_id: int,
+    payload: IterationUpdate,
+    actor_id: int | None = None,
+) -> dict:
     iteration = _get_active_iteration(db, iteration_id, for_update=True)
     ensure_iteration_mutable(iteration)
     data = payload.model_dump(exclude_unset=True)
@@ -114,7 +119,7 @@ def update_iteration(db: Session, iteration_id: int, payload: IterationUpdate) -
         for pid in project_ids:
             db.add(IterationProject(iteration_id=iteration_id, project_id=pid))
         db.flush()
-        _unlink_out_of_scope_iteration_items(db, iteration_id)
+        _unlink_out_of_scope_iteration_items(db, iteration_id, actor_id=actor_id)
 
     for field, value in data.items():
         setattr(iteration, field, value)
@@ -343,19 +348,38 @@ def unlink_task(
         db.commit()
 
 
-def _unlink_out_of_scope_iteration_items(db: Session, iteration_id: int) -> None:
+def _unlink_out_of_scope_iteration_items(
+    db: Session,
+    iteration_id: int,
+    actor_id: int | None = None,
+) -> None:
     scoped_project_ids = _iteration_scoped_project_ids(db, iteration_id)
-    _unlink_out_of_scope_model_items(db, Requirement, iteration_id, scoped_project_ids)
-    _unlink_out_of_scope_model_items(db, Task, iteration_id, scoped_project_ids)
-    _unlink_out_of_scope_model_items(db, TestCase, iteration_id, scoped_project_ids)
-    _unlink_out_of_scope_model_items(db, Bug, iteration_id, scoped_project_ids)
+    _unlink_out_of_scope_model_items(db, Requirement, iteration_id, scoped_project_ids, actor_id)
+    _unlink_out_of_scope_model_items(db, Task, iteration_id, scoped_project_ids, actor_id)
+    _unlink_out_of_scope_model_items(db, TestCase, iteration_id, scoped_project_ids, actor_id)
+    _unlink_out_of_scope_model_items(db, Bug, iteration_id, scoped_project_ids, actor_id)
 
 
-def _unlink_out_of_scope_model_items(db: Session, model, iteration_id: int, scoped_project_ids: set[int]) -> None:
+def _unlink_out_of_scope_model_items(
+    db: Session,
+    model,
+    iteration_id: int,
+    scoped_project_ids: set[int],
+    actor_id: int | None,
+) -> None:
     items = db.query(model).filter(model.deleted == 0, model.iteration_id == iteration_id).all()
     for item in items:
         if item.project_id not in scoped_project_ids:
-            item.iteration_id = None
+            if model is TestCase:
+                item.iteration_id = None
+            else:
+                move_work_item_to_iteration(
+                    db,
+                    item,
+                    None,
+                    actor_id=actor_id,
+                    reason="iteration_project_scope_removed",
+                )
 
 
 def _get_active_iteration(db: Session, iteration_id: int, *, for_update: bool = False) -> Iteration:

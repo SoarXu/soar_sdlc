@@ -54,6 +54,7 @@ def create_requirement(db: Session, payload: RequirementCreate, actor_id: int | 
 
 def update_requirement(db: Session, requirement_id: int, payload: RequirementUpdate, actor_id: int | None = None) -> Requirement:
     requirement = _get_active_requirement(db, requirement_id)
+    ensure_iteration_assignment_mutable(db, requirement.iteration_id, requirement.iteration_id)
     ensure_work_item_action(db, requirement, actor_id, "requirement")
     ensure_workflow_fields_not_updated(payload.model_fields_set)
     _ensure_project_editable_for_requirement(db, requirement)
@@ -108,6 +109,7 @@ def list_requirement_audit_logs(db: Session, requirement_id: int) -> list[dict]:
 
 def delete_requirement(db: Session, requirement_id: int, actor_id: int | None = None) -> None:
     requirement = _get_active_requirement(db, requirement_id)
+    ensure_iteration_assignment_mutable(db, requirement.iteration_id, requirement.iteration_id)
     _ensure_project_editable_for_requirement(db, requirement)
     linked_tasks = db.query(Task).filter(Task.requirement_id == requirement.id, Task.deleted == 0).all()
     for task in linked_tasks:

@@ -88,6 +88,46 @@ def _runtime_transition(
     )
 
 
+def test_task_create_and_update_reject_iteration_outside_target_project_scope(client: TestClient):
+    scoped_project_id = _create_project(client)
+    other_project_id = _create_project(client)
+    iteration_id = _create_iteration(client, scoped_project_id)
+
+    rejected_create = client.post(
+        "/api/v1/tasks",
+        json={
+            "project_id": other_project_id,
+            "iteration_id": iteration_id,
+            "title": "Cross-project task create",
+        },
+    )
+    valid = client.post(
+        "/api/v1/tasks",
+        json={
+            "project_id": scoped_project_id,
+            "iteration_id": iteration_id,
+            "title": "Scoped task",
+        },
+    )
+    unplanned = client.post(
+        "/api/v1/tasks",
+        json={"project_id": other_project_id, "title": "Cross-project task update"},
+    )
+    rejected_project_update = client.patch(
+        f"/api/v1/tasks/{valid.json()['id']}",
+        json={"project_id": other_project_id},
+    )
+    rejected_iteration_update = client.patch(
+        f"/api/v1/tasks/{unplanned.json()['id']}",
+        json={"iteration_id": iteration_id},
+    )
+
+    assert rejected_create.status_code == 400
+    assert valid.status_code == 200
+    assert rejected_project_update.status_code == 400
+    assert rejected_iteration_update.status_code == 400
+
+
 def test_requirement_and_task_create_default_to_template_statuses_and_prd_fields(client: TestClient):
     project_id = _create_project(client)
     _, owner_id = _create_actor_token("Requirement Owner")

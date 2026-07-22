@@ -8,6 +8,7 @@ from app.core.security import get_password_hash
 from app.db.session import SessionLocal
 from app.models.user import User
 from app.models.iteration import Iteration
+from app.models.requirement import Requirement
 from app.models.work_item_iteration_history import WorkItemIterationHistory
 from app.models.workflow_definition import WorkflowState
 from app.services.requirement_import_service import REQUIREMENT_IMPORT_COLUMNS
@@ -274,7 +275,7 @@ def test_import_update_membership_change_returns_conflict_without_local_rollback
 
     class SessionSpy:
         def rollback(self):
-            events.append("rollback")
+            pytest.fail("membership conflict must not rollback the batch session")
 
     monkeypatch.setattr(
         requirement_import_service,
@@ -304,6 +305,17 @@ def test_import_update_membership_change_does_not_persist_earlier_batch_row(clie
         "/api/v1/requirements",
         json={"project_id": project["id"], "title": "Existing drift row"},
     )
+    original_find = requirement_import_service._find_existing_requirement
+    find_calls = 0
+
+    def find_with_first_row_flushed(db, project_id, title):
+        nonlocal find_calls
+        find_calls += 1
+        if find_calls == 2:
+            db.flush()
+        return original_find(db, project_id, title)
+
+    monkeypatch.setattr(requirement_import_service, "_find_existing_requirement", find_with_first_row_flushed)
     monkeypatch.setattr(
         requirement_import_service,
         "_lock_requirement_for_import_update",
@@ -328,8 +340,15 @@ def test_import_update_membership_change_does_not_persist_earlier_batch_row(clie
 
     assert response.status_code == 409
     assert response.json()["detail"]["code"] == "ITERATION_STATE_CONFLICT"
-    titles = {item["title"] for item in client.get("/api/v1/requirements").json()}
-    assert "Earlier row must rollback" not in titles
+    assert find_calls == 2
+    db = SessionLocal()
+    try:
+        assert not db.query(Requirement).filter(
+            Requirement.project_id == project["id"],
+            Requirement.title == "Earlier row must rollback",
+        ).first()
+    finally:
+        db.close()
 
 
 def test_requirement_import_commit_keeps_created_requirement_unassigned(client: TestClient):

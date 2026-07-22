@@ -443,6 +443,12 @@ def test_terminal_iteration_rejects_test_run_create_update_move_and_delete(clien
         json={"project_id": project_id, "iteration_id": terminal_iteration_id, "name": "Terminal test run", "status": "completed"},
     )
     assert terminal_run.status_code == 200
+    test_case = client.post("/api/v1/test-cases", json={"project_id": project_id, "title": "Terminal run case"})
+    selected = client.post(
+        f"/api/v1/test-runs/{terminal_run.json()['id']}/cases",
+        json={"test_case_ids": [test_case.json()["id"]]},
+    )
+    assert selected.status_code == 200
     _mark_iteration_terminal(terminal_iteration_id)
 
     responses = [
@@ -453,6 +459,7 @@ def test_terminal_iteration_rejects_test_run_create_update_move_and_delete(clien
         client.patch(f"/api/v1/test-runs/{terminal_run.json()['id']}", json={"name": "Forbidden rename"}),
         client.delete(f"/api/v1/test-runs/{terminal_run.json()['id']}"),
         client.patch(f"/api/v1/test-runs/{movable_run.json()['id']}", json={"iteration_id": terminal_iteration_id}),
+        client.patch(f"/api/v1/test-run-cases/{selected.json()[0]['id']}", json={"result": "passed"}),
     ]
 
     for response in responses:

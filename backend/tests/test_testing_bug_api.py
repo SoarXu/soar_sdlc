@@ -66,6 +66,19 @@ def test_test_run_selects_cases_and_records_execution_result(client: TestClient)
     assert any(item["id"] == run_case["id"] for item in client.get("/api/v1/test-run-cases").json())
 
 
+def test_test_run_rejects_cases_outside_its_project_or_missing(client: TestClient):
+    project_id = _create_project(client)
+    other_project_id = _create_project(client)
+    run = client.post("/api/v1/test-runs", json={"project_id": project_id, "name": "Scoped run"})
+    other_case = client.post("/api/v1/test-cases", json={"project_id": other_project_id, "title": "Other project case"})
+    deleted_case = client.post("/api/v1/test-cases", json={"project_id": project_id, "title": "Deleted case"})
+    assert client.delete(f"/api/v1/test-cases/{deleted_case.json()['id']}").status_code == 204
+
+    for case_id, expected_status in ((other_case.json()["id"], 400), (deleted_case.json()["id"], 404), (999999999, 404)):
+        response = client.post(f"/api/v1/test-runs/{run.json()['id']}/cases", json={"test_case_ids": [case_id]})
+        assert response.status_code == expected_status, response.text
+
+
 def test_failed_test_result_can_create_bug_with_requirement_owner(client: TestClient):
     project_id = _create_project(client)
     requirement_id = _create_requirement(client, project_id, owner_id=1)

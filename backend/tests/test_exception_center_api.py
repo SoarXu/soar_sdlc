@@ -720,6 +720,22 @@ def test_post_terminal_reactivation_exemption_validates_selected_iterations_acto
         operation.selected_values = {**operation.selected_values, "source_iteration_id": source_iteration_id + 9}
         db.commit()
         assert _is_valid_post_terminal_reactivation(db, "bug", bug["id"], leave) is False
+        for invalid_value in ("not-a-number", True, 1.5, 0, -1, None):
+            operation.selected_values = {
+                **operation.selected_values,
+                "source_iteration_id": invalid_value,
+                "target_iteration_id": target_iteration_id,
+            }
+            db.commit()
+            assert _is_valid_post_terminal_reactivation(db, "bug", bug["id"], leave) is False
+        for invalid_value in ("not-a-number", True, 1.5, 0, -1, None):
+            operation.selected_values = {
+                **operation.selected_values,
+                "source_iteration_id": source_iteration_id,
+                "target_iteration_id": invalid_value,
+            }
+            db.commit()
+            assert _is_valid_post_terminal_reactivation(db, "bug", bug["id"], leave) is False
         operation.selected_values = {**operation.selected_values, "source_iteration_id": source_iteration_id, "target_iteration_id": target_iteration_id + 9}
         db.commit()
         assert _is_valid_post_terminal_reactivation(db, "bug", bug["id"], leave) is False

@@ -6,6 +6,7 @@ from fastapi.testclient import TestClient
 from app.core.security import create_access_token, get_password_hash
 from app.db.session import SessionLocal
 from app.models.bug import Bug
+from app.models.exception_rule import ExceptionRule
 from app.models.project_member import ProjectMember
 from app.models.requirement import Requirement
 from app.models.role import Role, UserRole
@@ -405,3 +406,156 @@ def test_exception_center_detects_owner_without_current_workflow_action_role(cli
     assert invalid_task["id"] in ineligible_ids(invalid_refs)
     assert matching_task["id"] not in ineligible_ids(matching_refs)
     assert owner_task["id"] not in ineligible_ids(owner_refs)
+
+
+def test_integrity_audit_distinguishes_verification_retry_from_true_activation(client: TestClient):
+    project = client.post("/api/v1/projects", json={"name": f"Activation audit {uuid4().hex[:8]}"}).json()
+    verification_bug = client.post("/api/v1/bugs", json={"project_id": project["id"], "title": "Verification retry"}).json()
+    broken_activation = client.post("/api/v1/bugs", json={"project_id": project["id"], "title": "Broken activation"}).json()
+    db = SessionLocal()
+    try:
+        verification_row = db.query(Bug).filter(Bug.id == verification_bug["id"]).one()
+        broken_row = db.query(Bug).filter(Bug.id == broken_activation["id"]).one()
+        verification_row.reopen_count = 1
+        broken_row.reopen_count = 1
+        db.add(_operation("bug", verification_row.id, verification_row.workflow_definition_id, verification_row.current_state_id, datetime.now(), "verification_failed"))
+        activation = _operation("bug", broken_row.id, broken_row.workflow_definition_id, broken_row.current_state_id, datetime.now(), "activate")
+        activation.reason = "reproduced"
+        db.add(activation)
+        db.commit()
+        refs = list_exception_refs(db, {project["id"]})
+    finally:
+        db.close()
+    missing_ids = {item["id"] for item in refs if item["exception_key"] == "missing_reactivation_audit"}
+    assert verification_bug["id"] not in missing_ids
+    assert broken_activation["id"] in missing_ids
+
+
+def test_terminal_membership_integrity_is_checked_and_rules_cannot_disable_it(client: TestClient):
+    project = client.post("/api/v1/projects", json={"name": f"Terminal integrity {uuid4().hex[:8]}"}).json()
+    clean = client.post("/api/v1/tasks", json={"project_id": project["id"], "title": "Clean terminal"}).json()
+    broken = client.post("/api/v1/tasks", json={"project_id": project["id"], "title": "Broken terminal"}).json()
+    db = SessionLocal()
+    try:
+        integrity_rules = db.query(ExceptionRule).filter(ExceptionRule.exception_key == "iteration_history_inconsistent").all()
+        if not integrity_rules:
+            db.add(ExceptionRule(
+                exception_key="iteration_history_inconsistent",
+                label="Configurable rule must not control integrity",
+                object_type="*",
+                threshold_hours=99999,
+                enabled=False,
+            ))
+            db.flush()
+            integrity_rules = db.query(ExceptionRule).filter(ExceptionRule.exception_key == "iteration_history_inconsistent").all()
+        original_rule_values = {rule.id: (rule.enabled, rule.threshold_hours) for rule in integrity_rules}
+        for task_id in (clean["id"], broken["id"]):
+            row = db.query(Task).filter(Task.id == task_id).one()
+            row.current_state_id = _target_state_id(db, row.workflow_definition_id, "complete")
+        db.add(WorkItemIterationHistory(object_type="task", object_id=broken["id"], iteration_id=99999999, enter_reason="illegal"))
+        db.query(ExceptionRule).filter(ExceptionRule.exception_key == "iteration_history_inconsistent").update({"enabled": False, "threshold_hours": 99999})
+        db.commit()
+        refs = list_exception_refs(db, {project["id"]})
+    finally:
+        if "original_rule_values" in locals():
+            for rule_id, (enabled, threshold_hours) in original_rule_values.items():
+                db.query(ExceptionRule).filter(ExceptionRule.id == rule_id).update({"enabled": enabled, "threshold_hours": threshold_hours})
+            db.commit()
+        db.close()
+    inconsistent_ids = {item["id"] for item in refs if item["exception_key"] == "iteration_history_inconsistent"}
+    assert clean["id"] not in inconsistent_ids
+    assert broken["id"] in inconsistent_ids
+
+
+def test_owner_eligibility_uses_object_conditions_and_ignores_informational_actions(client: TestClient):
+    project = client.post("/api/v1/projects", json={"name": f"Conditional role {uuid4().hex[:8]}"}).json()
+    developer_id, _ = _create_user("developer")
+    _add_member(project["id"], developer_id, "developer")
+    task = client.post(
+        "/api/v1/tasks",
+        json={"project_id": project["id"], "title": "Conditional bug fix", "task_type": "bug_fix", "owner_id": developer_id},
+    ).json()
+    db = SessionLocal()
+    try:
+        row = db.query(Task).filter(Task.id == task["id"]).one()
+        row.current_state_id = _target_state_id(db, row.workflow_definition_id, "claim")
+        transitions = db.query(WorkflowTransition).filter(
+            WorkflowTransition.definition_id == row.workflow_definition_id,
+            WorkflowTransition.from_state_id == row.current_state_id,
+        ).all()
+        original_roles = {transition.id: transition.allowed_roles for transition in transitions}
+        for transition in transitions:
+            transition.allowed_roles = "developer" if transition.action_key in {"complete", "add_information"} else "tester"
+        db.commit()
+        refs = list_exception_refs(db, {project["id"]})
+    finally:
+        if "original_roles" in locals():
+            for transition_id, allowed_roles in original_roles.items():
+                db.query(WorkflowTransition).filter(WorkflowTransition.id == transition_id).update({"allowed_roles": allowed_roles})
+            db.commit()
+        db.close()
+    assert any(
+        item["id"] == task["id"] and item["exception_key"] == "owner_ineligible"
+        for item in refs
+    )
+
+
+def test_workbench_aggregates_integrity_details_and_enforces_project_scope(client: TestClient):
+    project = client.post("/api/v1/projects", json={"name": f"Aggregate integrity {uuid4().hex[:8]}"}).json()
+    viewer_id, viewer_token = _create_user("developer")
+    invalid_owner_id, _ = _create_user("developer")
+    _, outsider_token = _create_user("developer")
+    _add_member(project["id"], viewer_id, "developer")
+    task = client.post(
+        "/api/v1/tasks",
+        json={"project_id": project["id"], "title": "Two integrity violations", "owner_id": invalid_owner_id},
+    ).json()
+    db = SessionLocal()
+    try:
+        db.add(WorkItemIterationHistory(object_type="task", object_id=task["id"], iteration_id=99999999, enter_reason="illegal"))
+        db.commit()
+    finally:
+        db.close()
+
+    visible = client.get(
+        "/api/v1/dashboard/workbench",
+        headers={"Authorization": f"Bearer {viewer_token}"},
+    ).json()["exception_center"]["items"]
+    hidden = client.get(
+        "/api/v1/dashboard/workbench",
+        headers={"Authorization": f"Bearer {outsider_token}"},
+    ).json()["exception_center"]["items"]
+    item = next(entry for entry in visible if entry["object_type"] == "task" and entry["id"] == task["id"])
+
+    assert {"owner_ineligible", "iteration_history_inconsistent"} <= set(item["exception_keys"])
+    assert {detail["exception_key"] for detail in item["exception_details"]} >= {
+        "owner_ineligible", "iteration_history_inconsistent"
+    }
+    assert not any(entry["object_type"] == "task" and entry["id"] == task["id"] for entry in hidden)
+
+
+def test_iteration_transfer_with_structural_history_but_no_operation_link_is_inconsistent(client: TestClient):
+    project = client.post("/api/v1/projects", json={"name": f"Transfer audit {uuid4().hex[:8]}"}).json()
+    task = client.post("/api/v1/tasks", json={"project_id": project["id"], "title": "Unlinked transfer"}).json()
+    now = datetime.now()
+    db = SessionLocal()
+    try:
+        row = db.query(Task).filter(Task.id == task["id"]).one()
+        row.iteration_id = 2002
+        db.add_all([
+            WorkItemIterationHistory(
+                object_type="task", object_id=row.id, iteration_id=2001, enter_reason="linked",
+                entered_at=now - timedelta(hours=2), left_at=now - timedelta(hours=1), leave_reason="deferred",
+            ),
+            WorkItemIterationHistory(
+                object_type="task", object_id=row.id, iteration_id=2002, enter_reason="deferred", entered_at=now,
+            ),
+        ])
+        db.commit()
+        refs = list_exception_refs(db, {project["id"]})
+    finally:
+        db.close()
+    assert any(
+        item["id"] == task["id"] and item["exception_key"] == "iteration_history_inconsistent"
+        for item in refs
+    )

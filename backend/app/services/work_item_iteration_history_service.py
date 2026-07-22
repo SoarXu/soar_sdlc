@@ -24,6 +24,7 @@ def move_work_item_to_iteration(
     actor_id: int | None = None,
     reason: str,
     operation_log_id: int | None = None,
+    record_same_iteration_transition: bool = False,
 ) -> None:
     object_type = OBJECT_TYPE_BY_MODEL[type(item)]
     db.refresh(item, with_for_update=True)
@@ -41,7 +42,9 @@ def move_work_item_to_iteration(
     if current_iteration_id == target_iteration_id:
         if target_iteration_id and not any(row.iteration_id == target_iteration_id for row in open_rows):
             _open_history(db, object_type, item.id, target_iteration_id, actor_id, reason, operation_log_id)
-        return
+            return
+        if not target_iteration_id or not record_same_iteration_transition:
+            return
 
     now = datetime.now()
     for row in open_rows:

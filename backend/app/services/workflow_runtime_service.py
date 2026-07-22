@@ -559,6 +559,8 @@ def owner_has_executable_current_action(db: Session, object_type: str, item, own
         transition for transition in transitions
         if not (transition.ui_config or {}).get("hidden")
         and not (transition.ui_config or {}).get("system_action")
+        and (transition.ui_config or {}).get("action_category", "process") == "process"
+        and _matches_transition_condition(item, transition)
     ]
     if not human_transitions:
         return True
@@ -928,6 +930,7 @@ def _apply_bug_activation(
             target_iteration.id,
             actor_id=actor.id if actor else None,
             reason="reactivated",
+            record_same_iteration_transition=True,
         )
     elif target_iteration:
         move_work_item_to_iteration(
@@ -936,6 +939,7 @@ def _apply_bug_activation(
             target_iteration.id,
             actor_id=actor.id if actor else None,
             reason="reactivated",
+            record_same_iteration_transition=True,
         )
 
     if not owner_eligible:

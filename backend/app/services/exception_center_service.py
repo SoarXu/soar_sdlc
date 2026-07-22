@@ -20,6 +20,14 @@ from app.services.workflow_state_query_service import (
 )
 
 
+INTEGRITY_LABELS = {
+    "owner_required_missing": "当前状态缺少处理人",
+    "owner_ineligible": "当前处理人无执行资格",
+    "iteration_history_inconsistent": "迭代归属审计链不完整",
+    "missing_reactivation_audit": "Bug 重激活审计链不完整",
+}
+
+
 def list_exception_refs(
     db: Session,
     scoped_project_ids: set[int] | None = None,
@@ -78,6 +86,26 @@ def list_exception_refs(
             }
         )
 
+    def add_integrity(object_type: str, item, exception_key: str, entered_at: datetime | None, detail: str) -> None:
+        signature = (object_type, item.id, exception_key)
+        if signature in seen:
+            return
+        seen.add(signature)
+        refs.append({
+            "object_type": object_type,
+            "id": item.id,
+            "project_id": item.project_id,
+            "priority": getattr(item, "priority", None) or getattr(item, "severity", None),
+            "status": current_state_name(item),
+            "owner_id": getattr(item, "owner_id", None),
+            "handler_id": getattr(item, "owner_id", None),
+            "exception_key": exception_key,
+            "exception_label": INTEGRITY_LABELS[exception_key],
+            "exception_detail": detail,
+            "entered_at": entered_at.isoformat() if entered_at else None,
+            "overdue_hours": 0,
+        })
+
     for requirement in db.query(Requirement).filter(Requirement.deleted == 0).all():
         if not _in_scope(requirement.project_id, scoped_project_ids):
             continue
@@ -94,7 +122,7 @@ def list_exception_refs(
             ).first()
             if has_active_bug:
                 add_if_due("requirement", requirement, "completed_requirement_active_bug", entered_at)
-        _add_integrity_exceptions(db, add_if_due, "requirement", requirement, entered_at)
+        _add_integrity_exceptions(db, add_integrity, "requirement", requirement, entered_at)
 
     for task in db.query(Task).filter(Task.deleted == 0).all():
         if not _in_scope(task.project_id, scoped_project_ids):
@@ -108,7 +136,7 @@ def list_exception_refs(
             add_if_due("task", task, "fixing_timeout", entered_at)
         if _is_high_priority(task.priority) and not is_terminal_state(task):
             add_if_due("task", task, "high_priority_unprocessed", entered_at)
-        _add_integrity_exceptions(db, add_if_due, "task", task, entered_at)
+        _add_integrity_exceptions(db, add_integrity, "task", task, entered_at)
 
     for bug in db.query(Bug).filter(Bug.deleted == 0).all():
         if not _in_scope(bug.project_id, scoped_project_ids):
@@ -132,7 +160,7 @@ def list_exception_refs(
             add_if_due("bug", bug, "repeated_activation", activated_at, current_count=bug.reopen_count)
         if _is_high_priority(bug.priority or bug.severity) and not is_terminal_state(bug):
             add_if_due("bug", bug, "high_priority_unprocessed", entered_at)
-        _add_integrity_exceptions(db, add_if_due, "bug", bug, entered_at)
+        _add_integrity_exceptions(db, add_integrity, "bug", bug, entered_at)
 
     return refs
 
@@ -188,19 +216,15 @@ def _is_high_priority(priority: str | None) -> bool:
     return str(priority or "").lower() in {"1", "high", "urgent"}
 
 
-def _add_integrity_exceptions(db: Session, add_if_due, object_type: str, item, entered_at: datetime | None) -> None:
-    if is_terminal_state(item):
-        return
-    if item.owner_id is None and _state_requires_owner(db, item):
-        add_if_due(object_type, item, "owner_required_missing", entered_at)
-    elif item.owner_id is not None and not _owner_is_eligible(db, object_type, item):
-        add_if_due(object_type, item, "owner_ineligible", entered_at)
+def _add_integrity_exceptions(db: Session, add_integrity, object_type: str, item, entered_at: datetime | None) -> None:
+    if not is_terminal_state(item) and item.owner_id is None and _state_requires_owner(db, item):
+        add_integrity(object_type, item, "owner_required_missing", entered_at, "当前工作流状态要求处理人，但 owner_id 为空")
+    elif not is_terminal_state(item) and item.owner_id is not None and not _owner_is_eligible(db, object_type, item):
+        add_integrity(object_type, item, "owner_ineligible", entered_at, "处理人账号、项目成员身份或当前动作资格无效")
     if _iteration_history_is_inconsistent(db, object_type, item):
-        add_if_due(object_type, item, "iteration_history_inconsistent", entered_at)
-    if object_type == "bug" and (item.reopen_count or 0) > 0 and not _latest_action_time(
-        db, "bug", item.id, "activate", None
-    ):
-        add_if_due("bug", item, "missing_reactivation_audit", entered_at)
+        add_integrity(object_type, item, "iteration_history_inconsistent", entered_at, "当前归属、开放历史或转移操作记录不一致")
+    if object_type == "bug" and _bug_activation_audit_is_inconsistent(db, item):
+        add_integrity("bug", item, "missing_reactivation_audit", entered_at, "activate 次数、原因或关联的离开/进入历史不完整")
 
 
 def _state_requires_owner(db: Session, item) -> bool:
@@ -228,8 +252,67 @@ def _iteration_history_is_inconsistent(db: Session, object_type: str, item) -> b
     rows = db.query(WorkItemIterationHistory).filter(
         WorkItemIterationHistory.object_type == object_type,
         WorkItemIterationHistory.object_id == item.id,
-        WorkItemIterationHistory.left_at.is_(None),
-    ).all()
+    ).order_by(WorkItemIterationHistory.entered_at.asc(), WorkItemIterationHistory.id.asc()).all()
+    open_rows = [row for row in rows if row.left_at is None]
     if item.iteration_id is None:
-        return bool(rows)
-    return len(rows) != 1 or rows[0].iteration_id != item.iteration_id
+        if open_rows:
+            return True
+    elif len(open_rows) != 1 or open_rows[0].iteration_id != item.iteration_id:
+        return True
+    for index, row in enumerate(rows):
+        if row.left_at is not None and (row.left_at < row.entered_at or not row.leave_reason):
+            return True
+        if index and rows[index - 1].left_at and rows[index - 1].left_at > row.entered_at:
+            return True
+    if len(rows) > 1:
+        for row in rows:
+            if row.operation_log_id is None:
+                return True
+            operation = db.query(StatusOperationLog).filter(
+                StatusOperationLog.id == row.operation_log_id,
+                StatusOperationLog.object_type == object_type,
+                StatusOperationLog.object_id == item.id,
+            ).first()
+            if not operation:
+                return True
+            history_reasons = {row.enter_reason, row.leave_reason}
+            expected_action = "activate" if "reactivated" in history_reasons else "defer" if "deferred" in history_reasons else None
+            if expected_action and operation.action != expected_action:
+                return True
+    return False
+
+
+def _bug_activation_audit_is_inconsistent(db: Session, bug: Bug) -> bool:
+    activation_logs = db.query(StatusOperationLog).filter(
+        StatusOperationLog.object_type == "bug",
+        StatusOperationLog.object_id == bug.id,
+        StatusOperationLog.action == "activate",
+    ).order_by(StatusOperationLog.effective_time.asc(), StatusOperationLog.id.asc()).all()
+    verification_failure_logs = db.query(StatusOperationLog).filter(
+        StatusOperationLog.object_type == "bug",
+        StatusOperationLog.object_id == bug.id,
+        StatusOperationLog.action == "verification_failed",
+    ).all()
+    if (bug.reopen_count or 0) != len(activation_logs) + len(verification_failure_logs):
+        return True
+    if not activation_logs:
+        return False
+    histories = db.query(WorkItemIterationHistory).filter(
+        WorkItemIterationHistory.object_type == "bug",
+        WorkItemIterationHistory.object_id == bug.id,
+    ).all()
+    for activation_index, operation in enumerate(activation_logs, start=1):
+        selected = operation.selected_values if isinstance(operation.selected_values, dict) else {}
+        if not (operation.reason or selected.get("reopen_reason")):
+            return True
+        failures_before_activation = sum(
+            failure.effective_time <= operation.effective_time for failure in verification_failure_logs
+        )
+        if int(selected.get("reopen_count_after") or -1) != activation_index + failures_before_activation:
+            return True
+        linked = [row for row in histories if row.operation_log_id == operation.id]
+        has_leave = any(row.leave_reason == "reactivated" and row.left_at is not None for row in linked)
+        has_enter = any(row.enter_reason == "reactivated" for row in linked)
+        if not has_leave or not has_enter:
+            return True
+    return False

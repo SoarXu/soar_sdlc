@@ -277,14 +277,9 @@ def _exception_center_items(
             "missing_reactivation_audit",
         }
     ]
-    integrity_scan_items = _load_workbench_items_by_refs(db, projects, iteration_names, integrity_refs)
-    integrity_items = _load_workbench_items_by_refs(
-        db,
-        projects,
-        iteration_names,
-        _terminal_iteration_open_item_refs(db, scoped_project_ids),
-    )
-    return _dedup_and_sort_workbench_items([*active_items, *integrity_scan_items, *integrity_items])
+    integrity_refs = [*_terminal_iteration_open_item_refs(db, scoped_project_ids), *integrity_refs]
+    integrity_items = _load_workbench_items_by_refs(db, projects, iteration_names, integrity_refs)
+    return _dedup_and_sort_workbench_items([*active_items, *integrity_items])
 
 
 def _terminal_iteration_open_item_refs(
@@ -329,13 +324,13 @@ def _load_workbench_items_by_refs(
     refs: list[dict],
 ) -> list[WorkbenchItem]:
     grouped_ids: dict[str, set[int]] = {}
-    metadata_by_ref: dict[tuple[str, int], dict] = {}
+    metadata_by_ref: dict[tuple[str, int], list[dict]] = {}
     for ref in refs:
         object_type = ref["object_type"]
         if object_type not in WORKBENCH_OBJECT_TYPES:
             continue
         grouped_ids.setdefault(object_type, set()).add(ref["id"])
-        metadata_by_ref.setdefault((object_type, ref["id"]), {}).update(ref)
+        metadata_by_ref.setdefault((object_type, ref["id"]), []).append(ref)
 
     items_by_ref: dict[tuple[str, int], WorkbenchItem] = {}
     if grouped_ids.get("requirement"):
@@ -354,16 +349,34 @@ def _load_workbench_items_by_refs(
         if key in seen or key not in items_by_ref:
             continue
         seen.add(key)
+        metadata_rows = metadata_by_ref[key]
+        metadata = {}
+        for metadata_row in metadata_rows:
+            metadata.update(metadata_row)
+        exception_rows = [row for row in metadata_rows if row.get("exception_key")]
+        primary_exception = exception_rows[0] if exception_rows else {}
+        exception_keys = list(dict.fromkeys(row["exception_key"] for row in exception_rows))
+        exception_details = [
+            {
+                "exception_key": row["exception_key"],
+                "exception_label": row.get("exception_label"),
+                "exception_detail": row.get("exception_detail"),
+                "entered_at": row.get("entered_at"),
+            }
+            for row in exception_rows
+        ]
         item = items_by_ref[key].model_copy(
             update={
-                "watch_source": metadata_by_ref[key].get("watch_source"),
-                "mentioned_in_comment_id": metadata_by_ref[key].get("mentioned_in_comment_id"),
-                "exception_key": metadata_by_ref[key].get("exception_key"),
-                "exception_label": metadata_by_ref[key].get("exception_label"),
-                "entered_at": metadata_by_ref[key].get("entered_at"),
-                "threshold_hours": metadata_by_ref[key].get("threshold_hours"),
-                "threshold_count": metadata_by_ref[key].get("threshold_count"),
-                "overdue_hours": metadata_by_ref[key].get("overdue_hours"),
+                "watch_source": metadata.get("watch_source"),
+                "mentioned_in_comment_id": metadata.get("mentioned_in_comment_id"),
+                "exception_key": primary_exception.get("exception_key"),
+                "exception_label": primary_exception.get("exception_label"),
+                "exception_keys": exception_keys,
+                "exception_details": exception_details,
+                "entered_at": primary_exception.get("entered_at"),
+                "threshold_hours": primary_exception.get("threshold_hours"),
+                "threshold_count": primary_exception.get("threshold_count"),
+                "overdue_hours": primary_exception.get("overdue_hours"),
             }
         )
         result.append(item)

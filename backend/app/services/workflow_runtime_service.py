@@ -26,6 +26,7 @@ from app.services.bug_type_service import bug_type_options, get_enabled_bug_type
 from app.services.project_permission_service import (
     actor_role_keys,
     can_admin_action,
+    can_view_project_work_items,
     ensure_authenticated,
     is_project_member,
     is_project_owner,
@@ -192,6 +193,11 @@ def execute_transition(
         item.owner_id = next_owner_id
     if handler_routing["source_rule"] != "keep_current" or next_owner_id != original_owner_id:
         selected_values["handler_routing"] = handler_routing
+    if object_type == "bug" and transition.action_key == "activate":
+        selected_values.update({
+            "recommended_owner_id": next_owner_id,
+            "original_owner_eligible": handler_routing.get("original_owner_eligible", False),
+        })
     next_owner = _owner_user(db, next_owner_id) if next_owner_id else None
     automation_results.extend(
         _run_transition_automations(
@@ -246,6 +252,22 @@ def execute_transition(
     if object_type == "bug" and transition.action_key == "activate":
         db.flush()
         _link_reactivation_history_to_operation(db, item.id, selected_values, operation.id)
+        db.flush()
+        history_ids = [
+            row.id for row in db.query(WorkItemIterationHistory.id).filter(
+                WorkItemIterationHistory.object_type == "bug",
+                WorkItemIterationHistory.object_id == item.id,
+                WorkItemIterationHistory.operation_log_id == operation.id,
+            ).order_by(WorkItemIterationHistory.id.asc()).all()
+        ]
+        audit_trail = {
+            "source_iteration_id": selected_values.get("source_iteration_id"),
+            "target_iteration_id": selected_values.get("target_iteration_id"),
+            "history_ids": history_ids,
+            "reopen_count": item.reopen_count,
+        }
+    else:
+        audit_trail = None
     if next_owner_id != original_owner_id:
         target_type = (transition.handler_rule or {}).get("target_type", "keep_current")
         operation.reason = operation.reason or request.delegate_reason or transition.action_key
@@ -269,6 +291,8 @@ def execute_transition(
         resolved_target_state_id=resolved_target_state.id if resolved_target_state else None,
         selected_values=selected_values,
         override_reason=request.override_reason or request.payload.get("override_reason"),
+        operation_log_id=operation.id,
+        audit_trail=audit_trail,
     )
 
 
@@ -922,8 +946,13 @@ def _apply_bug_activation(
                 detail={"code": "TARGET_ITERATION_OUT_OF_SCOPE", "message": "目标迭代不覆盖 Bug 所属项目"},
             )
 
+    if not can_view_project_work_items(db, bug.project_id, actor):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={"code": "PROJECT_ACCESS_DENIED", "message": "No access to target iteration project"},
+        )
+
     original_owner_id = bug.owner_id
-    owner_eligible = _reactivation_handler_is_eligible(db, bug.project_id, original_owner_id)
 
     if target_iteration and target_iteration.id != bug.iteration_id:
         move_work_item_to_iteration(
@@ -944,9 +973,6 @@ def _apply_bug_activation(
             record_same_iteration_transition=True,
         )
 
-    if not owner_eligible:
-        bug.owner_id = None
-
     before_count = bug.reopen_count or 0
     bug.reopen_count = before_count + 1
     selected_values.update(
@@ -955,29 +981,37 @@ def _apply_bug_activation(
             "source_iteration_id": source_iteration.id if source_iteration else None,
             "target_iteration_id": target_iteration.id if target_iteration else None,
             "original_owner_id": original_owner_id,
-            "recommended_owner_id": original_owner_id if owner_eligible else None,
-            "original_owner_eligible": owner_eligible,
             "reopen_count_before": before_count,
             "reopen_count_after": bug.reopen_count,
         }
     )
 
 
-def _reactivation_handler_is_eligible(db: Session, project_id: int | None, user_id: int | None) -> bool:
-    if not project_id or not user_id:
+def _reactivation_handler_is_eligible(db: Session, bug: Bug, user_id: int | None, target_state_id: int | None = None) -> bool:
+    if not bug.project_id or not user_id:
         return False
     user = db.query(User).filter(User.id == user_id, User.deleted == 0, User.is_active.is_(True)).first()
     if not user:
         return False
-    return bool(
-        db.query(ProjectMember.id)
-        .filter(ProjectMember.project_id == project_id, ProjectMember.user_id == user_id)
-        .first()
-    )
+    if not db.query(ProjectMember.id).filter(
+        ProjectMember.project_id == bug.project_id,
+        ProjectMember.user_id == user_id,
+    ).first():
+        return False
+    original_state_id = bug.current_state_id
+    original_owner_id = bug.owner_id
+    try:
+        if target_state_id is not None:
+            bug.current_state_id = target_state_id
+        bug.owner_id = user_id
+        return owner_has_executable_current_action(db, "bug", bug, user)
+    finally:
+        bug.current_state_id = original_state_id
+        bug.owner_id = original_owner_id
 
 
-def _ensure_reactivation_handler_eligible(db: Session, project_id: int | None, user_id: int) -> None:
-    if not _reactivation_handler_is_eligible(db, project_id, user_id):
+def _ensure_reactivation_handler_eligible(db: Session, bug: Bug, user_id: int) -> None:
+    if not _reactivation_handler_is_eligible(db, bug, user_id):
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail={"code": "HANDLER_NOT_ELIGIBLE", "message": "所选处理人无效或不具备项目处理资格"},
@@ -1008,8 +1042,14 @@ def _bug_activation_transition_read(
     form_config = dict(transition_read.form_config or {})
     fields = [dict(field) for field in form_config.get("fields") or []]
     fields = [field for field in fields if field.get("field") != "target_iteration_id"]
-    fields.insert(
-        0,
+    target_state = db.query(WorkflowState).filter(WorkflowState.id == transition_read.to_state_id).first()
+    fields[0:0] = [
+        {"field": "source_iteration", "label": "原迭代", "type": "text", "readonly": True,
+         "default_value": source_iteration.name if source_iteration else "未关联迭代"},
+        {"field": "reopen_count", "label": "当前复现次数", "type": "number", "readonly": True,
+         "default_value": bug.reopen_count or 0},
+        {"field": "target_status", "label": "目标状态", "type": "text", "readonly": True,
+         "default_value": target_state.status_name if target_state else None},
         {
             "field": "target_iteration_id",
             "label": "目标进行中迭代",
@@ -1017,11 +1057,11 @@ def _bug_activation_transition_read(
             "required": not source_is_active,
             "options": options,
         },
-    )
+    ]
     form_config["fields"] = fields
     form_config["allow_manual_owner"] = True
     ui_config = dict(transition_read.ui_config or {})
-    owner_eligible = _reactivation_handler_is_eligible(db, bug.project_id, bug.owner_id)
+    owner_eligible = _reactivation_handler_is_eligible(db, bug, bug.owner_id, transition_read.to_state_id)
     ui_config.update(
         {
             "recommended_owner_id": bug.owner_id if owner_eligible else None,
@@ -1286,21 +1326,33 @@ def _next_owner_resolution(
     rule = transition.handler_rule or {}
     original_owner_id = getattr(item, "owner_id", None)
     if object_type == "bug" and transition_action_key == "activate":
-        final_owner_id = original_owner_id
-        source_rule = "eligible_original_handler" if original_owner_id else "unassigned"
+        original_owner_eligible = _reactivation_handler_is_eligible(db, item, original_owner_id)
+        final_owner_id = original_owner_id if original_owner_eligible else None
+        source_rule = "eligible_original_handler" if original_owner_eligible else "unassigned"
         manual_override = False
         if request.next_owner_id is not None:
-            _ensure_reactivation_handler_eligible(db, item.project_id, request.next_owner_id)
+            _ensure_reactivation_handler_eligible(db, item, request.next_owner_id)
             final_owner_id = request.next_owner_id
             if request.next_owner_id != original_owner_id:
                 source_rule = "manual_override"
                 manual_override = True
+        allow_unassigned = bool(
+            (transition.handler_rule or {}).get("allow_unassigned") is True
+            or (transition.form_config or {}).get("allow_unassigned") is True
+        )
+        if final_owner_id is None and not allow_unassigned:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail={"code": "UNASSIGNED_NOT_ALLOWED", "message": "Please select an eligible handler"},
+            )
         return {
             "previous_owner_id": original_owner_id,
             "source_rule": source_rule,
             "resolved_default_owner_id": original_owner_id,
             "final_owner_id": final_owner_id,
             "manual_override": manual_override,
+            "original_owner_eligible": original_owner_eligible,
+            "allow_unassigned": allow_unassigned,
             "override_reason": request.override_reason or request.payload.get("override_reason"),
         }
     target_type = rule.get("target_type", "keep_current")

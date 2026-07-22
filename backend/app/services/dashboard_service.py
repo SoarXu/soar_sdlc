@@ -47,7 +47,7 @@ def get_workbench(db: Session, user_id: int | None = None) -> WorkbenchResponse:
     role_keys = _role_keys_for_user(db, user_id)
     view_mode = _workbench_view_mode(role_keys)
     team_project_ids = workbench_project_ids_for_user(db, user_id) if user_id else set()
-    scoped_project_ids = _expand_project_scope_ids(db, team_project_ids) if team_project_ids else set()
+    scoped_project_ids = team_project_ids
     projects = {item.id: item for item in db.query(Project).filter(Project.deleted == 0).all()}
     iteration_names = {item.id: item.name for item in db.query(Iteration).filter(Iteration.deleted == 0).all()}
     active_iteration_ids = _active_iteration_ids(db)
@@ -422,37 +422,6 @@ def _filter_active_scoped_items(
         if item.iteration_id in active_iteration_ids
         and _in_project_scope(item.project_id, scoped_project_ids)
     ]
-
-
-def _expand_project_scope_ids(db: Session, project_ids: set[int]) -> set[int]:
-    expanded = set(project_ids)
-    for project_id in project_ids:
-        expanded.update(_collect_descendant_project_ids(db, project_id))
-        expanded.update(_collect_ancestor_project_ids(db, project_id))
-    return expanded
-
-
-def _collect_descendant_project_ids(db: Session, project_id: int) -> set[int]:
-    children = db.query(Project).filter(Project.parent_id == project_id, Project.deleted == 0).all()
-    result = {child.id for child in children}
-    for child in children:
-        result.update(_collect_descendant_project_ids(db, child.id))
-    return result
-
-
-def _collect_ancestor_project_ids(db: Session, project_id: int) -> set[int]:
-    result = set()
-    project = db.query(Project).filter(Project.id == project_id, Project.deleted == 0).first()
-    parent_id = project.parent_id if project else None
-    visited = set()
-    while parent_id and parent_id not in visited:
-        visited.add(parent_id)
-        parent = db.query(Project).filter(Project.id == parent_id, Project.deleted == 0).first()
-        if not parent:
-            break
-        result.add(parent.id)
-        parent_id = parent.parent_id
-    return result
 
 
 def _review_tasks(db: Session) -> list[dict]:

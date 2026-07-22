@@ -31,8 +31,13 @@
           :label="field.label || field.field"
           :required="Boolean(field.required)"
         >
+          <el-input
+            v-if="field.readonly"
+            :model-value="formPayload[field.field]"
+            disabled
+          />
           <el-select
-            v-if="field.type === 'select'"
+            v-else-if="field.type === 'select'"
             v-model="formPayload[field.field]"
             clearable
             filterable
@@ -107,6 +112,14 @@
         </el-form-item>
 
         <el-alert
+          v-if="noActiveTargetIteration"
+          title="请先启动迭代"
+          type="warning"
+          :closable="false"
+          show-icon
+        />
+
+        <el-alert
           v-if="activeAction?.ui_config?.original_owner_id && activeAction?.ui_config?.original_owner_eligible"
           title="原处理人仍有效，将默认保留"
           type="info"
@@ -133,7 +146,7 @@
       </el-form>
       <template #footer>
         <el-button @click="dialogVisible = false">取消</el-button>
-        <el-button :type="buttonType(activeAction)" :loading="Boolean(submittingAction)" @click="submitActiveAction">
+        <el-button :type="buttonType(activeAction)" :loading="Boolean(submittingAction)" :disabled="noActiveTargetIteration" @click="submitActiveAction">
           {{ submitText }}
         </el-button>
       </template>
@@ -218,6 +231,10 @@ const primaryActions = computed(() => listSplit.value.primaryActions)
 const moreActions = computed(() => listSplit.value.moreActions)
 const visibleActions = computed(() => [...primaryActions.value, ...moreActions.value])
 const formFields = computed(() => activeAction.value?.form_config?.fields || [])
+const noActiveTargetIteration = computed(() => {
+  const field = formFields.value.find((item) => item.field === 'target_iteration_id')
+  return Boolean(field?.required && fieldOptions(field).length === 0)
+})
 const dialogTitle = computed(() => activeAction.value?.form_config?.title || activeAction.value?.action_name || '执行流转')
 const submitText = computed(() => activeAction.value?.form_config?.submit_text || activeAction.value?.action_name || '确认')
 const allowManualOwner = computed(() => actionAllowsManualOwner(activeAction.value))
@@ -375,7 +392,9 @@ async function submitAction(action) {
     }
     const payload = {
       transition_id: action.transition_id,
-      payload: { ...formPayload }
+      payload: Object.fromEntries(
+        formFields.value.filter((field) => !field.readonly).map((field) => [field.field, formPayload[field.field]])
+      )
     }
     if (nextOwnerId.value) payload.next_owner_id = nextOwnerId.value
     if (delegateReason.value.trim()) payload.delegate_reason = delegateReason.value.trim()

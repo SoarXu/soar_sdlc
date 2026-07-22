@@ -79,6 +79,29 @@ def _start_iteration(client: TestClient, iteration_id: int) -> None:
     assert response.status_code == 200
 
 
+def test_workbench_project_scope_does_not_expand_between_parent_and_child(client: TestClient):
+    parent_member_id, parent_token = _create_user_with_role(f"parent_scope_{uuid4().hex[:6]}", "developer")
+    child_member_id, child_token = _create_user_with_role(f"child_scope_{uuid4().hex[:6]}", "developer")
+    parent_id = _create_project(client, "Isolated parent")
+    child = client.post("/api/v1/projects", json={"name": "Isolated child", "parent_id": parent_id}).json()
+    parent_iteration = _create_iteration(client, parent_id, "Parent active")
+    child_iteration = _create_iteration(client, child["id"], "Child active")
+    _start_iteration(client, parent_iteration)
+    _start_iteration(client, child_iteration)
+    parent_task = client.post("/api/v1/tasks", json={"project_id": parent_id, "iteration_id": parent_iteration, "title": "Parent only"}).json()
+    child_task = client.post("/api/v1/tasks", json={"project_id": child["id"], "iteration_id": child_iteration, "title": "Child only"}).json()
+    _add_project_member(parent_id, parent_member_id, "developer")
+    _add_project_member(child["id"], child_member_id, "developer")
+
+    parent_items = client.get("/api/v1/dashboard/workbench", headers={"Authorization": f"Bearer {parent_token}"}).json()["unassigned"]["items"]
+    child_items = client.get("/api/v1/dashboard/workbench", headers={"Authorization": f"Bearer {child_token}"}).json()["unassigned"]["items"]
+
+    assert {item["id"] for item in parent_items if item["object_type"] == "task"} >= {parent_task["id"]}
+    assert child_task["id"] not in {item["id"] for item in parent_items}
+    assert {item["id"] for item in child_items if item["object_type"] == "task"} >= {child_task["id"]}
+    assert parent_task["id"] not in {item["id"] for item in child_items}
+
+
 def test_workbench_returns_default_queue_sections_for_pending_and_unassigned(client: TestClient):
     developer_id, developer_token = _create_user_with_role(f"queue_user_{uuid4().hex[:6]}", "developer")
     project_id = _create_project(client, "Queue workbench project")

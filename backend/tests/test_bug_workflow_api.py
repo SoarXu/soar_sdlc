@@ -12,6 +12,7 @@ from app.models.role import Role, UserRole
 from app.models.user import User
 from app.models.workflow_definition import WorkflowTransition
 from app.services.exception_center_service import list_exception_refs
+from app.services.workflow_runtime_service import _reactivation_handler_is_eligible
 
 
 def _create_project(client: TestClient) -> int:
@@ -234,6 +235,12 @@ def test_closed_bug_reactivates_into_active_iteration_and_retains_eligible_handl
     assert reactivated.status_code == 200, reactivated.text
     assert reactivated.json()["id"] == bug["id"]
     assert reactivated.json()["owner_id"] == handler_id
+    assert reactivated.json()["operation_log_id"]
+    audit_trail = reactivated.json()["audit_trail"]
+    assert audit_trail["source_iteration_id"] == source_iteration_id
+    assert audit_trail["target_iteration_id"] == target_iteration_id
+    assert len(audit_trail["history_ids"]) == 2
+    assert audit_trail["reopen_count"] == 1
     handler_routing = reactivated.json()["selected_values"]["handler_routing"]
     assert handler_routing["source_rule"] == "eligible_original_handler"
     assert handler_routing["manual_override"] is False
@@ -304,7 +311,6 @@ def test_closed_bug_reactivation_accepts_legacy_iteration_id_alias(client: TestC
         f"/api/v1/workflow-runtime/iteration/{source_iteration_id}/transition",
         json={"action_key": "complete"},
     ).status_code == 200
-
     reactivated = client.post(
         f"/api/v1/workflow-runtime/bug/{bug['id']}/transition",
         json={"action_key": "activate", "payload": {"reason": "Legacy target", "iteration_id": target_iteration_id}},
@@ -366,6 +372,16 @@ def test_bug_reactivation_drops_original_handler_who_is_not_a_project_member(cli
         f"/api/v1/workflow-runtime/iteration/{source_iteration_id}/transition",
         json={"action_key": "complete"},
     ).status_code == 200
+    db = SessionLocal()
+    try:
+        transition = db.query(WorkflowTransition).filter(
+            WorkflowTransition.definition_id == bug["workflow_definition_id"],
+            WorkflowTransition.action_key == "activate",
+        ).one()
+        transition.form_config = {**(transition.form_config or {}), "allow_unassigned": False}
+        db.commit()
+    finally:
+        db.close()
 
     actions = client.get(
         f"/api/v1/workflow-runtime/bug/{bug['id']}/transitions",
@@ -376,6 +392,27 @@ def test_bug_reactivation_drops_original_handler_who_is_not_a_project_member(cli
     assert activate_action["ui_config"]["original_owner_eligible"] is False
     assert activate_action["ui_config"]["recommended_owner_id"] is None
 
+    blocked = client.post(
+        f"/api/v1/workflow-runtime/bug/{bug['id']}/transition",
+        json={
+            "action_key": "activate",
+            "payload": {"reason": "Former handler left", "target_iteration_id": target_iteration_id},
+        },
+        headers={"Authorization": f"Bearer {reporter_token}"},
+    )
+
+    assert blocked.status_code == 422
+    assert blocked.json()["detail"]["code"] == "UNASSIGNED_NOT_ALLOWED"
+    db = SessionLocal()
+    try:
+        transition = db.query(WorkflowTransition).filter(
+            WorkflowTransition.definition_id == bug["workflow_definition_id"],
+            WorkflowTransition.action_key == "activate",
+        ).one()
+        transition.form_config = {**(transition.form_config or {}), "allow_unassigned": True}
+        db.commit()
+    finally:
+        db.close()
     reactivated = client.post(
         f"/api/v1/workflow-runtime/bug/{bug['id']}/transition",
         json={
@@ -398,4 +435,67 @@ def test_bug_reactivation_drops_original_handler_who_is_not_a_project_member(cli
         ).one()
         assert source_history.owner_id_snapshot == former_handler_id
     finally:
+        db.close()
+
+
+def test_bug_reactivation_rejects_reporter_without_target_project_access(client: TestClient):
+    reporter_id, reporter_token = _create_user("developer")
+    project_id = _create_project(client)
+    _add_member(project_id, reporter_id, "developer")
+    source_iteration_id = _create_iteration(client, project_id, "Access source", active=True)
+    target_iteration_id = _create_iteration(client, project_id, "Access target", active=True)
+    bug = client.post(
+        "/api/v1/bugs",
+        json={"project_id": project_id, "iteration_id": source_iteration_id, "title": "Former reporter", "reporter_id": reporter_id},
+        headers={"Authorization": f"Bearer {reporter_token}"},
+    ).json()
+    _set_bug_closed(bug["id"])
+    assert client.post(f"/api/v1/workflow-runtime/iteration/{source_iteration_id}/transition", json={"action_key": "complete"}).status_code == 200
+    db = SessionLocal()
+    try:
+        db.query(ProjectMember).filter(
+            ProjectMember.project_id == project_id,
+            ProjectMember.user_id == reporter_id,
+        ).delete()
+        db.commit()
+    finally:
+        db.close()
+
+    denied = client.post(
+        f"/api/v1/workflow-runtime/bug/{bug['id']}/transition",
+        json={"action_key": "activate", "payload": {"reason": "No access", "target_iteration_id": target_iteration_id}},
+        headers={"Authorization": f"Bearer {reporter_token}"},
+    )
+
+    assert denied.status_code == 403
+    assert denied.json()["detail"]["code"] == "PROJECT_ACCESS_DENIED"
+
+
+def test_reactivation_handler_eligibility_uses_target_state_core_action_roles(client: TestClient):
+    developer_id, _ = _create_user("developer")
+    admin_id, _ = _create_user("system_admin")
+    project_id = _create_project(client)
+    _add_member(project_id, developer_id, "developer")
+    _add_member(project_id, admin_id, "developer")
+    bug = client.post("/api/v1/bugs", json={"project_id": project_id, "title": "Target role gate"}).json()
+    db = SessionLocal()
+    try:
+        row = db.query(Bug).filter(Bug.id == bug["id"]).one()
+        transitions = db.query(WorkflowTransition).filter(
+            WorkflowTransition.definition_id == row.workflow_definition_id,
+            WorkflowTransition.from_state_id == row.current_state_id,
+        )
+        original_roles = {transition.id: transition.allowed_roles for transition in transitions.all()}
+        transitions.update({"allowed_roles": "project_owner"}, synchronize_session=False)
+        db.commit()
+
+        assert _reactivation_handler_is_eligible(db, row, developer_id) is False
+        assert _reactivation_handler_is_eligible(db, row, admin_id) is True
+    finally:
+        if "original_roles" in locals():
+            for transition_id, roles in original_roles.items():
+                db.query(WorkflowTransition).filter(WorkflowTransition.id == transition_id).update(
+                    {"allowed_roles": roles}, synchronize_session=False
+                )
+            db.commit()
         db.close()

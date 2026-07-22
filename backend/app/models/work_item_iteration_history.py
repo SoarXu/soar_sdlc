@@ -10,6 +10,7 @@ class WorkItemIterationHistory(Base):
     __tablename__ = "work_item_iteration_history"
     __table_args__ = (
         Index("idx_wiih_object", "object_type", "object_id", "left_at"),
+        Index("idx_wiih_iteration", "iteration_id", "left_at"),
     )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)

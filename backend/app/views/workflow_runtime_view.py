@@ -70,3 +70,5 @@ class WorkflowTransitionExecuteRead(BaseModel):
     resolved_target_state_id: int | None = None
     selected_values: dict[str, Any] = Field(default_factory=dict)
     override_reason: str | None = None
+    operation_log_id: int | None = None
+    audit_trail: dict[str, Any] | None = None

@@ -9,7 +9,7 @@ from app.models.status_operation import StatusOperationLog
 from app.models.workflow_definition import WorkflowState, WorkflowTransition
 
 
-def _create_config(client: TestClient) -> int:
+def _create_config(client: TestClient, *, clear_initial_definitions: bool = True) -> int:
     response = client.post(
         "/api/v1/assignee-rule-configs",
         json={
@@ -22,7 +22,15 @@ def _create_config(client: TestClient) -> int:
         },
     )
     assert response.status_code == 201
-    return response.json()["id"]
+    config_id = response.json()["id"]
+    if clear_initial_definitions:
+        definitions = client.get(
+            f"/api/v1/workflow-definitions?scope_type=assignee_rule_config&scope_id={config_id}"
+        ).json()
+        for definition in definitions:
+            disabled = client.delete(f"/api/v1/workflow-definitions/{definition['id']}")
+            assert disabled.status_code == 204, disabled.text
+    return config_id
 
 
 def test_create_and_list_workflow_definition(client: TestClient):
@@ -35,7 +43,7 @@ def test_create_and_list_workflow_definition(client: TestClient):
             "object_type": "bug",
             "scope_type": "assignee_rule_config",
             "scope_id": config_id,
-            "enabled": True,
+            "enabled": False,
         },
     )
 
@@ -48,6 +56,34 @@ def test_create_and_list_workflow_definition(client: TestClient):
     listed = client.get(f"/api/v1/workflow-definitions?object_type=bug&scope_id={config_id}")
     assert listed.status_code == 200
     assert data["id"] in {item["id"] for item in listed.json()}
+
+
+def test_assignee_rule_scheme_rejects_duplicate_enabled_object_workflows(client: TestClient):
+    config_id = _create_config(client, clear_initial_definitions=False)
+    payload = {
+        "name": f"Duplicate Bug workflow {uuid4().hex[:8]}",
+        "object_type": "bug",
+        "scope_type": "assignee_rule_config",
+        "scope_id": config_id,
+    }
+
+    rejected_create = client.post("/api/v1/workflow-definitions", json=payload)
+
+    assert rejected_create.status_code == 409
+    assert "工作流方案" in rejected_create.json()["detail"]
+    assert "Bug" in rejected_create.json()["detail"]
+
+    draft = client.post("/api/v1/workflow-definitions", json={**payload, "enabled": False})
+    assert draft.status_code == 201, draft.text
+
+    rejected_enable = client.patch(
+        f"/api/v1/workflow-definitions/{draft.json()['id']}",
+        json={"enabled": True},
+    )
+
+    assert rejected_enable.status_code == 409
+    assert "工作流方案" in rejected_enable.json()["detail"]
+    assert "Bug" in rejected_enable.json()["detail"]
 
 
 def test_graph_save_generates_private_identity_and_protects_persisted_transition(client: TestClient):
@@ -265,10 +301,11 @@ def test_graph_save_rejects_cross_definition_and_disabled_initial_state_ids(clie
             "/api/v1/workflow-definitions",
             json={
                 "name": f"Cross definition {index}-{uuid4().hex[:8]}",
-                "object_type": "task",
-                "scope_type": "assignee_rule_config",
-                "scope_id": config_id,
-            },
+                    "object_type": "task",
+                    "scope_type": "assignee_rule_config",
+                    "scope_id": config_id,
+                    "enabled": index == 0,
+                },
         ).json()
         for index in range(2)
     ]

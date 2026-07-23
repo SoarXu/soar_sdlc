@@ -40,26 +40,34 @@
         <el-table-column label="状态" width="110">
           <template #default="{ row }">{{ row.status_name || '-' }}</template>
         </el-table-column>
-        <el-table-column label="工作流方案" width="180" show-overflow-tooltip>
+        <el-table-column label="分派规则方案" width="180" show-overflow-tooltip>
           <template #default="{ row }">{{ workflowSchemeLabel(row.assignee_rule_config_id) }}</template>
         </el-table-column>
         <el-table-column label="操作" :width="projectOperationWidth" fixed="right">
           <template #default="{ row }">
-            <el-button v-if="canManageProjectRow(row)" link type="primary" @click="openEdit(row)">编辑</el-button>
-            <el-button v-if="canCreateProject" link type="success" @click="openCreate(row)">新增项目</el-button>
-            <WorkflowActionButtons
-              v-if="canManageProjectRow(row)"
-              object-type="project"
-              :object-id="row.id"
-              mode="list"
-              :transitions="workflowTransitions[row.id] || []"
-              :auto-load="false"
-              :users="users"
-              @executed="loadData"
-            />
-            <el-popconfirm v-if="canDeleteProjectRow" title="确认删除该项目？子项目将一并删除。" @confirm="removeProject(row.id)">
-              <template #reference><el-button link type="danger">删除</el-button></template>
-            </el-popconfirm>
+            <div class="table-actions project-list-actions">
+              <WorkflowActionButtons
+                v-if="canManageProjectRow(row)"
+                object-type="project"
+                :object-id="row.id"
+                mode="list"
+                :transitions="workflowTransitions[row.id] || []"
+                :auto-load="false"
+                :users="users"
+                @executed="loadData"
+              >
+                <template #after-primary>
+                  <el-button link type="primary" @click="openEdit(row)">编辑</el-button>
+                  <el-button v-if="canCreateProject" link type="success" @click="openCreate(row)">新增项目</el-button>
+                </template>
+              </WorkflowActionButtons>
+              <template v-else>
+                <el-button v-if="canCreateProject" link type="success" @click="openCreate(row)">新增项目</el-button>
+              </template>
+              <el-popconfirm v-if="canDeleteProjectRow" title="确认删除该项目？子项目将一并删除。" @confirm="removeProject(row.id)">
+                <template #reference><el-button link type="danger">删除</el-button></template>
+              </el-popconfirm>
+            </div>
           </template>
         </el-table-column>
       </el-table>
@@ -223,7 +231,7 @@ const {
 } = usePagination(projectTree)
 const projectOperationWidth = computed(() => workflowActionColumnWidth(
   projects.value.map((row) => (canManageProjectRow(row) ? workflowTransitions.value[row.id] || [] : [])),
-  { minWidth: 330, extraWidth: 190 }
+  { minWidth: 520, extraWidth: 190 }
 ))
 const form = reactive({ parent_id: null, program_id: null, name: '', owner_id: null, assignee_rule_config_id: null, start_date: null, end_date: null, is_long_term: false, description: '' })
 const statusActionOptions = {
@@ -244,7 +252,7 @@ function statusActionLabel(value) {
 }
 
 function workflowSchemeLabel(configId) {
-  if (!configId) return '-'
+  if (!configId) return '默认系统工作流'
   return workflowSchemes.value.find((item) => item.id === configId)?.name || `#${configId}`
 }
 function membersForProject(projectId) { return projectMembersById.value[projectId] || [] }

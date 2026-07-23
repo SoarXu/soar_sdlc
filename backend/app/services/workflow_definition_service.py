@@ -110,7 +110,7 @@ def update_definition(db: Session, definition_id: int, payload: WorkflowDefiniti
         "enabled": definition.enabled,
         **data,
     }
-    _validate_definition_payload(db, merged)
+    _validate_definition_payload(db, merged, excluding_definition_id=definition.id)
     for field, value in data.items():
         setattr(definition, field, value)
     definition.update_time = datetime.now()
@@ -351,7 +351,12 @@ def _get_definition(db: Session, definition_id: int) -> WorkflowDefinition:
     return definition
 
 
-def _validate_definition_payload(db: Session, data: dict) -> None:
+def _validate_definition_payload(
+    db: Session,
+    data: dict,
+    *,
+    excluding_definition_id: int | None = None,
+) -> None:
     if data["object_type"] not in OBJECT_TYPES:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Unknown workflow object type")
     if data["scope_type"] not in SCOPE_TYPES:
@@ -362,6 +367,32 @@ def _validate_definition_payload(db: Session, data: dict) -> None:
         exists = db.query(AssigneeRuleConfig.id).filter(AssigneeRuleConfig.id == data["scope_id"]).first()
         if not exists:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Assignee rule config not found")
+        if data.get("enabled", True):
+            conflicts_query = db.query(WorkflowDefinition).filter(
+                WorkflowDefinition.scope_type == "assignee_rule_config",
+                WorkflowDefinition.scope_id == data["scope_id"],
+                WorkflowDefinition.object_type == data["object_type"],
+                WorkflowDefinition.enabled.is_(True),
+            )
+            if excluding_definition_id is not None:
+                conflicts_query = conflicts_query.filter(WorkflowDefinition.id != excluding_definition_id)
+            conflicts = conflicts_query.order_by(WorkflowDefinition.id.asc()).all()
+            if conflicts:
+                object_label = {
+                    "requirement": "需求",
+                    "task": "任务",
+                    "bug": "Bug",
+                    "iteration": "迭代",
+                    "project": "项目",
+                }.get(data["object_type"], data["object_type"])
+                definitions = "、".join(f"ID {item.id}（{item.name}）" for item in conflicts)
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail=(
+                        f"工作流方案 {data['scope_id']} 已存在启用的 {object_label} 工作流定义：{definitions}；"
+                        "请先停用冲突定义后再创建或启用。"
+                    ),
+                )
 
 
 def _validate_graph(db: Session, definition: WorkflowDefinition, payload: WorkflowGraphSave) -> None:

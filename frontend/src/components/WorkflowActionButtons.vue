@@ -11,6 +11,7 @@
       >
         {{ action.action_name }}
       </el-button>
+      <slot name="after-primary" />
     </div>
     <el-dropdown v-if="moreActions.length" trigger="click" @command="handleMoreCommand">
       <el-button :link="mode === 'list'" type="primary" class="workflow-action-more">更多</el-button>
@@ -226,7 +227,7 @@ const blockerDetail = ref({ counts: {}, items: [] })
 const blockerTypeFilter = ref('all')
 
 const actions = computed(() => props.transitions ?? loadedTransitions.value)
-const listSplit = computed(() => splitListActions(actions.value))
+const listSplit = computed(() => splitListActions(actions.value, props.objectType))
 const primaryActions = computed(() => listSplit.value.primaryActions)
 const moreActions = computed(() => listSplit.value.moreActions)
 const visibleActions = computed(() => [...primaryActions.value, ...moreActions.value])

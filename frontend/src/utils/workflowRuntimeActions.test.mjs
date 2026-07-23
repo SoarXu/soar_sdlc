@@ -47,6 +47,29 @@ function action(transitionId, overrides = {}) {
 }
 
 {
+  const result = splitListActions([
+    action(1, { action_key: 'start', sort_order: 20 }),
+    action(2, { action_key: 'suspend', sort_order: 10 }),
+    action(3, { action_key: 'close', sort_order: 30 }),
+    action(4, { action_key: 'custom_project_action', sort_order: 40 })
+  ], 'project')
+
+  assert.deepEqual(result.primaryActions.map((item) => item.transition_id), [2, 1, 3])
+  assert.deepEqual(result.moreActions.map((item) => item.transition_id), [4])
+}
+
+{
+  const result = splitListActions([
+    action(1, { action_key: 'start', sort_order: 20 }),
+    action(2, { action_key: 'suspend', sort_order: 10 }),
+    action(3, { action_key: 'close', sort_order: 30 })
+  ], 'requirement')
+
+  assert.deepEqual(result.primaryActions, [])
+  assert.deepEqual(result.moreActions.map((item) => item.transition_id), [2, 1, 3])
+}
+
+{
   assert.equal(actionNeedsDialog(action('confirm_bug_type', {
     routing_mode: 'automatic_with_override',
     allowed_target_states: [{ id: 2, status_name: '修复中' }, { id: 3, status_name: '待验证' }]

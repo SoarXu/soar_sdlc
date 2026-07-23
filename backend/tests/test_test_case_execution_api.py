@@ -7,7 +7,7 @@ from app.models.bug import Bug
 from app.models.iteration import Iteration
 from app.models import test_case as test_case_models
 from app.models.work_item_iteration_history import WorkItemIterationHistory
-from app.models.workflow_definition import WorkflowState
+from app.models.workflow_definition import WorkflowDefinition, WorkflowState
 
 
 def _create_project(client: TestClient) -> int:
@@ -113,6 +113,67 @@ def test_test_case_execution_result_all_ignored(client: TestClient):
 
     assert executed.status_code == 200
     assert executed.json()["result"] == "ignored"
+
+
+def test_failed_case_bug_creation_succeeds_after_duplicate_bug_workflow_is_disabled(client: TestClient):
+    config = client.post(
+        "/api/v1/assignee-rule-configs",
+        json={"name": f"Bug workflow repair {uuid4().hex[:8]}"},
+    )
+    assert config.status_code == 201, config.text
+    config_id = config.json()["id"]
+    definitions = client.get(
+        f"/api/v1/workflow-definitions?scope_type=assignee_rule_config&scope_id={config_id}"
+    ).json()
+    by_type = {item["object_type"]: item for item in definitions}
+    for object_type in ("requirement", "task", "bug"):
+        applied = client.post(f"/api/v1/workflow-definitions/{by_type[object_type]['id']}/apply-template")
+        assert applied.status_code == 200, applied.text
+    assert client.post(f"/api/v1/assignee-rule-configs/{config_id}/enable").status_code == 200
+
+    project = client.post(
+        "/api/v1/projects",
+        json={"name": f"Bug workflow repair project {uuid4().hex[:8]}", "assignee_rule_config_id": config_id},
+    )
+    assert project.status_code == 200, project.text
+    case_id = _create_test_case(client, project.json()["id"])
+    assert client.post(
+        f"/api/v1/test-cases/{case_id}/executions",
+        json={"steps_result_json": [{"step": "submit", "expected": "success", "result": "failed", "actual": "500"}]},
+    ).status_code == 200
+
+    db = SessionLocal()
+    try:
+        duplicate = WorkflowDefinition(
+            name="debug-def",
+            object_type="bug",
+            scope_type="assignee_rule_config",
+            scope_id=config_id,
+            enabled=True,
+        )
+        db.add(duplicate)
+        db.commit()
+        duplicate_id = duplicate.id
+    finally:
+        db.close()
+
+    blocked = client.post(f"/api/v1/test-cases/{case_id}/bugs", json={"title": "Bug blocked by duplicate workflow"})
+
+    assert blocked.status_code == 409
+    assert "工作流方案" in blocked.json()["detail"]
+    assert f"ID {duplicate_id}" in blocked.json()["detail"]
+
+    db = SessionLocal()
+    try:
+        db.query(WorkflowDefinition).filter(WorkflowDefinition.id == duplicate_id).update({"enabled": False})
+        db.commit()
+    finally:
+        db.close()
+
+    created = client.post(f"/api/v1/test-cases/{case_id}/bugs", json={"title": "Bug created after repair"})
+
+    assert created.status_code == 200, created.text
+    assert created.json()["workflow_definition_id"] == by_type["bug"]["id"]
 
 
 def test_failed_test_case_execution_creates_bug_with_case_iteration_and_can_edit_iteration(client: TestClient):

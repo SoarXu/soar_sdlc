@@ -87,12 +87,22 @@ def resolve_effective_workflow(
                 WorkflowDefinition.scope_id == config.id,
                 WorkflowDefinition.enabled.is_(True),
             )
+            .order_by(WorkflowDefinition.id.asc())
             .all()
         )
         if len(definitions) != 1:
+            object_label = {"requirement": "需求", "task": "任务", "bug": "Bug"}[object_type]
+            if definitions:
+                conflicts = "、".join(f"ID {item.id}（{item.name}）" for item in definitions)
+                detail = (
+                    f"项目 {project.id} 绑定的工作流方案 {config.id} 存在多个启用的 {object_label} 工作流定义："
+                    f"{conflicts}；请停用多余定义后重试。"
+                )
+            else:
+                detail = f"项目 {project.id} 绑定的工作流方案 {config.id} 没有启用的 {object_label} 工作流定义。"
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
-                detail=f"Project workflow scheme has no unique {object_type} definition",
+                detail=detail,
             )
         definition = definitions[0]
     else:

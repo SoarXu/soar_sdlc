@@ -119,10 +119,10 @@ def _pending_handling_items(
         and _in_project_scope(item.project_id, scoped_project_ids)
     ]
     items.extend(
-        _task_item(item, projects, iteration_names)
+        _task_item(item, projects, iteration_names, _effective_task_iteration_id(db, item))
         for item in db.query(Task).filter(Task.deleted == 0, Task.owner_id == user_id).all()
         if not is_terminal_state(item)
-        and item.iteration_id in active_iteration_ids
+        and _effective_task_iteration_id(db, item) in active_iteration_ids
         and _in_project_scope(item.project_id, scoped_project_ids)
     )
     items.extend(
@@ -150,10 +150,10 @@ def _unassigned_items(
         and _in_project_scope(item.project_id, scoped_project_ids)
     ]
     items.extend(
-        _task_item(item, projects, iteration_names)
+        _task_item(item, projects, iteration_names, _effective_task_iteration_id(db, item))
         for item in db.query(Task).filter(Task.deleted == 0, Task.owner_id.is_(None)).all()
         if not is_terminal_state(item)
-        and item.iteration_id in active_iteration_ids
+        and _effective_task_iteration_id(db, item) in active_iteration_ids
         and _in_project_scope(item.project_id, scoped_project_ids)
     )
     items.extend(
@@ -184,9 +184,9 @@ def _created_by_me_items(
         and _in_project_scope(item.project_id, scoped_project_ids)
     ]
     items.extend(
-        _task_item(item, projects, iteration_names)
+        _task_item(item, projects, iteration_names, _effective_task_iteration_id(db, item))
         for item in db.query(Task).filter(Task.deleted == 0, Task.creator_id == user_id).all()
-        if item.iteration_id in active_iteration_ids and _in_project_scope(item.project_id, scoped_project_ids)
+        if _effective_task_iteration_id(db, item) in active_iteration_ids and _in_project_scope(item.project_id, scoped_project_ids)
     )
     items.extend(
         _bug_item(item, projects, iteration_names)
@@ -507,6 +507,17 @@ def _task_item(
         creator_id=item.creator_id,
         requirement_id=item.requirement_id,
     )
+
+
+def _effective_task_iteration_id(db: Session, task: Task) -> int | None:
+    if task.iteration_id:
+        return task.iteration_id
+    if not task.requirement_id:
+        return None
+    return db.query(Requirement.iteration_id).filter(
+        Requirement.id == task.requirement_id,
+        Requirement.deleted == 0,
+    ).scalar()
 
 
 def _bug_item(item: Bug, projects: dict[int, Project], iteration_names: dict[int, str]) -> WorkbenchItem:

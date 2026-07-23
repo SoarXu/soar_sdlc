@@ -677,3 +677,31 @@ def test_workbench_requires_authentication(client: TestClient):
     )
 
     assert response.status_code == 401
+
+
+def test_workbench_uses_requirement_iteration_for_legacy_linked_task(client: TestClient):
+    user_id, token = _create_user_with_role(f"linked_task_scope_{uuid4().hex[:6]}", "developer")
+    project_id = _create_project(client, "Linked task inherited iteration")
+    iteration_id = _create_iteration(client, project_id, "Linked task active iteration")
+    _start_iteration(client, iteration_id)
+    _add_project_member(project_id, user_id, "developer")
+    requirement = client.post(
+        "/api/v1/requirements",
+        json={"project_id": project_id, "iteration_id": iteration_id, "title": "Iteration requirement", "owner_id": user_id},
+    ).json()
+    task = client.post(
+        "/api/v1/tasks",
+        json={"project_id": project_id, "requirement_id": requirement["id"], "title": "Legacy linked task", "owner_id": user_id},
+    ).json()
+
+    db = SessionLocal()
+    try:
+        db.query(Task).filter(Task.id == task["id"]).update({"iteration_id": None})
+        db.commit()
+    finally:
+        db.close()
+
+    workbench = client.get("/api/v1/dashboard/workbench", headers={"Authorization": f"Bearer {token}"}).json()
+    pending_refs = {(item["object_type"], item["id"]) for item in workbench["pending_handling"]["items"]}
+
+    assert ("task", task["id"]) in pending_refs

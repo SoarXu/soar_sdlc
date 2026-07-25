@@ -689,6 +689,7 @@ def test_runtime_manager_delegate_requires_reason_and_records_snapshot(client: T
     )
 
     assert missing_reason.status_code == 422
+    assert missing_reason.json()["detail"] == "Delegate reason is required"
     assert delegated.status_code == 200
     history = client.get(f"/api/v1/bugs/{bug['id']}/status-operations").json()
     assert history[-1]["is_delegated"] is True
@@ -786,6 +787,14 @@ def test_runtime_manual_owner_respects_configured_roles(client: TestClient):
         json={"project_id": project_id, "title": f"Manual Role Bug {uuid4().hex[:8]}", "owner_id": owner_id},
     ).json()
 
+    listed = client.get(
+        f"/api/v1/workflow-runtime/bug/{bug['id']}/transitions",
+        headers={"Authorization": f"Bearer {owner_token}"},
+    )
+    assert listed.status_code == 200, listed.text
+    action = next(item for item in listed.json() if item["action_key"] == "start_fixing")
+    assert action["eligible_assignee_ids"] == sorted([owner_id, developer_id])
+
     rejected = client.post(
         f"/api/v1/workflow-runtime/bug/{bug['id']}/transition",
         json={"action_key": "start_fixing", "next_owner_id": tester_id},
@@ -800,6 +809,179 @@ def test_runtime_manual_owner_respects_configured_roles(client: TestClient):
     assert rejected.status_code == 400
     assert accepted.status_code == 200
     assert accepted.json()["owner_id"] == developer_id
+
+
+def test_runtime_manual_owner_project_member_target_role_excludes_unrelated_users(client: TestClient):
+    _, project_id = _create_project_with_bug_workflow(client)
+    owner_id, owner_token = _create_user("Runtime Target Role Owner", "developer")
+    member_id, _ = _create_user("Runtime Target Role Member", "tester")
+    inactive_member_id, _ = _create_user("Runtime Inactive Member", "developer")
+    unrelated_id, _ = _create_user("Runtime Unrelated User", "developer")
+    _add_project_member(project_id, owner_id, "developer")
+    _add_project_member(project_id, member_id, "tester")
+    _add_project_member(project_id, inactive_member_id, "developer")
+    db = SessionLocal()
+    try:
+        db.query(User).filter(User.id == inactive_member_id).update({"is_active": False})
+        transition = (
+            db.query(WorkflowTransition)
+            .filter(WorkflowTransition.action_key == "start_fixing")
+            .order_by(WorkflowTransition.id.desc())
+            .first()
+        )
+        transition.handler_rule = {
+            **(transition.handler_rule or {}),
+            "target_type": "project_role",
+            "target_roles": "project_member",
+            "allow_manual_owner": True,
+            "manual_owner_roles": "",
+        }
+        db.commit()
+    finally:
+        db.close()
+    bug_response = client.post(
+        "/api/v1/bugs",
+        json={"project_id": project_id, "title": f"Target Role Bug {uuid4().hex[:8]}", "owner_id": owner_id},
+    )
+    assert bug_response.status_code == 200, bug_response.text
+    bug = bug_response.json()
+
+    listed = client.get(
+        f"/api/v1/workflow-runtime/bug/{bug['id']}/transitions",
+        headers={"Authorization": f"Bearer {owner_token}"},
+    )
+
+    assert listed.status_code == 200, listed.text
+    action = next(item for item in listed.json() if item["action_key"] == "start_fixing")
+    assert action["eligible_assignee_ids"] == sorted([owner_id, member_id])
+    assert inactive_member_id not in action["eligible_assignee_ids"]
+    assert unrelated_id not in action["eligible_assignee_ids"]
+
+
+def test_bulk_assignment_exposes_metadata_and_assigns_all_items_atomically(client: TestClient):
+    _, project_id = _create_project_with_bug_workflow(client)
+    owner_id, owner_token = _create_user("Bulk Assignment Owner", "developer")
+    target_id, _ = _create_user("Bulk Assignment Target", "developer")
+    tester_id, _ = _create_user("Bulk Assignment Tester", "tester")
+    _add_project_member(project_id, owner_id, "developer")
+    _add_project_member(project_id, target_id, "developer")
+    _add_project_member(project_id, tester_id, "tester")
+    db = SessionLocal()
+    try:
+        transition = (
+            db.query(WorkflowTransition)
+            .filter(WorkflowTransition.action_key == "start_fixing")
+            .order_by(WorkflowTransition.id.desc())
+            .first()
+        )
+        transition.handler_rule = {
+            **(transition.handler_rule or {}),
+            "allow_manual_owner": True,
+            "manual_owner_roles": "developer",
+        }
+        db.commit()
+    finally:
+        db.close()
+
+    bugs = [
+        client.post(
+            "/api/v1/bugs",
+            json={"project_id": project_id, "title": f"Bulk Bug {uuid4().hex[:8]}", "owner_id": owner_id},
+        ).json()
+        for _ in range(2)
+    ]
+    transitions = client.get(
+        f"/api/v1/workflow-runtime/bug/{bugs[0]['id']}/transitions",
+        headers={"Authorization": f"Bearer {owner_token}"},
+    )
+    assert transitions.status_code == 200, transitions.text
+    action = next(item for item in transitions.json() if item["action_key"] == "start_fixing")
+    assert action["bulk_assignment"] == {
+        "supported": True,
+        "requires_delegate_reason": False,
+        "eligible_assignee_ids": sorted([owner_id, target_id]),
+    }
+
+    response = client.post(
+        "/api/v1/workflow-runtime/assignments/batch",
+        json={
+            "object_type": "bug",
+            "project_id": project_id,
+            "next_owner_id": target_id,
+            "items": [{"id": bug["id"], "transition_id": action["transition_id"]} for bug in bugs],
+        },
+        headers={"Authorization": f"Bearer {owner_token}"},
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["completed_count"] == 2
+    for bug in bugs:
+        loaded = client.get(f"/api/v1/bugs/{bug['id']}").json()
+        assert loaded["owner_id"] == target_id
+        history = client.get(f"/api/v1/bugs/{bug['id']}/status-operations").json()
+        assert history[-1]["next_owner_id"] == target_id
+
+
+def test_default_explicit_owner_assignment_exposes_bulk_metadata(client: TestClient):
+    project = client.post("/api/v1/projects", json={"name": f"Bulk Default Project {uuid4().hex[:8]}"}).json()
+    manager_id, manager_token = _create_user("Bulk Default Manager", "project_owner")
+    developer_id, _ = _create_user("Bulk Default Developer", "developer")
+    _add_project_member(project["id"], manager_id, "project_owner")
+    _add_project_member(project["id"], developer_id, "developer")
+    requirement = client.post(
+        "/api/v1/requirements",
+        json={"project_id": project["id"], "title": f"Bulk Default Requirement {uuid4().hex[:8]}"},
+    ).json()
+
+    transitions = client.get(
+        f"/api/v1/workflow-runtime/requirement/{requirement['id']}/transitions",
+        headers={"Authorization": f"Bearer {manager_token}"},
+    )
+
+    assert transitions.status_code == 200, transitions.text
+    assign = next(item for item in transitions.json() if item["action_key"] == "assign")
+    assert assign["bulk_assignment"]["supported"] is True
+    assert assign["bulk_assignment"]["eligible_assignee_ids"] == sorted([manager_id, developer_id])
+
+
+def test_optional_reason_owner_change_exposes_bulk_metadata(client: TestClient):
+    _, project_id = _create_project_with_bug_workflow(client)
+    owner_id, owner_token = _create_user("Bulk Transfer Owner", "developer")
+    target_id, _ = _create_user("Bulk Transfer Target", "developer")
+    _add_project_member(project_id, owner_id, "developer")
+    _add_project_member(project_id, target_id, "developer")
+    db = SessionLocal()
+    try:
+        transition = (
+            db.query(WorkflowTransition)
+            .filter(WorkflowTransition.action_key == "start_fixing")
+            .order_by(WorkflowTransition.id.desc())
+            .first()
+        )
+        transition.handler_rule = {
+            **(transition.handler_rule or {}),
+            "allow_manual_owner": True,
+            "manual_owner_roles": "developer",
+        }
+        transition.form_config = {
+            "fields": [{"field": "reason", "label": "原因", "type": "textarea", "required": False}]
+        }
+        db.commit()
+    finally:
+        db.close()
+    bug = client.post(
+        "/api/v1/bugs",
+        json={"project_id": project_id, "title": f"Bulk Transfer Bug {uuid4().hex[:8]}", "owner_id": owner_id},
+    ).json()
+
+    transitions = client.get(
+        f"/api/v1/workflow-runtime/bug/{bug['id']}/transitions",
+        headers={"Authorization": f"Bearer {owner_token}"},
+    )
+
+    assert transitions.status_code == 200, transitions.text
+    action = next(item for item in transitions.json() if item["action_key"] == "start_fixing")
+    assert action["bulk_assignment"]["supported"] is True
 
 
 def test_runtime_requirement_defer_moves_tasks_and_test_cases(client: TestClient):

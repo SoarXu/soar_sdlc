@@ -6,6 +6,8 @@ from app.db.session import get_db
 from app.models.user import User
 from app.services import workflow_runtime_service
 from app.views.workflow_runtime_view import (
+    WorkflowBulkAssignmentRead,
+    WorkflowBulkAssignmentRequest,
     WorkflowTransitionActionRead,
     WorkflowTransitionBatchRead,
     WorkflowTransitionBatchRequest,
@@ -34,6 +36,15 @@ def post_runtime_transition_batch(
     current_user: User | None = Depends(get_optional_current_user),
 ):
     return workflow_runtime_service.batch_available_transitions(db, payload, current_user)
+
+
+@router.post("/assignments/batch", response_model=WorkflowBulkAssignmentRead)
+def post_runtime_bulk_assignment(
+    payload: WorkflowBulkAssignmentRequest,
+    db: Session = Depends(get_db),
+    current_user: User | None = Depends(get_optional_current_user),
+):
+    return workflow_runtime_service.execute_bulk_assignment(db, payload, current_user)
 
 
 @router.post("/{object_type}/{object_id}/transition", response_model=WorkflowTransitionExecuteRead)

@@ -1,6 +1,6 @@
 <template>
-  <div v-if="visibleActions.length" class="workflow-action-buttons" :class="`workflow-action-buttons-${mode}`">
-    <div class="workflow-primary-actions">
+  <div v-if="visibleActions.length || slots.afterPrimary" class="workflow-action-buttons" :class="`workflow-action-buttons-${mode}`">
+    <div v-if="primaryActions.length" class="workflow-primary-actions">
       <el-button
         v-for="action in primaryActions"
         :key="action.transition_id"
@@ -13,6 +13,7 @@
       </el-button>
       <slot name="after-primary" />
     </div>
+    <slot name="after-primary" />
     <el-dropdown v-if="moreActions.length" trigger="click" @command="handleMoreCommand">
       <el-button :link="mode === 'list'" type="primary" class="workflow-action-more">更多</el-button>
       <template #dropdown>
@@ -24,7 +25,7 @@
       </template>
     </el-dropdown>
 
-    <el-dialog v-model="dialogVisible" :title="dialogTitle" width="640px">
+    <el-dialog v-model="dialogVisible" :title="dialogTitle" width="640px" append-to-body>
       <el-form label-position="top">
         <el-form-item
           v-for="field in formFields"
@@ -137,11 +138,11 @@
 
         <el-form-item v-if="allowManualOwner" label="下一处理人" :required="reactivationRequiresOwner">
           <el-select v-model="nextOwnerId" clearable filterable :placeholder="ownerSelectionPlaceholder">
-            <el-option v-for="user in users" :key="user.id" :label="user.full_name || user.username" :value="user.id" />
+            <el-option v-for="user in eligibleAssigneeUsers" :key="user.id" :label="user.full_name || user.username" :value="user.id" />
           </el-select>
         </el-form-item>
 
-        <el-form-item label="代处理原因">
+        <el-form-item v-if="delegateReasonRequired" label="代处理原因" required>
           <el-input v-model="delegateReason" type="textarea" :rows="2" placeholder="仅在管理员或项目负责人代处理时填写" />
         </el-form-item>
       </el-form>
@@ -182,7 +183,7 @@
 </template>
 
 <script setup>
-import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { computed, onMounted, reactive, ref, useSlots, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 
 import { executeWorkflowTransition, fetchWorkflowTransitions } from '../api/workflowRuntime'
@@ -209,6 +210,7 @@ const props = defineProps({
 })
 
 const emit = defineEmits(['command', 'executed', 'loaded'])
+const slots = useSlots()
 
 const loadedTransitions = ref([])
 const loading = ref(false)
@@ -308,6 +310,12 @@ function blockerDetailRoute(row) {
   }[row.object_type]
   return routeName ? { name: routeName, params: { id: row.id } } : null
 }
+const eligibleAssigneeUsers = computed(() => {
+  const eligibleIds = activeAction.value?.eligible_assignee_ids
+  if (!Array.isArray(eligibleIds)) return []
+  const eligibleIdSet = new Set(eligibleIds)
+  return users.value.filter((user) => eligibleIdSet.has(user.id))
+})
 
 function buttonType(action) {
   return action?.button_type || action?.ui_config?.button_type || 'primary'

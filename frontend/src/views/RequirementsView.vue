@@ -12,7 +12,8 @@
     </div>
 
     <el-card shadow="never">
-      <el-table v-loading="loading" :data="pagedRequirements" stripe>
+      <el-table ref="requirementTable" v-loading="loading" :data="pagedRequirements" stripe @selection-change="onRequirementSelectionChange">
+        <el-table-column type="selection" width="48" :selectable="canSelectRequirementForBatchAssignment" />
         <el-table-column prop="id" label="ID" width="80" />
         <el-table-column prop="title" label="需求标题" width="160" show-overflow-tooltip />
         <el-table-column label="项目" width="180"><template #default="{ row }">{{ labelById(projects, row.project_id) }}</template></el-table-column>
@@ -38,7 +39,15 @@
           </template>
         </el-table-column>
       </el-table>
-      <div class="table-pagination">
+      <div class="table-pagination batch-assignment-pagination">
+        <BatchAssignmentBar
+          object-type="requirement"
+          :project-id="selectedRequirementProjectId"
+          :selected-rows="selectedRequirements"
+          :users="users"
+          @completed="onRequirementBatchAssignmentCompleted"
+          @error="onRequirementBatchAssignmentError"
+        />
         <el-pagination
           v-model:current-page="requirementPage"
           v-model:page-size="requirementPageSize"
@@ -170,7 +179,7 @@
 </template>
 
 <script setup>
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { fetchIterations } from '../api/iterations'
@@ -191,6 +200,7 @@ import { fetchWorkflowTransitionsBatch } from '../api/workflowRuntime'
 import RequirementPriorityBadge from '../components/RequirementPriorityBadge.vue'
 import WatchToggleButton from '../components/WatchToggleButton.vue'
 import WorkflowActionButtons from '../components/WorkflowActionButtons.vue'
+import BatchAssignmentBar from '../components/BatchAssignmentBar.vue'
 import RequirementEditDialog from '../components/work-items/RequirementEditDialog.vue'
 import { showActionError } from '../utils/actionFeedback'
 import { currentUserId } from '../utils/currentUser'
@@ -199,6 +209,7 @@ import { canCreateWorkItem, canDeleteWorkItem, canExecuteWorkItem, currentUserFr
 import { labelById, userLabel } from '../utils/referenceLabels'
 import { usePagination } from '../utils/usePagination'
 import { workflowActionColumnWidth } from '../utils/workflowActionColumn'
+import { canSelectForBatchAssignment } from '../utils/batchAssignmentSelection'
 import { TASK_BRANCH_OPTIONS } from '../utils/taskBranchRules'
 
 const router = useRouter()
@@ -217,6 +228,9 @@ const projects = ref([])
 const projectMembersById = ref({})
 const iterations = ref([])
 const users = ref([])
+const requirementTable = ref(null)
+const selectedRequirements = ref([])
+const selectedRequirementProjectId = computed(() => selectedRequirements.value[0]?.project_id || null)
 const currentUser = computed(() => currentUserFromStorage(users.value))
 const canCreateAnyRequirement = computed(() => projects.value.some((project) => canCreateWorkItem(project, currentUser.value, membersForProject(project.id))))
 const {
@@ -251,6 +265,24 @@ function isRequirementProjectClosed(row) { return projects.value.find((item) => 
 function workflowTransitionsFor(row) { return workflowTransitions.value[`requirement:${row.id}`] || [] }
 function projectForRequirement(row) { return projects.value.find((item) => item.id === row.project_id) || null }
 function membersForProject(projectId) { return projectMembersById.value[projectId] || [] }
+function requirementBatchRow(row) { return { ...row, transitions: workflowTransitionsFor(row) } }
+function canSelectRequirementForBatchAssignment(row) { return canSelectForBatchAssignment(requirementBatchRow(row), selectedRequirements.value) }
+function onRequirementSelectionChange(rows) {
+  const projectId = rows[0]?.project_id
+  const allowedRows = rows.filter((row) => row.project_id === projectId && canSelectForBatchAssignment(requirementBatchRow(row), []))
+  selectedRequirements.value = allowedRows.map(requirementBatchRow)
+  if (allowedRows.length !== rows.length) nextTick(() => syncRequirementTableSelection(allowedRows))
+}
+function syncRequirementTableSelection(rows) {
+  requirementTable.value?.clearSelection()
+  rows.forEach((row) => requirementTable.value?.toggleRowSelection(row, true))
+}
+function clearRequirementSelection() {
+  selectedRequirements.value = []
+  requirementTable.value?.clearSelection()
+}
+async function onRequirementBatchAssignmentCompleted() { clearRequirementSelection(); await loadData() }
+function onRequirementBatchAssignmentError(error) { showActionError(error, '批量指派失败') }
 function canGenerateTask(row) {
   const project = projectForRequirement(row)
   return !isRequirementProjectClosed(row) && canExecuteWorkItem(row, currentUser.value, project, membersForProject(project?.id))
@@ -302,6 +334,7 @@ function clearImportFile() {
 async function loadData() {
   loading.value = true
   try {
+    clearRequirementSelection()
     const [reqRes, projectRes, iterationRes, userRes] = await Promise.all([fetchRequirements(), fetchProjects(), fetchIterations(), fetchUsers()])
     requirements.value = reqRes.data
     projects.value = projectRes.data
@@ -316,6 +349,8 @@ async function loadData() {
     loading.value = false
   }
 }
+
+watch([requirementPage, requirementPageSize], clearRequirementSelection)
 
 async function loadProjectMembers() {
   const entries = await Promise.all(projects.value.map(async (project) => {

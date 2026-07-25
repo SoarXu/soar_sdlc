@@ -642,6 +642,7 @@ def _project_graph() -> WorkflowGraphSave:
                 "planning",
                 "active",
                 form_config={"fields": [{"field": "effective_time", "label": "实际开始日期", "type": "date", "required": True}]},
+                ui_config={"list_display": "primary", "list_priority": 10},
             ),
             _transition("suspend", "暂停", "active", "paused"),
             _transition("resume", "恢复", "paused", "active"),

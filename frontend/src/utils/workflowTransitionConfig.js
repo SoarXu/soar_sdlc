@@ -88,10 +88,18 @@ export function serializeWorkflowTransition(item) {
       : {})
   }))
   if (condition_routes.length || Object.hasOwn(conditionConfig, 'routes')) {
+    const existingRoutes = conditionConfig.routes || {}
     conditionConfig.routes = Object.fromEntries(
       condition_routes
-        .filter((route) => route.value && Number.isInteger(route.state_id))
-        .map((route) => [route.value, route.state_id])
+        .filter((route) => route.value)
+        .map((route) => {
+          if (Number.isInteger(route.state_id)) return [route.value, route.state_id]
+          const legacyTarget = existingRoutes[route.value]
+          return typeof legacyTarget === 'string' && legacyTarget
+            ? [route.value, legacyTarget]
+            : null
+        })
+        .filter(Boolean)
     )
   }
   return {

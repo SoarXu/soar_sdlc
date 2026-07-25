@@ -9,7 +9,8 @@
     </div>
 
     <el-card shadow="never">
-      <el-table v-loading="loading" :data="pagedTasks" stripe>
+      <el-table ref="taskTable" v-loading="loading" :data="pagedTasks" stripe @selection-change="onTaskSelectionChange">
+        <el-table-column type="selection" width="48" :selectable="canSelectTaskForBatchAssignment" />
         <el-table-column prop="id" label="ID" width="80" />
         <el-table-column prop="title" label="任务标题" min-width="220" />
         <el-table-column label="项目" width="180"><template #default="{ row }">{{ labelById(projects, row.project_id) }}</template></el-table-column>
@@ -35,7 +36,15 @@
           </template>
         </el-table-column>
       </el-table>
-      <div class="table-pagination">
+      <div class="table-pagination batch-assignment-pagination">
+        <BatchAssignmentBar
+          object-type="task"
+          :project-id="selectedTaskProjectId"
+          :selected-rows="selectedTasks"
+          :users="users"
+          @completed="onTaskBatchAssignmentCompleted"
+          @error="onTaskBatchAssignmentError"
+        />
         <el-pagination
           v-model:current-page="taskPage"
           v-model:page-size="taskPageSize"
@@ -89,7 +98,7 @@
 </template>
 
 <script setup>
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { fetchProjectMembers, fetchProjects } from '../api/projects'
@@ -98,6 +107,7 @@ import { createTask, deleteTask, fetchTasks, fetchTaskStatusOperations, updateTa
 import { fetchUsers } from '../api/users'
 import { fetchWorkflowTransitionsBatch } from '../api/workflowRuntime'
 import WorkflowActionButtons from '../components/WorkflowActionButtons.vue'
+import BatchAssignmentBar from '../components/BatchAssignmentBar.vue'
 import TaskEditDialog from '../components/work-items/TaskEditDialog.vue'
 import WatchToggleButton from '../components/WatchToggleButton.vue'
 import { showActionError } from '../utils/actionFeedback'
@@ -106,6 +116,7 @@ import { labelById, userLabel } from '../utils/referenceLabels'
 import { loadCloseReasonMap } from '../utils/closeReasonTooltip'
 import { usePagination } from '../utils/usePagination'
 import { workflowActionColumnWidth } from '../utils/workflowActionColumn'
+import { canSelectForBatchAssignment } from '../utils/batchAssignmentSelection'
 import { deriveTaskBranch, TASK_BRANCH_OPTIONS, taskBranchLabel } from '../utils/taskBranchRules'
 
 const router = useRouter()
@@ -121,6 +132,9 @@ const projects = ref([])
 const projectMembersById = ref({})
 const requirements = ref([])
 const users = ref([])
+const taskTable = ref(null)
+const selectedTasks = ref([])
+const selectedTaskProjectId = computed(() => selectedTasks.value[0]?.project_id || null)
 const currentUser = computed(() => currentUserFromStorage(users.value))
 const canCreateAnyTask = computed(() => projects.value.some((project) => canCreateWorkItem(project, currentUser.value, membersForProject(project.id))))
 const {
@@ -146,6 +160,24 @@ function isTaskProjectClosed(row) { return projects.value.find((item) => item.id
 function workflowTransitionsFor(row) { return workflowTransitions.value[`task:${row.id}`] || [] }
 function projectForTask(row) { return projects.value.find((item) => item.id === row.project_id) || null }
 function membersForProject(projectId) { return projectMembersById.value[projectId] || [] }
+function taskBatchRow(row) { return { ...row, transitions: workflowTransitionsFor(row) } }
+function canSelectTaskForBatchAssignment(row) { return canSelectForBatchAssignment(taskBatchRow(row), selectedTasks.value) }
+function onTaskSelectionChange(rows) {
+  const projectId = rows[0]?.project_id
+  const allowedRows = rows.filter((row) => row.project_id === projectId && canSelectForBatchAssignment(taskBatchRow(row), []))
+  selectedTasks.value = allowedRows.map(taskBatchRow)
+  if (allowedRows.length !== rows.length) nextTick(() => syncTaskTableSelection(allowedRows))
+}
+function syncTaskTableSelection(rows) {
+  taskTable.value?.clearSelection()
+  rows.forEach((row) => taskTable.value?.toggleRowSelection(row, true))
+}
+function clearTaskSelection() {
+  selectedTasks.value = []
+  taskTable.value?.clearSelection()
+}
+async function onTaskBatchAssignmentCompleted() { clearTaskSelection(); await loadData() }
+function onTaskBatchAssignmentError(error) { showActionError(error, '批量指派失败') }
 function canDeleteTaskRow(row) {
   const project = projectForTask(row)
   return !isTaskProjectClosed(row) && canDeleteWorkItem(project, currentUser.value, membersForProject(project?.id))
@@ -176,6 +208,7 @@ function onOwnerChange() { ownerManuallySet.value = true }
 async function loadData() {
   loading.value = true
   try {
+    clearTaskSelection()
     const [taskRes, projectRes, reqRes, userRes] = await Promise.all([fetchTasks(), fetchProjects(), fetchRequirements(), fetchUsers()])
     tasks.value = taskRes.data; projects.value = projectRes.data; requirements.value = reqRes.data; users.value = userRes.data
     await loadProjectMembers()
@@ -183,6 +216,8 @@ async function loadData() {
     await loadWorkflowTransitions()
   } catch { ElMessage.error('任务列表加载失败') } finally { loading.value = false }
 }
+
+watch([taskPage, taskPageSize], clearTaskSelection)
 
 async function loadProjectMembers() {
   const entries = await Promise.all(projects.value.map(async (project) => {

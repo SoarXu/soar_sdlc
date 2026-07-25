@@ -5,6 +5,30 @@ const source = await readFile(new URL('./WorkflowActionButtons.vue', import.meta
 
 assert.match(source, /actionNeedsConfirmation/)
 assert.match(source, /workflowConfirmationMessage/)
+assert.match(
+  source,
+  /<div v-if="primaryActions\.length" class="workflow-primary-actions">/,
+  'an empty primary action group must not indent the more-actions dropdown'
+)
+assert.match(
+  source,
+  /<el-dialog[^>]*\bappend-to-body\b/,
+  'workflow dialogs must escape fixed table-cell stacking contexts'
+)
+assert.match(
+  source,
+  /<el-form-item v-if="delegateReasonRequired" label="代处理原因" required>/,
+  'delegate reason must only appear after the runtime confirms delegated execution'
+)
+assert.match(source, /<slot name="after-primary" \/>/)
+assert.match(source, /eligibleAssigneeUsers/)
+assert.match(source, /activeAction\.value\?\.eligible_assignee_ids/)
+assert.match(source, /v-for="user in eligibleAssigneeUsers"/)
+assert.doesNotMatch(source, /v-for="user in users"/)
+assert.ok(
+  source.indexOf('<slot name="after-primary" />') < source.indexOf('<el-dropdown v-if="moreActions.length"'),
+  'page actions inserted after primary workflow actions must stay before the more menu'
+)
 
 const submitBlock = source.slice(
   source.indexOf('async function submitActiveAction'),

@@ -11,3 +11,7 @@ export function fetchWorkflowTransitionsBatch(items) {
 export function executeWorkflowTransition(objectType, id, payload) {
   return http.post(`/workflow-runtime/${objectType}/${id}/transition`, payload)
 }
+
+export function executeWorkflowBulkAssignment(payload) {
+  return http.post('/workflow-runtime/assignments/batch', payload)
+}

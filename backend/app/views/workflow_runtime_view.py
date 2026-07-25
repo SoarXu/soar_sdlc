@@ -8,6 +8,12 @@ class WorkflowTargetStateRead(BaseModel):
     status_name: str
 
 
+class WorkflowBulkAssignmentMetadata(BaseModel):
+    supported: bool = False
+    requires_delegate_reason: bool = False
+    eligible_assignee_ids: list[int] = Field(default_factory=list)
+
+
 class WorkflowTransitionActionRead(BaseModel):
     transition_id: int
     action_name: str
@@ -23,6 +29,8 @@ class WorkflowTransitionActionRead(BaseModel):
     allowed_target_states: list[WorkflowTargetStateRead] = Field(default_factory=list)
     ui_config: dict[str, Any] = Field(default_factory=dict)
     form_config: dict[str, Any] = Field(default_factory=dict)
+    eligible_assignee_ids: list[int] = Field(default_factory=list)
+    bulk_assignment: WorkflowBulkAssignmentMetadata = Field(default_factory=WorkflowBulkAssignmentMetadata)
 
 
 class WorkflowTransitionExecuteRequest(BaseModel):
@@ -54,6 +62,29 @@ class WorkflowTransitionBatchResultItem(BaseModel):
 
 class WorkflowTransitionBatchRead(BaseModel):
     items: list[WorkflowTransitionBatchResultItem] = Field(default_factory=list)
+
+
+class WorkflowBulkAssignmentItem(BaseModel):
+    id: int
+    transition_id: int
+
+
+class WorkflowBulkAssignmentRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    object_type: str
+    project_id: int
+    next_owner_id: int
+    delegate_reason: str | None = None
+    items: list[WorkflowBulkAssignmentItem] = Field(min_length=1)
+
+
+class WorkflowBulkAssignmentRead(BaseModel):
+    object_type: str
+    project_id: int
+    next_owner_id: int
+    completed_count: int
+    completed_item_ids: list[int] = Field(default_factory=list)
 
 
 class WorkflowTransitionExecuteRead(BaseModel):

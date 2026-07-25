@@ -76,6 +76,17 @@ assert.match(source, /@click="selectNodeAction\(action\)"/)
 assert.doesNotMatch(source, /v-for="action in nodeActionViews"/)
 assert.match(source, /class="workflow-edge-endpoint"/)
 assert.match(source, /class="workflow-edge-segment-hit"/)
+assert.match(source, /class="workflow-route-controls"/)
+assert.ok(
+  source.indexOf('class="workflow-node"') < source.indexOf('class="workflow-route-controls"'),
+  'route controls must render above workflow nodes'
+)
+assert.match(source, /class="workflow-edge-endpoint"[\s\S]{0,180}\br="7"/)
+assert.match(source, /class="workflow-edge-hit"/)
+assert.match(source, /class="workflow-edge-hit"[^>]*:d="edge\.path"[^>]*@click\.stop="selectTransitionForRouting\(edge\.transition\)"/)
+assert.match(source, /<rect[^>]*@click\.stop="selectTransition\(edge\.transition\)"/)
+assert.match(source, /<text[^>]*@click\.stop="selectTransition\(edge\.transition\)"/)
+assert.doesNotMatch(source, /class="workflow-edge"[\s\S]{0,180}@click\.stop="selectTransition\(edge\.transition\)"/)
 assert.match(source, /startEndpointDrag/)
 assert.match(source, /startSegmentDrag/)
 assert.match(source, /cancelRouteDrag/)
@@ -135,6 +146,15 @@ const startEndpointDragBody = functionBody('startEndpointDrag', 'startSegmentDra
 const startSegmentDragBody = functionBody('startSegmentDrag', 'beginRouteDrag')
 assert.doesNotMatch(startEndpointDragBody, /onRouteDrag\(/)
 assert.doesNotMatch(startSegmentDragBody, /onRouteDrag\(/)
+
+const selectTransitionForRoutingBody = functionBody('selectTransitionForRouting', 'selectTransition(')
+assert.match(selectTransitionForRoutingBody, /selectedKind\.value = 'transition'/)
+assert.match(selectTransitionForRoutingBody, /advancedDrawerVisible\.value = false/)
+assert.doesNotMatch(selectTransitionForRoutingBody, /advancedDrawer\.value\?\.open/)
+const selectTransitionOpenBody = functionBody('selectTransition', 'moveTransition')
+assert.match(selectTransitionOpenBody, /selectTransitionForRouting\(transition\)/)
+assert.match(selectTransitionOpenBody, /advancedDrawerVisible\.value = true/)
+assert.match(selectTransitionOpenBody, /advancedDrawer\.value\?\.open/)
 
 const beginRouteDragBody = functionBody('beginRouteDrag', 'onRouteDrag')
 assert.match(beginRouteDragBody, /if \(!isManualDiagramRoute\(transition\.diagram_config\)\)/)

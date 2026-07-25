@@ -9,7 +9,8 @@
     </div>
 
     <el-card shadow="never">
-      <el-table v-loading="loading" :data="pagedBugs" stripe>
+      <el-table ref="bugTable" v-loading="loading" :data="pagedBugs" stripe @selection-change="onBugSelectionChange">
+        <el-table-column type="selection" width="48" :selectable="canSelectBugForBatchAssignment" />
         <el-table-column prop="id" label="ID" width="80" />
         <el-table-column label="Bug 标题" min-width="220"><template #default="{ row }"><router-link class="table-link" :to="{ name: 'bug-detail', params: { id: row.id } }">{{ row.title }}</router-link></template></el-table-column>
         <el-table-column label="项目" width="170"><template #default="{ row }">{{ labelById(projects, row.project_id) }}</template></el-table-column>
@@ -27,7 +28,15 @@
           </template>
         </el-table-column>
       </el-table>
-      <div class="table-pagination">
+      <div class="table-pagination batch-assignment-pagination">
+        <BatchAssignmentBar
+          object-type="bug"
+          :project-id="selectedBugProjectId"
+          :selected-rows="selectedBugs"
+          :users="users"
+          @completed="onBugBatchAssignmentCompleted"
+          @error="onBugBatchAssignmentError"
+        />
         <el-pagination
           v-model:current-page="bugPage"
           v-model:page-size="bugPageSize"
@@ -68,7 +77,7 @@
 </template>
 
 <script setup>
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { createBug, deleteBug, fetchBugs, updateBug } from '../api/bugs'
@@ -83,6 +92,7 @@ import { fetchWorkflowTransitionsBatch } from '../api/workflowRuntime'
 import RequirementPriorityBadge from '../components/RequirementPriorityBadge.vue'
 import RichTextPasteEditor from '../components/RichTextPasteEditor.vue'
 import WorkflowActionButtons from '../components/WorkflowActionButtons.vue'
+import BatchAssignmentBar from '../components/BatchAssignmentBar.vue'
 import BugEditDialog from '../components/work-items/BugEditDialog.vue'
 import WatchToggleButton from '../components/WatchToggleButton.vue'
 import { showActionError } from '../utils/actionFeedback'
@@ -91,12 +101,16 @@ import { bugIterationOptions, includeSelectedIterationOption } from '../utils/bu
 import { canCreateWorkItem, canDeleteWorkItem, currentUserFromStorage } from '../utils/permissions'
 import { usePagination } from '../utils/usePagination'
 import { workflowActionColumnWidth } from '../utils/workflowActionColumn'
+import { canSelectForBatchAssignment } from '../utils/batchAssignmentSelection'
 
 const router = useRouter()
 const loading = ref(false), saving = ref(false), dialogVisible = ref(false), editDialogVisible = ref(false), editingId = ref(null)
 const bugs = ref([]), projects = ref([]), requirements = ref([]), tasks = ref([]), testCases = ref([]), testRuns = ref([]), users = ref([]), iterations = ref([])
 const projectMembersById = ref({})
 const workflowTransitions = ref({})
+const bugTable = ref(null)
+const selectedBugs = ref([])
+const selectedBugProjectId = computed(() => selectedBugs.value[0]?.project_id || null)
 const {
   page: bugPage,
   pageSize: bugPageSize,
@@ -125,6 +139,24 @@ function optionLabel(options, value) { return options.find((option) => option.va
 function workflowTransitionsFor(row) { return workflowTransitions.value[`bug:${row.id}`] || [] }
 function projectForBug(row) { return projects.value.find((item) => item.id === row.project_id) || null }
 function membersForProject(projectId) { return projectMembersById.value[projectId] || [] }
+function bugBatchRow(row) { return { ...row, transitions: workflowTransitionsFor(row) } }
+function canSelectBugForBatchAssignment(row) { return canSelectForBatchAssignment(bugBatchRow(row), selectedBugs.value) }
+function onBugSelectionChange(rows) {
+  const projectId = rows[0]?.project_id
+  const allowedRows = rows.filter((row) => row.project_id === projectId && canSelectForBatchAssignment(bugBatchRow(row), []))
+  selectedBugs.value = allowedRows.map(bugBatchRow)
+  if (allowedRows.length !== rows.length) nextTick(() => syncBugTableSelection(allowedRows))
+}
+function syncBugTableSelection(rows) {
+  bugTable.value?.clearSelection()
+  rows.forEach((row) => bugTable.value?.toggleRowSelection(row, true))
+}
+function clearBugSelection() {
+  selectedBugs.value = []
+  bugTable.value?.clearSelection()
+}
+async function onBugBatchAssignmentCompleted() { clearBugSelection(); await loadData() }
+function onBugBatchAssignmentError(error) { showActionError(error, '批量指派失败') }
 function canDeleteBugRow(row) {
   const project = projectForBug(row)
   return canDeleteWorkItem(project, currentUser.value, membersForProject(project?.id))
@@ -140,12 +172,15 @@ function handleWorkflowCommand(row, { commandType }) {
 async function loadData() {
   loading.value = true
   try {
+    clearBugSelection()
     const [bugRes, projectRes, reqRes, taskRes, caseRes, runRes, userRes, iterationRes] = await Promise.all([fetchBugs(), fetchProjects(), fetchRequirements(), fetchTasks(), fetchTestCases(), fetchTestRuns(), fetchUsers(), fetchIterations()])
     bugs.value = bugRes.data; projects.value = projectRes.data; requirements.value = reqRes.data; tasks.value = taskRes.data; testCases.value = caseRes.data; testRuns.value = runRes.data; users.value = userRes.data; iterations.value = iterationRes.data
     await loadProjectMembers()
     await loadWorkflowTransitions()
   } catch { ElMessage.error('Bug 列表加载失败') } finally { loading.value = false }
 }
+
+watch([bugPage, bugPageSize], clearBugSelection)
 async function loadProjectMembers() {
   const entries = await Promise.all(projects.value.map(async (project) => {
     try {

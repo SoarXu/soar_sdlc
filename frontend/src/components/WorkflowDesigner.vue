@@ -64,35 +64,26 @@
               :key="edge.key"
               class="workflow-edge"
               :class="{ selected: isSelectedTransition(edge.transition), disabled: !edge.transition.enabled }"
-              @click.stop="selectTransition(edge.transition)"
             >
-              <path class="workflow-edge-path" :d="edge.path" />
-              <rect :x="edge.labelX - 40" :y="edge.labelY - 13" width="80" height="26" rx="5" />
-              <text :x="edge.labelX" :y="edge.labelY + 4">{{ edge.transition.action_name }}</text>
-              <template v-if="isSelectedTransition(edge.transition) && edge.transition.from_state_id !== edge.transition.to_state_id">
-                <path
-                  v-for="segment in editableSegments(edge)"
-                  :key="`${edge.key}-segment-${segment.index}`"
-                  class="workflow-edge-segment-hit"
-                  :class="segment.orientation"
-                  :d="segment.path"
-                  @mousedown.stop.prevent="startSegmentDrag(edge, segment.index, $event)"
-                />
-                <circle
-                  class="workflow-edge-endpoint"
-                  :cx="edge.start.x"
-                  :cy="edge.start.y"
-                  r="4"
-                  @mousedown.stop.prevent="startEndpointDrag(edge, 'source', $event)"
-                />
-                <circle
-                  class="workflow-edge-endpoint"
-                  :cx="edge.end.x"
-                  :cy="edge.end.y"
-                  r="4"
-                  @mousedown.stop.prevent="startEndpointDrag(edge, 'target', $event)"
-                />
-              </template>
+              <path
+                class="workflow-edge-hit"
+                :d="edge.path"
+                @click.stop="selectTransitionForRouting(edge.transition)"
+              />
+              <path class="workflow-edge-path" :d="edge.path" @click.stop="selectTransitionForRouting(edge.transition)" />
+              <rect
+                :x="edge.labelX - 40"
+                :y="edge.labelY - 13"
+                width="80"
+                height="26"
+                rx="5"
+                @click.stop="selectTransition(edge.transition)"
+              />
+              <text
+                :x="edge.labelX"
+                :y="edge.labelY + 4"
+                @click.stop="selectTransition(edge.transition)"
+              >{{ edge.transition.action_name }}</text>
             </g>
             <g
               v-for="state in renderedStates"
@@ -129,6 +120,35 @@
                 <text y="4">{{ nodeActionForState(state).actions.length }}</text>
               </g>
             </g>
+            <template v-for="edge in transitionViews" :key="`${edge.key}-route-controls`">
+              <g
+                v-if="isSelectedTransition(edge.transition) && edge.transition.from_state_id !== edge.transition.to_state_id"
+                class="workflow-route-controls"
+              >
+                <path
+                  v-for="segment in editableSegments(edge)"
+                  :key="`${edge.key}-segment-${segment.index}`"
+                  class="workflow-edge-segment-hit"
+                  :class="segment.orientation"
+                  :d="segment.path"
+                  @mousedown.stop.prevent="startSegmentDrag(edge, segment.index, $event)"
+                />
+                <circle
+                  class="workflow-edge-endpoint"
+                  :cx="edge.start.x"
+                  :cy="edge.start.y"
+                  r="7"
+                  @mousedown.stop.prevent="startEndpointDrag(edge, 'source', $event)"
+                />
+                <circle
+                  class="workflow-edge-endpoint"
+                  :cx="edge.end.x"
+                  :cy="edge.end.y"
+                  r="7"
+                  @mousedown.stop.prevent="startEndpointDrag(edge, 'target', $event)"
+                />
+              </g>
+            </template>
           </g>
         </svg>
         <div
@@ -621,11 +641,16 @@ function selectState(state) {
   advancedDrawer.value?.open?.()
 }
 
-function selectTransition(transition) {
+function selectTransitionForRouting(transition) {
   stopRouteDrag()
   closeNodeActionMenu()
   selectedKind.value = 'transition'
   selectedKey.value = transitionKey(transition)
+  advancedDrawerVisible.value = false
+}
+
+function selectTransition(transition) {
+  selectTransitionForRouting(transition)
   advancedDrawerVisible.value = true
   advancedDrawer.value?.open?.()
 }
@@ -1066,6 +1091,14 @@ function transitionKey(transition) {
 
 .workflow-edge {
   cursor: pointer;
+}
+
+.workflow-edge-hit {
+  fill: none;
+  stroke: transparent;
+  stroke-width: 14;
+  pointer-events: stroke;
+  marker-end: none;
 }
 
 .workflow-edge-path {

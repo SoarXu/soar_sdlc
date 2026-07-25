@@ -13,6 +13,7 @@ from app.models.role import Role, UserRole
 from app.models.task import Task
 from app.models.user import User
 from app.models.workflow_definition import WorkflowState, WorkflowTransition
+from app.services.default_workflow_template_service import graph_for_object_type
 from app.views.workflow_definition_view import WorkflowTemplateState, WorkflowTemplateTransition
 
 
@@ -22,6 +23,13 @@ def test_template_build_contract_uses_request_local_refs_not_status_columns():
     assert set(WorkflowTemplateTransition.model_fields) >= {"from_ref", "to_ref"}
     assert "from_status" not in WorkflowTemplateTransition.model_fields
     assert "to_status" not in WorkflowTemplateTransition.model_fields
+
+
+def test_project_start_is_a_primary_list_action():
+    graph = graph_for_object_type("project")
+    start = next(item for item in graph.transitions if item.action_key == "start")
+
+    assert start.ui_config["list_display"] == "primary"
 
 
 def _create_user(full_name: str, role_key: str) -> tuple[int, str]:

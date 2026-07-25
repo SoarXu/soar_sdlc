@@ -44,6 +44,8 @@ from app.services.work_item_iteration_history_service import move_work_item_to_i
 from app.services.workflow_state_query_service import current_state_name, is_terminal_state
 from app.views.status_operation_view import StatusOperationCreate
 from app.views.workflow_runtime_view import (
+    WorkflowBulkAssignmentRead,
+    WorkflowBulkAssignmentRequest,
     WorkflowTransitionActionRead,
     WorkflowTransitionBatchRead,
     WorkflowTransitionBatchRequest,
@@ -90,7 +92,7 @@ def list_available_transitions(
             continue
         if not _can_see_transition(db, object_type, item, transition, actor):
             continue
-        transition_read = _transition_read(db, transition)
+        transition_read = _transition_read(db, item, transition, actor)
         if object_type == "bug" and transition.action_key == "activate":
             transition_read = _bug_activation_transition_read(db, item, transition, transition_read)
         result.append(transition_read)
@@ -124,6 +126,70 @@ def execute_transition(
     ensure_authenticated(actor)
     ensure_default_workflow_templates(db)
     item = _get_item_for_execution(db, object_type, object_id, request)
+    return _execute_transition(db, object_type, item, request, actor, commit=True)
+
+
+def execute_bulk_assignment(
+    db: Session,
+    payload: WorkflowBulkAssignmentRequest,
+    actor: User | None,
+) -> WorkflowBulkAssignmentRead:
+    ensure_authenticated(actor)
+    ensure_default_workflow_templates(db)
+    if payload.object_type not in {"requirement", "task", "bug"}:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unsupported bulk assignment object type")
+    if len({item.id for item in payload.items}) != len(payload.items):
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Duplicate bulk assignment item")
+
+    prepared: list[tuple[object, WorkflowTransitionExecuteRequest]] = []
+    for batch_item in payload.items:
+        item = _get_item(db, payload.object_type, batch_item.id)
+        if _project_id_for_item(db, payload.object_type, item) != payload.project_id:
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Bulk assignment items must belong to one project")
+        request = WorkflowTransitionExecuteRequest(
+            transition_id=batch_item.transition_id,
+            next_owner_id=payload.next_owner_id,
+            delegate_reason=payload.delegate_reason,
+        )
+        transition, _ = _get_executable_transition(db, payload.object_type, item, request.transition_id)
+        _ensure_supported_runtime_configuration(transition)
+        _ensure_can_execute(db, payload.object_type, item, transition, actor, request)
+        metadata = _bulk_assignment_metadata(db, item, transition, actor)
+        if not metadata["supported"]:
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Workflow transition does not support bulk assignment")
+        if payload.next_owner_id not in metadata["eligible_assignee_ids"]:
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Next handler is not allowed for bulk assignment")
+        if metadata["requires_delegate_reason"] and not (payload.delegate_reason or "").strip():
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Delegate reason is required")
+        prepared.append((item, request))
+
+    try:
+        results = [
+            _execute_transition(db, payload.object_type, item, request, actor, commit=False)
+            for item, request in prepared
+        ]
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    return WorkflowBulkAssignmentRead(
+        object_type=payload.object_type,
+        project_id=payload.project_id,
+        next_owner_id=payload.next_owner_id,
+        completed_count=len(results),
+        completed_item_ids=[result.id for result in results],
+    )
+
+
+def _execute_transition(
+    db: Session,
+    object_type: str,
+    item,
+    request: WorkflowTransitionExecuteRequest,
+    actor: User | None,
+    *,
+    commit: bool,
+):
     transition_context = _get_executable_transition(db, object_type, item, request.transition_id)
     transition, current_state = transition_context
     _ensure_supported_runtime_configuration(transition)
@@ -280,8 +346,11 @@ def execute_transition(
             operation.remark,
             f"handler transition ({target_type}): {original_owner_id} -> {next_owner_id}",
         )
-    db.commit()
-    db.refresh(item)
+    if commit:
+        db.commit()
+        db.refresh(item)
+    else:
+        db.flush()
     return WorkflowTransitionExecuteRead(
         object_type=object_type,
         id=item.id,
@@ -512,7 +581,7 @@ def _get_executable_transition(db: Session, object_type: str, item, transition_i
     raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Workflow transition not available")
 
 
-def _transition_read(db: Session, transition: WorkflowTransition) -> WorkflowTransitionActionRead:
+def _transition_read(db: Session, item, transition: WorkflowTransition, actor: User | None) -> WorkflowTransitionActionRead:
     ui_config = transition.ui_config or {}
     form_config = dict(transition.form_config or {})
     fields = [dict(field) for field in form_config.get("fields") or []]
@@ -536,6 +605,11 @@ def _transition_read(db: Session, transition: WorkflowTransition) -> WorkflowTra
     )
     if handler_rule.get("allow_manual_owner") and "allow_manual_owner" not in form_config:
         form_config["allow_manual_owner"] = True
+    eligible_assignee_ids = (
+        _eligible_manual_assignee_ids(db, project_id=_project_id_for_item(db, _object_type_for_item(item), item), rule=handler_rule)
+        if handler_rule.get("allow_manual_owner")
+        else []
+    )
     return WorkflowTransitionActionRead(
         transition_id=transition.id,
         action_name=transition.action_name,
@@ -554,7 +628,71 @@ def _transition_read(db: Session, transition: WorkflowTransition) -> WorkflowTra
         ],
         ui_config=ui_config,
         form_config=form_config,
+        eligible_assignee_ids=eligible_assignee_ids,
+        bulk_assignment=_bulk_assignment_metadata(db, item, transition, actor),
     )
+
+
+def _bulk_assignment_metadata(
+    db: Session,
+    item,
+    transition: WorkflowTransition,
+    actor: User | None,
+) -> dict[str, Any]:
+    handler_rule = transition.handler_rule or {}
+    form_fields = (transition.form_config or {}).get("fields") or []
+    unsupported_form_fields = [
+        field for field in form_fields
+        if field.get("field") != "reason" or field.get("required")
+    ]
+    routing_mode = (transition.condition_config or {}).get("routing_mode")
+    project_id = _project_id_for_item(db, _object_type_for_item(item), item)
+    project = db.query(Project).filter(Project.id == project_id, Project.deleted == 0).first() if project_id else None
+    supported = bool(
+        project
+        and not is_terminal_state(project)
+        and handler_rule.get("allow_manual_owner")
+        and not unsupported_form_fields
+        and routing_mode not in {"manual_allowed", "automatic_with_override"}
+    )
+    if not supported:
+        return {
+            "supported": False,
+            "requires_delegate_reason": False,
+            "eligible_assignee_ids": [],
+        }
+    return {
+        "supported": True,
+        "requires_delegate_reason": _is_delegated(db, item, actor),
+        "eligible_assignee_ids": _eligible_manual_assignee_ids(db, project_id=project_id, rule=handler_rule),
+    }
+
+
+def _manual_owner_roles(rule: dict[str, Any]) -> list[str]:
+    roles = _split_csv(rule.get("manual_owner_roles"))
+    if roles:
+        return roles
+    if rule.get("target_type") in {"project_role", "fixed_role"}:
+        return _split_csv(rule.get("target_roles"))
+    return []
+
+
+def _eligible_manual_assignee_ids(db: Session, project_id: int | None, rule: dict[str, Any]) -> list[int]:
+    if not project_id:
+        return []
+    roles = _manual_owner_roles(rule)
+    query = (
+        db.query(ProjectMember.user_id)
+        .join(User, User.id == ProjectMember.user_id)
+        .filter(
+            ProjectMember.project_id == project_id,
+            User.deleted == 0,
+            User.is_active.is_(True),
+        )
+    )
+    if roles and "project_member" not in roles:
+        query = query.filter(ProjectMember.project_role.in_(roles))
+    return sorted({row.user_id for row in query.all()})
 
 
 def _matches_transition_condition(item, transition: WorkflowTransition) -> bool:
@@ -612,7 +750,7 @@ def _ensure_can_execute(
     if not _handler_allowed(db, object_type, item, transition, actor):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only current handler can execute transition")
     if delegated and not request.delegate_reason:
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Please provide delegate reason")
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Delegate reason is required")
     if not _role_allowed(db, object_type, item, transition, actor):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Transition role not allowed")
     if (transition.handler_rule or {}).get("target_type") == "explicit_owner" and not request.next_owner_id:
@@ -1728,7 +1866,13 @@ def _first_project_member_id(db: Session, project_id: int | None, roles: list[st
     for role in roles:
         member = (
             db.query(ProjectMember)
-            .filter(ProjectMember.project_id == project_id, ProjectMember.project_role == role)
+            .join(User, User.id == ProjectMember.user_id)
+            .filter(
+                ProjectMember.project_id == project_id,
+                User.deleted == 0,
+                User.is_active.is_(True),
+                *([] if role == "project_member" else [ProjectMember.project_role == role]),
+            )
             .order_by(ProjectMember.sort_order.asc(), ProjectMember.id.asc())
             .first()
         )
@@ -1746,14 +1890,7 @@ def _ensure_project_member(db: Session, project_id: int | None, user_id: int) ->
 
 def _ensure_manual_owner_allowed(db: Session, project_id: int | None, user_id: int, rule: dict[str, Any]) -> None:
     _ensure_project_member(db, project_id, user_id)
-    roles = _split_csv(rule.get("manual_owner_roles"))
-    if not roles:
-        return
-    if not (
-        db.query(ProjectMember)
-        .filter(ProjectMember.project_id == project_id, ProjectMember.user_id == user_id, ProjectMember.project_role.in_(roles))
-        .first()
-    ):
+    if user_id not in _eligible_manual_assignee_ids(db, project_id=project_id, rule=rule):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Next handler role is not allowed")
 
 

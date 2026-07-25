@@ -68,4 +68,18 @@ const dictionaryRoundTrip = serializeWorkflowTransition(dictionaryNormalized)
 assert.equal(dictionaryRoundTrip.condition_config.route_dictionary, 'bug_type')
 assert.equal('routes' in dictionaryRoundTrip.condition_config, false)
 
+const legacyRouteSource = {
+  ...source,
+  condition_config: {
+    field: 'bug_type',
+    routing_mode: 'automatic',
+    routes: {
+      code_issue: 'fixing',
+      cannot_reproduce: 'pending_verification'
+    }
+  }
+}
+const legacyRouteRoundTrip = serializeWorkflowTransition(normalizeWorkflowTransition(legacyRouteSource))
+assert.deepEqual(legacyRouteRoundTrip.condition_config.routes, legacyRouteSource.condition_config.routes)
+
 console.log('workflow transition config tests passed')

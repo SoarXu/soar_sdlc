@@ -117,7 +117,8 @@
           <el-button v-if="canCreateCurrentWorkItem && !projectClosed" @click="openImportDialog">导入需求</el-button>
           <el-button v-if="canCreateCurrentWorkItem && !projectClosed" type="primary" @click="openRequirementCreate">新增需求</el-button>
         </div>
-        <el-table :data="pagedProjectRequirements" stripe width="100%">
+        <el-table ref="projectRequirementTable" :data="pagedProjectRequirements" stripe width="100%" @selection-change="(rows) => onProjectWorkItemSelectionChange('requirement', rows)">
+          <el-table-column type="selection" width="48" :selectable="(row) => canSelectProjectWorkItemForBatchAssignment('requirement', row)" />
           <el-table-column prop="id" label="ID" width="80" />
           <el-table-column label="需求标题" min-width="180" show-overflow-tooltip>
             <template #default="{ row }"><router-link class="table-link" :to="`/requirements/${row.id}`">{{ row.title }}</router-link></template>
@@ -153,7 +154,15 @@
             </template>
           </el-table-column>
         </el-table>
-        <div class="table-pagination">
+        <div class="table-pagination batch-assignment-pagination">
+          <BatchAssignmentBar
+            object-type="requirement"
+            :project-id="projectId"
+            :selected-rows="selectedProjectRequirements"
+            :users="users"
+            @completed="onProjectWorkItemBatchAssignmentCompleted('requirement')"
+            @error="onProjectWorkItemBatchAssignmentError"
+          />
           <el-pagination
             v-model:current-page="projectListPagination.requirements.currentPage"
             v-model:page-size="projectListPagination.requirements.pageSize"
@@ -171,7 +180,8 @@
           <el-input v-model="projectListFilters.tasks.keyword" clearable placeholder="搜索任务标题" class="project-tab-search" @keyup.enter="resetProjectListSearch('tasks')" @clear="resetProjectListSearch('tasks')" />
           <el-button v-if="canCreateCurrentWorkItem && !projectClosed" type="primary" @click="openTaskCreate">新增任务</el-button>
         </div>
-        <el-table :data="pagedProjectTasks" stripe width="100%">
+        <el-table ref="projectTaskTable" :data="pagedProjectTasks" stripe width="100%" @selection-change="(rows) => onProjectWorkItemSelectionChange('task', rows)">
+          <el-table-column type="selection" width="48" :selectable="(row) => canSelectProjectWorkItemForBatchAssignment('task', row)" />
           <el-table-column prop="id" label="ID" width="80" />
           <el-table-column label="任务标题" min-width="180" show-overflow-tooltip>
             <template #default="{ row }"><router-link class="table-link" :to="`/tasks/${row.id}`">{{ row.title }}</router-link></template>
@@ -192,7 +202,15 @@
             <template #default="{ row }"><el-button v-if="canEditWorkItem(row)" link type="primary" @click="openTaskEdit(row)">编辑</el-button><WorkflowActionButtons object-type="task" :object-id="row.id" mode="list" :transitions="projectWorkflowTransitionsFor('task', row.id)" :auto-load="false" :users="users" @executed="refreshAfterMutation" /><el-popconfirm v-if="canDeleteCurrentWorkItem && !projectClosed" title="确认删除该任务？" @confirm="removeTask(row.id)"><template #reference><el-button link type="danger">删除</el-button></template></el-popconfirm></template>
           </el-table-column>
         </el-table>
-        <div class="table-pagination">
+        <div class="table-pagination batch-assignment-pagination">
+          <BatchAssignmentBar
+            object-type="task"
+            :project-id="projectId"
+            :selected-rows="selectedProjectTasks"
+            :users="users"
+            @completed="onProjectWorkItemBatchAssignmentCompleted('task')"
+            @error="onProjectWorkItemBatchAssignmentError"
+          />
           <el-pagination
             v-model:current-page="projectListPagination.tasks.currentPage"
             v-model:page-size="projectListPagination.tasks.pageSize"
@@ -266,7 +284,8 @@
           <el-input v-model="projectListFilters.bugs.keyword" clearable placeholder="搜索 Bug 标题/类型" class="project-tab-search" @keyup.enter="resetProjectListSearch('bugs')" @clear="resetProjectListSearch('bugs')" />
           <el-button v-if="canCreateCurrentWorkItem" type="primary" @click="openBugCreate">新增 Bug</el-button>
         </div>
-        <el-table :data="pagedProjectBugs" stripe width="100%">
+        <el-table ref="projectBugTable" :data="pagedProjectBugs" stripe width="100%" @selection-change="(rows) => onProjectWorkItemSelectionChange('bug', rows)">
+          <el-table-column type="selection" width="48" :selectable="(row) => canSelectProjectWorkItemForBatchAssignment('bug', row)" />
           <el-table-column prop="id" label="ID" width="80" />
           <el-table-column label="Bug 标题" min-width="180" show-overflow-tooltip><template #default="{ row }"><router-link class="table-link" :to="{ name: 'bug-detail', params: { id: row.id }, query: { from: 'project' } }">{{ row.title }}</router-link></template></el-table-column>
           <el-table-column label="需求" width="180"><template #default="{ row }">{{ labelById(projectRequirementOptions, row.requirement_id, 'title') }}</template></el-table-column>
@@ -294,7 +313,15 @@
             </template>
           </el-table-column>
         </el-table>
-        <div class="table-pagination">
+        <div class="table-pagination batch-assignment-pagination">
+          <BatchAssignmentBar
+            object-type="bug"
+            :project-id="projectId"
+            :selected-rows="selectedProjectBugs"
+            :users="users"
+            @completed="onProjectWorkItemBatchAssignmentCompleted('bug')"
+            @error="onProjectWorkItemBatchAssignmentError"
+          />
           <el-pagination
             v-model:current-page="projectListPagination.bugs.currentPage"
             v-model:page-size="projectListPagination.bugs.pageSize"
@@ -659,6 +686,7 @@ import { fetchWorkflowTransitionsBatch } from '../api/workflowRuntime'
 import RequirementPriorityBadge from '../components/RequirementPriorityBadge.vue'
 import RichTextPasteEditor from '../components/RichTextPasteEditor.vue'
 import WorkflowActionButtons from '../components/WorkflowActionButtons.vue'
+import BatchAssignmentBar from '../components/BatchAssignmentBar.vue'
 import { currentUserId } from '../utils/currentUser'
 import { loadCloseReasonMap } from '../utils/closeReasonTooltip'
 import { labelById, userLabel } from '../utils/referenceLabels'
@@ -668,6 +696,7 @@ import { canCreateWorkItem, canDeleteWorkItem, canExecuteWorkItem, canManageProj
 import { deriveTaskBranch, TASK_BRANCH_OPTIONS, taskBranchLabel } from '../utils/taskBranchRules'
 import { DEFAULT_BUG_TYPE_KEY } from '../utils/bugTypeOptions'
 import { useBugTypes } from '../utils/useBugTypes'
+import { canSelectForBatchAssignment } from '../utils/batchAssignmentSelection'
 
 const route = useRoute()
 const router = useRouter()
@@ -699,6 +728,12 @@ const projectStatusOperations = ref([])
 const closeReasonByRequirement = ref({})
 const closeReasonByTask = ref({})
 const projectWorkflowTransitions = ref({})
+const projectRequirementTable = ref(null)
+const projectTaskTable = ref(null)
+const projectBugTable = ref(null)
+const selectedProjectRequirements = ref([])
+const selectedProjectTasks = ref([])
+const selectedProjectBugs = ref([])
 const expandedHistoryKeys = ref(new Set())
 const projectPageSizes = [10, 20, 50, 100]
 const projectListTotals = reactive({
@@ -925,6 +960,7 @@ function collectProjectAndAncestorIds(id) {
   return result
 }
 function setActiveTab(key) {
+  clearProjectWorkItemSelection()
   activeTab.value = key
   router.replace({ name: 'project-detail', params: { id: projectId.value }, query: { ...route.query, tab: key } })
 }
@@ -954,11 +990,13 @@ async function loadProjectIterationsPage() {
   await loadProjectWorkflowTransitions('iteration', projectIterations.value)
 }
 async function loadProjectRequirementsPage() {
+  clearProjectWorkItemSelection('requirement')
   if (applyProjectPage('requirements', await fetchProjectRequirements(projectId.value, projectListParams('requirements')), projectRequirementRows)) return loadProjectRequirementsPage()
   closeReasonByRequirement.value = await loadCloseReasonMap(projectRequirements.value, fetchRequirementStatusOperations)
   await loadProjectWorkflowTransitions('requirement', projectRequirements.value)
 }
 async function loadProjectTasksPage() {
+  clearProjectWorkItemSelection('task')
   if (applyProjectPage('tasks', await fetchProjectTasks(projectId.value, projectListParams('tasks')), projectTaskRows)) return loadProjectTasksPage()
   closeReasonByTask.value = await loadCloseReasonMap(projectTasks.value, fetchTaskStatusOperations)
   await loadProjectWorkflowTransitions('task', projectTasks.value)
@@ -970,6 +1008,7 @@ async function loadProjectTestRunsPage() {
   if (applyProjectPage('testRuns', await fetchProjectTestRuns(projectId.value, projectListParams('testRuns')), projectTestRunRows)) await loadProjectTestRunsPage()
 }
 async function loadProjectBugsPage() {
+  clearProjectWorkItemSelection('bug')
   if (applyProjectPage('bugs', await fetchProjectBugs(projectId.value, projectListParams('bugs')), projectBugRows)) await loadProjectBugsPage()
   await loadProjectWorkflowTransitions('bug', projectBugs.value)
 }
@@ -1004,6 +1043,41 @@ function testRunStatusLabel(value) { return optionLabel(testRunStatusOptions, va
 function operationActionLabel(value) { return optionLabel([{ label: '启动', value: 'start' }, { label: '挂起', value: 'suspend' }, { label: '关闭', value: 'close' }, { label: '激活', value: 'activate' }], value) }
 function projectWorkflowTransitionKey(objectType, id) { return `${objectType}:${id}` }
 function projectWorkflowTransitionsFor(objectType, id) { return projectWorkflowTransitions.value[projectWorkflowTransitionKey(objectType, id)] || [] }
+function projectWorkItemSelectionRef(objectType) {
+  return {
+    requirement: selectedProjectRequirements,
+    task: selectedProjectTasks,
+    bug: selectedProjectBugs
+  }[objectType]
+}
+function projectWorkItemTableRef(objectType) {
+  return {
+    requirement: projectRequirementTable,
+    task: projectTaskTable,
+    bug: projectBugTable
+  }[objectType]
+}
+function projectWorkItemBatchRow(objectType, row) {
+  return { ...row, transitions: projectWorkflowTransitionsFor(objectType, row.id) }
+}
+function canSelectProjectWorkItemForBatchAssignment(objectType, row) {
+  return canSelectForBatchAssignment(projectWorkItemBatchRow(objectType, row), projectWorkItemSelectionRef(objectType).value)
+}
+function onProjectWorkItemSelectionChange(objectType, rows) {
+  projectWorkItemSelectionRef(objectType).value = rows.map((row) => projectWorkItemBatchRow(objectType, row))
+}
+function clearProjectWorkItemSelection(objectType) {
+  const objectTypes = objectType ? [objectType] : ['requirement', 'task', 'bug']
+  objectTypes.forEach((type) => {
+    projectWorkItemSelectionRef(type).value = []
+    projectWorkItemTableRef(type).value?.clearSelection()
+  })
+}
+async function onProjectWorkItemBatchAssignmentCompleted(objectType) {
+  clearProjectWorkItemSelection(objectType)
+  await loadProjectListPage({ requirement: 'requirements', task: 'tasks', bug: 'bugs' }[objectType])
+}
+function onProjectWorkItemBatchAssignmentError(error) { showActionError(error, '批量指派失败') }
 function iterationCanDefer(row) { return row.state_category === 'normal' && projectWorkflowTransitionsFor('iteration', row.id).length > 0 }
 async function loadProjectWorkflowTransitions(objectType, rows) {
   const items = (rows || []).map((row) => ({ object_type: objectType, id: row.id }))
@@ -1262,6 +1336,7 @@ async function safeFetchProjectMembers(id) {
 }
 
 async function loadData() {
+  clearProjectWorkItemSelection()
   loading.value = true
   try {
     const [
@@ -1521,6 +1596,7 @@ async function removeBug(id) { try { await deleteBug(id); await refreshAfterMuta
 
 onMounted(loadData)
 watch(() => route.query.tab, async (value) => {
+  clearProjectWorkItemSelection()
   activeTab.value = normalizeProjectTab(value)
   await refreshActiveProjectList()
 })

@@ -91,7 +91,8 @@
         <el-empty v-if="!filteredListItems.length" class="workbench-section-empty" :description="`${activeListSection.label}暂无工作项`" />
 
         <div v-else class="workbench-list-table">
-          <el-table :data="filteredListItems" border stripe :row-class-name="workbenchRowClassName">
+          <el-table ref="workbenchTable" :data="filteredListItems" border stripe :row-class-name="workbenchRowClassName" @selection-change="onWorkbenchSelectionChange">
+            <el-table-column type="selection" width="48" :selectable="canSelectWorkbenchItemForBatchAssignment" />
             <el-table-column prop="id" label="ID" width="90" />
             <el-table-column label="类型" width="100">
               <template #default="{ row }">
@@ -162,6 +163,16 @@
               </template>
             </el-table-column>
           </el-table>
+          <div v-if="selectedWorkbenchItems.length" class="workbench-batch-assignment-footer">
+            <BatchAssignmentBar
+              :object-type="selectedWorkbenchObjectType"
+              :project-id="selectedWorkbenchProjectId"
+              :selected-rows="selectedWorkbenchItems"
+              :users="users"
+              @completed="onWorkbenchBatchAssignmentCompleted"
+              @error="onWorkbenchBatchAssignmentError"
+            />
+          </div>
         </div>
       </section>
     </div>
@@ -238,7 +249,7 @@
 </template>
 
 <script setup>
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 
@@ -251,6 +262,7 @@ import { resolveWorkbenchWorkflowCommand } from '../utils/workbenchWorkflowComma
 import RequirementPriorityBadge from '../components/RequirementPriorityBadge.vue'
 import RichTextPasteEditor from '../components/RichTextPasteEditor.vue'
 import WorkflowActionButtons from '../components/WorkflowActionButtons.vue'
+import BatchAssignmentBar from '../components/BatchAssignmentBar.vue'
 import BugEditDialog from '../components/work-items/BugEditDialog.vue'
 import RequirementEditDialog from '../components/work-items/RequirementEditDialog.vue'
 import TaskEditDialog from '../components/work-items/TaskEditDialog.vue'
@@ -271,6 +283,7 @@ import {
 } from '../utils/workbenchViewModel'
 import { DEFAULT_BUG_TYPE_KEY } from '../utils/bugTypeOptions'
 import { useBugTypes } from '../utils/useBugTypes'
+import { canSelectForBatchAssignment } from '../utils/batchAssignmentSelection'
 
 const router = useRouter()
 const loading = ref(false)
@@ -278,6 +291,8 @@ const saving = ref(false)
 const workbenchData = ref({})
 const users = ref([])
 const workflowTransitions = ref({})
+const workbenchTable = ref(null)
+const selectedWorkbenchItems = ref([])
 const activeView = ref('pending_handling')
 const activeTrackingTab = ref('created_by_me')
 const keywordFilter = ref('')
@@ -332,6 +347,8 @@ const workflowOperationWidth = computed(() => workflowActionColumnWidth(
   filteredListItems.value.map((row) => workflowTransitionsFor(row)),
   { minWidth: 180, extraWidth: 90 }
 ))
+const selectedWorkbenchObjectType = computed(() => selectedWorkbenchItems.value[0]?.object_type || '')
+const selectedWorkbenchProjectId = computed(() => selectedWorkbenchItems.value[0]?.project_id || null)
 const activeFilters = computed(() => ({
   keyword: keywordFilter.value,
   types: typeFilter.value,
@@ -394,6 +411,46 @@ function shouldShowWorkflowActions(item, sectionKey = activeListSection.value?.k
 
 function workflowTransitionsFor(item) {
   return workflowTransitions.value[`${item.object_type}:${item.id}`] || []
+}
+
+function workbenchBatchRow(item) {
+  return { ...item, transitions: workflowTransitionsFor(item) }
+}
+
+function canSelectWorkbenchItemForBatchAssignment(item) {
+  return canSelectForBatchAssignment(workbenchBatchRow(item), selectedWorkbenchItems.value)
+}
+
+function onWorkbenchSelectionChange(rows) {
+  const firstRow = rows.find((row) => canSelectForBatchAssignment(workbenchBatchRow(row), []))
+  const allowedRows = firstRow
+    ? rows.filter((row) => (
+      row.object_type === firstRow.object_type
+      && row.project_id === firstRow.project_id
+      && canSelectForBatchAssignment(workbenchBatchRow(row), [])
+    ))
+    : []
+  selectedWorkbenchItems.value = allowedRows.map(workbenchBatchRow)
+  if (allowedRows.length !== rows.length) nextTick(() => syncWorkbenchSelection(allowedRows))
+}
+
+function syncWorkbenchSelection(rows) {
+  workbenchTable.value?.clearSelection()
+  rows.forEach((row) => workbenchTable.value?.toggleRowSelection(row, true))
+}
+
+function clearWorkbenchSelection() {
+  selectedWorkbenchItems.value = []
+  workbenchTable.value?.clearSelection()
+}
+
+async function onWorkbenchBatchAssignmentCompleted() {
+  clearWorkbenchSelection()
+  await loadWorkbench()
+}
+
+function onWorkbenchBatchAssignmentError(error) {
+  showActionError(error, '批量指派失败')
 }
 
 function workbenchRowClassName({ row }) {
@@ -559,6 +616,7 @@ async function loadWorkflowTransitions(data) {
 }
 
 async function loadWorkbench() {
+  clearWorkbenchSelection()
   loading.value = true
   try {
     const [workbenchResponse, usersResponse] = await Promise.all([
@@ -576,6 +634,18 @@ async function loadWorkbench() {
 }
 
 onMounted(loadWorkbench)
+watch([
+  activeView,
+  activeTrackingTab,
+  keywordFilter,
+  typeFilter,
+  exceptionProjectFilter,
+  exceptionPriorityFilter,
+  exceptionStatusFilter,
+  exceptionOwnerFilter,
+  exceptionHandlerFilter,
+  exceptionMinOverdueHours
+], clearWorkbenchSelection, { deep: true })
 </script>
 
 <style scoped>
@@ -590,5 +660,15 @@ onMounted(loadWorkbench)
 .exception-filter-unit {
   color: #5f6b7a;
   white-space: nowrap;
+}
+
+.workbench-batch-assignment-footer {
+  position: sticky;
+  bottom: 0;
+  z-index: 3;
+  min-height: 48px;
+  padding: 0 12px 8px;
+  border-top: 1px solid var(--el-border-color-lighter);
+  background: var(--el-bg-color);
 }
 </style>

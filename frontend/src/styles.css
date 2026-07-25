@@ -486,6 +486,18 @@ body {
   overflow-x: auto;
 }
 
+.table-pagination.batch-assignment-pagination {
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+@media (max-width: 720px) {
+  .table-pagination.batch-assignment-pagination {
+    flex-direction: column;
+  }
+}
+
 .metrics {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));

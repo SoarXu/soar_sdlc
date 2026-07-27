@@ -1,6 +1,7 @@
 from fastapi import APIRouter
 
 from app.controllers import (
+    business_component_controller,
     assignee_rule_config_controller,
     auth_controller,
     bug_controller,
@@ -46,6 +47,7 @@ api_router.include_router(work_item_controller.router, prefix="/work-items", tag
 api_router.include_router(work_item_comment_controller.router, prefix="/work-item-comments", tags=["work-item-comments"])
 api_router.include_router(program_controller.router, prefix="/programs", tags=["programs"])
 api_router.include_router(project_controller.router, prefix="/projects", tags=["projects"])
+api_router.include_router(business_component_controller.router, prefix="/projects", tags=["business-components"])
 api_router.include_router(iteration_controller.router, prefix="/iterations", tags=["iterations"])
 api_router.include_router(requirement_controller.router, prefix="/requirements", tags=["requirements"])
 api_router.include_router(task_controller.router, prefix="/tasks", tags=["tasks"])

@@ -1,4 +1,11 @@
 from app.models.audit_log import AuditLog
+from app.models.business_component import (
+    BusinessComponent,
+    BusinessComponentMember,
+    BusinessComponentTransitionRoute,
+    WorkItemComponent,
+    WorkflowMigrationLog,
+)
 from app.models.assignee_rule_config import AssigneeRuleConfig
 from app.models.bug import Attachment, Bug, ObjectTag, Tag
 from app.models.bug_type import BugType
@@ -30,6 +37,9 @@ __all__ = [
     "Attachment",
     "AssigneeRuleConfig",
     "AuditLog",
+    "BusinessComponent",
+    "BusinessComponentMember",
+    "BusinessComponentTransitionRoute",
     "Bug",
     "BugType",
     "CustomFieldValue",
@@ -64,6 +74,8 @@ __all__ = [
     "WorkItemIterationHistory",
     "WorkflowComponent",
     "WorkflowDefinition",
+    "WorkflowMigrationLog",
     "WorkflowState",
     "WorkflowTransition",
+    "WorkItemComponent",
 ]

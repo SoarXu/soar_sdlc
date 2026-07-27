@@ -5,6 +5,10 @@ from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 
 from app.models.audit_log import AuditLog
+from app.services.business_component_service import (
+    active_primary_component_member_roles,
+    resolve_component_transition_route,
+)
 from app.models.assignee_rule_config import AssigneeRuleConfig
 from app.models.bug import Bug
 from app.models.iteration import Iteration, IterationProject
@@ -603,11 +607,13 @@ def _transition_read(db: Session, item, transition: WorkflowTransition, actor: U
         .all()
         if allowed_target_state_ids else []
     )
-    if handler_rule.get("allow_manual_owner") and "allow_manual_owner" not in form_config:
+    component_route = resolve_component_transition_route(db, _object_type_for_item(item), item, transition)
+    component_allows_manual_owner = bool(component_route and component_route["next_owner_mode"] == "manual")
+    if (handler_rule.get("allow_manual_owner") or component_allows_manual_owner) and "allow_manual_owner" not in form_config:
         form_config["allow_manual_owner"] = True
     eligible_assignee_ids = (
-        _eligible_manual_assignee_ids(db, project_id=_project_id_for_item(db, _object_type_for_item(item), item), rule=handler_rule)
-        if handler_rule.get("allow_manual_owner")
+        _eligible_transition_assignee_ids(db, item, transition, handler_rule, component_route)
+        if handler_rule.get("allow_manual_owner") or component_allows_manual_owner
         else []
     )
     return WorkflowTransitionActionRead(
@@ -648,10 +654,14 @@ def _bulk_assignment_metadata(
     routing_mode = (transition.condition_config or {}).get("routing_mode")
     project_id = _project_id_for_item(db, _object_type_for_item(item), item)
     project = db.query(Project).filter(Project.id == project_id, Project.deleted == 0).first() if project_id else None
+    component_route = resolve_component_transition_route(db, _object_type_for_item(item), item, transition)
+    allows_manual_owner = handler_rule.get("allow_manual_owner") or bool(
+        component_route and component_route["next_owner_mode"] == "manual"
+    )
     supported = bool(
         project
         and not is_terminal_state(project)
-        and handler_rule.get("allow_manual_owner")
+        and allows_manual_owner
         and not unsupported_form_fields
         and routing_mode not in {"manual_allowed", "automatic_with_override"}
     )
@@ -664,7 +674,7 @@ def _bulk_assignment_metadata(
     return {
         "supported": True,
         "requires_delegate_reason": _is_delegated(db, item, actor),
-        "eligible_assignee_ids": _eligible_manual_assignee_ids(db, project_id=project_id, rule=handler_rule),
+        "eligible_assignee_ids": _eligible_transition_assignee_ids(db, item, transition, handler_rule, component_route),
     }
 
 
@@ -695,6 +705,23 @@ def _eligible_manual_assignee_ids(db: Session, project_id: int | None, rule: dic
     return sorted({row.user_id for row in query.all()})
 
 
+def _eligible_transition_assignee_ids(
+    db: Session,
+    item,
+    transition: WorkflowTransition,
+    rule: dict[str, Any],
+    component_route: dict | None = None,
+) -> list[int]:
+    component_route = component_route or resolve_component_transition_route(
+        db, _object_type_for_item(item), item, transition
+    )
+    if component_route is not None:
+        return component_route["eligible_manual_owner_ids"]
+    return _eligible_manual_assignee_ids(
+        db, project_id=_project_id_for_item(db, _object_type_for_item(item), item), rule=rule
+    )
+
+
 def _matches_transition_condition(item, transition: WorkflowTransition) -> bool:
     condition_config = transition.condition_config or {}
     task_types = condition_config.get("task_types")
@@ -708,6 +735,12 @@ def _can_see_transition(db: Session, object_type: str, item, transition: Workflo
         return False
     if not _matches_ownerless_visibility(object_type, item, transition):
         return False
+    component_route = resolve_component_transition_route(db, object_type, item, transition)
+    if component_route is not None:
+        if not actor:
+            return False
+        if not is_system_admin(db, actor.id) and actor.id not in component_route["eligible_executor_ids"]:
+            return False
     if not _handler_allowed(db, object_type, item, transition, actor):
         return False
     return _role_allowed(db, object_type, item, transition, actor)
@@ -771,6 +804,9 @@ def _handler_allowed(
     scope = (transition.ui_config or {}).get("handler_scope")
     if not actor:
         return object_type in {"iteration", "project"}
+    component_roles = active_primary_component_member_roles(db, object_type, item, actor.id)
+    if component_roles is not None and not component_roles and not is_system_admin(db, actor.id):
+        return False
     project_id = _project_id_for_item(db, object_type, item)
     if scope == "allowed_identity":
         return True
@@ -809,6 +845,9 @@ def _role_allowed(db: Session, object_type: str, item, transition: WorkflowTrans
         return True
     identities = _actor_identities(db, object_type, item, actor)
     effective_roles = actor_role_keys(db, project_id, actor.id) | identities
+    component_roles = active_primary_component_member_roles(db, object_type, item, actor.id)
+    if component_roles:
+        effective_roles |= component_roles
     if "system_admin" in identities and "project_owner" in roles:
         effective_roles.add("project_owner")
     return bool(set(roles) & effective_roles)
@@ -1508,6 +1547,11 @@ def _next_owner_resolution(
 ) -> dict[str, Any]:
     rule = transition.handler_rule or {}
     original_owner_id = getattr(item, "owner_id", None)
+    component_route = resolve_component_transition_route(db, object_type, item, transition)
+    if component_route is not None:
+        component_result = _component_next_owner_resolution(component_route, original_owner_id, request)
+        if component_result is not None:
+            return component_result
     if object_type == "bug" and transition_action_key == "activate":
         original_owner_eligible, unavailable_reason = _reactivation_handler_eligibility(
             db,
@@ -1589,6 +1633,39 @@ def _next_owner_resolution(
         "resolved_default_owner_id": default_owner_id,
         "final_owner_id": final_owner_id,
         "manual_override": manual_override,
+        "override_reason": request.override_reason or request.payload.get("override_reason"),
+    }
+
+
+def _component_next_owner_resolution(
+    route: dict[str, Any], original_owner_id: int | None, request: WorkflowTransitionExecuteRequest
+) -> dict[str, Any] | None:
+    mode = route["next_owner_mode"]
+    eligible_ids = route["eligible_manual_owner_ids"]
+    if mode == "manual":
+        if request.next_owner_id is None:
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Component route requires a next handler")
+        if request.next_owner_id not in eligible_ids:
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Next handler is outside component route")
+        owner_id = request.next_owner_id
+    elif mode == "keep_current":
+        owner_id = original_owner_id
+    elif mode == "pending_assignment":
+        owner_id = None
+    elif route["next_owner_id"] is not None:
+        owner_id = route["next_owner_id"]
+    elif route["fallback_mode"] == "project_rule":
+        return None
+    elif route["fallback_mode"] == "keep_current":
+        owner_id = original_owner_id
+    else:
+        owner_id = None
+    return {
+        "previous_owner_id": original_owner_id,
+        "source_rule": f"component_route:{route['route_id']}",
+        "resolved_default_owner_id": owner_id,
+        "final_owner_id": owner_id,
+        "manual_override": mode == "manual",
         "override_reason": request.override_reason or request.payload.get("override_reason"),
     }
 

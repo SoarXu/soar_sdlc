@@ -25,6 +25,11 @@ EXPECTED_TABLES = {
     "form_layout_config",
     "custom_field_value",
     "workflow_component_registry",
+    "business_components",
+    "business_component_members",
+    "business_component_transition_routes",
+    "work_item_components",
+    "workflow_migration_logs",
     "object_relation",
     "status_operation_log",
     "notifications",
@@ -135,3 +140,17 @@ def test_workflow_scheme_lifecycle_column_defaults_to_draft():
     column = Base.metadata.tables["assignee_rule_configs"].columns["lifecycle_status"]
     assert column.default.arg == "draft"
     assert column.nullable is False
+
+
+def test_business_component_tables_preserve_workflow_and_work_item_identity():
+    component = Base.metadata.tables["business_components"]
+    members = Base.metadata.tables["business_component_members"]
+    routes = Base.metadata.tables["business_component_transition_routes"]
+    associations = Base.metadata.tables["work_item_components"]
+    migrations = Base.metadata.tables["workflow_migration_logs"]
+
+    assert {"project_id", "source_project_id", "workflow_scheme_id", "enabled"} <= set(component.columns.keys())
+    assert {"component_id", "user_id", "component_role", "enabled"} <= set(members.columns.keys())
+    assert {"component_id", "object_type", "transition_id", "eligible_member_mode"} <= set(routes.columns.keys())
+    assert {"object_type", "object_id", "component_id", "relation_type"} <= set(associations.columns.keys())
+    assert {"object_type", "object_id", "old_definition_id", "new_definition_id"} <= set(migrations.columns.keys())

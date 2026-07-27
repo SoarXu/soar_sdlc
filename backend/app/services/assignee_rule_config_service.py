@@ -1,5 +1,6 @@
 from copy import deepcopy
 from datetime import datetime
+from types import SimpleNamespace
 
 from fastapi import HTTPException, status
 from sqlalchemy import func
@@ -144,6 +145,63 @@ def create_config(db: Session, payload: AssigneeRuleConfigCreate) -> AssigneeRul
     except Exception:
         db.rollback()
         raise
+
+
+def clone_enabled_config(db: Session, source_config_id: int, name: str) -> AssigneeRuleConfig:
+    source = (
+        db.query(AssigneeRuleConfig)
+        .filter(
+            AssigneeRuleConfig.id == source_config_id,
+            AssigneeRuleConfig.lifecycle_status == "enabled",
+            AssigneeRuleConfig.enabled.is_(True),
+        )
+        .first()
+    )
+    if not source:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Source workflow scheme is not enabled")
+    if db.query(AssigneeRuleConfig.id).filter(AssigneeRuleConfig.name == name).first():
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Config name already exists")
+
+    clone = AssigneeRuleConfig(
+        name=name,
+        description=source.description,
+        requirement_owner_roles=source.requirement_owner_roles,
+        task_owner_roles=source.task_owner_roles,
+        test_case_tester_roles=source.test_case_tester_roles,
+        test_run_owner_roles=source.test_run_owner_roles,
+        bug_owner_roles=source.bug_owner_roles,
+        lifecycle_status="enabled",
+        enabled=True,
+    )
+    db.add(clone)
+    db.flush()
+    for object_type, label in (("requirement", "需求"), ("task", "任务"), ("bug", "Bug")):
+        db.add(
+            WorkflowDefinition(
+                name=f"{clone.name}-{label}工作流",
+                object_type=object_type,
+                scope_type="assignee_rule_config",
+                scope_id=clone.id,
+                template_key=None,
+                parent_definition_id=None,
+                is_default_template=False,
+                enabled=True,
+                version=1,
+            )
+        )
+    db.flush()
+    _copy_template_source(
+        db,
+        clone.id,
+        SimpleNamespace(source_type="scheme", source_id=str(source.id)),
+    )
+    invalid = _invalid_core_workflows(db, clone.id)
+    if invalid:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"message": "Cloned workflow scheme is not runnable", "errors": invalid},
+        )
+    return clone
 
 
 def _copy_template_source(db: Session, config_id: int, source) -> None:

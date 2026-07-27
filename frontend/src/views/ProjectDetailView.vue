@@ -3,6 +3,7 @@
     <div class="project-detail-head">
       <div>
         <el-button link type="primary" @click="$router.push('/projects')">返回项目列表</el-button>
+        <el-button link type="primary" @click="$router.push({ name: 'project-components', params: { id: projectId } })">业务组件</el-button>
         <h1>{{ project.name || '项目详情' }}</h1>
         <p>
           {{ labelById(programs, project.program_id) }} · {{ userLabel(users, project.owner_id) }} ·

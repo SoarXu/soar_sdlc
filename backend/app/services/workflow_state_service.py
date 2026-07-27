@@ -2,6 +2,7 @@ from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 
 from app.models.assignee_rule_config import AssigneeRuleConfig
+from app.models.business_component import BusinessComponent
 from app.models.project import Project
 from app.models.workflow_definition import WorkflowDefinition, WorkflowState
 from app.services.default_workflow_template_service import ensure_default_workflow_templates
@@ -11,8 +12,13 @@ CORE_OBJECT_TYPES = {"requirement", "task", "bug"}
 SYSTEM_OBJECT_TYPES = {"project", "iteration"}
 
 
-def initial_workflow_values(db: Session, object_type: str, project_id: int | None) -> dict:
-    definition, initial_state = resolve_effective_workflow(db, object_type, project_id)
+def initial_workflow_values(
+    db: Session,
+    object_type: str,
+    project_id: int | None,
+    primary_component_id: int | None = None,
+) -> dict:
+    definition, initial_state = resolve_effective_workflow(db, object_type, project_id, primary_component_id)
     return {
         "workflow_definition_id": definition.id,
         "current_state_id": initial_state.id,
@@ -59,6 +65,7 @@ def resolve_effective_workflow(
     db: Session,
     object_type: str,
     project_id: int | None,
+    primary_component_id: int | None = None,
 ) -> tuple[WorkflowDefinition, WorkflowState]:
     if object_type not in CORE_OBJECT_TYPES:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unsupported workflow object type")
@@ -68,10 +75,26 @@ def resolve_effective_workflow(
     if not project:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
 
-    if project.assignee_rule_config_id:
+    component_scheme_id = None
+    if primary_component_id is not None:
+        component = (
+            db.query(BusinessComponent)
+            .filter(
+                BusinessComponent.id == primary_component_id,
+                BusinessComponent.project_id == project.id,
+                BusinessComponent.enabled.is_(True),
+            )
+            .first()
+        )
+        if not component:
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Invalid primary business component")
+        component_scheme_id = component.workflow_scheme_id
+
+    scheme_id = component_scheme_id or project.assignee_rule_config_id
+    if scheme_id:
         config = (
             db.query(AssigneeRuleConfig)
-            .filter(AssigneeRuleConfig.id == project.assignee_rule_config_id)
+            .filter(AssigneeRuleConfig.id == scheme_id)
             .first()
         )
         if not config or config.lifecycle_status != "enabled":

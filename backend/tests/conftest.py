@@ -148,6 +148,11 @@ def client() -> TestClient:
 
 
 TRACKED_TABLES = [
+    "workflow_migration_logs",
+    "work_item_components",
+    "business_component_transition_routes",
+    "business_component_members",
+    "business_components",
     "work_item_iteration_history",
     "exception_rules",
     "bug_types",

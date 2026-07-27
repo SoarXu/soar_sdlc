@@ -2,6 +2,7 @@ from datetime import datetime
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.views.task_view import LinkedTaskSummary
+from app.views.business_component_view import BusinessComponentReferenceRead
 
 
 class BugBase(BaseModel):
@@ -33,6 +34,9 @@ class BugBase(BaseModel):
 
 class BugCreate(BugBase):
     model_config = ConfigDict(extra="forbid")
+
+    primary_component_id: int | None = None
+    related_component_ids: list[int] = Field(default_factory=list)
 
 
 class BugUpdate(BaseModel):
@@ -86,3 +90,5 @@ class BugRead(BugBase):
     delete_time: datetime | None = None
     linked_tasks: list[LinkedTaskSummary] = Field(default_factory=list)
     iteration_history: list[dict] = Field(default_factory=list)
+    primary_component: BusinessComponentReferenceRead | None = None
+    related_components: list[BusinessComponentReferenceRead] = Field(default_factory=list)

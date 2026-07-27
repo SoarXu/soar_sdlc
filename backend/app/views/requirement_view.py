@@ -2,6 +2,7 @@ from datetime import datetime
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.views.task_view import LinkedTaskSummary
+from app.views.business_component_view import BusinessComponentReferenceRead
 
 
 class RequirementBase(BaseModel):
@@ -23,6 +24,9 @@ class RequirementBase(BaseModel):
 class RequirementCreate(RequirementBase):
     model_config = ConfigDict(extra="forbid")
 
+    primary_component_id: int | None = None
+    related_component_ids: list[int] = Field(default_factory=list)
+
 
 class RequirementUpdate(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -41,6 +45,8 @@ class RequirementUpdate(BaseModel):
     acceptance_criteria: str | None = None
     source_reviewed: bool | None = None
     updater_id: int | None = None
+    primary_component_id: int | None = None
+    related_component_ids: list[int] | None = None
 
 
 class RequirementRead(RequirementBase):
@@ -57,6 +63,8 @@ class RequirementRead(RequirementBase):
     update_time: datetime | None = None
     delete_time: datetime | None = None
     linked_tasks: list[LinkedTaskSummary] = Field(default_factory=list)
+    primary_component: BusinessComponentReferenceRead | None = None
+    related_components: list[BusinessComponentReferenceRead] = Field(default_factory=list)
 
 
 class RequirementImportError(BaseModel):

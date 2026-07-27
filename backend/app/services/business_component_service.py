@@ -1,15 +1,28 @@
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 
-from app.models.business_component import BusinessComponent, BusinessComponentMember
+from app.models.business_component import BusinessComponent, BusinessComponentMember, BusinessComponentTransitionRoute
+from app.models.business_component import WorkItemComponent
+from app.models.bug import Bug
 from app.models.project import Project
 from app.models.project_member import ProjectMember
+from app.models.requirement import Requirement
+from app.models.task import Task
+from app.models.workflow_definition import WorkflowDefinition, WorkflowState, WorkflowTransition
+from app.models.assignee_rule_config import AssigneeRuleConfig
+from app.models.business_component import WorkflowMigrationLog
 from app.services.assignee_rule_config_service import clone_enabled_config
 from app.services.workflow_state_query_service import is_terminal_state
-from app.views.business_component_view import BusinessComponentCreateFromProject, BusinessComponentMemberWrite
+from app.views.business_component_view import (
+    BusinessComponentCreateFromProject,
+    BusinessComponentMemberWrite,
+    BusinessComponentTransitionRouteWrite,
+    BusinessComponentUpdate,
+)
 
 
 COMPONENT_MEMBER_ROLES = {"owner", "handler", "reviewer", "approver"}
+WORK_ITEM_MODELS = {"requirement": Requirement, "task": Task, "bug": Bug}
 
 
 def list_business_components(db: Session, project_id: int) -> list[BusinessComponent]:
@@ -145,6 +158,317 @@ def replace_business_component_members(
     return component
 
 
+def update_business_component(
+    db: Session,
+    project_id: int,
+    component_id: int,
+    payload: BusinessComponentUpdate,
+) -> BusinessComponent:
+    project = _get_project(db, project_id)
+    if is_terminal_state(project):
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Terminal projects cannot update business components")
+    component = _get_component(db, project_id, component_id)
+    data = payload.model_dump(exclude_unset=True)
+    if "workflow_scheme_id" in data and data["workflow_scheme_id"] is not None:
+        scheme = db.query(AssigneeRuleConfig).filter(AssigneeRuleConfig.id == data["workflow_scheme_id"]).first()
+        if not scheme or scheme.lifecycle_status != "enabled":
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Workflow scheme must be enabled")
+    if "name" in data:
+        data["name"] = data["name"].strip()
+    for field, value in data.items():
+        setattr(component, field, value)
+    db.commit()
+    db.refresh(component)
+    return component
+
+
+def list_business_component_routes(
+    db: Session, project_id: int, component_id: int
+) -> list[BusinessComponentTransitionRoute]:
+    _get_component(db, project_id, component_id)
+    return (
+        db.query(BusinessComponentTransitionRoute)
+        .filter(BusinessComponentTransitionRoute.component_id == component_id)
+        .order_by(BusinessComponentTransitionRoute.object_type, BusinessComponentTransitionRoute.transition_id)
+        .all()
+    )
+
+
+def replace_business_component_routes(
+    db: Session,
+    project_id: int,
+    component_id: int,
+    payload: list[BusinessComponentTransitionRouteWrite],
+) -> list[BusinessComponentTransitionRoute]:
+    project = _get_project(db, project_id)
+    if is_terminal_state(project):
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Terminal projects cannot update business components")
+    component = _get_component(db, project_id, component_id)
+    route_keys = {(item.object_type, item.transition_id) for item in payload}
+    if len(route_keys) != len(payload):
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Transition routes must be unique")
+    for item in payload:
+        transition = db.query(WorkflowTransition).filter(WorkflowTransition.id == item.transition_id).first()
+        definition = (
+            db.query(WorkflowDefinition)
+            .filter(WorkflowDefinition.id == transition.definition_id)
+            .first()
+            if transition
+            else None
+        )
+        if not transition or not definition or definition.object_type != item.object_type:
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Transition does not match work item type")
+        if component.workflow_scheme_id and not _definition_belongs_to_component_scheme(
+            transition.definition_id, component.workflow_scheme_id, db
+        ):
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Transition is outside component workflow scheme")
+    db.query(BusinessComponentTransitionRoute).filter(
+        BusinessComponentTransitionRoute.component_id == component_id
+    ).delete(synchronize_session=False)
+    db.add_all(
+        BusinessComponentTransitionRoute(component_id=component_id, **item.model_dump())
+        for item in payload
+    )
+    db.commit()
+    return list_business_component_routes(db, project_id, component_id)
+
+
+def resolve_primary_component(db: Session, project_id: int, component_id: int | None) -> BusinessComponent | None:
+    if component_id is None:
+        return None
+    component = _get_component(db, project_id, component_id)
+    if not component.enabled:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Business component is disabled")
+    return component
+
+
+def replace_work_item_components(
+    db: Session,
+    object_type: str,
+    object_id: int,
+    project_id: int,
+    primary_component_id: int | None,
+    related_component_ids: list[int] | None,
+) -> BusinessComponent | None:
+    primary = resolve_primary_component(db, project_id, primary_component_id)
+    related_ids = related_component_ids or []
+    if len(related_ids) != len(set(related_ids)):
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Related components must be unique")
+    if primary and primary.id in related_ids:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Primary component cannot also be related")
+    related_components = [resolve_primary_component(db, project_id, component_id) for component_id in related_ids]
+    db.query(WorkItemComponent).filter(
+        WorkItemComponent.object_type == object_type,
+        WorkItemComponent.object_id == object_id,
+    ).delete(synchronize_session=False)
+    if primary:
+        db.add(
+            WorkItemComponent(
+                object_type=object_type,
+                object_id=object_id,
+                component_id=primary.id,
+                relation_type="primary",
+                component_name_snapshot=primary.name,
+            )
+        )
+    db.add_all(
+        WorkItemComponent(
+            object_type=object_type,
+            object_id=object_id,
+            component_id=component.id,
+            relation_type="related",
+            component_name_snapshot=component.name,
+        )
+        for component in related_components
+    )
+    return primary
+
+
+def attach_work_item_components(db: Session, object_type: str, item) -> None:
+    links = (
+        db.query(WorkItemComponent, BusinessComponent)
+        .join(BusinessComponent, BusinessComponent.id == WorkItemComponent.component_id)
+        .filter(WorkItemComponent.object_type == object_type, WorkItemComponent.object_id == item.id)
+        .order_by(WorkItemComponent.id.asc())
+        .all()
+    )
+    item.primary_component = next((component for link, component in links if link.relation_type == "primary"), None)
+    item.related_components = [component for link, component in links if link.relation_type == "related"]
+
+
+def work_item_component_ids(db: Session, object_type: str, object_id: int) -> tuple[int | None, list[int]]:
+    links = (
+        db.query(WorkItemComponent)
+        .filter(WorkItemComponent.object_type == object_type, WorkItemComponent.object_id == object_id)
+        .order_by(WorkItemComponent.id.asc())
+        .all()
+    )
+    primary_id = next((link.component_id for link in links if link.relation_type == "primary"), None)
+    related_ids = [link.component_id for link in links if link.relation_type == "related"]
+    return primary_id, related_ids
+
+
+def active_primary_component_member_roles(db: Session, object_type: str, item, user_id: int) -> set[str] | None:
+    primary_component_id, _ = work_item_component_ids(db, object_type, item.id)
+    if primary_component_id is None:
+        return None
+    return {
+        row.component_role
+        for row in db.query(BusinessComponentMember)
+        .filter(
+            BusinessComponentMember.component_id == primary_component_id,
+            BusinessComponentMember.user_id == user_id,
+            BusinessComponentMember.enabled.is_(True),
+        )
+        .all()
+    }
+
+
+def resolve_component_transition_route(db: Session, object_type: str, item, transition: WorkflowTransition) -> dict | None:
+    """Resolve an enabled component-specific route for one work-item transition."""
+    primary_component_id, _ = work_item_component_ids(db, object_type, item.id)
+    if primary_component_id is None:
+        return None
+    route = (
+        db.query(BusinessComponentTransitionRoute)
+        .filter(
+            BusinessComponentTransitionRoute.component_id == primary_component_id,
+            BusinessComponentTransitionRoute.object_type == object_type,
+            BusinessComponentTransitionRoute.transition_id == transition.id,
+            BusinessComponentTransitionRoute.enabled.is_(True),
+        )
+        .first()
+    )
+    if not route:
+        return None
+    members = (
+        db.query(BusinessComponentMember)
+        .filter(
+            BusinessComponentMember.component_id == primary_component_id,
+            BusinessComponentMember.enabled.is_(True),
+        )
+        .order_by(BusinessComponentMember.id.asc())
+        .all()
+    )
+    eligible_ids = _member_ids_for_route(members, route.eligible_member_mode, route.eligible_roles, route.eligible_user_ids)
+    next_owner_ids = _member_ids_for_route(members, route.next_owner_mode, route.next_owner_roles, None)
+    if route.next_owner_mode == "user":
+        next_owner_ids = [route.next_owner_user_id] if route.next_owner_user_id in {member.user_id for member in members} else []
+    return {
+        "route_id": route.id,
+        "eligible_executor_ids": eligible_ids,
+        "eligible_manual_owner_ids": eligible_ids if route.next_owner_mode == "manual" else next_owner_ids,
+        "next_owner_id": next_owner_ids[0] if next_owner_ids else None,
+        "next_owner_mode": route.next_owner_mode,
+        "fallback_mode": route.fallback_mode,
+    }
+
+
+def _member_ids_for_route(
+    members: list[BusinessComponentMember], mode: str, roles_value: str | None, users_value: str | None
+) -> list[int]:
+    if mode in {"all", "manual"}:
+        return sorted({member.user_id for member in members})
+    if mode == "users":
+        user_ids = _parse_id_csv(users_value)
+        return sorted({member.user_id for member in members if member.user_id in user_ids})
+    roles = _split_csv(roles_value)
+    if not roles:
+        roles = ["handler", "owner"]
+    return sorted({member.user_id for member in members if member.component_role in roles})
+
+
+def _split_csv(value: str | None) -> list[str]:
+    return [item.strip() for item in (value or "").split(",") if item.strip()]
+
+
+def _parse_id_csv(value: str | None) -> set[int]:
+    result: set[int] = set()
+    for item in _split_csv(value):
+        try:
+            result.add(int(item))
+        except ValueError:
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Component route user IDs must be integers")
+    return result
+
+
+def default_primary_component_handler_id(db: Session, object_type: str, item) -> int | None:
+    primary_component_id, _ = work_item_component_ids(db, object_type, item.id)
+    if primary_component_id is None:
+        return None
+    member = (
+        db.query(BusinessComponentMember)
+        .filter(
+            BusinessComponentMember.component_id == primary_component_id,
+            BusinessComponentMember.enabled.is_(True),
+            BusinessComponentMember.component_role.in_(("handler", "owner")),
+        )
+        .order_by(BusinessComponentMember.component_role.asc(), BusinessComponentMember.id.asc())
+        .first()
+    )
+    return member.user_id if member else None
+
+
+def migrate_work_item_workflow(
+    db: Session,
+    project_id: int,
+    component_id: int,
+    object_type: str,
+    object_id: int,
+    new_definition_id: int,
+    new_state_id: int,
+    reason: str,
+    actor_id: int | None,
+):
+    component = _get_component(db, project_id, component_id)
+    model = WORK_ITEM_MODELS.get(object_type)
+    if not model:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Unsupported work item type")
+    item = db.query(model).filter(model.id == object_id, model.deleted == 0).with_for_update().first()
+    if not item or item.project_id != project_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Work item not found")
+    primary_component_id, _ = work_item_component_ids(db, object_type, item.id)
+    if primary_component_id != component.id:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Work item does not belong to this primary component")
+    definition = (
+        db.query(WorkflowDefinition)
+        .filter(WorkflowDefinition.id == new_definition_id, WorkflowDefinition.object_type == object_type, WorkflowDefinition.enabled.is_(True))
+        .first()
+    )
+    state = (
+        db.query(WorkflowState)
+        .filter(WorkflowState.id == new_state_id, WorkflowState.definition_id == new_definition_id, WorkflowState.enabled.is_(True))
+        .first()
+    )
+    if not definition or not state:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Target workflow state is invalid")
+    if not component.workflow_scheme_id or not _definition_belongs_to_component_scheme(
+        definition.id, component.workflow_scheme_id, db
+    ):
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Target workflow is outside component scheme")
+    if is_terminal_state(item):
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Terminal work items cannot migrate workflow")
+    old_definition_id, old_state_id = item.workflow_definition_id, item.current_state_id
+    item.workflow_definition_id = definition.id
+    item.current_state_id = state.id
+    db.add(
+        WorkflowMigrationLog(
+            object_type=object_type,
+            object_id=item.id,
+            old_definition_id=old_definition_id,
+            old_state_id=old_state_id,
+            new_definition_id=definition.id,
+            new_state_id=state.id,
+            reason=reason.strip(),
+            actor_id=actor_id,
+        )
+    )
+    db.commit()
+    db.refresh(item)
+    attach_work_item_components(db, object_type, item)
+    return item
+
+
 def _get_project(db: Session, project_id: int) -> Project:
     project = db.query(Project).filter(Project.id == project_id, Project.deleted == 0).first()
     if not project:
@@ -161,6 +485,19 @@ def _get_component(db: Session, project_id: int, component_id: int) -> BusinessC
     if not component:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Business component not found")
     return component
+
+
+def _definition_belongs_to_component_scheme(definition_id: int, scheme_id: int, db: Session) -> bool:
+    return bool(
+        db.query(WorkflowDefinition.id)
+        .filter(
+            WorkflowDefinition.id == definition_id,
+            WorkflowDefinition.scope_type == "assignee_rule_config",
+            WorkflowDefinition.scope_id == scheme_id,
+            WorkflowDefinition.enabled.is_(True),
+        )
+        .first()
+    )
 
 
 def _component_role_for_project_role(project_role: str) -> str:

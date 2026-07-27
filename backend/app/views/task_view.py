@@ -3,6 +3,7 @@ from decimal import Decimal
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_serializer
+from app.views.business_component_view import BusinessComponentReferenceRead
 
 
 class TaskBase(BaseModel):
@@ -24,6 +25,9 @@ class TaskBase(BaseModel):
 
 class TaskCreate(TaskBase):
     model_config = ConfigDict(extra="forbid")
+
+    primary_component_id: int | None = None
+    related_component_ids: list[int] = Field(default_factory=list)
 
     task_type: Literal[
         "requirement_implementation",
@@ -103,6 +107,8 @@ class TaskRead(TaskBase):
     update_time: datetime | None = None
     delete_time: datetime | None = None
     source_relations: list[TaskSourceRead] = Field(default_factory=list)
+    primary_component: BusinessComponentReferenceRead | None = None
+    related_components: list[BusinessComponentReferenceRead] = Field(default_factory=list)
 
     @field_serializer("estimated_hours", "actual_hours")
     def serialize_decimal(self, value: Decimal | None):

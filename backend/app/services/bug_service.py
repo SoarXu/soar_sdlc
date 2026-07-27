@@ -10,6 +10,12 @@ from app.models.requirement import Requirement
 from app.models.test_case import TestCase
 from app.models.test_run import TestRun, TestRunCase
 from app.services.current_handler_service import ensure_work_item_action
+from app.services.business_component_service import (
+    attach_work_item_components,
+    replace_work_item_components,
+    resolve_primary_component,
+    work_item_component_ids,
+)
 from app.services.iteration_service import ensure_iteration_assignment_mutable
 from app.services.project_permission_service import ensure_workflow_fields_not_updated
 from app.services.lifecycle_service import (
@@ -30,6 +36,7 @@ def list_bugs(db: Session) -> list[Bug]:
     for bug in bugs:
         bug.linked_tasks = linked_task_summaries(db, "bug", bug.id)
         bug.iteration_history = list_iteration_history(db, "bug", bug.id)
+        attach_work_item_components(db, "bug", bug)
     return bugs
 
 
@@ -37,11 +44,20 @@ def get_bug(db: Session, bug_id: int) -> Bug:
     bug = _get_active_bug(db, bug_id)
     bug.linked_tasks = linked_task_summaries(db, "bug", bug.id)
     bug.iteration_history = list_iteration_history(db, "bug", bug.id)
+    attach_work_item_components(db, "bug", bug)
     return bug
 
 
 def create_bug(db: Session, payload: BugCreate, actor_id: int | None = None) -> Bug:
     data = payload.model_dump()
+    primary_component_id = data.pop("primary_component_id", None)
+    related_component_ids = data.pop("related_component_ids", [])
+    if primary_component_id is None and data.get("requirement_id"):
+        primary_component_id, inherited_related_component_ids = work_item_component_ids(
+            db, "requirement", data["requirement_id"]
+        )
+        if not related_component_ids:
+            related_component_ids = inherited_related_component_ids
     data["creator_id"] = actor_id
     ensure_iteration_assignment_mutable(db, None, data.get("iteration_id"))
     if data.get("iteration_id"):
@@ -51,14 +67,19 @@ def create_bug(db: Session, payload: BugCreate, actor_id: int | None = None) -> 
         or test_case_lifecycle_phase(db, data.get("test_case_id"))
         or project_lifecycle_phase(db, data.get("project_id"))
     )
-    data.update(initial_workflow_values(db, "bug", data.get("project_id")))
+    primary_component = resolve_primary_component(db, data["project_id"], primary_component_id)
+    data.update(initial_workflow_values(db, "bug", data.get("project_id"), primary_component_id))
     bug = Bug(**data)
     db.add(bug)
     db.flush()
+    replace_work_item_components(
+        db, "bug", bug.id, bug.project_id, primary_component_id, related_component_ids
+    )
     if bug.iteration_id:
         move_work_item_to_iteration(db, bug, bug.iteration_id, actor_id=actor_id, reason="created")
     db.commit()
     db.refresh(bug)
+    attach_work_item_components(db, "bug", bug)
     return bug
 
 

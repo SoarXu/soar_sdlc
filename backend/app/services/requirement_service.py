@@ -11,6 +11,11 @@ from app.models.task import Task
 from app.models.test_case import TestCase
 from app.models.user import User
 from app.services.current_handler_service import ensure_work_item_action
+from app.services.business_component_service import (
+    attach_work_item_components,
+    replace_work_item_components,
+    resolve_primary_component,
+)
 from app.services.iteration_service import ensure_iteration_assignment_mutable
 from app.services.project_permission_service import ensure_workflow_fields_not_updated
 from app.services.lifecycle_service import project_lifecycle_phase
@@ -26,29 +31,45 @@ def list_requirements(db: Session) -> list[Requirement]:
     requirements = db.query(Requirement).filter(Requirement.deleted == 0).order_by(Requirement.id.desc()).all()
     for requirement in requirements:
         requirement.linked_tasks = linked_task_summaries(db, "requirement", requirement.id)
+        attach_work_item_components(db, "requirement", requirement)
     return requirements
 
 
 def get_requirement(db: Session, requirement_id: int) -> Requirement:
     requirement = _get_active_requirement(db, requirement_id)
     requirement.linked_tasks = linked_task_summaries(db, "requirement", requirement.id)
+    attach_work_item_components(db, "requirement", requirement)
     return requirement
 
 
 def create_requirement(db: Session, payload: RequirementCreate, actor_id: int | None = None) -> Requirement:
     data = payload.model_dump()
+    primary_component_id = data.pop("primary_component_id", None)
+    related_component_ids = data.pop("related_component_ids", [])
     data["creator_id"] = actor_id
     ensure_iteration_assignment_mutable(db, None, data.get("iteration_id"))
     _ensure_requirement_iteration_scope(db, data.get("project_id"), data.get("iteration_id"))
-    data.update(initial_workflow_values(db, "requirement", data.get("project_id")))
+    primary_component = resolve_primary_component(db, data["project_id"], primary_component_id)
+    if primary_component:
+        data["source_project_id"] = primary_component.source_project_id
+    data.update(initial_workflow_values(db, "requirement", data.get("project_id"), primary_component_id))
     data["lifecycle_phase"] = project_lifecycle_phase(db, data.get("project_id"))
     requirement = Requirement(**data)
     db.add(requirement)
     db.flush()
+    replace_work_item_components(
+        db,
+        "requirement",
+        requirement.id,
+        requirement.project_id,
+        primary_component_id,
+        related_component_ids,
+    )
     if requirement.iteration_id:
         move_work_item_to_iteration(db, requirement, requirement.iteration_id, actor_id=actor_id, reason="created")
     db.commit()
     db.refresh(requirement)
+    attach_work_item_components(db, "requirement", requirement)
     return requirement
 
 

@@ -50,7 +50,7 @@
 </template>
 
 <script setup>
-import { computed, reactive, ref, watch } from 'vue'
+import { computed, nextTick, reactive, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 
 import { fetchIterations } from '../../api/iterations'
@@ -58,7 +58,7 @@ import { fetchProjects } from '../../api/projects'
 import { fetchRequirement, updateRequirement } from '../../api/requirements'
 import { fetchUsers } from '../../api/users'
 import { showActionError } from '../../utils/actionFeedback'
-import { requirementIterationLabel, requirementIterationOptions } from '../../utils/requirementPoolIterations'
+import { requirementIterationLabel, requirementIterationOptions, requirementPoolForProject } from '../../utils/requirementPoolIterations'
 import RequirementPriorityBadge from '../RequirementPriorityBadge.vue'
 
 const props = defineProps({
@@ -114,6 +114,7 @@ async function load() {
       description: item.description || '',
       acceptance_criteria: item.acceptance_criteria || ''
     })
+    await nextTick()
   } catch (error) {
     showActionError(error, '需求加载失败')
     visible.value = false
@@ -121,6 +122,12 @@ async function load() {
     loading.value = false
   }
 }
+
+watch(() => form.project_id, (projectId) => {
+  if (loading.value || !projectId) return
+  const selectedProject = projects.value.find((project) => project.id === projectId)
+  form.iteration_id = requirementPoolForProject(selectedProject, iterations.value)?.id ?? null
+})
 
 async function save() {
   if (!form.project_id || !form.title?.trim()) {

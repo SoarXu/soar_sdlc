@@ -266,6 +266,52 @@ def test_iteration_crud_serializes_requirement_pool_identity(client: TestClient)
     assert updated.json()["is_requirement_pool"] is False
 
 
+def test_available_requirements_lists_only_scoped_project_pool_requirements(client: TestClient):
+    scoped_project_id = _create_project(client, "Scoped pool project")
+    outside_project_id = _create_project(client, "Outside pool project")
+    iteration_id = _create_iteration(client, [scoped_project_id], "Pool compatible iteration")
+    scoped_requirement_id = _create_requirement(client, scoped_project_id, "Scoped pool requirement")
+    outside_requirement_id = _create_requirement(client, outside_project_id, "Outside pool requirement")
+
+    available = client.get(f"/api/v1/iterations/{iteration_id}/available-requirements")
+
+    assert available.status_code == 200
+    assert {item["id"] for item in available.json()} == {scoped_requirement_id}
+    assert outside_requirement_id not in {item["id"] for item in available.json()}
+
+
+def test_link_requirements_moves_pool_items_but_rejects_other_delivery_items(client: TestClient):
+    project_id = _create_project(client, "Link pool project")
+    target_iteration_id = _create_iteration(client, [project_id], "Target delivery iteration")
+    other_iteration_id = _create_iteration(client, [project_id], "Other delivery iteration")
+    pool_requirement_id = _create_requirement(client, project_id, "Pool requirement")
+    pool_target_requirement_id = _create_requirement(client, project_id, "Pool target requirement")
+    other_delivery_requirement_id = _create_requirement(client, project_id, "Other delivery requirement")
+    pool_id = client.get(f"/api/v1/projects/{project_id}").json()["requirement_pool_iteration_id"]
+    assert client.post(
+        f"/api/v1/iterations/{other_iteration_id}/requirements",
+        json={"requirement_ids": [other_delivery_requirement_id]},
+    ).status_code == 200
+
+    linked = client.post(
+        f"/api/v1/iterations/{target_iteration_id}/requirements",
+        json={"requirement_ids": [pool_requirement_id]},
+    )
+    rejected = client.post(
+        f"/api/v1/iterations/{target_iteration_id}/requirements",
+        json={"requirement_ids": [other_delivery_requirement_id]},
+    )
+    pool_rejected = client.post(
+        f"/api/v1/iterations/{pool_id}/requirements",
+        json={"requirement_ids": [pool_target_requirement_id]},
+    )
+
+    assert linked.status_code == 200, linked.text
+    assert client.get(f"/api/v1/requirements/{pool_requirement_id}").json()["iteration_id"] == target_iteration_id
+    assert rejected.status_code == 400
+    assert pool_rejected.status_code == 400
+
+
 def test_iteration_detail_collects_scoped_projects_and_linked_objects(client: TestClient):
     root_project = _create_project(client, "Root project")
     child_project = _create_project(client, "Child project", parent_id=root_project)
@@ -522,9 +568,10 @@ def test_iteration_project_scope_removal_closes_work_item_history_with_actor_and
     )
 
     assert updated.status_code == 200, updated.text
+    removed_pool_id = client.get(f"/api/v1/projects/{removed_project_id}").json()["requirement_pool_iteration_id"]
     db = SessionLocal()
     try:
-        assert db.query(Requirement).filter(Requirement.id == requirement_id).one().iteration_id is None
+        assert db.query(Requirement).filter(Requirement.id == requirement_id).one().iteration_id == removed_pool_id
         assert db.query(Task).filter(Task.id == task_id).one().iteration_id is None
         assert db.query(Bug).filter(Bug.id == bug_id).one().iteration_id is None
         histories = db.query(WorkItemIterationHistory).filter(

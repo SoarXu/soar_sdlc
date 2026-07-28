@@ -15,6 +15,7 @@ from app.models.work_item_iteration_history import WorkItemIterationHistory
 from app.services.lifecycle_service import project_lifecycle_phase
 from app.services.status_operation_service import create_status_operation, list_status_operations
 from app.services.iteration_completion_snapshot_service import get_completion_snapshot
+from app.services.requirement_pool_service import is_project_requirement_pool, requirement_pool_for_project
 from app.services.workflow_state_query_service import is_terminal_state, non_terminal_state_clause
 from app.services.workflow_state_service import initial_system_workflow_values
 from app.services.work_item_iteration_history_service import move_work_item_to_iteration
@@ -211,10 +212,11 @@ def available_requirements(db: Session, iteration_id: int) -> list[Requirement]:
     scoped_project_ids = _iteration_scoped_project_ids(db, iteration_id)
     return (
         db.query(Requirement)
+        .join(Project, Project.id == Requirement.project_id)
         .filter(
             Requirement.deleted == 0,
             Requirement.project_id.in_(scoped_project_ids),
-            Requirement.iteration_id.is_(None),
+            Requirement.iteration_id == Project.requirement_pool_iteration_id,
         )
         .order_by(Requirement.id.desc())
         .all()
@@ -227,7 +229,10 @@ def link_requirements(
     requirement_ids: list[int],
     actor_id: int | None = None,
 ) -> list[Requirement]:
-    ensure_iteration_mutable(_get_active_iteration(db, iteration_id, for_update=True))
+    iteration = _get_active_iteration(db, iteration_id, for_update=True)
+    ensure_iteration_mutable(iteration)
+    if iteration.is_requirement_pool:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Requirement pool cannot be a link target")
     scoped_project_ids = _iteration_scoped_project_ids(db, iteration_id)
     requirements = db.query(Requirement).filter(Requirement.deleted == 0, Requirement.id.in_(requirement_ids)).all()
     if len(requirements) != len(set(requirement_ids)):
@@ -235,7 +240,10 @@ def link_requirements(
     for requirement in requirements:
         if requirement.project_id not in scoped_project_ids:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="需求不在迭代项目范围内")
-        if requirement.iteration_id and requirement.iteration_id != iteration_id:
+        if (
+            requirement.iteration_id != iteration_id
+            and not is_project_requirement_pool(db, requirement.project_id, requirement.iteration_id)
+        ):
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="需求已关联其他迭代")
         move_work_item_to_iteration(db, requirement, iteration_id, actor_id=actor_id, reason="linked")
     db.commit()
@@ -251,7 +259,8 @@ def unlink_requirement(
     ensure_iteration_mutable(_get_active_iteration(db, iteration_id, for_update=True))
     requirement = db.query(Requirement).filter(Requirement.id == requirement_id, Requirement.deleted == 0).first()
     if requirement and requirement.iteration_id == iteration_id:
-        move_work_item_to_iteration(db, requirement, None, actor_id=actor_id, reason="unlinked")
+        pool = requirement_pool_for_project(db, requirement.project_id)
+        move_work_item_to_iteration(db, requirement, pool.id, actor_id=actor_id, reason="unlinked")
         db.commit()
 
 
@@ -328,6 +337,15 @@ def _unlink_out_of_scope_model_items(
         if item.project_id not in scoped_project_ids:
             if model is TestCase:
                 item.iteration_id = None
+            elif model is Requirement:
+                pool = requirement_pool_for_project(db, item.project_id)
+                move_work_item_to_iteration(
+                    db,
+                    item,
+                    pool.id,
+                    actor_id=actor_id,
+                    reason="iteration_project_scope_removed",
+                )
             else:
                 move_work_item_to_iteration(
                     db,

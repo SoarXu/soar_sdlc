@@ -61,6 +61,7 @@ def test_link_and_unlink_requirement_open_and_close_membership_history(client: T
     project_id = _create_project(client)
     iteration_id = _create_iteration(client, project_id)
     requirement_id = _create_requirement(client, project_id)
+    pool_id = client.get(f"/api/v1/projects/{project_id}").json()["requirement_pool_iteration_id"]
 
     linked = client.post(
         f"/api/v1/iterations/{iteration_id}/requirements",
@@ -70,16 +71,17 @@ def test_link_and_unlink_requirement_open_and_close_membership_history(client: T
 
     db = SessionLocal()
     try:
-        row = db.execute(
+        rows = db.execute(
             text(
-                "select iteration_id, enter_reason, left_at from work_item_iteration_history "
+                "select iteration_id, enter_reason, leave_reason, left_at from work_item_iteration_history "
                 "where object_type = 'requirement' and object_id = :object_id"
             ),
             {"object_id": requirement_id},
-        ).one()
-        assert row.iteration_id == iteration_id
-        assert row.enter_reason == "linked"
-        assert row.left_at is None
+        ).all()
+        assert [(row.iteration_id, row.enter_reason, row.left_at is None) for row in rows] == [
+            (pool_id, "created", False),
+            (iteration_id, "linked", True),
+        ]
     finally:
         db.close()
 
@@ -88,15 +90,19 @@ def test_link_and_unlink_requirement_open_and_close_membership_history(client: T
 
     db = SessionLocal()
     try:
-        row = db.execute(
+        rows = db.execute(
             text(
-                "select leave_reason, left_at from work_item_iteration_history "
+                "select iteration_id, enter_reason, leave_reason, left_at from work_item_iteration_history "
                 "where object_type = 'requirement' and object_id = :object_id"
             ),
             {"object_id": requirement_id},
-        ).one()
-        assert row.leave_reason == "unlinked"
-        assert row.left_at is not None
+        ).all()
+        assert [(row.iteration_id, row.enter_reason, row.leave_reason, row.left_at is None) for row in rows] == [
+            (pool_id, "created", "linked", False),
+            (iteration_id, "linked", "unlinked", False),
+            (pool_id, "unlinked", None, True),
+        ]
+        assert db.query(Requirement).filter(Requirement.id == requirement_id).one().iteration_id == pool_id
     finally:
         db.close()
 

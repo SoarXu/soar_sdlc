@@ -221,6 +221,16 @@ def _cleanup_created_rows(before: dict[str, set[int]]) -> None:
         for table in TRACKED_TABLES:
             if table not in before or not _table_exists(db, table):
                 continue
+            if table == "iterations":
+                created_iteration_ids = _created_ids(db, before, table)
+                if created_iteration_ids:
+                    db.execute(
+                        text(
+                            "update projects set requirement_pool_iteration_id = null "
+                            "where requirement_pool_iteration_id in :ids"
+                        ),
+                        {"ids": tuple(created_iteration_ids)},
+                    )
             rows = db.execute(text(f"select id from {table}")).all()
             created_ids = [row.id for row in rows if row.id not in before[table]]
             if created_ids:

@@ -19,6 +19,7 @@ from app.models.test_run import TestRun, TestRunCase
 from app.models.user import User
 from app.models.workflow_definition import WorkflowTransition
 from app.services.status_operation_service import create_status_operation, list_status_operations
+from app.services.requirement_pool_service import create_project_requirement_pool
 from app.services.workflow_runtime_service import execute_transition
 from app.services.workflow_state_service import initial_system_workflow_values
 from app.views.project_view import ProjectCreate, ProjectMemberCreate, ProjectUpdate
@@ -188,10 +189,16 @@ def create_project(db: Session, payload: ProjectCreate) -> Project:
         data["end_date"] = None
     data.update(initial_system_workflow_values(db, "project"))
     project = Project(**data)
-    db.add(project)
-    db.commit()
-    db.refresh(project)
-    return project
+    try:
+        db.add(project)
+        db.flush()
+        create_project_requirement_pool(db, project)
+        db.commit()
+        db.refresh(project)
+        return project
+    except Exception:
+        db.rollback()
+        raise
 
 
 def update_project(db: Session, project_id: int, payload: ProjectUpdate, actor_id: int | None = None) -> Project:

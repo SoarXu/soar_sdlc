@@ -188,11 +188,12 @@ def create_project(db: Session, payload: ProjectCreate) -> Project:
     if data.get("is_long_term"):
         data["end_date"] = None
     data.update(initial_system_workflow_values(db, "project"))
+    iteration_workflow_values = initial_system_workflow_values(db, "iteration")
     project = Project(**data)
     try:
         db.add(project)
         db.flush()
-        create_project_requirement_pool(db, project)
+        create_project_requirement_pool(db, project, workflow_values=iteration_workflow_values)
         db.commit()
         db.refresh(project)
         return project

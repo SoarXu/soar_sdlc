@@ -7,6 +7,7 @@ from fastapi.testclient import TestClient
 from app.db.session import SessionLocal
 from app.models.iteration import Iteration, IterationProject
 from app.models.project import Project
+from app.models.workflow_definition import WorkflowDefinition
 from app.services import project_service
 from app.services.requirement_pool_service import requirement_pool_for_project
 
@@ -48,6 +49,37 @@ def test_project_creation_rolls_back_when_pool_creation_fails(client: TestClient
     try:
         assert db.query(Project).filter(Project.name == project_name).count() == 0
     finally:
+        db.close()
+
+
+def test_project_creation_does_not_persist_when_iteration_default_workflow_is_invalid(client: TestClient):
+    project_name = f"Invalid iteration workflow project-{uuid4().hex[:8]}"
+    db = SessionLocal()
+    try:
+        iteration_workflow = (
+            db.query(WorkflowDefinition)
+            .filter(
+                WorkflowDefinition.object_type == "iteration",
+                WorkflowDefinition.scope_type == "system",
+                WorkflowDefinition.is_default_template.is_(True),
+            )
+            .one()
+        )
+        was_enabled = iteration_workflow.enabled
+        iteration_workflow.enabled = False
+        db.commit()
+
+        response = client.post("/api/v1/projects", json={"name": project_name})
+
+        assert response.status_code == 409
+        assert db.query(Project).filter(Project.name == project_name).count() == 0
+    finally:
+        db.rollback()
+        if "iteration_workflow" in locals():
+            db.query(WorkflowDefinition).filter(WorkflowDefinition.id == iteration_workflow.id).update(
+                {"enabled": was_enabled}
+            )
+            db.commit()
         db.close()
 
 

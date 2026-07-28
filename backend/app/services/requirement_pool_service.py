@@ -10,8 +10,12 @@ from app.services.workflow_state_service import initial_system_workflow_values
 POOL_INTEGRITY_ERROR = "REQUIREMENT_POOL_INTEGRITY_ERROR"
 
 
-def create_project_requirement_pool(db: Session, project: Project) -> Iteration:
-    workflow_values = initial_system_workflow_values(db, "iteration")
+def create_project_requirement_pool(
+    db: Session,
+    project: Project,
+    workflow_values: dict | None = None,
+) -> Iteration:
+    workflow_values = workflow_values or initial_system_workflow_values(db, "iteration")
     pool = Iteration(
         name="需求池",
         is_requirement_pool=True,

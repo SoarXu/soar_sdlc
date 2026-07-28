@@ -325,7 +325,7 @@ def _lock_requirement_for_import_update(
     prelocked_iterations: dict,
 ) -> Requirement:
     requirement = _get_requirement_for_import_update(db, requirement_id, for_update=True)
-    if requirement.iteration_id is None or requirement.iteration_id in prelocked_iterations:
+    if requirement.iteration_id in prelocked_iterations:
         return requirement
     raise HTTPException(
         status_code=status.HTTP_409_CONFLICT,

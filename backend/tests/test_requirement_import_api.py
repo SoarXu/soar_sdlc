@@ -293,6 +293,24 @@ def test_import_update_refresh_rejects_membership_outside_prelocked_set(monkeypa
     assert events == ["locked"]
 
 
+def test_import_update_refresh_rejects_requirement_without_prelocked_iteration(monkeypatch):
+    monkeypatch.setattr(
+        requirement_import_service,
+        "_get_requirement_for_import_update",
+        lambda *_args, **_kwargs: SimpleNamespace(iteration_id=None),
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        requirement_import_service._lock_requirement_for_import_update(
+            object(),
+            1,
+            {7: SimpleNamespace(id=7)},
+        )
+
+    assert exc_info.value.status_code == 409
+    assert exc_info.value.detail["code"] == "ITERATION_STATE_CONFLICT"
+
+
 def test_import_batch_locks_existing_iterations_once_in_sorted_order(monkeypatch):
     rows = [
         SimpleNamespace(project_id=1, title="Later iteration", requirement_type=None, priority="3", owner_id=None, proposer_id=None, review_status="not_required", description=None, acceptance_criteria=None),

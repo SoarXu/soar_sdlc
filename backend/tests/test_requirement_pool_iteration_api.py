@@ -308,3 +308,21 @@ def test_delivery_iteration_still_supports_ordinary_update(client: TestClient):
 
     assert response.status_code == 200, response.text
     assert response.json()["goal"] == "Ship the release"
+
+
+def test_iteration_lists_hide_requirement_pools_unless_explicitly_requested(client: TestClient):
+    project = _create_project(client, "Pool list scope")
+    pool_id = project["requirement_pool_iteration_id"]
+    delivery = _create_delivery_iteration(client, project["id"], "Visible delivery")
+
+    default_items = client.get("/api/v1/iterations", params={"project_id": project["id"]}).json()
+    selector_items = client.get(
+        "/api/v1/iterations",
+        params={"project_id": project["id"], "include_requirement_pool": True},
+    ).json()
+    project_page = client.get(f"/api/v1/projects/{project['id']}/iterations").json()
+
+    assert {item["id"] for item in default_items} == {delivery["id"]}
+    assert {item["id"] for item in selector_items} == {pool_id, delivery["id"]}
+    assert next(item for item in selector_items if item["id"] == pool_id)["is_requirement_pool"] is True
+    assert {item["id"] for item in project_page["items"]} == {delivery["id"]}

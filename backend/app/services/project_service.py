@@ -47,7 +47,11 @@ def list_project_iterations_page(
     query = (
         db.query(Iteration)
         .join(IterationProject, IterationProject.iteration_id == Iteration.id)
-        .filter(Iteration.deleted == 0, IterationProject.project_id == project_id)
+        .filter(
+            Iteration.deleted == 0,
+            Iteration.is_requirement_pool.is_(False),
+            IterationProject.project_id == project_id,
+        )
     )
     if keyword:
         query = query.filter(Iteration.name.like(f"%{keyword}%"))

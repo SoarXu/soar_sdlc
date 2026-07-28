@@ -24,8 +24,15 @@ from app.views.iteration_view import DeferIterationWorkItemsRequest, IterationCr
 from app.views.status_operation_view import StatusOperationCreate
 
 
-def list_iterations(db: Session, project_id: int | None = None) -> list[dict]:
+def list_iterations(
+    db: Session,
+    project_id: int | None = None,
+    *,
+    include_requirement_pool: bool = False,
+) -> list[dict]:
     query = db.query(Iteration).filter(Iteration.deleted == 0)
+    if not include_requirement_pool:
+        query = query.filter(Iteration.is_requirement_pool.is_(False))
     if project_id:
         subquery = db.query(IterationProject.iteration_id).filter(IterationProject.project_id == project_id)
         query = query.filter(Iteration.id.in_(subquery))
@@ -521,6 +528,7 @@ def auto_start_due_iterations(db: Session, iteration_id: int | None = None) -> i
     today = date.today()
     query = db.query(Iteration).filter(
         Iteration.deleted == 0,
+        Iteration.is_requirement_pool.is_(False),
         Iteration.current_state_id == WorkflowState.id,
         WorkflowState.definition_id == Iteration.workflow_definition_id,
         WorkflowState.category == "start",

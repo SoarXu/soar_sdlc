@@ -7,6 +7,7 @@ from fastapi.testclient import TestClient
 from app.core.security import create_access_token, get_password_hash
 from app.db.session import SessionLocal
 from app.models.bug import Bug
+from app.models.iteration import Iteration
 from app.models.object_watch import ObjectWatch
 from app.models.project_member import ProjectMember
 from app.models.role import Role, UserRole
@@ -705,3 +706,41 @@ def test_workbench_uses_requirement_iteration_for_legacy_linked_task(client: Tes
     pending_refs = {(item["object_type"], item["id"]) for item in workbench["pending_handling"]["items"]}
 
     assert ("task", task["id"]) in pending_refs
+
+
+def test_workbench_excludes_requirement_pool_items_even_when_pool_state_looks_active(client: TestClient):
+    user_id, token = _create_user_with_role(f"pool_scope_{uuid4().hex[:6]}", "developer")
+    project_response = client.post("/api/v1/projects", json={"name": "Pool workbench scope"})
+    assert project_response.status_code == 200
+    project = project_response.json()
+    delivery_id = _create_iteration(client, project["id"], "State source")
+    _start_iteration(client, delivery_id)
+    _add_project_member(project["id"], user_id, "developer")
+    requirement = client.post(
+        "/api/v1/requirements",
+        json={"project_id": project["id"], "title": "Unscheduled requirement", "owner_id": user_id},
+    ).json()
+    task = client.post(
+        "/api/v1/tasks",
+        json={"project_id": project["id"], "requirement_id": requirement["id"], "title": "Inherited pool task", "owner_id": user_id},
+    ).json()
+
+    db = SessionLocal()
+    try:
+        active_state_id = db.query(Iteration.current_state_id).filter(Iteration.id == delivery_id).scalar()
+        db.query(Iteration).filter(Iteration.id == project["requirement_pool_iteration_id"]).update(
+            {"current_state_id": active_state_id}
+        )
+        db.commit()
+    finally:
+        db.close()
+
+    workbench = client.get("/api/v1/dashboard/workbench", headers={"Authorization": f"Bearer {token}"}).json()
+    visible_refs = {
+        (item["object_type"], item["id"])
+        for section in ("pending_handling", "unassigned", "created_by_me", "watched_by_me", "mentioned_me")
+        for item in workbench[section]["items"]
+    }
+
+    assert ("requirement", requirement["id"]) not in visible_refs
+    assert ("task", task["id"]) not in visible_refs

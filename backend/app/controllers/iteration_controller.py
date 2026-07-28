@@ -39,8 +39,12 @@ router = APIRouter()
 
 
 @router.get("", response_model=list[IterationRead])
-def get_iterations(project_id: int | None = None, db: Session = Depends(get_db)):
-    return list_iterations(db, project_id)
+def get_iterations(
+    project_id: int | None = None,
+    include_requirement_pool: bool = False,
+    db: Session = Depends(get_db),
+):
+    return list_iterations(db, project_id, include_requirement_pool=include_requirement_pool)
 
 
 @router.post("", response_model=IterationRead)

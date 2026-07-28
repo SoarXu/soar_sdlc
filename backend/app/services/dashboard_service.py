@@ -294,6 +294,7 @@ def _terminal_iteration_open_item_refs(
 
     terminal_iteration_ids = select(Iteration.id).where(
         Iteration.deleted == 0,
+        Iteration.is_requirement_pool.is_(False),
         terminal_state_clause(Iteration),
     )
     refs = []
@@ -402,6 +403,7 @@ def _active_iteration_ids(db: Session) -> set[int]:
             )
             .filter(
                 Iteration.deleted == 0,
+                Iteration.is_requirement_pool.is_(False),
                 WorkflowTransition.enabled.is_(True),
                 WorkflowTransition.action_key.in_(("complete", "cancel")),
             )

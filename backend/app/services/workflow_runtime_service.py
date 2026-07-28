@@ -1246,7 +1246,12 @@ def _bug_activation_transition_read(
     )
     source_is_active = bool(source_iteration and is_iteration_active(db, source_iteration))
     options = []
-    for iteration in db.query(Iteration).filter(Iteration.deleted == 0).order_by(Iteration.id.desc()).all():
+    for iteration in (
+        db.query(Iteration)
+        .filter(Iteration.deleted == 0, Iteration.is_requirement_pool.is_(False))
+        .order_by(Iteration.id.desc())
+        .all()
+    ):
         if not is_iteration_active(db, iteration):
             continue
         if bug.project_id not in iteration_scoped_project_ids(db, iteration.id):
@@ -1512,7 +1517,11 @@ def _require_project_items_complete(db: Session, project_id: int) -> None:
     iterations = (
         db.query(Iteration)
         .join(IterationProject, IterationProject.iteration_id == Iteration.id)
-        .filter(IterationProject.project_id == project_id, Iteration.deleted == 0)
+        .filter(
+            IterationProject.project_id == project_id,
+            Iteration.deleted == 0,
+            Iteration.is_requirement_pool.is_(False),
+        )
         .all()
     )
     blocking_messages: list[str] = []

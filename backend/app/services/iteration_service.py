@@ -33,28 +33,7 @@ def list_iterations(db: Session, project_id: int | None = None) -> list[dict]:
     for it in iterations:
         ip_records = db.query(IterationProject).filter(IterationProject.iteration_id == it.id).all()
         project_ids = [ip.project_id for ip in ip_records]
-        result.append({
-            "id": it.id,
-            "workflow_definition_id": it.workflow_definition_id,
-            "current_state_id": it.current_state_id,
-            "status_name": it.status_name,
-            "state_category": it.state_category,
-            "project_id": project_ids[0] if project_ids else None,
-            "project_ids": project_ids,
-            "name": it.name,
-            "owner_id": it.owner_id,
-            "start_date": it.start_date,
-            "end_date": it.end_date,
-            "actual_start_date": it.actual_start_date,
-            "actual_end_date": it.actual_end_date,
-            "lifecycle_phase": it.lifecycle_phase,
-            "goal": it.goal,
-            "creator_id": it.creator_id,
-            "updater_id": it.updater_id,
-            "create_time": it.create_time,
-            "update_time": it.update_time,
-            "delete_time": it.delete_time,
-        })
+        result.append(_iteration_to_dict(it, project_ids))
     return result
 
 
@@ -77,28 +56,7 @@ def create_iteration(db: Session, payload: IterationCreate) -> dict:
     db.commit()
     db.refresh(iteration)
 
-    return {
-        "id": iteration.id,
-        "workflow_definition_id": iteration.workflow_definition_id,
-        "current_state_id": iteration.current_state_id,
-        "status_name": iteration.status_name,
-        "state_category": iteration.state_category,
-        "project_id": project_ids[0] if project_ids else None,
-        "project_ids": project_ids,
-        "name": iteration.name,
-        "owner_id": iteration.owner_id,
-        "start_date": iteration.start_date,
-        "end_date": iteration.end_date,
-        "actual_start_date": iteration.actual_start_date,
-        "actual_end_date": iteration.actual_end_date,
-        "lifecycle_phase": iteration.lifecycle_phase,
-        "goal": iteration.goal,
-        "creator_id": iteration.creator_id,
-        "updater_id": iteration.updater_id,
-        "create_time": iteration.create_time,
-        "update_time": iteration.update_time,
-        "delete_time": iteration.delete_time,
-    }
+    return _iteration_to_dict(iteration, project_ids)
 
 
 def update_iteration(
@@ -131,28 +89,7 @@ def update_iteration(
     ip_records = db.query(IterationProject).filter(IterationProject.iteration_id == iteration.id).all()
     result_project_ids = [ip.project_id for ip in ip_records]
 
-    return {
-        "id": iteration.id,
-        "workflow_definition_id": iteration.workflow_definition_id,
-        "current_state_id": iteration.current_state_id,
-        "status_name": iteration.status_name,
-        "state_category": iteration.state_category,
-        "project_id": result_project_ids[0] if result_project_ids else None,
-        "project_ids": result_project_ids,
-        "name": iteration.name,
-        "owner_id": iteration.owner_id,
-        "start_date": iteration.start_date,
-        "end_date": iteration.end_date,
-        "actual_start_date": iteration.actual_start_date,
-        "actual_end_date": iteration.actual_end_date,
-        "lifecycle_phase": iteration.lifecycle_phase,
-        "goal": iteration.goal,
-        "creator_id": iteration.creator_id,
-        "updater_id": iteration.updater_id,
-        "create_time": iteration.create_time,
-        "update_time": iteration.update_time,
-        "delete_time": iteration.delete_time,
-    }
+    return _iteration_to_dict(iteration, result_project_ids)
 
 
 def delete_iteration(db: Session, iteration_id: int) -> None:
@@ -467,6 +404,7 @@ def _iteration_to_dict(iteration: Iteration, project_ids: list[int]) -> dict:
         "current_state_id": iteration.current_state_id,
         "status_name": iteration.status_name,
         "state_category": iteration.state_category,
+        "is_requirement_pool": iteration.is_requirement_pool,
         "project_id": project_ids[0] if project_ids else None,
         "project_ids": project_ids,
         "name": iteration.name,

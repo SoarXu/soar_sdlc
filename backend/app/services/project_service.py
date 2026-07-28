@@ -524,6 +524,7 @@ def _iteration_to_dict(db: Session, iteration: Iteration) -> dict:
         "current_state_id": iteration.current_state_id,
         "status_name": iteration.status_name,
         "state_category": iteration.state_category,
+        "is_requirement_pool": iteration.is_requirement_pool,
         "lifecycle_phase": iteration.lifecycle_phase,
         "goal": iteration.goal,
         "creator_id": iteration.creator_id,

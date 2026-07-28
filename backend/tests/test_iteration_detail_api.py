@@ -242,6 +242,30 @@ def test_iteration_crud_persists_to_database(client: TestClient):
     assert deleted.status_code == 204
 
 
+def test_iteration_crud_serializes_requirement_pool_identity(client: TestClient):
+    project_id = _create_project(client)
+
+    created = client.post(
+        "/api/v1/iterations",
+        json={"project_id": project_id, "name": "Pool identity serialization"},
+    )
+    assert created.status_code == 200
+    iteration_id = created.json()["id"]
+    assert created.json()["is_requirement_pool"] is False
+
+    listed = client.get(f"/api/v1/iterations?project_id={project_id}")
+    assert listed.status_code == 200
+    listed_iteration = next(item for item in listed.json() if item["id"] == iteration_id)
+    assert listed_iteration["is_requirement_pool"] is False
+
+    updated = client.patch(
+        f"/api/v1/iterations/{iteration_id}",
+        json={"name": "Updated pool identity serialization"},
+    )
+    assert updated.status_code == 200
+    assert updated.json()["is_requirement_pool"] is False
+
+
 def test_iteration_detail_collects_scoped_projects_and_linked_objects(client: TestClient):
     root_project = _create_project(client, "Root project")
     child_project = _create_project(client, "Child project", parent_id=root_project)

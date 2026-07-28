@@ -508,6 +508,7 @@ def test_project_iteration_list_exposes_workflow_state_identity(client: TestClie
 
     assert response.status_code == 200
     listed = next(item for item in response.json()["items"] if item["id"] == iteration["id"])
+    assert listed["is_requirement_pool"] is False
     assert {
         "workflow_definition_id": listed.get("workflow_definition_id"),
         "current_state_id": listed.get("current_state_id"),

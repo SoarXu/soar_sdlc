@@ -5,6 +5,7 @@ from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
 from app.db.session import SessionLocal
+from app.models.audit_log import AuditLog
 from app.models.iteration import Iteration, IterationProject
 from app.models.project import Project
 from app.models.workflow_definition import WorkflowDefinition
@@ -198,3 +199,112 @@ def test_requirement_creation_rejects_foreign_or_noncanonical_pool(client: TestC
 
     assert foreign.status_code == 400
     assert noncanonical.status_code == 400
+
+
+def test_requirement_pool_allows_name_only_rename_and_records_audit(client: TestClient):
+    project = _create_project(client, "Rename pool")
+    pool_id = project["requirement_pool_iteration_id"]
+    renamed = f"Unscheduled work-{uuid4().hex[:8]}"
+
+    response = client.patch(f"/api/v1/iterations/{pool_id}", json={"name": renamed})
+
+    assert response.status_code == 200, response.text
+    assert response.json()["name"] == renamed
+    db = SessionLocal()
+    try:
+        pool = db.query(Iteration).filter(Iteration.id == pool_id).one()
+        audit = (
+            db.query(AuditLog)
+            .filter(AuditLog.object_type == "iteration", AuditLog.object_id == pool_id, AuditLog.action == "update")
+            .one()
+        )
+        assert pool.is_requirement_pool is True
+        assert project["requirement_pool_iteration_id"] == pool.id
+        assert audit.before_data == {"name": "需求池"}
+        assert audit.after_data == {"name": renamed}
+    finally:
+        db.close()
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"owner_id": 1},
+        {"start_date": "2026-01-01"},
+        {"end_date": "2026-01-31"},
+        {"actual_start_date": "2026-01-01"},
+        {"actual_end_date": "2026-01-31"},
+        {"goal": "Must not be editable"},
+        {"lifecycle_phase": "product"},
+        {"project_ids": []},
+    ],
+)
+def test_requirement_pool_rejects_non_name_update(client: TestClient, payload: dict):
+    project = _create_project(client, "Protected pool update")
+
+    response = client.patch(f"/api/v1/iterations/{project['requirement_pool_iteration_id']}", json=payload)
+
+    assert response.status_code == 409
+    assert response.json()["detail"]["code"] == "REQUIREMENT_POOL_OPERATION_FORBIDDEN"
+
+
+@pytest.mark.parametrize("name", ["", "   ", "需求池"])
+def test_requirement_pool_rejects_blank_or_unchanged_name(client: TestClient, name: str):
+    project = _create_project(client, "Protected pool name")
+
+    response = client.patch(f"/api/v1/iterations/{project['requirement_pool_iteration_id']}", json={"name": name})
+
+    assert response.status_code == 409
+    assert response.json()["detail"]["code"] == "REQUIREMENT_POOL_OPERATION_FORBIDDEN"
+
+
+@pytest.mark.parametrize(
+    "method,path_suffix,json",
+    [
+        ("delete", "", None),
+        ("get", "/detail", None),
+        ("get", "/available-requirements", None),
+        ("post", "/requirements", {"requirement_ids": []}),
+        ("delete", "/requirements/999999", None),
+        ("get", "/available-tasks", None),
+        ("post", "/tasks", {"task_ids": []}),
+        ("delete", "/tasks/999999", None),
+    ],
+)
+def test_requirement_pool_rejects_delivery_iteration_operations(client: TestClient, method: str, path_suffix: str, json: dict | None):
+    project = _create_project(client, "Protected pool operations")
+    pool_id = project["requirement_pool_iteration_id"]
+
+    response = client.request(method, f"/api/v1/iterations/{pool_id}{path_suffix}", json=json)
+
+    assert response.status_code == 409
+    assert response.json()["detail"]["code"] == "REQUIREMENT_POOL_OPERATION_FORBIDDEN"
+
+
+def test_requirement_pool_rejects_defer_as_source_or_target(client: TestClient):
+    project = _create_project(client, "Protected pool defer")
+    pool_id = project["requirement_pool_iteration_id"]
+    delivery = _create_delivery_iteration(client, project["id"], "Defer delivery")
+
+    source_response = client.post(
+        f"/api/v1/iterations/{pool_id}/defer-work-items",
+        json={"target_iteration_id": delivery["id"]},
+    )
+    target_response = client.post(
+        f"/api/v1/iterations/{delivery['id']}/defer-work-items",
+        json={"target_iteration_id": pool_id},
+    )
+
+    for response in (source_response, target_response):
+        assert response.status_code == 409
+        assert response.json()["detail"]["code"] == "REQUIREMENT_POOL_OPERATION_FORBIDDEN"
+
+
+def test_delivery_iteration_still_supports_ordinary_update(client: TestClient):
+    project = _create_project(client, "Delivery remains mutable")
+    delivery = _create_delivery_iteration(client, project["id"])
+
+    response = client.patch(f"/api/v1/iterations/{delivery['id']}", json={"goal": "Ship the release"})
+
+    assert response.status_code == 200, response.text
+    assert response.json()["goal"] == "Ship the release"

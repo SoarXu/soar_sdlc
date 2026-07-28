@@ -8,6 +8,7 @@ import pytest
 from app.core.security import create_access_token, get_password_hash
 from app.db.session import SessionLocal
 from app.models.bug import Bug
+from app.models.iteration import Iteration
 from app.models.notification import Notification
 from app.models.project_member import ProjectMember
 from app.models.relation import ObjectRelation
@@ -242,6 +243,48 @@ def test_iteration_transition_locks_its_item_directly_once(monkeypatch):
 
     assert result is iteration
     assert calls == ["item"]
+
+
+def test_requirement_pool_has_no_available_workflow_actions(client: TestClient):
+    project = client.post("/api/v1/projects", json={"name": f"Pool workflow list-{uuid4().hex[:8]}"}).json()
+    pool_id = project["requirement_pool_iteration_id"]
+
+    response = client.get(f"/api/v1/workflow-runtime/iteration/{pool_id}/transitions")
+
+    assert response.status_code == 200, response.text
+    assert response.json() == []
+
+
+def test_requirement_pool_rejects_direct_workflow_transition(client: TestClient):
+    project = client.post("/api/v1/projects", json={"name": f"Pool workflow execute-{uuid4().hex[:8]}"}).json()
+    pool_id = project["requirement_pool_iteration_id"]
+    db = SessionLocal()
+    try:
+        transition_id = (
+            db.query(WorkflowTransition.id)
+            .filter(
+                WorkflowTransition.definition_id == db.query(Iteration.workflow_definition_id)
+                .filter(Iteration.id == pool_id)
+                .scalar_subquery(),
+                WorkflowTransition.from_state_id == db.query(Iteration.current_state_id)
+                .filter(Iteration.id == pool_id)
+                .scalar_subquery(),
+                WorkflowTransition.enabled.is_(True),
+            )
+            .order_by(WorkflowTransition.sort_order.asc(), WorkflowTransition.id.asc())
+            .scalar()
+        )
+    finally:
+        db.close()
+    assert transition_id is not None
+
+    response = client.post(
+        f"/api/v1/workflow-runtime/iteration/{pool_id}/transition",
+        json={"transition_id": transition_id},
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"]["code"] == "REQUIREMENT_POOL_OPERATION_FORBIDDEN"
 
 
 def test_list_available_transitions_uses_nonlocking_item_loader(monkeypatch):

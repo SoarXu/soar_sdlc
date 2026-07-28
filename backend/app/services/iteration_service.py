@@ -4,6 +4,7 @@ from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 
 from app.models.iteration import Iteration, IterationProject
+from app.models.audit_log import AuditLog
 from app.models.bug import Bug
 from app.models.project import Project
 from app.models.requirement import Requirement
@@ -67,8 +68,11 @@ def update_iteration(
     actor_id: int | None = None,
 ) -> dict:
     iteration = _get_active_iteration(db, iteration_id, for_update=True)
-    ensure_iteration_mutable(iteration)
     data = payload.model_dump(exclude_unset=True)
+    if iteration.is_requirement_pool:
+        return _rename_requirement_pool(db, iteration, data, actor_id)
+
+    ensure_iteration_mutable(iteration)
     project_id = data.pop("project_id", None)
     project_ids = data.pop("project_ids", None)
     if project_id and project_ids is None:
@@ -95,6 +99,7 @@ def update_iteration(
 
 def delete_iteration(db: Session, iteration_id: int) -> None:
     iteration = _get_active_iteration(db, iteration_id, for_update=True)
+    ensure_delivery_iteration(iteration)
     ensure_iteration_mutable(iteration)
     iteration.deleted = 1
     iteration.delete_time = datetime.now()
@@ -110,6 +115,8 @@ def defer_work_items(
     locked_iterations = lock_iterations_for_mutation(db, {iteration_id, payload.target_iteration_id})
     source_iteration = locked_iterations[iteration_id]
     target_iteration = locked_iterations[payload.target_iteration_id]
+    ensure_delivery_iteration(source_iteration)
+    ensure_delivery_iteration(target_iteration)
     ensure_iteration_mutable(source_iteration)
     ensure_iteration_mutable(target_iteration)
     if source_iteration.id == target_iteration.id:
@@ -147,6 +154,7 @@ def list_iteration_status_operations(db: Session, iteration_id: int) -> list[dic
 
 def get_iteration_detail(db: Session, iteration_id: int) -> dict:
     iteration = _get_active_iteration(db, iteration_id)
+    ensure_delivery_iteration(iteration)
     project_ids = _iteration_project_ids(db, iteration_id)
     scoped_project_ids = _iteration_scoped_project_ids(db, iteration_id)
     requirements = _linked_requirements(db, iteration_id)
@@ -209,6 +217,7 @@ def get_iteration_detail(db: Session, iteration_id: int) -> dict:
 
 
 def available_requirements(db: Session, iteration_id: int) -> list[Requirement]:
+    ensure_delivery_iteration(_get_active_iteration(db, iteration_id))
     scoped_project_ids = _iteration_scoped_project_ids(db, iteration_id)
     return (
         db.query(Requirement)
@@ -230,9 +239,8 @@ def link_requirements(
     actor_id: int | None = None,
 ) -> list[Requirement]:
     iteration = _get_active_iteration(db, iteration_id, for_update=True)
+    ensure_delivery_iteration(iteration)
     ensure_iteration_mutable(iteration)
-    if iteration.is_requirement_pool:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Requirement pool cannot be a link target")
     scoped_project_ids = _iteration_scoped_project_ids(db, iteration_id)
     requirements = (
         db.query(Requirement)
@@ -262,7 +270,9 @@ def unlink_requirement(
     requirement_id: int,
     actor_id: int | None = None,
 ) -> None:
-    ensure_iteration_mutable(_get_active_iteration(db, iteration_id, for_update=True))
+    iteration = _get_active_iteration(db, iteration_id, for_update=True)
+    ensure_delivery_iteration(iteration)
+    ensure_iteration_mutable(iteration)
     requirement = (
         db.query(Requirement)
         .filter(Requirement.id == requirement_id, Requirement.deleted == 0)
@@ -277,6 +287,7 @@ def unlink_requirement(
 
 
 def available_tasks(db: Session, iteration_id: int) -> list[Task]:
+    ensure_delivery_iteration(_get_active_iteration(db, iteration_id))
     scoped_project_ids = _iteration_scoped_project_ids(db, iteration_id)
     return (
         db.query(Task)
@@ -297,7 +308,9 @@ def link_tasks(
     task_ids: list[int],
     actor_id: int | None = None,
 ) -> list[Task]:
-    ensure_iteration_mutable(_get_active_iteration(db, iteration_id, for_update=True))
+    iteration = _get_active_iteration(db, iteration_id, for_update=True)
+    ensure_delivery_iteration(iteration)
+    ensure_iteration_mutable(iteration)
     scoped_project_ids = _iteration_scoped_project_ids(db, iteration_id)
     tasks = db.query(Task).filter(Task.deleted == 0, Task.id.in_(task_ids)).all()
     if len(tasks) != len(set(task_ids)):
@@ -318,7 +331,9 @@ def unlink_task(
     task_id: int,
     actor_id: int | None = None,
 ) -> None:
-    ensure_iteration_mutable(_get_active_iteration(db, iteration_id, for_update=True))
+    iteration = _get_active_iteration(db, iteration_id, for_update=True)
+    ensure_delivery_iteration(iteration)
+    ensure_iteration_mutable(iteration)
     task = db.query(Task).filter(Task.id == task_id, Task.deleted == 0).first()
     if task and task.iteration_id == iteration_id:
         move_work_item_to_iteration(db, task, None, actor_id=actor_id, reason="unlinked")
@@ -388,6 +403,48 @@ def ensure_iteration_mutable(iteration: Iteration) -> None:
                 "iteration_id": iteration.id,
             },
         )
+
+
+def ensure_delivery_iteration(iteration: Iteration) -> None:
+    if getattr(iteration, "is_requirement_pool", False):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": "REQUIREMENT_POOL_OPERATION_FORBIDDEN",
+                "message": "Requirement pool does not support this iteration operation",
+            },
+        )
+
+
+def _rename_requirement_pool(
+    db: Session,
+    iteration: Iteration,
+    data: dict,
+    actor_id: int | None,
+) -> dict:
+    if (
+        set(data) != {"name"}
+        or not isinstance(data["name"], str)
+        or not data["name"].strip()
+        or data["name"].strip() == iteration.name
+    ):
+        ensure_delivery_iteration(iteration)
+
+    old_name = iteration.name
+    iteration.name = data["name"].strip()
+    db.add(
+        AuditLog(
+            actor_id=actor_id,
+            action="update",
+            object_type="iteration",
+            object_id=iteration.id,
+            before_data={"name": old_name},
+            after_data={"name": iteration.name},
+        )
+    )
+    db.commit()
+    db.refresh(iteration)
+    return _iteration_to_dict(iteration, _iteration_project_ids(db, iteration.id))
 
 
 def ensure_iteration_assignment_mutable(

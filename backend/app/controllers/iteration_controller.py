@@ -13,6 +13,7 @@ from app.services.iteration_service import (
     create_iteration,
     delete_iteration,
     defer_work_items,
+    ensure_delivery_iteration,
     get_iteration_detail,
     link_requirements,
     link_tasks,
@@ -73,6 +74,7 @@ def patch_iteration(
 
 @router.get("/{iteration_id}/detail")
 def get_iteration_detail_view(iteration_id: int, db: Session = Depends(get_db)):
+    _ensure_delivery_iteration_operation(db, iteration_id)
     return get_iteration_detail(db, iteration_id)
 
 
@@ -93,6 +95,8 @@ def defer_iteration_work_items(
     db: Session = Depends(get_db),
     current_user: User | None = Depends(get_optional_current_user),
 ):
+    _ensure_delivery_iteration_operation(db, iteration_id)
+    _ensure_delivery_iteration_operation(db, payload.target_iteration_id)
     _ensure_can_manage_iteration(db, iteration_id, current_user)
     _ensure_can_manage_iteration(db, payload.target_iteration_id, current_user)
     return defer_work_items(db, iteration_id, payload, actor_id=current_user.id if current_user else None)
@@ -100,6 +104,7 @@ def defer_iteration_work_items(
 
 @router.get("/{iteration_id}/available-requirements")
 def get_available_requirements(iteration_id: int, db: Session = Depends(get_db)):
+    _ensure_delivery_iteration_operation(db, iteration_id)
     return available_requirements(db, iteration_id)
 
 
@@ -110,6 +115,7 @@ def post_iteration_requirements(
     db: Session = Depends(get_db),
     current_user: User | None = Depends(get_optional_current_user),
 ):
+    _ensure_delivery_iteration_operation(db, iteration_id)
     _ensure_can_manage_iteration(db, iteration_id, current_user)
     return link_requirements(
         db,
@@ -126,6 +132,7 @@ def delete_iteration_requirement(
     db: Session = Depends(get_db),
     current_user: User | None = Depends(get_optional_current_user),
 ):
+    _ensure_delivery_iteration_operation(db, iteration_id)
     _ensure_can_manage_iteration(db, iteration_id, current_user)
     unlink_requirement(db, iteration_id, requirement_id, actor_id=current_user.id if current_user else None)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
@@ -133,6 +140,7 @@ def delete_iteration_requirement(
 
 @router.get("/{iteration_id}/available-tasks")
 def get_available_tasks(iteration_id: int, db: Session = Depends(get_db)):
+    _ensure_delivery_iteration_operation(db, iteration_id)
     return available_tasks(db, iteration_id)
 
 
@@ -143,6 +151,7 @@ def post_iteration_tasks(
     db: Session = Depends(get_db),
     current_user: User | None = Depends(get_optional_current_user),
 ):
+    _ensure_delivery_iteration_operation(db, iteration_id)
     _ensure_can_manage_iteration(db, iteration_id, current_user)
     return link_tasks(db, iteration_id, payload.task_ids, actor_id=current_user.id if current_user else None)
 
@@ -154,6 +163,7 @@ def delete_iteration_task(
     db: Session = Depends(get_db),
     current_user: User | None = Depends(get_optional_current_user),
 ):
+    _ensure_delivery_iteration_operation(db, iteration_id)
     _ensure_can_manage_iteration(db, iteration_id, current_user)
     unlink_task(db, iteration_id, task_id, actor_id=current_user.id if current_user else None)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
@@ -165,6 +175,7 @@ def remove_iteration(
     db: Session = Depends(get_db),
     current_user: User | None = Depends(get_optional_current_user),
 ):
+    _ensure_delivery_iteration_operation(db, iteration_id)
     _ensure_can_manage_iteration(db, iteration_id, current_user)
     delete_iteration(db, iteration_id)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
@@ -193,6 +204,12 @@ def _ensure_can_manage_iteration(db: Session, iteration_id: int, current_user: U
         if legacy_project_id:
             project_ids = [legacy_project_id]
     _ensure_can_manage_projects(db, project_ids, current_user)
+
+
+def _ensure_delivery_iteration_operation(db: Session, iteration_id: int) -> None:
+    iteration = db.query(Iteration).filter(Iteration.id == iteration_id, Iteration.deleted == 0).first()
+    if iteration:
+        ensure_delivery_iteration(iteration)
 
 
 def _ensure_can_view_iteration_audit(db: Session, iteration_id: int, current_user: User | None) -> None:

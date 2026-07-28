@@ -440,7 +440,8 @@ def test_link_requirements_moves_pool_items_but_rejects_other_delivery_items(cli
     assert linked.status_code == 200, linked.text
     assert client.get(f"/api/v1/requirements/{pool_requirement_id}").json()["iteration_id"] == target_iteration_id
     assert rejected.status_code == 400
-    assert pool_rejected.status_code == 400
+    assert pool_rejected.status_code == 409
+    assert pool_rejected.json()["detail"]["code"] == "REQUIREMENT_POOL_OPERATION_FORBIDDEN"
 
 
 def test_iteration_detail_collects_scoped_projects_and_linked_objects(client: TestClient):

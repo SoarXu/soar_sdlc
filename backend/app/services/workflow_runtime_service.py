@@ -39,6 +39,7 @@ from app.services.project_permission_service import (
 from app.services.status_operation_service import create_status_operation
 from app.services.iteration_completion_snapshot_service import create_completion_snapshot
 from app.services.iteration_service import (
+    ensure_delivery_iteration,
     ensure_iteration_mutable,
     is_iteration_active,
     iteration_scoped_project_ids,
@@ -80,6 +81,8 @@ def list_available_transitions(
 ) -> list[WorkflowTransitionActionRead]:
     ensure_default_workflow_templates(db)
     item = _get_item(db, object_type, object_id)
+    if object_type == "iteration" and item.is_requirement_pool:
+        return []
     definition_context = _resolve_definition_context(db, object_type, item)
     if not definition_context:
         return []
@@ -130,6 +133,8 @@ def execute_transition(
     ensure_authenticated(actor)
     ensure_default_workflow_templates(db)
     item = _get_item_for_execution(db, object_type, object_id, request)
+    if object_type == "iteration":
+        ensure_delivery_iteration(item)
     return _execute_transition(db, object_type, item, request, actor, commit=True)
 
 

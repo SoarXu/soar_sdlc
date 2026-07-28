@@ -4,7 +4,6 @@ from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 
 from app.models.audit_log import AuditLog
-from app.models.iteration import Iteration, IterationProject
 from app.models.project import Project
 from app.models.requirement import Requirement
 from app.models.task import Task
@@ -24,6 +23,10 @@ from app.services.task_service import linked_task_summaries
 from app.services.work_item_iteration_history_service import move_work_item_to_iteration
 from app.services.workflow_state_service import initial_workflow_values
 from app.services.workflow_state_query_service import is_terminal_state
+from app.services.requirement_pool_service import (
+    is_project_requirement_pool,
+    resolve_requirement_iteration_id,
+)
 from app.views.requirement_view import RequirementCreate, RequirementUpdate
 
 
@@ -47,8 +50,10 @@ def create_requirement(db: Session, payload: RequirementCreate, actor_id: int | 
     primary_component_id = data.pop("primary_component_id", None)
     related_component_ids = data.pop("related_component_ids", [])
     data["creator_id"] = actor_id
+    data["iteration_id"] = resolve_requirement_iteration_id(
+        db, data["project_id"], data.get("iteration_id")
+    )
     ensure_iteration_assignment_mutable(db, None, data.get("iteration_id"))
-    _ensure_requirement_iteration_scope(db, data.get("project_id"), data.get("iteration_id"))
     primary_component = resolve_primary_component(db, data["project_id"], primary_component_id)
     if primary_component:
         data["source_project_id"] = primary_component.source_project_id
@@ -65,8 +70,7 @@ def create_requirement(db: Session, payload: RequirementCreate, actor_id: int | 
         primary_component_id,
         related_component_ids,
     )
-    if requirement.iteration_id:
-        move_work_item_to_iteration(db, requirement, requirement.iteration_id, actor_id=actor_id, reason="created")
+    move_work_item_to_iteration(db, requirement, requirement.iteration_id, actor_id=actor_id, reason="created")
     db.commit()
     db.refresh(requirement)
     attach_work_item_components(db, "requirement", requirement)
@@ -75,25 +79,34 @@ def create_requirement(db: Session, payload: RequirementCreate, actor_id: int | 
 
 def update_requirement(db: Session, requirement_id: int, payload: RequirementUpdate, actor_id: int | None = None) -> Requirement:
     requirement = _get_active_requirement(db, requirement_id)
-    ensure_iteration_assignment_mutable(db, requirement.iteration_id, requirement.iteration_id)
     ensure_work_item_action(db, requirement, actor_id, "requirement")
     ensure_workflow_fields_not_updated(payload.model_fields_set)
     _ensure_project_editable_for_requirement(db, requirement)
     data = payload.model_dump(exclude_unset=True)
     data.pop("status", None)
     target_project_id = data.get("project_id", requirement.project_id)
-    target_iteration_id = data.get("iteration_id", requirement.iteration_id)
+    iteration_was_supplied = "iteration_id" in data
+    requested_iteration_id = data.get("iteration_id") if iteration_was_supplied else requirement.iteration_id
+    if (
+        target_project_id != requirement.project_id
+        and not iteration_was_supplied
+        and is_project_requirement_pool(db, requirement.project_id, requirement.iteration_id)
+    ):
+        requested_iteration_id = None
+    target_iteration_id = resolve_requirement_iteration_id(db, target_project_id, requested_iteration_id)
     ensure_iteration_assignment_mutable(db, requirement.iteration_id, target_iteration_id)
-    _ensure_requirement_iteration_scope(db, target_project_id, target_iteration_id)
+    if target_iteration_id != requirement.iteration_id:
+        data["iteration_id"] = target_iteration_id
     before_data, after_data = _requirement_change_data(requirement, data)
-    if "iteration_id" in data:
+    if target_iteration_id != requirement.iteration_id:
         move_work_item_to_iteration(
             db,
             requirement,
-            data.pop("iteration_id"),
+            target_iteration_id,
             actor_id=actor_id,
             reason="updated",
         )
+    data.pop("iteration_id", None)
     for field, value in data.items():
         setattr(requirement, field, value)
     if before_data:
@@ -174,32 +187,6 @@ def _ensure_project_editable_for_requirement(db: Session, requirement: Requireme
     project = db.query(Project).filter(Project.id == requirement.project_id, Project.deleted == 0).first()
     if project and is_terminal_state(project):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Project is closed")
-
-
-def _ensure_requirement_iteration_scope(db: Session, project_id: int | None, iteration_id: int | None) -> None:
-    if not project_id or not iteration_id:
-        return
-    iteration = db.query(Iteration).filter(Iteration.id == iteration_id, Iteration.deleted == 0).first()
-    if not iteration:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Iteration not found")
-    if project_id not in _iteration_scoped_project_ids(db, iteration_id):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Requirement is outside iteration scope")
-
-
-def _iteration_scoped_project_ids(db: Session, iteration_id: int) -> set[int]:
-    root_ids = [row.project_id for row in db.query(IterationProject).filter(IterationProject.iteration_id == iteration_id).all()]
-    result = set(root_ids)
-    for project_id in root_ids:
-        result.update(_collect_descendant_project_ids(db, project_id))
-    return result
-
-
-def _collect_descendant_project_ids(db: Session, project_id: int) -> set[int]:
-    children = db.query(Project).filter(Project.parent_id == project_id, Project.deleted == 0).all()
-    result = {child.id for child in children}
-    for child in children:
-        result.update(_collect_descendant_project_ids(db, child.id))
-    return result
 
 
 def _requirement_change_data(requirement: Requirement, data: dict) -> tuple[dict, dict]:

@@ -127,3 +127,74 @@ def test_requirement_pool_helper_rejects_corrupted_pool_identity(client: TestCli
         assert exc_info.value.detail["code"] == "REQUIREMENT_POOL_INTEGRITY_ERROR"
     finally:
         db.close()
+
+
+def _create_delivery_iteration(client: TestClient, project_id: int, name_prefix: str = "Delivery") -> dict:
+    response = client.post(
+        "/api/v1/iterations",
+        json={"project_ids": [project_id], "name": f"{name_prefix}-{uuid4().hex[:8]}"},
+    )
+    assert response.status_code == 200, response.text
+    return response.json()
+
+
+@pytest.mark.parametrize("payload", [{}, {"iteration_id": None}])
+def test_requirement_creation_without_iteration_uses_canonical_pool(client: TestClient, payload: dict):
+    project = _create_project(client, "Create into pool")
+
+    created = client.post(
+        "/api/v1/requirements",
+        json={"project_id": project["id"], "title": f"Pool requirement-{uuid4().hex[:8]}", **payload},
+    )
+
+    assert created.status_code == 200, created.text
+    assert created.json()["iteration_id"] == project["requirement_pool_iteration_id"]
+
+
+def test_requirement_creation_keeps_explicit_delivery_iteration(client: TestClient):
+    project = _create_project(client, "Create into delivery")
+    delivery = _create_delivery_iteration(client, project["id"])
+
+    created = client.post(
+        "/api/v1/requirements",
+        json={
+            "project_id": project["id"],
+            "iteration_id": delivery["id"],
+            "title": f"Delivery requirement-{uuid4().hex[:8]}",
+        },
+    )
+
+    assert created.status_code == 200, created.text
+    assert created.json()["iteration_id"] == delivery["id"]
+
+
+def test_requirement_creation_rejects_foreign_or_noncanonical_pool(client: TestClient):
+    project = _create_project(client, "Canonical pool")
+    foreign_project = _create_project(client, "Foreign pool")
+    delivery = _create_delivery_iteration(client, project["id"], "Corrupted pool")
+    db = SessionLocal()
+    try:
+        db.query(Iteration).filter(Iteration.id == delivery["id"]).update({"is_requirement_pool": True})
+        db.commit()
+    finally:
+        db.close()
+
+    foreign = client.post(
+        "/api/v1/requirements",
+        json={
+            "project_id": project["id"],
+            "iteration_id": foreign_project["requirement_pool_iteration_id"],
+            "title": f"Foreign pool requirement-{uuid4().hex[:8]}",
+        },
+    )
+    noncanonical = client.post(
+        "/api/v1/requirements",
+        json={
+            "project_id": project["id"],
+            "iteration_id": delivery["id"],
+            "title": f"Noncanonical pool requirement-{uuid4().hex[:8]}",
+        },
+    )
+
+    assert foreign.status_code == 400
+    assert noncanonical.status_code == 400

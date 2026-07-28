@@ -156,16 +156,23 @@ def test_requirement_patch_closes_current_membership_history(client: TestClient)
 
     db = SessionLocal()
     try:
-        row = db.execute(
-            text(
-                "select enter_reason, leave_reason, left_at from work_item_iteration_history "
-                "where object_type = 'requirement' and object_id = :object_id"
-            ),
-            {"object_id": requirement_id},
-        ).one()
-        assert row.enter_reason == "created"
-        assert row.leave_reason == "updated"
-        assert row.left_at is not None
+        histories = (
+            db.query(WorkItemIterationHistory)
+            .filter(
+                WorkItemIterationHistory.object_type == "requirement",
+                WorkItemIterationHistory.object_id == requirement_id,
+            )
+            .order_by(WorkItemIterationHistory.id)
+            .all()
+        )
+        pool_id = client.get(f"/api/v1/projects/{project_id}").json()["requirement_pool_iteration_id"]
+        assert updated.json()["iteration_id"] == pool_id
+        assert [row.enter_reason for row in histories] == ["created", "updated"]
+        assert histories[0].iteration_id == iteration_id
+        assert histories[0].leave_reason == "updated"
+        assert histories[0].left_at is not None
+        assert histories[1].iteration_id == pool_id
+        assert histories[1].left_at is None
     finally:
         db.close()
 
@@ -226,3 +233,41 @@ def test_membership_move_locks_and_refreshes_stale_work_item_before_history_chan
     finally:
         stale_db.close()
         mover_db.close()
+
+
+def test_requirement_clear_moves_from_delivery_to_pool_with_history(client: TestClient):
+    project_id = _create_project(client)
+    delivery_id = _create_iteration(client, project_id)
+    created = client.post(
+        "/api/v1/requirements",
+        json={
+            "project_id": project_id,
+            "iteration_id": delivery_id,
+            "title": f"Clear to pool-{uuid4().hex[:8]}",
+        },
+    )
+    assert created.status_code == 200, created.text
+
+    updated = client.patch(f"/api/v1/requirements/{created.json()['id']}", json={"iteration_id": None})
+
+    assert updated.status_code == 200, updated.text
+    pool_id = client.get(f"/api/v1/projects/{project_id}").json()["requirement_pool_iteration_id"]
+    assert updated.json()["iteration_id"] == pool_id
+    db = SessionLocal()
+    try:
+        histories = (
+            db.query(WorkItemIterationHistory)
+            .filter(
+                WorkItemIterationHistory.object_type == "requirement",
+                WorkItemIterationHistory.object_id == created.json()["id"],
+            )
+            .order_by(WorkItemIterationHistory.id)
+            .all()
+        )
+        assert [history.enter_reason for history in histories] == ["created", "updated"]
+        assert histories[0].iteration_id == delivery_id
+        assert histories[0].left_at is not None
+        assert histories[1].iteration_id == pool_id
+        assert histories[1].left_at is None
+    finally:
+        db.close()

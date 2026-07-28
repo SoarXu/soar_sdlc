@@ -56,6 +56,50 @@ def requirement_pool_for_project(db: Session, project_id: int, *, for_update: bo
     return pool
 
 
+def resolve_requirement_iteration_id(
+    db: Session,
+    project_id: int,
+    requested_iteration_id: int | None,
+) -> int:
+    if requested_iteration_id is None:
+        return requirement_pool_for_project(db, project_id).id
+
+    iteration = db.query(Iteration).filter(
+        Iteration.id == requested_iteration_id,
+        Iteration.deleted == 0,
+    ).first()
+    if not iteration:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Iteration not found")
+    if project_id not in _iteration_scoped_project_ids(db, requested_iteration_id):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Requirement is outside iteration scope")
+    if iteration.is_requirement_pool and requirement_pool_for_project(db, project_id).id != requested_iteration_id:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Requirement pool is not canonical for project")
+    return requested_iteration_id
+
+
+def is_project_requirement_pool(db: Session, project_id: int, iteration_id: int | None) -> bool:
+    return iteration_id is not None and requirement_pool_for_project(db, project_id).id == iteration_id
+
+
+def _iteration_scoped_project_ids(db: Session, iteration_id: int) -> set[int]:
+    root_ids = [
+        row.project_id
+        for row in db.query(IterationProject).filter(IterationProject.iteration_id == iteration_id).all()
+    ]
+    project_ids = set(root_ids)
+    for project_id in root_ids:
+        project_ids.update(_descendant_project_ids(db, project_id))
+    return project_ids
+
+
+def _descendant_project_ids(db: Session, project_id: int) -> set[int]:
+    children = db.query(Project).filter(Project.parent_id == project_id, Project.deleted == 0).all()
+    project_ids = {child.id for child in children}
+    for child in children:
+        project_ids.update(_descendant_project_ids(db, child.id))
+    return project_ids
+
+
 def _raise_pool_integrity_error(project_id: int) -> None:
     raise HTTPException(
         status_code=status.HTTP_409_CONFLICT,

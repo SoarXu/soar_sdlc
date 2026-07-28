@@ -201,7 +201,7 @@ def test_requirement_import_commit_updates_duplicate_requirement(client: TestCli
     assert updated["priority"] == "1"
 
 
-def test_requirement_import_update_closes_active_iteration_history(client: TestClient):
+def test_requirement_import_update_preserves_active_iteration_history(client: TestClient):
     project_name = f"Import planned project-{uuid4().hex[:8]}"
     project = client.post("/api/v1/projects", json={"name": project_name}).json()
     iteration = client.post(
@@ -220,16 +220,15 @@ def test_requirement_import_update_closes_active_iteration_history(client: TestC
     )
 
     assert response.status_code == 200
-    assert client.get(f"/api/v1/requirements/{existing['id']}").json()["iteration_id"] is None
+    assert client.get(f"/api/v1/requirements/{existing['id']}").json()["iteration_id"] == iteration["id"]
     db = SessionLocal()
     try:
         history = db.query(WorkItemIterationHistory).filter(
             WorkItemIterationHistory.object_type == "requirement",
             WorkItemIterationHistory.object_id == existing["id"],
         ).one()
-        assert history.left_at is not None
-        assert history.leave_reason == "import_updated"
-        assert history.left_by is not None
+        assert history.iteration_id == iteration["id"]
+        assert history.left_at is None
     finally:
         db.close()
 
@@ -482,3 +481,51 @@ def test_requirement_import_update_preserves_existing_current_handler(client: Te
     assert response.status_code == 200
     updated = client.get(f"/api/v1/requirements/{existing['id']}").json()
     assert updated["owner_id"] == old_owner_id
+
+
+def test_requirement_import_new_row_enters_pool_and_opens_history(client: TestClient):
+    project_name = f"Import pool-{uuid4().hex[:8]}"
+    project = client.post("/api/v1/projects", json={"name": project_name}).json()
+
+    response = client.post(
+        "/api/v1/requirements/import/commit",
+        data={"duplicate_strategy": "create_duplicate"},
+        files={"file": _xlsx([REQUIREMENT_IMPORT_COLUMNS, [project_name, "Imported into pool"]])},
+    )
+
+    assert response.status_code == 200, response.text
+    created = next(item for item in client.get("/api/v1/requirements").json() if item["title"] == "Imported into pool")
+    assert created["iteration_id"] == project["requirement_pool_iteration_id"]
+    db = SessionLocal()
+    try:
+        history = db.query(WorkItemIterationHistory).filter(
+            WorkItemIterationHistory.object_type == "requirement",
+            WorkItemIterationHistory.object_id == created["id"],
+        ).one()
+        assert history.iteration_id == project["requirement_pool_iteration_id"]
+        assert history.enter_reason == "created"
+        assert history.left_at is None
+    finally:
+        db.close()
+
+
+def test_requirement_import_duplicate_keeps_delivery_iteration(client: TestClient):
+    project_name = f"Import preserve iteration-{uuid4().hex[:8]}"
+    project = client.post("/api/v1/projects", json={"name": project_name}).json()
+    iteration = client.post(
+        "/api/v1/iterations",
+        json={"project_ids": [project["id"]], "name": f"Import delivery-{uuid4().hex[:8]}"},
+    ).json()
+    existing = client.post(
+        "/api/v1/requirements",
+        json={"project_id": project["id"], "iteration_id": iteration["id"], "title": "Preserved import row"},
+    ).json()
+
+    response = client.post(
+        "/api/v1/requirements/import/commit",
+        data={"duplicate_strategy": "update_existing"},
+        files={"file": _xlsx([REQUIREMENT_IMPORT_COLUMNS, [project_name, "Preserved import row"]])},
+    )
+
+    assert response.status_code == 200, response.text
+    assert client.get(f"/api/v1/requirements/{existing['id']}").json()["iteration_id"] == iteration["id"]

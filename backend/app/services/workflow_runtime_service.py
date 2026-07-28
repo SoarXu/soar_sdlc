@@ -36,6 +36,7 @@ from app.services.project_permission_service import (
     is_project_owner,
     is_system_admin,
 )
+from app.services.requirement_pool_service import requirement_pool_for_project
 from app.services.status_operation_service import create_status_operation
 from app.services.iteration_completion_snapshot_service import create_completion_snapshot
 from app.services.iteration_service import (
@@ -443,6 +444,7 @@ def _get_item_for_execution(
         refreshed_iteration_id = getattr(item, "iteration_id", None)
         if refreshed_iteration_id is None or refreshed_iteration_id in locked_iterations:
             item._transition_locked_iterations = locked_iterations
+            item._transition_target_iteration_id = target_iteration_id
             return item
 
         db.rollback()
@@ -467,8 +469,6 @@ def _activation_target_iteration_id(
     if object_type not in {"bug", "requirement"}:
         return None
     target_iteration_id = _request_target_iteration_id(request.payload or {})
-    if target_iteration_id is None:
-        return None
     expected_action_key = "activate" if object_type == "bug" else "defer"
     target_transition = db.query(WorkflowTransition.id).filter(
         WorkflowTransition.id == request.transition_id,
@@ -476,7 +476,13 @@ def _activation_target_iteration_id(
         WorkflowTransition.action_key == expected_action_key,
         WorkflowTransition.enabled == True,  # noqa: E712
     ).first()
-    return target_iteration_id if target_transition else None
+    if not target_transition:
+        return None
+    if target_iteration_id is not None:
+        return target_iteration_id
+    if object_type == "requirement":
+        return requirement_pool_for_project(db, item.project_id).id
+    return None
 
 
 def _request_target_iteration_id(payload: dict[str, Any]) -> int | None:
@@ -2000,8 +2006,12 @@ def _ensure_manual_owner_allowed(db: Session, project_id: int | None, user_id: i
 
 
 def _defer_requirement_links(db: Session, requirement: Requirement, payload: dict[str, Any], actor: User | None) -> None:
-    parsed_target_iteration_id = _request_target_iteration_id(payload)
-    if parsed_target_iteration_id and requirement.iteration_id == parsed_target_iteration_id:
+    target_iteration_id = getattr(requirement, "_transition_target_iteration_id", None)
+    if target_iteration_id is None:
+        target_iteration_id = _request_target_iteration_id(payload)
+    if target_iteration_id is None:
+        target_iteration_id = requirement_pool_for_project(db, requirement.project_id).id
+    if requirement.iteration_id == target_iteration_id:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Target iteration cannot be current iteration")
     locked_iterations = getattr(requirement, "_transition_locked_iterations", {})
     tasks = (
@@ -2024,7 +2034,7 @@ def _defer_requirement_links(db: Session, requirement: Requirement, payload: dic
         iteration_id
         for iteration_id in (
             requirement.iteration_id,
-            parsed_target_iteration_id,
+            target_iteration_id,
             *(task.iteration_id for task in tasks),
             *(test_case.iteration_id for test_case in test_cases),
         )
@@ -2041,21 +2051,20 @@ def _defer_requirement_links(db: Session, requirement: Requirement, payload: dic
         )
     for iteration in locked_iterations.values():
         ensure_iteration_mutable(iteration)
-    if parsed_target_iteration_id:
-        target_scope = iteration_scoped_project_ids(db, parsed_target_iteration_id)
-        for item in (requirement, *tasks, *test_cases):
-            if item.project_id not in target_scope:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"{type(item).__name__} is outside target iteration scope",
-                )
+    target_scope = iteration_scoped_project_ids(db, target_iteration_id)
+    for item in (requirement, *tasks, *test_cases):
+        if item.project_id not in target_scope:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"{type(item).__name__} is outside target iteration scope",
+            )
 
     from_iteration_id = requirement.iteration_id
     actor_id = actor.id if actor else None
     move_work_item_to_iteration(
         db,
         requirement,
-        parsed_target_iteration_id,
+        target_iteration_id,
         actor_id=actor_id,
         reason="deferred",
     )
@@ -2063,7 +2072,7 @@ def _defer_requirement_links(db: Session, requirement: Requirement, payload: dic
         move_work_item_to_iteration(
             db,
             task,
-            parsed_target_iteration_id,
+            target_iteration_id,
             actor_id=actor_id,
             reason="deferred",
         )
@@ -2072,7 +2081,7 @@ def _defer_requirement_links(db: Session, requirement: Requirement, payload: dic
             if definition and definition.initial_state_id:
                 task.current_state_id = definition.initial_state_id
     for test_case in test_cases:
-        test_case.iteration_id = parsed_target_iteration_id
+        test_case.iteration_id = target_iteration_id
 
     db.add(
         AuditLog(
@@ -2085,7 +2094,7 @@ def _defer_requirement_links(db: Session, requirement: Requirement, payload: dic
                 "current_state_id": requirement.current_state_id,
                 "status_name": requirement.status_name,
             },
-            after_data={"iteration_id": parsed_target_iteration_id},
+            after_data={"iteration_id": target_iteration_id},
         )
     )
 

@@ -1099,6 +1099,42 @@ def test_runtime_requirement_defer_moves_tasks_and_test_cases(client: TestClient
         db.close()
 
 
+def test_runtime_requirement_defer_without_target_uses_project_requirement_pool(client: TestClient):
+    _, project_id = _create_project_with_requirement_workflow(client)
+    project = client.get(f"/api/v1/projects/{project_id}").json()
+    owner_id, owner_token = _create_user("Runtime Pool Defer Owner", "developer")
+    _add_project_member(project_id, owner_id, "developer")
+    source = client.post(
+        "/api/v1/iterations",
+        json={"name": f"Runtime pool source {uuid4().hex[:8]}", "project_ids": [project_id]},
+    ).json()
+    requirement = client.post(
+        "/api/v1/requirements",
+        json={
+            "project_id": project_id,
+            "iteration_id": source["id"],
+            "title": f"Runtime pool defer requirement {uuid4().hex[:8]}",
+            "owner_id": owner_id,
+        },
+    ).json()
+    assert client.post(
+        f"/api/v1/workflow-runtime/requirement/{requirement['id']}/transition",
+        json={"action_key": "claim"},
+        headers={"Authorization": f"Bearer {owner_token}"},
+    ).status_code == 200
+
+    deferred = client.post(
+        f"/api/v1/workflow-runtime/requirement/{requirement['id']}/transition",
+        json={"action_key": "defer", "payload": {"remark": "unplanned"}},
+        headers={"Authorization": f"Bearer {owner_token}"},
+    )
+
+    assert deferred.status_code == 200, deferred.text
+    assert client.get(f"/api/v1/requirements/{requirement['id']}").json()["iteration_id"] == project[
+        "requirement_pool_iteration_id"
+    ]
+
+
 @pytest.mark.parametrize("terminal_side", ["source", "target"])
 def test_requirement_defer_rejects_terminal_source_or_target_iteration(client: TestClient, terminal_side: str):
     _, project_id = _create_project_with_requirement_workflow(client)

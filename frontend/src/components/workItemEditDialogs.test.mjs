@@ -19,6 +19,12 @@ for (const [filename, fetchName, updateName] of components) {
   assert.match(source, /watch\([\s\S]*?\{ immediate: true \}\)/)
 }
 
+const requirementDialog = await readFile(new URL('./work-items/RequirementEditDialog.vue', import.meta.url), 'utf8')
+assert.match(requirementDialog, /fetchIterations\(\{ include_requirement_pool: true \}\)/)
+assert.match(requirementDialog, /requirementIterationOptions/)
+assert.match(requirementDialog, /requirementIterationLabel/)
+assert.doesNotMatch(requirementDialog, /v-model="form\.iteration_id" clearable/)
+
 const viewContracts = [
   ['../views/RequirementsView.vue', 'RequirementEditDialog'],
   ['../views/TasksView.vue', 'TaskEditDialog'],

@@ -142,6 +142,7 @@
 | status | VARCHAR(32) | NOT NULL DEFAULT 'planning' | 状态：planning、active、paused、closed |
 | description | TEXT | NULL | 描述 |
 | workflow_config_id | BIGINT UNSIGNED | NULL | 项目级工作流配置 ID |
+| requirement_pool_iteration_id | BIGINT UNSIGNED | NULL, UNIQUE, FK -> iterations.id (RESTRICT) | 项目唯一需求池迭代 ID |
 | creator_id | BIGINT UNSIGNED | NULL | 创建人 |
 | updater_id | BIGINT UNSIGNED | NULL | 更新人 |
 | create_time | DATETIME | NOT NULL | 创建时间 |
@@ -154,6 +155,7 @@
 - `idx_projects_parent(parent_id)`
 - `idx_projects_owner(owner_id)`
 - `idx_projects_status(status)`
+- `uk_projects_requirement_pool_iteration(requirement_pool_iteration_id)`
 
 ### 3.3 iterations 迭代表
 
@@ -162,6 +164,7 @@
 | id | BIGINT UNSIGNED | PK, AUTO_INCREMENT | 迭代 ID |
 | project_id | BIGINT UNSIGNED | NOT NULL | 所属项目 ID |
 | name | VARCHAR(150) | NOT NULL | 迭代名称 |
+| is_requirement_pool | TINYINT(1) | NOT NULL DEFAULT 0 | 是否为项目系统需求池：1 是，0 否 |
 | owner_id | BIGINT UNSIGNED | NULL | 负责人 ID |
 | start_date | DATE | NULL | 开始日期 |
 | end_date | DATE | NULL | 结束日期 |
@@ -180,6 +183,7 @@
 - `idx_iterations_project(project_id)`
 - `idx_iterations_owner(owner_id)`
 - `idx_iterations_status(status)`
+- `idx_iterations_requirement_pool(is_requirement_pool)`
 
 ## 4. 需求与任务
 
@@ -189,7 +193,7 @@
 |---|---|---|---|
 | id | BIGINT UNSIGNED | PK, AUTO_INCREMENT | 需求 ID |
 | project_id | BIGINT UNSIGNED | NOT NULL | 所属项目 ID |
-| iteration_id | BIGINT UNSIGNED | NULL | 所属迭代 ID |
+| iteration_id | BIGINT UNSIGNED | NOT NULL, FK -> iterations.id (RESTRICT) | 所属迭代 ID；必须为项目需求池或交付迭代 |
 | title | VARCHAR(255) | NOT NULL | 需求标题 |
 | requirement_type | VARCHAR(64) | NULL | 需求类型 |
 | priority | VARCHAR(32) | NOT NULL DEFAULT '3' | 优先级：1 最高，5 最低 |
@@ -723,6 +727,7 @@
 核心外键关系：
 
 - `projects.program_id -> programs.id`
+- `projects.requirement_pool_iteration_id -> iterations.id`（UNIQUE，RESTRICT）
 - `iterations.project_id -> projects.id`
 - `requirements.project_id -> projects.id`
 - `requirements.iteration_id -> iterations.id`

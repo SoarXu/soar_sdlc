@@ -800,9 +800,10 @@ def test_terminal_iteration_detail_uses_persisted_completion_snapshot(client: Te
     }]
     assert detail["metrics"]["requirement_total"] == 1
 
+    pool_id = client.get(f"/api/v1/projects/{project_id}").json()["requirement_pool_iteration_id"]
     db = SessionLocal()
     try:
-        db.query(Requirement).filter(Requirement.id == requirement_id).update({Requirement.iteration_id: None})
+        db.query(Requirement).filter(Requirement.id == requirement_id).update({Requirement.iteration_id: pool_id})
         db.commit()
     finally:
         db.close()

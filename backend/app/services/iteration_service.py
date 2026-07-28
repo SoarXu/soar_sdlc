@@ -234,7 +234,13 @@ def link_requirements(
     if iteration.is_requirement_pool:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Requirement pool cannot be a link target")
     scoped_project_ids = _iteration_scoped_project_ids(db, iteration_id)
-    requirements = db.query(Requirement).filter(Requirement.deleted == 0, Requirement.id.in_(requirement_ids)).all()
+    requirements = (
+        db.query(Requirement)
+        .filter(Requirement.deleted == 0, Requirement.id.in_(requirement_ids))
+        .order_by(Requirement.id.asc())
+        .with_for_update()
+        .all()
+    )
     if len(requirements) != len(set(requirement_ids)):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="需求不存在")
     for requirement in requirements:

@@ -1,5 +1,8 @@
 from uuid import uuid4
+from types import SimpleNamespace
 
+import pytest
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
 from app.db.session import SessionLocal
@@ -42,6 +45,81 @@ def test_iteration_loader_can_request_a_database_row_lock():
 
     assert item is db.query_spy.item
     assert db.query_spy.locked is True
+
+
+@pytest.mark.parametrize(
+    ("locked_project_id", "locked_iteration_id"),
+    [
+        (2, 501),
+        (1, 502),
+    ],
+)
+def test_link_requirements_validates_the_locked_requirement_state(
+    monkeypatch,
+    locked_project_id: int,
+    locked_iteration_id: int,
+):
+    stale_requirement = SimpleNamespace(id=101, project_id=1, iteration_id=501)
+    locked_requirement = SimpleNamespace(
+        id=101,
+        project_id=locked_project_id,
+        iteration_id=locked_iteration_id,
+    )
+    moved = []
+
+    class QuerySpy:
+        def __init__(self):
+            self.locked = False
+
+        def filter(self, *args):
+            return self
+
+        def with_for_update(self):
+            self.locked = True
+            return self
+
+        def order_by(self, *args):
+            return self
+
+        def all(self):
+            return [locked_requirement] if self.locked else [stale_requirement]
+
+    class SessionSpy:
+        def __init__(self):
+            self.query_spy = QuerySpy()
+
+        def query(self, model):
+            return self.query_spy
+
+        def commit(self):
+            return None
+
+    db = SessionSpy()
+    monkeypatch.setattr(
+        iteration_service,
+        "_get_active_iteration",
+        lambda *args, **kwargs: SimpleNamespace(is_requirement_pool=False),
+    )
+    monkeypatch.setattr(iteration_service, "ensure_iteration_mutable", lambda iteration: None)
+    monkeypatch.setattr(iteration_service, "_iteration_scoped_project_ids", lambda *args: {1})
+    monkeypatch.setattr(
+        iteration_service,
+        "is_project_requirement_pool",
+        lambda db, project_id, iteration_id: iteration_id == 501,
+    )
+    monkeypatch.setattr(
+        iteration_service,
+        "move_work_item_to_iteration",
+        lambda *args, **kwargs: moved.append(args[1].id),
+    )
+    monkeypatch.setattr(iteration_service, "_linked_requirements", lambda *args: [])
+
+    with pytest.raises(HTTPException) as exc_info:
+        iteration_service.link_requirements(db, 88, [101])
+
+    assert exc_info.value.status_code == 400
+    assert db.query_spy.locked is True
+    assert moved == []
 
 
 def test_iteration_creation_uses_system_workflow_initial_state(client: TestClient):

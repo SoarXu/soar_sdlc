@@ -1122,7 +1122,13 @@ def _apply_bug_activation(
     target_iteration = source_iteration
     if parsed_target_iteration_id:
         target_iteration = locked_iterations.get(parsed_target_iteration_id)
-        if not target_iteration or not is_iteration_active(db, target_iteration):
+        if not target_iteration:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail={"code": "TARGET_ITERATION_NOT_ACTIVE", "message": "目标迭代必须处于进行中"},
+            )
+        ensure_delivery_iteration(target_iteration)
+        if not is_iteration_active(db, target_iteration):
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail={"code": "TARGET_ITERATION_NOT_ACTIVE", "message": "目标迭代必须处于进行中"},

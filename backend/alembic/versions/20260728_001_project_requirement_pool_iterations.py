@@ -118,6 +118,29 @@ def _audit_or_raise(bind) -> None:
 
 
 def _resolve_default_iteration_workflow(bind) -> tuple[int, int]:
+    parameters = {
+        "object_type": "iteration",
+        "scope_type": "system",
+        "is_default_template": 1,
+        "enabled": 1,
+    }
+    valid_definition = bind.execute(
+        sa.text(
+            "SELECT definition.id, state.id AS initial_state_id "
+            "FROM workflow_definitions definition "
+            "JOIN workflow_states state ON state.id = definition.initial_state_id "
+            "AND state.definition_id = definition.id AND state.enabled = :enabled "
+            "WHERE definition.object_type = :object_type "
+            "AND definition.scope_type = :scope_type "
+            "AND definition.is_default_template = :is_default_template "
+            "AND definition.enabled = :enabled "
+            "ORDER BY definition.id DESC LIMIT 1"
+        ),
+        parameters,
+    ).mappings().first()
+    if valid_definition is not None:
+        return int(valid_definition["id"]), int(valid_definition["initial_state_id"])
+
     definition = bind.execute(
         sa.text(
             "SELECT id, initial_state_id FROM workflow_definitions "
@@ -125,12 +148,7 @@ def _resolve_default_iteration_workflow(bind) -> tuple[int, int]:
             "AND is_default_template = :is_default_template AND enabled = :enabled "
             "ORDER BY id DESC LIMIT 1"
         ),
-        {
-            "object_type": "iteration",
-            "scope_type": "system",
-            "is_default_template": 1,
-            "enabled": 1,
-        },
+        parameters,
     ).mappings().first()
     if definition is None:
         raise RuntimeError(
@@ -145,23 +163,10 @@ def _resolve_default_iteration_workflow(bind) -> tuple[int, int]:
             f"{definition_id} has no initial state"
         )
     initial_state_id = int(initial_state_id)
-    valid_state = bind.execute(
-        sa.text(
-            "SELECT id FROM workflow_states "
-            "WHERE id = :state_id AND definition_id = :definition_id AND enabled = :enabled"
-        ),
-        {
-            "state_id": initial_state_id,
-            "definition_id": definition_id,
-            "enabled": 1,
-        },
-    ).scalar_one_or_none()
-    if valid_state is None:
-        raise RuntimeError(
-            f"Cannot create requirement pools: default system iteration workflow "
-            f"{definition_id} has invalid or disabled initial state {initial_state_id}"
-        )
-    return definition_id, initial_state_id
+    raise RuntimeError(
+        f"Cannot create requirement pools: default system iteration workflow "
+        f"{definition_id} has invalid or disabled initial state {initial_state_id}"
+    )
 
 
 def _project_rows(bind) -> list[Mapping[str, Any]]:

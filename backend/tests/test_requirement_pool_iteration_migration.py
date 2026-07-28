@@ -160,6 +160,23 @@ def test_migration_resolves_latest_valid_default_iteration_workflow():
         assert migration._resolve_default_iteration_workflow(bind) == (9, 90)
 
 
+def test_migration_skips_newer_default_with_invalid_initial_state():
+    migration = _migration_module()
+    engine = sa.create_engine("sqlite://")
+    with engine.begin() as bind:
+        _create_workflow_schema(bind)
+        bind.execute(sa.text(
+            "INSERT INTO workflow_definitions VALUES "
+            "(8, 'iteration', 'system', 1, 1, 80), "
+            "(9, 'iteration', 'system', 1, 1, 90)"
+        ))
+        bind.execute(sa.text(
+            "INSERT INTO workflow_states VALUES (80, 8, 1), (90, 9, 0)"
+        ))
+
+        assert migration._resolve_default_iteration_workflow(bind) == (8, 80)
+
+
 @pytest.mark.parametrize(
     "state_values",
     [

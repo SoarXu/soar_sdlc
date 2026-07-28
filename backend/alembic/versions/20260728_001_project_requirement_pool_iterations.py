@@ -10,7 +10,6 @@ from typing import Any, Union
 
 from alembic import op
 import sqlalchemy as sa
-from sqlalchemy.dialects import mysql
 
 
 revision: str = "20260728_001"
@@ -257,7 +256,7 @@ def _backfill_requirement_iterations(bind) -> None:
 
 
 def _add_constraints(bind) -> None:
-    bigint = mysql.BIGINT(unsigned=True)
+    bigint = sa.BigInteger()
     if bind.dialect.name == "sqlite":
         with op.batch_alter_table("projects", recreate="always") as batch_op:
             batch_op.create_unique_constraint(
@@ -298,6 +297,14 @@ def _add_constraints(bind) -> None:
             ["id"],
             ondelete="RESTRICT",
         )
+    if _REQUIREMENT_ITERATION_FK in _foreign_key_names(bind, "requirements"):
+        op.drop_constraint(_REQUIREMENT_ITERATION_FK, "requirements", type_="foreignkey")
+    op.alter_column(
+        "requirements",
+        "iteration_id",
+        existing_type=bigint,
+        nullable=False,
+    )
     requirement_foreign_keys = _foreign_key_names(bind, "requirements")
     if _REQUIREMENT_ITERATION_FK not in requirement_foreign_keys:
         op.create_foreign_key(
@@ -308,17 +315,10 @@ def _add_constraints(bind) -> None:
             ["id"],
             ondelete="RESTRICT",
         )
-    op.alter_column(
-        "requirements",
-        "iteration_id",
-        existing_type=bigint,
-        nullable=False,
-    )
 
 
 def upgrade() -> None:
     bind = op.get_bind()
-    bigint = mysql.BIGINT(unsigned=True)
     if "is_requirement_pool" not in _columns(bind, "iterations"):
         op.add_column(
             "iterations",
@@ -332,7 +332,7 @@ def upgrade() -> None:
     if "requirement_pool_iteration_id" not in _columns(bind, "projects"):
         op.add_column(
             "projects",
-            sa.Column("requirement_pool_iteration_id", bigint, nullable=True),
+            sa.Column("requirement_pool_iteration_id", sa.BigInteger(), nullable=True),
         )
 
     workflow_definition_id, current_state_id = _resolve_default_iteration_workflow(bind)
@@ -358,7 +358,7 @@ def _remove_pool_rows(bind) -> None:
 
 
 def _drop_constraints_and_columns(bind) -> None:
-    bigint = mysql.BIGINT(unsigned=True)
+    bigint = sa.BigInteger()
     if bind.dialect.name == "sqlite":
         with op.batch_alter_table("requirements", recreate="always") as batch_op:
             if _REQUIREMENT_ITERATION_FK in _foreign_key_names(bind, "requirements"):
@@ -382,6 +382,8 @@ def _drop_constraints_and_columns(bind) -> None:
             batch_op.drop_column("is_requirement_pool")
         return
 
+    if _REQUIREMENT_ITERATION_FK in _foreign_key_names(bind, "requirements"):
+        op.drop_constraint(_REQUIREMENT_ITERATION_FK, "requirements", type_="foreignkey")
     op.alter_column(
         "requirements",
         "iteration_id",
@@ -395,8 +397,6 @@ def _drop_constraints_and_columns(bind) -> None:
         ),
         {"is_requirement_pool": 1},
     )
-    if _REQUIREMENT_ITERATION_FK in _foreign_key_names(bind, "requirements"):
-        op.drop_constraint(_REQUIREMENT_ITERATION_FK, "requirements", type_="foreignkey")
     if _PROJECT_POOL_FK in _foreign_key_names(bind, "projects"):
         op.drop_constraint(_PROJECT_POOL_FK, "projects", type_="foreignkey")
     if _PROJECT_POOL_UNIQUE in _unique_constraint_names(bind, "projects"):

@@ -263,7 +263,13 @@ def unlink_requirement(
     actor_id: int | None = None,
 ) -> None:
     ensure_iteration_mutable(_get_active_iteration(db, iteration_id, for_update=True))
-    requirement = db.query(Requirement).filter(Requirement.id == requirement_id, Requirement.deleted == 0).first()
+    requirement = (
+        db.query(Requirement)
+        .filter(Requirement.id == requirement_id, Requirement.deleted == 0)
+        .populate_existing()
+        .with_for_update()
+        .first()
+    )
     if requirement and requirement.iteration_id == iteration_id:
         pool = requirement_pool_for_project(db, requirement.project_id)
         move_work_item_to_iteration(db, requirement, pool.id, actor_id=actor_id, reason="unlinked")

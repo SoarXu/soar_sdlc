@@ -122,6 +122,59 @@ def test_link_requirements_validates_the_locked_requirement_state(
     assert moved == []
 
 
+def test_unlink_requirement_checks_locked_membership_before_moving(monkeypatch):
+    stale_requirement = SimpleNamespace(id=101, project_id=1, iteration_id=88)
+    locked_requirement = SimpleNamespace(id=101, project_id=1, iteration_id=89)
+    moved = []
+
+    class QuerySpy:
+        def __init__(self):
+            self.locked = False
+            self.refreshed = False
+
+        def filter(self, *args):
+            return self
+
+        def populate_existing(self):
+            self.refreshed = True
+            return self
+
+        def with_for_update(self):
+            self.locked = True
+            return self
+
+        def first(self):
+            return locked_requirement if self.locked and self.refreshed else stale_requirement
+
+    class SessionSpy:
+        def __init__(self):
+            self.query_spy = QuerySpy()
+            self.commits = 0
+
+        def query(self, model):
+            return self.query_spy
+
+        def commit(self):
+            self.commits += 1
+
+    db = SessionSpy()
+    monkeypatch.setattr(iteration_service, "_get_active_iteration", lambda *args, **kwargs: object())
+    monkeypatch.setattr(iteration_service, "ensure_iteration_mutable", lambda iteration: None)
+    monkeypatch.setattr(iteration_service, "requirement_pool_for_project", lambda *args: SimpleNamespace(id=999))
+    monkeypatch.setattr(
+        iteration_service,
+        "move_work_item_to_iteration",
+        lambda *args, **kwargs: moved.append(args[1].id),
+    )
+
+    iteration_service.unlink_requirement(db, 88, 101)
+
+    assert db.query_spy.locked is True
+    assert db.query_spy.refreshed is True
+    assert moved == []
+    assert db.commits == 0
+
+
 def test_iteration_creation_uses_system_workflow_initial_state(client: TestClient):
     project_id = _create_project(client)
     created = client.post(

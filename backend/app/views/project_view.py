@@ -52,6 +52,7 @@ class ProjectRead(ProjectBase):
     current_state_id: int
     status_name: str
     state_category: str
+    requirement_pool_iteration_id: int | None = None
     workflow_config_id: int | None = None
     assignee_rule_config_id: int | None = None
     creator_id: int | None = None

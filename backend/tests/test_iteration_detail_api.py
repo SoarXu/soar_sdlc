@@ -1,5 +1,8 @@
 from uuid import uuid4
+from types import SimpleNamespace
 
+import pytest
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
 from app.db.session import SessionLocal
@@ -42,6 +45,134 @@ def test_iteration_loader_can_request_a_database_row_lock():
 
     assert item is db.query_spy.item
     assert db.query_spy.locked is True
+
+
+@pytest.mark.parametrize(
+    ("locked_project_id", "locked_iteration_id"),
+    [
+        (2, 501),
+        (1, 502),
+    ],
+)
+def test_link_requirements_validates_the_locked_requirement_state(
+    monkeypatch,
+    locked_project_id: int,
+    locked_iteration_id: int,
+):
+    stale_requirement = SimpleNamespace(id=101, project_id=1, iteration_id=501)
+    locked_requirement = SimpleNamespace(
+        id=101,
+        project_id=locked_project_id,
+        iteration_id=locked_iteration_id,
+    )
+    moved = []
+
+    class QuerySpy:
+        def __init__(self):
+            self.locked = False
+
+        def filter(self, *args):
+            return self
+
+        def with_for_update(self):
+            self.locked = True
+            return self
+
+        def order_by(self, *args):
+            return self
+
+        def all(self):
+            return [locked_requirement] if self.locked else [stale_requirement]
+
+    class SessionSpy:
+        def __init__(self):
+            self.query_spy = QuerySpy()
+
+        def query(self, model):
+            return self.query_spy
+
+        def commit(self):
+            return None
+
+    db = SessionSpy()
+    monkeypatch.setattr(
+        iteration_service,
+        "_get_active_iteration",
+        lambda *args, **kwargs: SimpleNamespace(is_requirement_pool=False),
+    )
+    monkeypatch.setattr(iteration_service, "ensure_iteration_mutable", lambda iteration: None)
+    monkeypatch.setattr(iteration_service, "_iteration_scoped_project_ids", lambda *args: {1})
+    monkeypatch.setattr(
+        iteration_service,
+        "is_project_requirement_pool",
+        lambda db, project_id, iteration_id: iteration_id == 501,
+    )
+    monkeypatch.setattr(
+        iteration_service,
+        "move_work_item_to_iteration",
+        lambda *args, **kwargs: moved.append(args[1].id),
+    )
+    monkeypatch.setattr(iteration_service, "_linked_requirements", lambda *args: [])
+
+    with pytest.raises(HTTPException) as exc_info:
+        iteration_service.link_requirements(db, 88, [101])
+
+    assert exc_info.value.status_code == 400
+    assert db.query_spy.locked is True
+    assert moved == []
+
+
+def test_unlink_requirement_checks_locked_membership_before_moving(monkeypatch):
+    stale_requirement = SimpleNamespace(id=101, project_id=1, iteration_id=88)
+    locked_requirement = SimpleNamespace(id=101, project_id=1, iteration_id=89)
+    moved = []
+
+    class QuerySpy:
+        def __init__(self):
+            self.locked = False
+            self.refreshed = False
+
+        def filter(self, *args):
+            return self
+
+        def populate_existing(self):
+            self.refreshed = True
+            return self
+
+        def with_for_update(self):
+            self.locked = True
+            return self
+
+        def first(self):
+            return locked_requirement if self.locked and self.refreshed else stale_requirement
+
+    class SessionSpy:
+        def __init__(self):
+            self.query_spy = QuerySpy()
+            self.commits = 0
+
+        def query(self, model):
+            return self.query_spy
+
+        def commit(self):
+            self.commits += 1
+
+    db = SessionSpy()
+    monkeypatch.setattr(iteration_service, "_get_active_iteration", lambda *args, **kwargs: object())
+    monkeypatch.setattr(iteration_service, "ensure_iteration_mutable", lambda iteration: None)
+    monkeypatch.setattr(iteration_service, "requirement_pool_for_project", lambda *args: SimpleNamespace(id=999))
+    monkeypatch.setattr(
+        iteration_service,
+        "move_work_item_to_iteration",
+        lambda *args, **kwargs: moved.append(args[1].id),
+    )
+
+    iteration_service.unlink_requirement(db, 88, 101)
+
+    assert db.query_spy.locked is True
+    assert db.query_spy.refreshed is True
+    assert moved == []
+    assert db.commits == 0
 
 
 def test_iteration_creation_uses_system_workflow_initial_state(client: TestClient):
@@ -240,6 +371,77 @@ def test_iteration_crud_persists_to_database(client: TestClient):
 
     deleted = client.delete(f"/api/v1/iterations/{iteration_id}")
     assert deleted.status_code == 204
+
+
+def test_iteration_crud_serializes_requirement_pool_identity(client: TestClient):
+    project_id = _create_project(client)
+
+    created = client.post(
+        "/api/v1/iterations",
+        json={"project_id": project_id, "name": "Pool identity serialization"},
+    )
+    assert created.status_code == 200
+    iteration_id = created.json()["id"]
+    assert created.json()["is_requirement_pool"] is False
+
+    listed = client.get(f"/api/v1/iterations?project_id={project_id}")
+    assert listed.status_code == 200
+    listed_iteration = next(item for item in listed.json() if item["id"] == iteration_id)
+    assert listed_iteration["is_requirement_pool"] is False
+
+    updated = client.patch(
+        f"/api/v1/iterations/{iteration_id}",
+        json={"name": "Updated pool identity serialization"},
+    )
+    assert updated.status_code == 200
+    assert updated.json()["is_requirement_pool"] is False
+
+
+def test_available_requirements_lists_only_scoped_project_pool_requirements(client: TestClient):
+    scoped_project_id = _create_project(client, "Scoped pool project")
+    outside_project_id = _create_project(client, "Outside pool project")
+    iteration_id = _create_iteration(client, [scoped_project_id], "Pool compatible iteration")
+    scoped_requirement_id = _create_requirement(client, scoped_project_id, "Scoped pool requirement")
+    outside_requirement_id = _create_requirement(client, outside_project_id, "Outside pool requirement")
+
+    available = client.get(f"/api/v1/iterations/{iteration_id}/available-requirements")
+
+    assert available.status_code == 200
+    assert {item["id"] for item in available.json()} == {scoped_requirement_id}
+    assert outside_requirement_id not in {item["id"] for item in available.json()}
+
+
+def test_link_requirements_moves_pool_items_but_rejects_other_delivery_items(client: TestClient):
+    project_id = _create_project(client, "Link pool project")
+    target_iteration_id = _create_iteration(client, [project_id], "Target delivery iteration")
+    other_iteration_id = _create_iteration(client, [project_id], "Other delivery iteration")
+    pool_requirement_id = _create_requirement(client, project_id, "Pool requirement")
+    pool_target_requirement_id = _create_requirement(client, project_id, "Pool target requirement")
+    other_delivery_requirement_id = _create_requirement(client, project_id, "Other delivery requirement")
+    pool_id = client.get(f"/api/v1/projects/{project_id}").json()["requirement_pool_iteration_id"]
+    assert client.post(
+        f"/api/v1/iterations/{other_iteration_id}/requirements",
+        json={"requirement_ids": [other_delivery_requirement_id]},
+    ).status_code == 200
+
+    linked = client.post(
+        f"/api/v1/iterations/{target_iteration_id}/requirements",
+        json={"requirement_ids": [pool_requirement_id]},
+    )
+    rejected = client.post(
+        f"/api/v1/iterations/{target_iteration_id}/requirements",
+        json={"requirement_ids": [other_delivery_requirement_id]},
+    )
+    pool_rejected = client.post(
+        f"/api/v1/iterations/{pool_id}/requirements",
+        json={"requirement_ids": [pool_target_requirement_id]},
+    )
+
+    assert linked.status_code == 200, linked.text
+    assert client.get(f"/api/v1/requirements/{pool_requirement_id}").json()["iteration_id"] == target_iteration_id
+    assert rejected.status_code == 400
+    assert pool_rejected.status_code == 409
+    assert pool_rejected.json()["detail"]["code"] == "REQUIREMENT_POOL_OPERATION_FORBIDDEN"
 
 
 def test_iteration_detail_collects_scoped_projects_and_linked_objects(client: TestClient):
@@ -498,9 +700,10 @@ def test_iteration_project_scope_removal_closes_work_item_history_with_actor_and
     )
 
     assert updated.status_code == 200, updated.text
+    removed_pool_id = client.get(f"/api/v1/projects/{removed_project_id}").json()["requirement_pool_iteration_id"]
     db = SessionLocal()
     try:
-        assert db.query(Requirement).filter(Requirement.id == requirement_id).one().iteration_id is None
+        assert db.query(Requirement).filter(Requirement.id == requirement_id).one().iteration_id == removed_pool_id
         assert db.query(Task).filter(Task.id == task_id).one().iteration_id is None
         assert db.query(Bug).filter(Bug.id == bug_id).one().iteration_id is None
         histories = db.query(WorkItemIterationHistory).filter(
@@ -597,9 +800,10 @@ def test_terminal_iteration_detail_uses_persisted_completion_snapshot(client: Te
     }]
     assert detail["metrics"]["requirement_total"] == 1
 
+    pool_id = client.get(f"/api/v1/projects/{project_id}").json()["requirement_pool_iteration_id"]
     db = SessionLocal()
     try:
-        db.query(Requirement).filter(Requirement.id == requirement_id).update({Requirement.iteration_id: None})
+        db.query(Requirement).filter(Requirement.id == requirement_id).update({Requirement.iteration_id: pool_id})
         db.commit()
     finally:
         db.close()

@@ -14,8 +14,8 @@
           </el-select>
         </el-form-item>
         <el-form-item label="迭代">
-          <el-select v-model="form.iteration_id" clearable filterable placeholder="请选择迭代">
-            <el-option v-for="iteration in iterations" :key="iteration.id" :label="iteration.name" :value="iteration.id" />
+          <el-select v-model="form.iteration_id" filterable placeholder="请选择迭代">
+            <el-option v-for="iteration in requirementSelectableIterations" :key="iteration.id" :label="requirementIterationLabel(iteration)" :value="iteration.id" />
           </el-select>
         </el-form-item>
         <el-form-item label="提出人">
@@ -50,7 +50,7 @@
 </template>
 
 <script setup>
-import { computed, reactive, ref, watch } from 'vue'
+import { computed, nextTick, reactive, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 
 import { fetchIterations } from '../../api/iterations'
@@ -58,6 +58,7 @@ import { fetchProjects } from '../../api/projects'
 import { fetchRequirement, updateRequirement } from '../../api/requirements'
 import { fetchUsers } from '../../api/users'
 import { showActionError } from '../../utils/actionFeedback'
+import { requirementIterationLabel, requirementIterationOptions, requirementPoolForProject } from '../../utils/requirementPoolIterations'
 import RequirementPriorityBadge from '../RequirementPriorityBadge.vue'
 
 const props = defineProps({
@@ -79,6 +80,14 @@ const form = reactive({})
 const priorityOptions = ['1', '2', '3', '4', '5']
 const requirementTypeOptions = ['功能', '接口', '性能', '安全', '体验', '改进', '其他']
 const legacyPriorities = { high: '1', medium: '3', low: '5' }
+const selectedProject = computed(() => projects.value.find((project) => project.id === form.project_id) || null)
+const requirementSelectableIterations = computed(() => requirementIterationOptions(
+  selectedProject.value,
+  projects.value,
+  iterations.value
+).filter((iteration) => (
+  iteration.is_requirement_pool || iteration.state_category !== 'terminal' || iteration.id === form.iteration_id
+)))
 
 async function load() {
   if (!props.modelValue || !props.itemId) return
@@ -87,7 +96,7 @@ async function load() {
     const [itemResponse, projectResponse, iterationResponse, userResponse] = await Promise.all([
       fetchRequirement(props.itemId),
       fetchProjects(),
-      fetchIterations(),
+      fetchIterations({ include_requirement_pool: true }),
       fetchUsers()
     ])
     projects.value = projectResponse.data || []
@@ -105,6 +114,7 @@ async function load() {
       description: item.description || '',
       acceptance_criteria: item.acceptance_criteria || ''
     })
+    await nextTick()
   } catch (error) {
     showActionError(error, '需求加载失败')
     visible.value = false
@@ -112,6 +122,12 @@ async function load() {
     loading.value = false
   }
 }
+
+watch(() => form.project_id, (projectId) => {
+  if (loading.value || !projectId) return
+  const selectedProject = projects.value.find((project) => project.id === projectId)
+  form.iteration_id = requirementPoolForProject(selectedProject, iterations.value)?.id ?? null
+})
 
 async function save() {
   if (!form.project_id || !form.title?.trim()) {

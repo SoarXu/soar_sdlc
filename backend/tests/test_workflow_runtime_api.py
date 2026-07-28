@@ -8,6 +8,7 @@ import pytest
 from app.core.security import create_access_token, get_password_hash
 from app.db.session import SessionLocal
 from app.models.bug import Bug
+from app.models.iteration import Iteration
 from app.models.notification import Notification
 from app.models.project_member import ProjectMember
 from app.models.relation import ObjectRelation
@@ -242,6 +243,48 @@ def test_iteration_transition_locks_its_item_directly_once(monkeypatch):
 
     assert result is iteration
     assert calls == ["item"]
+
+
+def test_requirement_pool_has_no_available_workflow_actions(client: TestClient):
+    project = client.post("/api/v1/projects", json={"name": f"Pool workflow list-{uuid4().hex[:8]}"}).json()
+    pool_id = project["requirement_pool_iteration_id"]
+
+    response = client.get(f"/api/v1/workflow-runtime/iteration/{pool_id}/transitions")
+
+    assert response.status_code == 200, response.text
+    assert response.json() == []
+
+
+def test_requirement_pool_rejects_direct_workflow_transition(client: TestClient):
+    project = client.post("/api/v1/projects", json={"name": f"Pool workflow execute-{uuid4().hex[:8]}"}).json()
+    pool_id = project["requirement_pool_iteration_id"]
+    db = SessionLocal()
+    try:
+        transition_id = (
+            db.query(WorkflowTransition.id)
+            .filter(
+                WorkflowTransition.definition_id == db.query(Iteration.workflow_definition_id)
+                .filter(Iteration.id == pool_id)
+                .scalar_subquery(),
+                WorkflowTransition.from_state_id == db.query(Iteration.current_state_id)
+                .filter(Iteration.id == pool_id)
+                .scalar_subquery(),
+                WorkflowTransition.enabled.is_(True),
+            )
+            .order_by(WorkflowTransition.sort_order.asc(), WorkflowTransition.id.asc())
+            .scalar()
+        )
+    finally:
+        db.close()
+    assert transition_id is not None
+
+    response = client.post(
+        f"/api/v1/workflow-runtime/iteration/{pool_id}/transition",
+        json={"transition_id": transition_id},
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"]["code"] == "REQUIREMENT_POOL_OPERATION_FORBIDDEN"
 
 
 def test_list_available_transitions_uses_nonlocking_item_loader(monkeypatch):
@@ -1054,6 +1097,42 @@ def test_runtime_requirement_defer_moves_tasks_and_test_cases(client: TestClient
         assert {row.enter_reason for row in histories if row.left_at is None} == {"deferred"}
     finally:
         db.close()
+
+
+def test_runtime_requirement_defer_without_target_uses_project_requirement_pool(client: TestClient):
+    _, project_id = _create_project_with_requirement_workflow(client)
+    project = client.get(f"/api/v1/projects/{project_id}").json()
+    owner_id, owner_token = _create_user("Runtime Pool Defer Owner", "developer")
+    _add_project_member(project_id, owner_id, "developer")
+    source = client.post(
+        "/api/v1/iterations",
+        json={"name": f"Runtime pool source {uuid4().hex[:8]}", "project_ids": [project_id]},
+    ).json()
+    requirement = client.post(
+        "/api/v1/requirements",
+        json={
+            "project_id": project_id,
+            "iteration_id": source["id"],
+            "title": f"Runtime pool defer requirement {uuid4().hex[:8]}",
+            "owner_id": owner_id,
+        },
+    ).json()
+    assert client.post(
+        f"/api/v1/workflow-runtime/requirement/{requirement['id']}/transition",
+        json={"action_key": "claim"},
+        headers={"Authorization": f"Bearer {owner_token}"},
+    ).status_code == 200
+
+    deferred = client.post(
+        f"/api/v1/workflow-runtime/requirement/{requirement['id']}/transition",
+        json={"action_key": "defer", "payload": {"remark": "unplanned"}},
+        headers={"Authorization": f"Bearer {owner_token}"},
+    )
+
+    assert deferred.status_code == 200, deferred.text
+    assert client.get(f"/api/v1/requirements/{requirement['id']}").json()["iteration_id"] == project[
+        "requirement_pool_iteration_id"
+    ]
 
 
 @pytest.mark.parametrize("terminal_side", ["source", "target"])

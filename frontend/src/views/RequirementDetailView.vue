@@ -25,7 +25,7 @@
       <el-form v-if="editing" label-position="top">
         <el-form-item label="需求标题" required><el-input v-model="requirementForm.title" /></el-form-item>
         <div class="form-grid">
-          <el-form-item label="迭代"><el-select v-model="requirementForm.iteration_id" clearable filterable><el-option v-for="iteration in iterations" :key="iteration.id" :label="iteration.name" :value="iteration.id" /></el-select></el-form-item>
+          <el-form-item label="迭代"><el-select v-model="requirementForm.iteration_id" filterable><el-option v-for="iteration in requirementSelectableIterations" :key="iteration.id" :label="requirementIterationLabel(iteration)" :value="iteration.id" /></el-select></el-form-item>
           <el-form-item label="提出人"><el-select v-model="requirementForm.proposer_id" clearable filterable><el-option v-for="user in users" :key="user.id" :label="user.full_name" :value="user.id" /></el-select></el-form-item>
           <el-form-item label="类型"><el-select v-model="requirementForm.requirement_type"><el-option v-for="option in requirementTypeOptions" :key="option" :label="option" :value="option" /></el-select></el-form-item>
           <el-form-item label="优先级"><el-select v-model="requirementForm.priority"><el-option v-for="option in requirementPriorityOptions" :key="option.value" :label="option.label" :value="option.value"><RequirementPriorityBadge :value="option.value" /></el-option></el-select></el-form-item>
@@ -37,7 +37,7 @@
       <template v-else>
       <el-descriptions :column="3" border>
         <el-descriptions-item label="所属项目">{{ labelById(projects, requirement.project_id) }}</el-descriptions-item>
-        <el-descriptions-item label="迭代">{{ labelById(iterations, requirement.iteration_id) }}</el-descriptions-item>
+        <el-descriptions-item label="迭代">{{ requirementIterationLabel(iterations.find((item) => item.id === requirement.iteration_id)) }}</el-descriptions-item>
         <el-descriptions-item label="负责人">{{ userLabel(users, requirement.owner_id) }}</el-descriptions-item>
         <el-descriptions-item label="提出人">{{ userLabel(users, requirement.proposer_id) }}</el-descriptions-item>
         <el-descriptions-item label="优先级"><RequirementPriorityBadge :value="requirement.priority" /></el-descriptions-item>
@@ -248,6 +248,7 @@ import { formatAuditValue } from '../utils/auditHistoryLabels'
 import { taskBranchLabel } from '../utils/taskBranchRules'
 import { DEFAULT_BUG_TYPE_KEY } from '../utils/bugTypeOptions'
 import { useBugTypes } from '../utils/useBugTypes'
+import { requirementIterationLabel, requirementIterationOptions } from '../utils/requirementPoolIterations'
 
 const route = useRoute()
 const router = useRouter()
@@ -274,6 +275,14 @@ const caseForm = reactive({ project_id: null, requirement_id: null, title: '', c
 const caseBugForm = reactive({ title: '', bug_type: DEFAULT_BUG_TYPE_KEY, severity: '3', priority: '3', reproduce_steps: '', actual_result: '' })
 const expandedHistory = reactive({})
 const requirementForm = reactive({ iteration_id: null, title: '', requirement_type: '功能', priority: '3', owner_id: null, proposer_id: null, description: '', acceptance_criteria: '' })
+const requirementProject = computed(() => projects.value.find((project) => project.id === requirement.value.project_id) || null)
+const requirementSelectableIterations = computed(() => requirementIterationOptions(
+  requirementProject.value,
+  projects.value,
+  iterations.value
+).filter((iteration) => (
+  iteration.is_requirement_pool || iteration.state_category !== 'terminal' || iteration.id === requirementForm.iteration_id
+)))
 const relatedTasks = computed(() => (
   requirement.value.linked_tasks?.length
     ? requirement.value.linked_tasks
@@ -563,7 +572,7 @@ async function loadData() {
     const [requirementRes, projectRes, iterationRes, userRes, taskRes, validationRes, operationRes, auditRes] = await Promise.all([
       fetchRequirement(requirementId.value),
       fetchProjects(),
-      fetchIterations(),
+      fetchIterations({ include_requirement_pool: true }),
       fetchUsers(),
       fetchTasks(),
       fetchRequirementValidationCases(requirementId.value),

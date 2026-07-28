@@ -6,6 +6,7 @@ from app.models.requirement import Requirement
 from app.models.role import Role, UserRole
 from app.models.task import Task
 from app.models.user import User
+from app.services.requirement_pool_service import create_project_requirement_pool
 from app.services.workflow_state_service import initial_system_workflow_values, initial_workflow_values
 from app.core.security import get_password_hash
 
@@ -19,8 +20,10 @@ def test_commit_ingest_links_objects_and_creates_review_task(client):
         )
         db.add(project)
         db.flush()
+        pool = create_project_requirement_pool(db, project)
         requirement = Requirement(
             project_id=project.id,
+            iteration_id=pool.id,
             title="REQ DevOps 需求",
             owner_id=None,
             **initial_workflow_values(db, "requirement", project.id),

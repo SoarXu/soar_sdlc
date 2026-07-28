@@ -19,6 +19,7 @@ from app.models.test_run import TestRun, TestRunCase
 from app.models.user import User
 from app.models.workflow_definition import WorkflowTransition
 from app.services.status_operation_service import create_status_operation, list_status_operations
+from app.services.requirement_pool_service import create_project_requirement_pool
 from app.services.workflow_runtime_service import execute_transition
 from app.services.workflow_state_service import initial_system_workflow_values
 from app.views.project_view import ProjectCreate, ProjectMemberCreate, ProjectUpdate
@@ -46,7 +47,11 @@ def list_project_iterations_page(
     query = (
         db.query(Iteration)
         .join(IterationProject, IterationProject.iteration_id == Iteration.id)
-        .filter(Iteration.deleted == 0, IterationProject.project_id == project_id)
+        .filter(
+            Iteration.deleted == 0,
+            Iteration.is_requirement_pool.is_(False),
+            IterationProject.project_id == project_id,
+        )
     )
     if keyword:
         query = query.filter(Iteration.name.like(f"%{keyword}%"))
@@ -187,11 +192,18 @@ def create_project(db: Session, payload: ProjectCreate) -> Project:
     if data.get("is_long_term"):
         data["end_date"] = None
     data.update(initial_system_workflow_values(db, "project"))
+    iteration_workflow_values = initial_system_workflow_values(db, "iteration")
     project = Project(**data)
-    db.add(project)
-    db.commit()
-    db.refresh(project)
-    return project
+    try:
+        db.add(project)
+        db.flush()
+        create_project_requirement_pool(db, project, workflow_values=iteration_workflow_values)
+        db.commit()
+        db.refresh(project)
+        return project
+    except Exception:
+        db.rollback()
+        raise
 
 
 def update_project(db: Session, project_id: int, payload: ProjectUpdate, actor_id: int | None = None) -> Project:
@@ -524,6 +536,7 @@ def _iteration_to_dict(db: Session, iteration: Iteration) -> dict:
         "current_state_id": iteration.current_state_id,
         "status_name": iteration.status_name,
         "state_category": iteration.state_category,
+        "is_requirement_pool": iteration.is_requirement_pool,
         "lifecycle_phase": iteration.lifecycle_phase,
         "goal": iteration.goal,
         "creator_id": iteration.creator_id,

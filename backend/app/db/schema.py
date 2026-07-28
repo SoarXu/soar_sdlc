@@ -46,6 +46,23 @@ def _ensure_column(engine: Engine, table: str, col: str, ddl: str, index_ddl: st
                 conn.execute(text(index_ddl))
 
 
+def _ensure_requirement_pool_identity_columns(engine: Engine) -> None:
+    _ensure_column(
+        engine,
+        "iterations",
+        "is_requirement_pool",
+        "ALTER TABLE iterations ADD COLUMN is_requirement_pool "
+        "TINYINT(1) NOT NULL DEFAULT 0 COMMENT 'system requirement pool flag'",
+    )
+    _ensure_column(
+        engine,
+        "projects",
+        "requirement_pool_iteration_id",
+        "ALTER TABLE projects ADD COLUMN requirement_pool_iteration_id "
+        "BIGINT NULL COMMENT 'canonical requirement pool iteration ID'",
+    )
+
+
 def _ensure_varchar_length(engine: Engine, table: str, col: str, minimum_length: int, ddl: str) -> None:
     inspector = inspect(engine)
     if table not in inspector.get_table_names():
@@ -150,6 +167,7 @@ def _history_open_lookup_index_exists(indexes: list[dict], canonical_name: str =
 
 def ensure_runtime_schema(engine: Engine) -> None:
     _validate_final_workflow_schema(engine)
+    _ensure_requirement_pool_identity_columns(engine)
     inspector0 = inspect(engine)
     if "status_operation_log" in inspector0.get_table_names():
         _ensure_column(

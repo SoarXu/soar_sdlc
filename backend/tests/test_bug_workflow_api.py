@@ -7,6 +7,8 @@ from sqlalchemy import text
 from app.core.security import create_access_token, get_password_hash
 from app.db.session import SessionLocal
 from app.models.bug import Bug
+from app.models.iteration import Iteration
+from app.models.project import Project
 from app.models.project_member import ProjectMember
 from app.models.role import Role, UserRole
 from app.models.user import User
@@ -180,6 +182,107 @@ def test_bug_project_only_update_rejects_existing_iteration_scope_mismatch(clien
 
     assert updated.status_code == 400
     assert client.get(f"/api/v1/bugs/{bug['id']}").json()["project_id"] == scoped_project_id
+
+
+def test_closed_bug_reactivation_rejects_requirement_pool_target_even_if_pool_looks_active(client: TestClient):
+    reporter_id, reporter_token = _create_user("developer")
+    project_id = _create_project(client)
+    _add_member(project_id, reporter_id, "developer")
+    source_iteration_id = _create_iteration(client, project_id, "Closed source iteration", active=True)
+    bug = client.post(
+        "/api/v1/bugs",
+        json={
+            "project_id": project_id,
+            "iteration_id": source_iteration_id,
+            "title": "Pool target must be rejected",
+            "reporter_id": reporter_id,
+        },
+        headers={"Authorization": f"Bearer {reporter_token}"},
+    ).json()
+
+    db = SessionLocal()
+    try:
+        active_state_id = db.query(Iteration.current_state_id).filter(Iteration.id == source_iteration_id).scalar()
+        pool_id = db.query(Project.requirement_pool_iteration_id).filter(Project.id == project_id).scalar()
+        db.query(Iteration).filter(Iteration.id == pool_id).update({"current_state_id": active_state_id})
+        transition = db.query(WorkflowTransition).filter(
+            WorkflowTransition.definition_id == bug["workflow_definition_id"],
+            WorkflowTransition.action_key == "activate",
+        ).one()
+        transition.handler_rule = {**(transition.handler_rule or {}), "allow_unassigned": True}
+        db.commit()
+    finally:
+        db.close()
+
+    _set_bug_closed(bug["id"])
+    assert client.post(
+        f"/api/v1/workflow-runtime/iteration/{source_iteration_id}/transition",
+        json={"action_key": "complete"},
+    ).status_code == 200
+
+    reactivated = client.post(
+        f"/api/v1/workflow-runtime/bug/{bug['id']}/transition",
+        json={"action_key": "activate", "payload": {"reason": "Pool target", "target_iteration_id": pool_id}},
+        headers={"Authorization": f"Bearer {reporter_token}"},
+    )
+
+    assert reactivated.status_code == 409
+    assert reactivated.json()["detail"]["code"] == "REQUIREMENT_POOL_OPERATION_FORBIDDEN"
+    assert client.get(f"/api/v1/bugs/{bug['id']}").json()["iteration_id"] == source_iteration_id
+
+
+def test_bug_reactivation_does_not_treat_active_looking_requirement_pool_as_active_source(client: TestClient):
+    reporter_id, reporter_token = _create_user("developer")
+    project_id = _create_project(client)
+    _add_member(project_id, reporter_id, "developer")
+    delivery_iteration_id = _create_iteration(client, project_id, "Delivery target", active=True)
+    bug = client.post(
+        "/api/v1/bugs",
+        json={
+            "project_id": project_id,
+            "iteration_id": delivery_iteration_id,
+            "title": "Pool source must require a delivery target",
+            "reporter_id": reporter_id,
+        },
+        headers={"Authorization": f"Bearer {reporter_token}"},
+    ).json()
+
+    db = SessionLocal()
+    try:
+        active_state_id = db.query(Iteration.current_state_id).filter(Iteration.id == delivery_iteration_id).scalar()
+        pool_id = db.query(Project.requirement_pool_iteration_id).filter(Project.id == project_id).scalar()
+        db.query(Iteration).filter(Iteration.id == pool_id).update({"current_state_id": active_state_id})
+        db.query(Bug).filter(Bug.id == bug["id"]).update({"iteration_id": pool_id})
+        transition = db.query(WorkflowTransition).filter(
+            WorkflowTransition.definition_id == bug["workflow_definition_id"],
+            WorkflowTransition.action_key == "activate",
+        ).one()
+        transition.handler_rule = {**(transition.handler_rule or {}), "allow_unassigned": True}
+        db.commit()
+    finally:
+        db.close()
+
+    _set_bug_closed(bug["id"])
+    actions = client.get(
+        f"/api/v1/workflow-runtime/bug/{bug['id']}/transitions",
+        headers={"Authorization": f"Bearer {reporter_token}"},
+    ).json()
+    activate_action = next(item for item in actions if item["action_key"] == "activate")
+    target_field = next(
+        field for field in activate_action["form_config"]["fields"] if field["field"] == "target_iteration_id"
+    )
+
+    assert target_field["required"] is True
+    assert {option["value"] for option in target_field["options"]} == {delivery_iteration_id}
+
+    reactivated = client.post(
+        f"/api/v1/workflow-runtime/bug/{bug['id']}/transition",
+        json={"action_key": "activate", "payload": {"reason": "Pool source"}},
+        headers={"Authorization": f"Bearer {reporter_token}"},
+    )
+
+    assert reactivated.status_code == 422
+    assert reactivated.json()["detail"]["code"] == "TARGET_ITERATION_REQUIRED"
 
 
 def test_closed_bug_reactivates_into_active_iteration_and_retains_eligible_handler(client: TestClient):

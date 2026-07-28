@@ -18,7 +18,7 @@
         <el-table-column prop="title" label="需求标题" width="160" show-overflow-tooltip />
         <el-table-column label="项目" width="180"><template #default="{ row }">{{ labelById(projects, row.project_id) }}</template></el-table-column>
         <el-table-column label="来源项目" width="180"><template #default="{ row }">{{ labelById(projects, row.source_project_id) }}</template></el-table-column>
-        <el-table-column label="迭代" width="160"><template #default="{ row }">{{ labelById(iterations, row.iteration_id) }}</template></el-table-column>
+        <el-table-column label="迭代" width="160"><template #default="{ row }">{{ requirementIterationLabel(iterations.find((item) => item.id === row.iteration_id)) }}</template></el-table-column>
         <el-table-column label="当前处理人" width="150"><template #default="{ row }">{{ userLabel(users, row.owner_id) }}</template></el-table-column>
         <el-table-column label="优先级" width="100"><template #default="{ row }"><RequirementPriorityBadge :value="row.priority" /></template></el-table-column>
         <el-table-column label="状态" width="100">
@@ -73,8 +73,8 @@
             </el-select>
           </el-form-item>
           <el-form-item label="迭代">
-            <el-select v-model="form.iteration_id" clearable filterable placeholder="请选择迭代">
-              <el-option v-for="iteration in iterations" :key="iteration.id" :label="iteration.name" :value="iteration.id" />
+            <el-select v-model="form.iteration_id" filterable placeholder="请选择迭代">
+              <el-option v-for="iteration in requirementSelectableIterations" :key="iteration.id" :label="requirementIterationLabel(iteration)" :value="iteration.id" />
             </el-select>
           </el-form-item>
           <el-form-item v-if="!editingId" label="当前处理人">
@@ -211,6 +211,7 @@ import { usePagination } from '../utils/usePagination'
 import { workflowActionColumnWidth } from '../utils/workflowActionColumn'
 import { canSelectForBatchAssignment } from '../utils/batchAssignmentSelection'
 import { TASK_BRANCH_OPTIONS } from '../utils/taskBranchRules'
+import { requirementIterationLabel, requirementIterationOptions, requirementPoolForProject } from '../utils/requirementPoolIterations'
 
 const router = useRouter()
 const loading = ref(false)
@@ -259,6 +260,14 @@ const requirementPriorityOptions = [
 ]
 const requirementTypeOptions = ['功能', '接口', '性能', '安全', '体验', '改进', '其他']
 const legacyRequirementPriorityValues = { high: '1', medium: '3', low: '5' }
+const selectedProject = computed(() => projects.value.find((project) => project.id === form.project_id) || null)
+const requirementSelectableIterations = computed(() => requirementIterationOptions(
+  selectedProject.value,
+  projects.value,
+  iterations.value
+).filter((iteration) => (
+  iteration.is_requirement_pool || iteration.state_category !== 'terminal' || iteration.id === form.iteration_id
+)))
 
 function normalizeRequirementPriority(value) { return legacyRequirementPriorityValues[value] || value || '3' }
 function isRequirementProjectClosed(row) { return projects.value.find((item) => item.id === row.project_id)?.state_category === 'terminal' }
@@ -335,7 +344,7 @@ async function loadData() {
   loading.value = true
   try {
     clearRequirementSelection()
-    const [reqRes, projectRes, iterationRes, userRes] = await Promise.all([fetchRequirements(), fetchProjects(), fetchIterations(), fetchUsers()])
+    const [reqRes, projectRes, iterationRes, userRes] = await Promise.all([fetchRequirements(), fetchProjects(), fetchIterations({ include_requirement_pool: true }), fetchUsers()])
     requirements.value = reqRes.data
     projects.value = projectRes.data
     iterations.value = iterationRes.data
@@ -351,6 +360,11 @@ async function loadData() {
 }
 
 watch([requirementPage, requirementPageSize], clearRequirementSelection)
+watch(() => form.project_id, (projectId) => {
+  if (editingId.value) return
+  const selectedProject = projects.value.find((project) => project.id === projectId)
+  form.iteration_id = requirementPoolForProject(selectedProject, iterations.value)?.id ?? null
+})
 
 async function loadProjectMembers() {
   const entries = await Promise.all(projects.value.map(async (project) => {

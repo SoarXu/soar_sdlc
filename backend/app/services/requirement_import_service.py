@@ -14,6 +14,7 @@ from app.services.workflow_state_service import initial_workflow_values
 from app.services.project_permission_service import ensure_work_item_create_permission
 from app.services.iteration_service import ensure_iteration_mutable, lock_iterations_for_mutation
 from app.services.work_item_iteration_history_service import move_work_item_to_iteration
+from app.services.requirement_pool_service import resolve_requirement_iteration_id
 
 
 REQUIREMENT_IMPORT_COLUMNS = [
@@ -107,6 +108,12 @@ def commit_requirement_import(
         for requirement in existing_requirements
         if requirement is not None and requirement.iteration_id is not None
     }
+    new_requirement_iteration_ids = {
+        resolve_requirement_iteration_id(db, row.project_id, None)
+        for row, existing in zip(parsed_rows, existing_requirements)
+        if existing is None or duplicate_strategy == "create_duplicate"
+    }
+    iteration_ids.update(new_requirement_iteration_ids)
     prelocked_iterations = lock_iterations_for_mutation(db, iteration_ids) if iteration_ids else {}
     created_count = 0
     updated_count = 0
@@ -122,10 +129,12 @@ def commit_requirement_import(
             updated_count += 1
             continue
         workflow_values = initial_workflow_values(db, "requirement", row.project_id)
+        iteration_id = resolve_requirement_iteration_id(db, row.project_id, None)
+        ensure_iteration_mutable(prelocked_iterations[iteration_id])
         requirement = Requirement(
             project_id=row.project_id,
             source_project_id=None,
-            iteration_id=None,
+            iteration_id=iteration_id,
             title=row.title,
             requirement_type=row.requirement_type,
             priority=row.priority,
@@ -138,6 +147,14 @@ def commit_requirement_import(
             acceptance_criteria=row.acceptance_criteria,
         )
         db.add(requirement)
+        db.flush()
+        move_work_item_to_iteration(
+            db,
+            requirement,
+            iteration_id,
+            actor_id=actor.id if actor else None,
+            reason="created",
+        )
         created_count += 1
     db.commit()
     return {"created_count": created_count, "updated_count": updated_count, "error_count": 0, "errors": []}
@@ -291,14 +308,6 @@ def _apply_row_to_requirement(
     requirement = _lock_requirement_for_import_update(db, requirement.id, prelocked_iterations or {})
     if requirement.iteration_id is not None:
         ensure_iteration_mutable(prelocked_iterations[requirement.iteration_id])
-    if requirement.iteration_id is not None:
-        move_work_item_to_iteration(
-            db,
-            requirement,
-            None,
-            actor_id=actor_id,
-            reason="import_updated",
-        )
     requirement.source_project_id = None
     requirement.requirement_type = row.requirement_type
     requirement.priority = row.priority
@@ -316,7 +325,7 @@ def _lock_requirement_for_import_update(
     prelocked_iterations: dict,
 ) -> Requirement:
     requirement = _get_requirement_for_import_update(db, requirement_id, for_update=True)
-    if requirement.iteration_id is None or requirement.iteration_id in prelocked_iterations:
+    if requirement.iteration_id in prelocked_iterations:
         return requirement
     raise HTTPException(
         status_code=status.HTTP_409_CONFLICT,

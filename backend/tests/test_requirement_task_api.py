@@ -674,3 +674,47 @@ def test_requirement_task_and_bug_create_reject_legacy_status_aliases(client: Te
     assert requirement.status_code == 422
     assert task.status_code == 422
     assert bug.status_code == 422
+
+
+def test_requirement_project_change_moves_pool_or_keeps_compatible_delivery_iteration(client: TestClient):
+    source = _create_named_project(client, f"Requirement source-{uuid4().hex[:8]}")
+    target = _create_named_project(client, f"Requirement target-{uuid4().hex[:8]}")
+    shared_iteration = _create_iteration(client, source, f"Shared delivery-{uuid4().hex[:8]}")
+    scope_update = client.patch(
+        f"/api/v1/iterations/{shared_iteration}", json={"project_ids": [source, target]}
+    )
+    assert scope_update.status_code == 200, scope_update.text
+    pool_requirement = client.post(
+        "/api/v1/requirements",
+        json={"project_id": source, "title": f"Move pooled requirement-{uuid4().hex[:8]}"},
+    ).json()
+    delivery_requirement = client.post(
+        "/api/v1/requirements",
+        json={
+            "project_id": source,
+            "iteration_id": shared_iteration,
+            "title": f"Move delivery requirement-{uuid4().hex[:8]}",
+        },
+    ).json()
+
+    moved_pool = client.patch(f"/api/v1/requirements/{pool_requirement['id']}", json={"project_id": target})
+    moved_delivery = client.patch(f"/api/v1/requirements/{delivery_requirement['id']}", json={"project_id": target})
+
+    assert moved_pool.status_code == 200, moved_pool.text
+    assert moved_pool.json()["iteration_id"] == client.get(f"/api/v1/projects/{target}").json()["requirement_pool_iteration_id"]
+    assert moved_delivery.status_code == 200, moved_delivery.text
+    assert moved_delivery.json()["iteration_id"] == shared_iteration
+
+
+def test_requirement_project_change_rejects_incompatible_delivery_iteration(client: TestClient):
+    source = _create_named_project(client, f"Incompatible source-{uuid4().hex[:8]}")
+    target = _create_named_project(client, f"Incompatible target-{uuid4().hex[:8]}")
+    delivery = _create_iteration(client, source, f"Source-only delivery-{uuid4().hex[:8]}")
+    requirement = client.post(
+        "/api/v1/requirements",
+        json={"project_id": source, "iteration_id": delivery, "title": f"Incompatible move-{uuid4().hex[:8]}"},
+    ).json()
+
+    response = client.patch(f"/api/v1/requirements/{requirement['id']}", json={"project_id": target})
+
+    assert response.status_code == 400

@@ -115,6 +115,9 @@
       <template v-else-if="activeTab === 'requirements'">
         <div class="project-tab-toolbar">
           <el-input v-model="projectListFilters.requirements.keyword" clearable placeholder="搜索需求标题" class="project-tab-search" @keyup.enter="resetProjectListSearch('requirements')" @clear="resetProjectListSearch('requirements')" />
+          <el-tooltip v-if="canManageCurrentProject && projectRequirementPool" content="重命名需求池" placement="top">
+            <el-button :icon="Edit" circle aria-label="重命名需求池" @click="openRequirementPoolRename" />
+          </el-tooltip>
           <el-button v-if="canCreateCurrentWorkItem && !projectClosed" @click="openImportDialog">导入需求</el-button>
           <el-button v-if="canCreateCurrentWorkItem && !projectClosed" type="primary" @click="openRequirementCreate">新增需求</el-button>
         </div>
@@ -124,7 +127,7 @@
           <el-table-column label="需求标题" min-width="180" show-overflow-tooltip>
             <template #default="{ row }"><router-link class="table-link" :to="`/requirements/${row.id}`">{{ row.title }}</router-link></template>
           </el-table-column>
-          <el-table-column label="迭代" width="140"><template #default="{ row }">{{ labelById(requirementIterationDisplayOptions, row.iteration_id) }}</template></el-table-column>
+          <el-table-column label="迭代" width="180"><template #default="{ row }">{{ requirementIterationLabel(requirementIterationDisplayOptions.find((item) => item.id === row.iteration_id)) }}</template></el-table-column>
           <el-table-column label="当前处理人" width="130"><template #default="{ row }">{{ userLabel(users, row.owner_id) }}</template></el-table-column>
           <el-table-column label="优先级" width="100"><template #default="{ row }"><RequirementPriorityBadge :value="row.priority" /></template></el-table-column>
           <el-table-column label="状态" width="90">
@@ -489,11 +492,18 @@
     <el-dialog v-model="requirementDialogVisible" :title="editingRequirementId ? '编辑需求' : '新增需求'" width="640px">
       <el-form label-position="top">
         <el-form-item label="需求标题" required><el-input v-model="requirementForm.title" /></el-form-item>
-        <div class="form-grid"><el-form-item label="迭代"><el-select v-model="requirementForm.iteration_id" clearable filterable><el-option v-for="iteration in requirementIterationOptions" :key="iteration.id" :label="iteration.name" :value="iteration.id" /></el-select></el-form-item><el-form-item v-if="!editingRequirementId" label="当前处理人"><el-select v-model="requirementForm.owner_id" clearable filterable><el-option v-for="user in users" :key="user.id" :label="user.full_name" :value="user.id" /></el-select></el-form-item><el-form-item label="提出人"><el-select v-model="requirementForm.proposer_id" clearable filterable><el-option v-for="user in users" :key="user.id" :label="user.full_name" :value="user.id" /></el-select></el-form-item><el-form-item label="类型"><el-select v-model="requirementForm.requirement_type"><el-option v-for="option in requirementTypeOptions" :key="option" :label="option" :value="option" /></el-select></el-form-item><el-form-item label="优先级"><el-select v-model="requirementForm.priority" class="priority-select"><template #prefix><RequirementPriorityBadge :value="requirementForm.priority" /></template><el-option v-for="option in requirementPriorityOptions" :key="option.value" :label="option.label" :value="option.value"><RequirementPriorityBadge :value="option.value" /></el-option></el-select></el-form-item></div>
+        <div class="form-grid"><el-form-item label="迭代"><el-select v-model="requirementForm.iteration_id" filterable><el-option v-for="iteration in requirementSelectableIterations" :key="iteration.id" :label="requirementIterationLabel(iteration)" :value="iteration.id" /></el-select></el-form-item><el-form-item v-if="!editingRequirementId" label="当前处理人"><el-select v-model="requirementForm.owner_id" clearable filterable><el-option v-for="user in users" :key="user.id" :label="user.full_name" :value="user.id" /></el-select></el-form-item><el-form-item label="提出人"><el-select v-model="requirementForm.proposer_id" clearable filterable><el-option v-for="user in users" :key="user.id" :label="user.full_name" :value="user.id" /></el-select></el-form-item><el-form-item label="类型"><el-select v-model="requirementForm.requirement_type"><el-option v-for="option in requirementTypeOptions" :key="option" :label="option" :value="option" /></el-select></el-form-item><el-form-item label="优先级"><el-select v-model="requirementForm.priority" class="priority-select"><template #prefix><RequirementPriorityBadge :value="requirementForm.priority" /></template><el-option v-for="option in requirementPriorityOptions" :key="option.value" :label="option.label" :value="option.value"><RequirementPriorityBadge :value="option.value" /></el-option></el-select></el-form-item></div>
         <el-form-item label="需求描述"><el-input v-model="requirementForm.description" type="textarea" :rows="3" /></el-form-item>
         <el-form-item label="验收标准"><el-input v-model="requirementForm.acceptance_criteria" type="textarea" :rows="3" /></el-form-item>
       </el-form>
       <template #footer><el-button @click="requirementDialogVisible = false">取消</el-button><el-button type="primary" :loading="saving" @click="submitRequirement">保存</el-button></template>
+    </el-dialog>
+
+    <el-dialog v-model="requirementPoolRenameVisible" title="重命名需求池" width="360px">
+      <el-form label-position="top" @submit.prevent="renameRequirementPool">
+        <el-form-item label="需求池名称" required><el-input v-model="poolName" maxlength="100" show-word-limit /></el-form-item>
+      </el-form>
+      <template #footer><el-button @click="requirementPoolRenameVisible = false">取消</el-button><el-button type="primary" :loading="saving" @click="renameRequirementPool">保存</el-button></template>
     </el-dialog>
 
     
@@ -649,6 +659,7 @@
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { Edit } from '@element-plus/icons-vue'
 
 import { createBug, deleteBug, updateBug } from '../api/bugs'
 import { createIteration, deferIterationWorkItems, deleteIteration, fetchIterations, updateIteration } from '../api/iterations'
@@ -698,6 +709,7 @@ import { deriveTaskBranch, TASK_BRANCH_OPTIONS, taskBranchLabel } from '../utils
 import { DEFAULT_BUG_TYPE_KEY } from '../utils/bugTypeOptions'
 import { useBugTypes } from '../utils/useBugTypes'
 import { canSelectForBatchAssignment } from '../utils/batchAssignmentSelection'
+import { deliveryIterations, requirementIterationLabel, requirementIterationOptions, requirementPoolForProject } from '../utils/requirementPoolIterations'
 
 const route = useRoute()
 const router = useRouter()
@@ -765,6 +777,7 @@ const projectListPagination = reactive({
 const iterationDialogVisible = ref(false)
 const deferWorkItemsVisible = ref(false)
 const requirementDialogVisible = ref(false)
+const requirementPoolRenameVisible = ref(false)
 const taskDialogVisible = ref(false)
 const caseDialogVisible = ref(false)
 const caseExecutionVisible = ref(false)
@@ -778,6 +791,7 @@ const selectedCase = ref(null)
 const bugSourceCase = ref(null)
 const caseExecutionHistory = ref([])
 const deferWorkItemsForm = reactive({ target_iteration_id: null, remark: '' })
+const poolName = ref('')
 const settingsForm = reactive({ assignee_rule_config_id: null })
 
 const tabs = [
@@ -845,7 +859,7 @@ const projectMemberRoleOptions = [
   { label: '观察者', value: 'viewer' }
 ]
 
-const projectIterations = computed(() => projectIterationRows.value)
+const projectIterations = computed(() => deliveryIterations(projectIterationRows.value))
 const projectRequirements = computed(() => projectRequirementRows.value)
 const projectTasks = computed(() => projectTaskRows.value)
 const projectClosed = computed(() => project.value.state_category === 'terminal')
@@ -874,19 +888,18 @@ const pagedProjectTasks = computed(() => projectTasks.value)
 const pagedProjectTestCases = computed(() => projectTestCases.value)
 const pagedProjectTestRuns = computed(() => projectTestRuns.value)
 const pagedProjectBugs = computed(() => projectBugs.value)
-const projectIterationOptions = computed(() => iterations.value.filter((item) => (item.project_ids || []).includes(projectId.value)))
-const requirementProjectScopeIds = computed(() => collectProjectAndAncestorIds(projectId.value))
-const requirementIterationDisplayOptions = computed(() => iterations.value.filter((item) => {
-  const optionProjectIds = item.project_ids || []
-  return optionProjectIds.some((id) => requirementProjectScopeIds.value.includes(id))
-}))
-const requirementIterationOptions = computed(() => requirementIterationDisplayOptions.value.filter((item) => item.state_category !== 'terminal'))
+const projectIterationOptions = computed(() => deliveryIterations(iterations.value).filter((item) => (item.project_ids || []).includes(projectId.value)))
+const projectRequirementPool = computed(() => requirementPoolForProject(project.value, iterations.value))
+const requirementIterationDisplayOptions = computed(() => requirementIterationOptions(project.value, projects.value, iterations.value))
+const requirementSelectableIterations = computed(() => requirementIterationDisplayOptions.value.filter((item) => (
+  item.is_requirement_pool || item.state_category !== 'terminal' || item.id === requirementForm.iteration_id
+)))
 const projectRequirementOptions = computed(() => requirements.value.filter((item) => item.project_id === projectId.value))
 const projectTaskOptions = computed(() => tasks.value.filter((item) => item.project_id === projectId.value))
 const projectTestCaseOptions = computed(() => projectTestCaseRows.value)
 const projectTestRunOptions = computed(() => projectTestRunRows.value)
-const bugEditableIterationOptions = computed(() => bugIterationOptions(iterations.value, projects.value, bugForm.project_id || projectId.value))
-const bugEditableIterationDisplayOptions = computed(() => includeSelectedIterationOption(bugEditableIterationOptions.value, iterations.value, bugForm.iteration_id))
+const bugEditableIterationOptions = computed(() => bugIterationOptions(deliveryIterations(iterations.value), projects.value, bugForm.project_id || projectId.value))
+const bugEditableIterationDisplayOptions = computed(() => includeSelectedIterationOption(bugEditableIterationOptions.value, deliveryIterations(iterations.value), bugForm.iteration_id))
 const deferTargetIterations = computed(() => projectIterationOptions.value.filter((item) => item.id !== startingIterationId.value && item.state_category !== 'terminal'))
 const unfinishedIterationRequirements = computed(() => requirements.value.filter((item) => item.iteration_id === startingIterationId.value && item.state_category !== 'terminal'))
 const directUnfinishedIterationTasks = computed(() => tasks.value.filter((item) => item.iteration_id === startingIterationId.value && item.state_category !== 'terminal'))
@@ -1227,7 +1240,7 @@ async function submitProjectMembers() {
   }
 }
 function resetIterationForm() { Object.assign(iterationForm, { project_ids: [projectId.value], name: '', owner_id: null, start_date: null, end_date: null, goal: '' }) }
-function resetRequirementForm() { Object.assign(requirementForm, { project_id: projectId.value, iteration_id: null, title: '', requirement_type: '功能', priority: '3', owner_id: null, proposer_id: currentUserId(users.value), description: '', acceptance_criteria: '' }) }
+function resetRequirementForm() { Object.assign(requirementForm, { project_id: projectId.value, iteration_id: projectRequirementPool.value?.id ?? null, title: '', requirement_type: '功能', priority: '3', owner_id: null, proposer_id: currentUserId(users.value), description: '', acceptance_criteria: '' }) }
 function resetTaskForm() { Object.assign(taskForm, { project_id: projectId.value, requirement_id: null, title: '', task_type: 'standalone_operation', priority: 'medium', owner_id: null, due_date: null, description: '' }) }
 function resetCaseForm() { Object.assign(caseForm, { project_id: projectId.value, requirement_id: null, title: '', case_type: 'functional', test_scope: 'functional_test', default_tester_id: defaultTesterByRule('test_case_tester_roles', ['tester', 'test_lead']), precondition: '', steps_json: [{ step: '', expected: '' }], expected_result: '' }) }
 function resetRunForm() { Object.assign(runForm, { project_id: projectId.value, iteration_id: null, name: '', test_owner_id: defaultTesterByRule('test_run_owner_roles', ['tester', 'test_lead']), status: 'planning', remark: '' }) }
@@ -1242,6 +1255,20 @@ function openDeferWorkItems(row) {
 }
 function openRequirementCreate() { editingRequirementId.value = null; resetRequirementForm(); requirementDialogVisible.value = true }
 function openRequirementEdit(row) { editingRequirementId.value = row.id; Object.assign(requirementForm, { ...row, priority: normalizeRequirementPriority(row.priority), requirement_type: row.requirement_type || '', description: row.description || '', acceptance_criteria: row.acceptance_criteria || '' }); requirementDialogVisible.value = true }
+function openRequirementPoolRename() { poolName.value = projectRequirementPool.value?.name || ''; requirementPoolRenameVisible.value = true }
+async function renameRequirementPool() {
+  if (!poolName.value.trim()) return ElMessage.warning('请填写需求池名称')
+  saving.value = true
+  try {
+    await updateIteration(projectRequirementPool.value.id, { name: poolName.value.trim() })
+    requirementPoolRenameVisible.value = false
+    await loadData()
+  } catch (error) {
+    showActionError(error, '需求池重命名失败')
+  } finally {
+    saving.value = false
+  }
+}
 function openGenerate(row) { editingTaskId.value = null; resetTaskForm(); Object.assign(taskForm, { requirement_id: row.id, title: row.title, task_type: 'requirement_implementation', owner_id: null }); taskDialogVisible.value = true }
 
 async function downloadImportTemplate() {
@@ -1364,7 +1391,7 @@ async function loadData() {
       fetchPrograms(),
       fetchUsers(),
       fetchAssigneeRuleConfigs(),
-      fetchIterations(),
+      fetchIterations({ include_requirement_pool: true }),
       fetchRequirements(),
       fetchTasks(),
       safeFetchProjectMembers(projectId.value),
@@ -1407,7 +1434,7 @@ async function loadData() {
 
 async function refreshProjectReferences() {
   const [iterationRefRes, requirementRefRes, taskRefRes] = await Promise.all([
-    fetchIterations(),
+    fetchIterations({ include_requirement_pool: true }),
     fetchRequirements(),
     fetchTasks()
   ])

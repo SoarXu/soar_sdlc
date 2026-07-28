@@ -1112,7 +1112,11 @@ def _apply_bug_activation(
             },
         )
     source_iteration = locked_iterations.get(bug.iteration_id)
-    source_is_active = bool(source_iteration and is_iteration_active(db, source_iteration))
+    source_is_active = bool(
+        source_iteration
+        and not source_iteration.is_requirement_pool
+        and is_iteration_active(db, source_iteration)
+    )
     if not source_is_active and parsed_target_iteration_id is None:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -1250,7 +1254,11 @@ def _bug_activation_transition_read(
         if bug.iteration_id
         else None
     )
-    source_is_active = bool(source_iteration and is_iteration_active(db, source_iteration))
+    source_is_active = bool(
+        source_iteration
+        and not source_iteration.is_requirement_pool
+        and is_iteration_active(db, source_iteration)
+    )
     options = []
     for iteration in (
         db.query(Iteration)

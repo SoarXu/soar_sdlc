@@ -19,6 +19,12 @@ class Project(Base):
     actual_start_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     actual_end_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     is_long_term: Mapped[bool] = mapped_column(Boolean, default=False)
+    requirement_pool_iteration_id: Mapped[int | None] = mapped_column(
+        BigInteger,
+        ForeignKey("iterations.id", ondelete="RESTRICT", use_alter=True),
+        nullable=True,
+        unique=True,
+    )
     workflow_definition_id: Mapped[int] = mapped_column(
         BigInteger,
         ForeignKey("workflow_definitions.id", ondelete="RESTRICT"),

@@ -41,6 +41,7 @@ class IterationRead(BaseModel):
     current_state_id: int
     status_name: str
     state_category: str
+    is_requirement_pool: bool
     project_id: int | None = None
     project_ids: list[int] = []
     name: str

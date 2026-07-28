@@ -53,6 +53,7 @@ class RequirementRead(RequirementBase):
     model_config = ConfigDict(from_attributes=True)
 
     id: int
+    iteration_id: int
     workflow_definition_id: int
     current_state_id: int
     status_name: str

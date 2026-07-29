@@ -251,6 +251,10 @@ function statusActionLabel(value) {
   return statusActionOptions[value] || value || '-'
 }
 
+function isUnfinishedIterationBlocker(error) {
+  return error.response?.data?.detail?.includes('unfinished iteration')
+}
+
 function workflowSchemeLabel(configId) {
   if (!configId) return '默认系统工作流'
   return workflowSchemes.value.find((item) => item.id === configId)?.name || `#${configId}`
@@ -399,7 +403,11 @@ async function changeProjectStatus(id, action) {
     await actions[action](id, buildStatusPayload())
     await loadData()
   } catch (error) {
-    showActionError(error, '项目状态更新失败')
+    if (isUnfinishedIterationBlocker(error)) {
+      ElMessage.warning('项目存在未结束迭代，无法关闭。')
+    } else {
+      showActionError(error, '项目状态更新失败')
+    }
     throw error
   }
 }

@@ -82,6 +82,21 @@
           <el-input v-model="projectListFilters.iterations.keyword" clearable placeholder="搜索迭代名称" class="project-tab-search" @keyup.enter="resetProjectListSearch('iterations')" @clear="resetProjectListSearch('iterations')" />
           <el-button v-if="canManageCurrentProject" type="primary" @click="openIterationCreate">新增迭代</el-button>
         </div>
+        <el-table v-if="projectRequirementPoolRow" :data="projectRequirementPoolRow ? [projectRequirementPoolRow] : []" stripe width="100%">
+          <el-table-column prop="id" label="ID" width="80" />
+          <el-table-column label="迭代名称" min-width="180" show-overflow-tooltip>
+            <template #default="{ row }"><el-tag type="info">{{ requirementIterationLabel(row) }}</el-tag></template>
+          </el-table-column>
+          <el-table-column label="负责人" width="150"><template #default>-</template></el-table-column>
+          <el-table-column label="开始日期" width="130"><template #default>-</template></el-table-column>
+          <el-table-column label="结束日期" width="130"><template #default>-</template></el-table-column>
+          <el-table-column label="实际开始" width="130"><template #default>-</template></el-table-column>
+          <el-table-column label="实际结束" width="130"><template #default>-</template></el-table-column>
+          <el-table-column label="状态" width="120"><template #default>-</template></el-table-column>
+          <el-table-column label="操作" width="250" fixed="right">
+            <template #default="{ row }"><el-button v-if="canManageCurrentProject" link type="primary" @click="openIterationEdit(row)">编辑</el-button></template>
+          </el-table-column>
+        </el-table>
         <el-table :data="pagedProjectIterations" stripe width="100%">
           <el-table-column prop="id" label="ID" width="80" />
           <el-table-column label="迭代名称" min-width="180" show-overflow-tooltip>
@@ -96,7 +111,7 @@
           <el-table-column prop="actual_end_date" label="实际结束" width="130" />
           <el-table-column label="状态" width="120"><template #default="{ row }">{{ row.status_name || '-' }}</template></el-table-column>
           <el-table-column label="操作" width="250" fixed="right">
-            <template #default="{ row }"><WorkflowActionButtons v-if="canManageCurrentProject" object-type="iteration" :object-id="row.id" mode="list" :transitions="projectWorkflowTransitionsFor('iteration', row.id)" :auto-load="false" :users="users" @executed="refreshAfterMutation" /><el-button v-if="canManageCurrentProject && iterationCanDefer(row)" link type="warning" @click="openDeferWorkItems(row)">延期工作项</el-button><el-button v-if="canManageCurrentProject" link type="primary" @click="openIterationEdit(row)">编辑</el-button><el-popconfirm v-if="canManageCurrentProject" title="确认删除该迭代？" @confirm="removeIteration(row.id)"><template #reference><el-button link type="danger">删除</el-button></template></el-popconfirm></template>
+            <template #default="{ row }"><WorkflowActionButtons v-if="canManageCurrentProject && !row.is_requirement_pool" object-type="iteration" :object-id="row.id" mode="list" :transitions="projectWorkflowTransitionsFor('iteration', row.id)" :auto-load="false" :users="users" @executed="refreshAfterMutation" /><el-button v-if="canManageCurrentProject && !row.is_requirement_pool && iterationCanDefer(row)" link type="warning" @click="openDeferWorkItems(row)">延期工作项</el-button><el-button v-if="canManageCurrentProject" link type="primary" @click="openIterationEdit(row)">编辑</el-button><el-popconfirm v-if="canManageCurrentProject && !row.is_requirement_pool" title="确认删除该迭代？" @confirm="removeIteration(row.id)"><template #reference><el-button link type="danger">删除</el-button></template></el-popconfirm></template>
           </el-table-column>
         </el-table>
         <div class="table-pagination">
@@ -115,9 +130,6 @@
       <template v-else-if="activeTab === 'requirements'">
         <div class="project-tab-toolbar">
           <el-input v-model="projectListFilters.requirements.keyword" clearable placeholder="搜索需求标题" class="project-tab-search" @keyup.enter="resetProjectListSearch('requirements')" @clear="resetProjectListSearch('requirements')" />
-          <el-tooltip v-if="canManageCurrentProject && projectRequirementPool" content="重命名需求池" placement="top">
-            <el-button :icon="Edit" circle aria-label="重命名需求池" @click="openRequirementPoolRename" />
-          </el-tooltip>
           <el-button v-if="canCreateCurrentWorkItem && !projectClosed" @click="openImportDialog">导入需求</el-button>
           <el-button v-if="canCreateCurrentWorkItem && !projectClosed" type="primary" @click="openRequirementCreate">新增需求</el-button>
         </div>
@@ -436,8 +448,8 @@
     <el-dialog v-model="iterationDialogVisible" :title="editingIterationId ? '编辑迭代' : '新增迭代'" width="560px">
       <el-form label-position="top">
         <el-form-item label="迭代名称" required><el-input v-model="iterationForm.name" /></el-form-item>
-        <div class="form-grid"><el-form-item label="负责人"><el-select v-model="iterationForm.owner_id" clearable filterable><el-option v-for="user in users" :key="user.id" :label="user.full_name" :value="user.id" /></el-select></el-form-item><el-form-item label="开始日期"><el-date-picker v-model="iterationForm.start_date" value-format="YYYY-MM-DD" type="date" /></el-form-item><el-form-item label="结束日期"><el-date-picker v-model="iterationForm.end_date" value-format="YYYY-MM-DD" type="date" /></el-form-item></div>
-        <el-form-item label="目标"><el-input v-model="iterationForm.goal" type="textarea" :rows="3" /></el-form-item>
+        <div class="form-grid"><el-form-item label="负责人"><el-select v-model="iterationForm.owner_id" clearable filterable :disabled="editingRequirementPool"><el-option v-for="user in users" :key="user.id" :label="user.full_name" :value="user.id" /></el-select></el-form-item><el-form-item label="开始日期"><el-date-picker v-model="iterationForm.start_date" value-format="YYYY-MM-DD" type="date" :disabled="editingRequirementPool" /></el-form-item><el-form-item label="结束日期"><el-date-picker v-model="iterationForm.end_date" value-format="YYYY-MM-DD" type="date" :disabled="editingRequirementPool" /></el-form-item></div>
+        <el-form-item label="目标"><el-input v-model="iterationForm.goal" type="textarea" :rows="3" :disabled="editingRequirementPool" /></el-form-item>
       </el-form>
       <template #footer><el-button @click="iterationDialogVisible = false">取消</el-button><el-button type="primary" :loading="saving" @click="submitIteration">保存</el-button></template>
     </el-dialog>
@@ -498,15 +510,6 @@
       </el-form>
       <template #footer><el-button @click="requirementDialogVisible = false">取消</el-button><el-button type="primary" :loading="saving" @click="submitRequirement">保存</el-button></template>
     </el-dialog>
-
-    <el-dialog v-model="requirementPoolRenameVisible" title="重命名需求池" width="360px">
-      <el-form label-position="top" @submit.prevent="renameRequirementPool">
-        <el-form-item label="需求池名称" required><el-input v-model="poolName" maxlength="100" show-word-limit /></el-form-item>
-      </el-form>
-      <template #footer><el-button @click="requirementPoolRenameVisible = false">取消</el-button><el-button type="primary" :loading="saving" @click="renameRequirementPool">保存</el-button></template>
-    </el-dialog>
-
-    
 
     <el-dialog v-model="taskDialogVisible" :title="editingTaskId ? '编辑任务' : '新增任务'" width="620px">
       <el-form label-position="top">
@@ -659,7 +662,6 @@
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Edit } from '@element-plus/icons-vue'
 
 import { createBug, deleteBug, updateBug } from '../api/bugs'
 import { createIteration, deferIterationWorkItems, deleteIteration, fetchIterations, updateIteration } from '../api/iterations'
@@ -730,6 +732,7 @@ const testCases = ref([])
 const testRuns = ref([])
 const bugs = ref([])
 const projectIterationRows = ref([])
+const projectRequirementPoolRow = ref(null)
 const projectRequirementRows = ref([])
 const projectTaskRows = ref([])
 const projectTestCaseRows = ref([])
@@ -777,7 +780,6 @@ const projectListPagination = reactive({
 const iterationDialogVisible = ref(false)
 const deferWorkItemsVisible = ref(false)
 const requirementDialogVisible = ref(false)
-const requirementPoolRenameVisible = ref(false)
 const taskDialogVisible = ref(false)
 const caseDialogVisible = ref(false)
 const caseExecutionVisible = ref(false)
@@ -786,12 +788,12 @@ const runDialogVisible = ref(false)
 const bugDialogVisible = ref(false)
 const importVisible = ref(false)
 const editingIterationId = ref(null), startingIterationId = ref(null), editingRequirementId = ref(null), editingTaskId = ref(null)
+const editingRequirementPool = ref(false)
 const editingCaseId = ref(null), editingRunId = ref(null), editingBugId = ref(null)
 const selectedCase = ref(null)
 const bugSourceCase = ref(null)
 const caseExecutionHistory = ref([])
 const deferWorkItemsForm = reactive({ target_iteration_id: null, remark: '' })
-const poolName = ref('')
 const settingsForm = reactive({ assignee_rule_config_id: null })
 
 const tabs = [
@@ -889,7 +891,7 @@ const pagedProjectTestCases = computed(() => projectTestCases.value)
 const pagedProjectTestRuns = computed(() => projectTestRuns.value)
 const pagedProjectBugs = computed(() => projectBugs.value)
 const projectIterationOptions = computed(() => deliveryIterations(iterations.value).filter((item) => (item.project_ids || []).includes(projectId.value)))
-const projectRequirementPool = computed(() => requirementPoolForProject(project.value, iterations.value))
+const projectRequirementPool = computed(() => projectRequirementPoolRow.value || requirementPoolForProject(project.value, iterations.value))
 const requirementIterationDisplayOptions = computed(() => requirementIterationOptions(project.value, projects.value, iterations.value))
 const requirementSelectableIterations = computed(() => requirementIterationDisplayOptions.value.filter((item) => (
   item.is_requirement_pool || item.state_category !== 'terminal' || item.id === requirementForm.iteration_id
@@ -990,6 +992,7 @@ function projectListParams(key) {
 function applyProjectPage(key, response, targetRef) {
   const data = response.data
   targetRef.value = data.items || []
+  if (key === 'iterations') projectRequirementPoolRow.value = data.requirement_pool || null
   projectListTotals[key] = data.total || 0
   const pager = projectListPagination[key]
   const maxPage = Math.max(1, Math.ceil(projectListTotals[key] / pager.pageSize))
@@ -1246,8 +1249,8 @@ function resetCaseForm() { Object.assign(caseForm, { project_id: projectId.value
 function resetRunForm() { Object.assign(runForm, { project_id: projectId.value, iteration_id: null, name: '', test_owner_id: defaultTesterByRule('test_run_owner_roles', ['tester', 'test_lead']), status: 'planning', remark: '' }) }
 function resetBugForm() { Object.assign(bugForm, { project_id: projectId.value, iteration_id: null, requirement_id: null, task_id: null, test_case_id: null, test_run_id: null, title: '', bug_type: DEFAULT_BUG_TYPE_KEY, severity: '3', priority: '3', owner_id: null, reporter_id: null, reproduce_steps: '', expected_result: '', actual_result: '' }) }
 
-function openIterationCreate() { editingIterationId.value = null; resetIterationForm(); iterationDialogVisible.value = true }
-function openIterationEdit(row) { editingIterationId.value = row.id; Object.assign(iterationForm, { ...row, project_ids: row.project_ids || [], goal: row.goal || '' }); iterationDialogVisible.value = true }
+function openIterationCreate() { editingIterationId.value = null; editingRequirementPool.value = false; resetIterationForm(); iterationDialogVisible.value = true }
+function openIterationEdit(row) { editingIterationId.value = row.id; editingRequirementPool.value = Boolean(row.is_requirement_pool); Object.assign(iterationForm, { ...row, project_ids: row.project_ids || [], goal: row.goal || '' }); iterationDialogVisible.value = true }
 function openDeferWorkItems(row) {
   startingIterationId.value = row.id
   Object.assign(deferWorkItemsForm, { target_iteration_id: null, remark: '' })
@@ -1255,20 +1258,6 @@ function openDeferWorkItems(row) {
 }
 function openRequirementCreate() { editingRequirementId.value = null; resetRequirementForm(); requirementDialogVisible.value = true }
 function openRequirementEdit(row) { editingRequirementId.value = row.id; Object.assign(requirementForm, { ...row, priority: normalizeRequirementPriority(row.priority), requirement_type: row.requirement_type || '', description: row.description || '', acceptance_criteria: row.acceptance_criteria || '' }); requirementDialogVisible.value = true }
-function openRequirementPoolRename() { poolName.value = projectRequirementPool.value?.name || ''; requirementPoolRenameVisible.value = true }
-async function renameRequirementPool() {
-  if (!poolName.value.trim()) return ElMessage.warning('请填写需求池名称')
-  saving.value = true
-  try {
-    await updateIteration(projectRequirementPool.value.id, { name: poolName.value.trim() })
-    requirementPoolRenameVisible.value = false
-    await loadData()
-  } catch (error) {
-    showActionError(error, '需求池重命名失败')
-  } finally {
-    saving.value = false
-  }
-}
 function openGenerate(row) { editingTaskId.value = null; resetTaskForm(); Object.assign(taskForm, { requirement_id: row.id, title: row.title, task_type: 'requirement_implementation', owner_id: null }); taskDialogVisible.value = true }
 
 async function downloadImportTemplate() {
@@ -1452,7 +1441,9 @@ async function submitIteration() {
   if (!iterationForm.name.trim()) return ElMessage.warning('请填写迭代名称')
   saving.value = true
   try {
-    const payload = { ...iterationForm, project_ids: iterationForm.project_ids.length ? iterationForm.project_ids : [projectId.value], owner_id: iterationForm.owner_id || null }
+    const payload = editingRequirementPool.value
+      ? { name: iterationForm.name.trim() }
+      : { ...iterationForm, project_ids: iterationForm.project_ids.length ? iterationForm.project_ids : [projectId.value], owner_id: iterationForm.owner_id || null }
     if (editingIterationId.value) await updateIteration(editingIterationId.value, payload)
     else await createIteration(payload)
     iterationDialogVisible.value = false

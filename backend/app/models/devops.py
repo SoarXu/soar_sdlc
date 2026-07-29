@@ -7,6 +7,29 @@ from sqlalchemy.orm import Mapped, mapped_column
 from app.db.session import Base
 
 
+class DevopsGitPlatformConnection(Base):
+    __tablename__ = "devops_git_platform_connections"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    name: Mapped[str] = mapped_column(String(150), unique=True)
+    provider: Mapped[str] = mapped_column(String(32))
+    base_url: Mapped[str] = mapped_column(String(1000))
+    access_token_encrypted: Mapped[str | None] = mapped_column(Text, nullable=True)
+    enabled: Mapped[int] = mapped_column(Integer, default=1)
+    authenticated_username: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    connection_status: Mapped[str] = mapped_column(String(32), default="pending")
+    last_verified_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    create_time: Mapped[datetime] = mapped_column(DateTime, server_default=text("CURRENT_TIMESTAMP"))
+    update_time: Mapped[datetime] = mapped_column(
+        DateTime,
+        server_default=text("CURRENT_TIMESTAMP"),
+        server_onupdate=text("CURRENT_TIMESTAMP"),
+    )
+    deleted: Mapped[int] = mapped_column(Integer, default=0)
+    delete_time: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+
 class DevopsRepository(Base):
     __tablename__ = "devops_repositories"
 

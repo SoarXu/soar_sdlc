@@ -3,12 +3,43 @@
     <div class="page-header">
       <div>
         <h1>DevOps</h1>
-        <p>接入 GitLab 提交、Jenkins 任务和 Code Review。</p>
+        <p>管理 Git 平台连接、代码提交、构建任务和评审。</p>
       </div>
       <el-button type="primary" @click="openCommitDialog">录入提交</el-button>
     </div>
 
     <el-tabs v-model="activeTab" class="devops-tabs">
+      <el-tab-pane label="Git 平台" name="platforms">
+        <div class="project-tab-toolbar">
+          <span class="devops-tab-hint">先验证平台连接，再接入仓库与代码事件。</span>
+          <el-button type="primary" @click="openGitPlatformDialog">新增平台</el-button>
+        </div>
+        <el-table :data="gitPlatforms" stripe>
+          <el-table-column prop="name" label="配置名称" min-width="160" />
+          <el-table-column label="平台" width="120">
+            <template #default="{ row }"><el-tag effect="plain">{{ gitPlatformLabel(row.provider) }}</el-tag></template>
+          </el-table-column>
+          <el-table-column prop="base_url" label="服务地址" min-width="260" show-overflow-tooltip />
+          <el-table-column label="连接账号" width="150">
+            <template #default="{ row }">{{ row.authenticated_username || '-' }}</template>
+          </el-table-column>
+          <el-table-column label="状态" width="120">
+            <template #default="{ row }"><el-tag :type="gitPlatformStatusType(row.connection_status)">{{ gitPlatformStatusLabel(row.connection_status) }}</el-tag></template>
+          </el-table-column>
+          <el-table-column label="最近验证" width="180">
+            <template #default="{ row }">{{ row.last_verified_at || '-' }}</template>
+          </el-table-column>
+          <el-table-column label="操作" width="150" fixed="right">
+            <template #default="{ row }">
+              <el-tooltip content="测试连接" placement="top"><el-button circle :icon="Connection" :loading="testingGitPlatformId === row.id" @click="testGitPlatform(row)" /></el-tooltip>
+              <el-tooltip content="编辑配置" placement="top"><el-button circle :icon="Edit" @click="editGitPlatform(row)" /></el-tooltip>
+              <el-tooltip content="删除配置" placement="top"><el-button circle type="danger" :icon="Delete" @click="removeGitPlatform(row)" /></el-tooltip>
+            </template>
+          </el-table-column>
+        </el-table>
+        <el-empty v-if="!gitPlatforms.length" description="暂无 Git 平台配置" />
+      </el-tab-pane>
+
       <el-tab-pane label="提交记录" name="commits">
         <el-table :data="commits" stripe>
           <el-table-column label="Commit" width="150">
@@ -77,6 +108,25 @@
         </el-table>
       </el-tab-pane>
     </el-tabs>
+
+    <el-dialog v-model="gitPlatformDialogVisible" :title="editingGitPlatformId ? '编辑 Git 平台' : '新增 Git 平台'" width="600px">
+      <el-form label-position="top">
+        <div class="form-grid">
+          <el-form-item label="配置名称" required><el-input v-model="gitPlatformForm.name" maxlength="150" placeholder="例如：本地 Gitea" /></el-form-item>
+          <el-form-item label="平台类型" required>
+            <el-select v-model="gitPlatformForm.provider"><el-option v-for="item in gitPlatformOptions" :key="item.value" :label="item.label" :value="item.value" /></el-select>
+          </el-form-item>
+        </div>
+        <el-form-item label="服务地址" required>
+          <el-input v-model="gitPlatformForm.base_url" :placeholder="gitPlatformUrlPlaceholder(gitPlatformForm.provider)" />
+        </el-form-item>
+        <el-form-item label="访问令牌" required>
+          <el-input v-model="gitPlatformForm.access_token" type="password" show-password :placeholder="editingGitPlatformId ? '留空则保留现有令牌' : '输入个人访问令牌'" autocomplete="new-password" />
+        </el-form-item>
+        <el-form-item label="启用"><el-switch v-model="gitPlatformForm.enabled" /></el-form-item>
+      </el-form>
+      <template #footer><el-button @click="gitPlatformDialogVisible = false">取消</el-button><el-button type="primary" :loading="saving" @click="submitGitPlatform">保存</el-button></template>
+    </el-dialog>
 
     <el-dialog v-model="commitDialogVisible" title="录入 GitLab Commit" width="760px">
       <el-form label-position="top">
@@ -147,15 +197,19 @@
 <script setup>
 import { onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { Connection, Delete, Edit } from '@element-plus/icons-vue'
 
 import CommitDiffViewer from '../components/CommitDiffViewer.vue'
 import {
   createDevopsRepository,
+  createGitPlatform,
   createJenkinsBuild,
   createJenkinsJob,
   deleteDevopsRepository,
+  deleteGitPlatform,
   deleteJenkinsJob,
   fetchCodeReviewTasks,
+  fetchGitPlatforms,
   fetchDevopsCommit,
   fetchDevopsCommits,
   fetchDevopsRepositories,
@@ -163,11 +217,14 @@ import {
   fetchJenkinsJobs,
   ingestDevopsCommit,
   markDevopsCommitReviewed,
+  testGitPlatformConnection,
+  updateGitPlatform,
   updateDevopsRepository,
   updateJenkinsJob
 } from '../api/devops'
 
-const activeTab = ref('commits')
+const activeTab = ref('platforms')
+const gitPlatforms = ref([])
 const repositories = ref([])
 const jenkinsJobs = ref([])
 const jenkinsBuilds = ref([])
@@ -180,9 +237,18 @@ const diffDialogVisible = ref(false)
 const repositoryDialogVisible = ref(false)
 const jobDialogVisible = ref(false)
 const buildDialogVisible = ref(false)
+const gitPlatformDialogVisible = ref(false)
 const editingRepositoryId = ref(null)
 const editingJobId = ref(null)
+const editingGitPlatformId = ref(null)
+const testingGitPlatformId = ref(null)
 
+const gitPlatformOptions = [
+  { label: 'Gitea', value: 'gitea' },
+  { label: 'GitLab', value: 'gitlab' },
+  { label: 'GitHub', value: 'github' }
+]
+const gitPlatformForm = reactive({ name: '', provider: 'gitea', base_url: '', access_token: '', enabled: true })
 const commitForm = reactive({ repository_id: null, commit_sha: '', branch_name: '', author_name: '', message: '', diff_text: '' })
 const repositoryForm = reactive({ provider: 'gitlab', name: '', repository_url: '', external_project_id: '', default_branch: '', enabled: 1 })
 const jobForm = reactive({ job_name: '', jenkins_url: '', repository_id: null, branch_pattern: '', enabled: 1 })
@@ -191,6 +257,58 @@ const buildForm = reactive({ job_id: null, job_name: '', build_number: '', build
 function reviewStatusLabel(value) { return { pending: '待评审', reviewed: '已评审' }[value] || value || '-' }
 function repoName(id) { return repositories.value.find((repo) => repo.id === id)?.name || '-' }
 function buildStatusLabel(value) { return { running: '运行中', success: '成功', failed: '失败', aborted: '中止' }[value] || value || '-' }
+function gitPlatformLabel(value) { return gitPlatformOptions.find((item) => item.value === value)?.label || value || '-' }
+function gitPlatformStatusLabel(value) { return { pending: '待验证', connected: '已连接', failed: '连接失败' }[value] || '-' }
+function gitPlatformStatusType(value) { return { pending: 'info', connected: 'success', failed: 'danger' }[value] || 'info' }
+function gitPlatformUrlPlaceholder(provider) {
+  return {
+    gitea: '例如：http://10.56.0.242:3002',
+    gitlab: '例如：https://gitlab.example.com',
+    github: '例如：https://api.github.com'
+  }[provider]
+}
+function openGitPlatformDialog() {
+  editingGitPlatformId.value = null
+  Object.assign(gitPlatformForm, { name: '', provider: 'gitea', base_url: '', access_token: '', enabled: true })
+  gitPlatformDialogVisible.value = true
+}
+function editGitPlatform(row) {
+  editingGitPlatformId.value = row.id
+  Object.assign(gitPlatformForm, { name: row.name, provider: row.provider, base_url: row.base_url, access_token: '', enabled: Boolean(row.enabled) })
+  gitPlatformDialogVisible.value = true
+}
+async function submitGitPlatform() {
+  if (!gitPlatformForm.name.trim() || !gitPlatformForm.base_url.trim()) return ElMessage.warning('请填写配置名称和服务地址')
+  if (!editingGitPlatformId.value && !gitPlatformForm.access_token.trim()) return ElMessage.warning('请填写访问令牌')
+  saving.value = true
+  try {
+    const payload = { ...gitPlatformForm, name: gitPlatformForm.name.trim(), base_url: gitPlatformForm.base_url.trim(), enabled: gitPlatformForm.enabled ? 1 : 0 }
+    if (editingGitPlatformId.value && !payload.access_token) delete payload.access_token
+    if (editingGitPlatformId.value) await updateGitPlatform(editingGitPlatformId.value, payload)
+    else await createGitPlatform(payload)
+    gitPlatformDialogVisible.value = false
+    ElMessage.success('Git 平台配置已保存')
+    await loadData()
+  } finally {
+    saving.value = false
+  }
+}
+async function testGitPlatform(row) {
+  testingGitPlatformId.value = row.id
+  try {
+    const { data } = await testGitPlatformConnection(row.id)
+    ElMessage[data.connection_status === 'connected' ? 'success' : 'error'](data.last_error || `已连接账号：${data.authenticated_username}`)
+    await loadData()
+  } finally {
+    testingGitPlatformId.value = null
+  }
+}
+async function removeGitPlatform(row) {
+  await ElMessageBox.confirm(`确认删除 Git 平台配置“${row.name}”？`, '提示', { type: 'warning' })
+  await deleteGitPlatform(row.id)
+  ElMessage.success('Git 平台配置已删除')
+  await loadData()
+}
 function openCommitDialog() {
   Object.assign(commitForm, { repository_id: null, commit_sha: '', branch_name: '', author_name: '', message: '', diff_text: '' })
   commitDialogVisible.value = true
@@ -308,13 +426,15 @@ async function reviewCommit(row) {
 }
 
 async function loadData() {
-  const [repoRes, jobRes, buildRes, commitRes, reviewRes] = await Promise.all([
+  const [platformRes, repoRes, jobRes, buildRes, commitRes, reviewRes] = await Promise.all([
+    fetchGitPlatforms(),
     fetchDevopsRepositories(),
     fetchJenkinsJobs(),
     fetchJenkinsBuilds(),
     fetchDevopsCommits(),
     fetchCodeReviewTasks()
   ])
+  gitPlatforms.value = platformRes.data
   repositories.value = repoRes.data
   jenkinsJobs.value = jobRes.data
   jenkinsBuilds.value = buildRes.data

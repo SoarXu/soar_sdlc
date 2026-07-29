@@ -3,13 +3,17 @@ from typing import Any
 from fastapi import APIRouter, Depends, Response, status
 from sqlalchemy.orm import Session
 
-from app.core.auth_dependencies import require_system_admin
+from app.core.auth_dependencies import get_current_user, require_system_admin
 from app.db.session import get_db
 from app.services import devops_service
+from app.services import git_platform_service
 from app.views.devops_view import (
     DevopsCommitDetail,
     DevopsCommitIngest,
     DevopsCommitRead,
+    DevopsGitPlatformConnectionCreate,
+    DevopsGitPlatformConnectionRead,
+    DevopsGitPlatformConnectionUpdate,
     DevopsJenkinsBuildCreate,
     DevopsJenkinsBuildRead,
     DevopsJenkinsJobCreate,
@@ -22,6 +26,52 @@ from app.views.devops_view import (
 )
 
 router = APIRouter()
+
+
+@router.get("/git-platforms", response_model=list[DevopsGitPlatformConnectionRead])
+def list_git_platform_connections(
+    db: Session = Depends(get_db),
+    _current_user=Depends(get_current_user),
+):
+    return git_platform_service.list_connections(db)
+
+
+@router.post("/git-platforms", response_model=DevopsGitPlatformConnectionRead, status_code=status.HTTP_201_CREATED)
+def create_git_platform_connection(
+    payload: DevopsGitPlatformConnectionCreate,
+    db: Session = Depends(get_db),
+    _admin=Depends(require_system_admin),
+):
+    return git_platform_service.create_connection(db, payload)
+
+
+@router.post("/git-platforms/{connection_id}/test", response_model=DevopsGitPlatformConnectionRead)
+def test_git_platform_connection(
+    connection_id: int,
+    db: Session = Depends(get_db),
+    _admin=Depends(require_system_admin),
+):
+    return git_platform_service.test_connection(db, connection_id)
+
+
+@router.put("/git-platforms/{connection_id}", response_model=DevopsGitPlatformConnectionRead)
+def update_git_platform_connection(
+    connection_id: int,
+    payload: DevopsGitPlatformConnectionUpdate,
+    db: Session = Depends(get_db),
+    _admin=Depends(require_system_admin),
+):
+    return git_platform_service.update_connection(db, connection_id, payload)
+
+
+@router.delete("/git-platforms/{connection_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_git_platform_connection(
+    connection_id: int,
+    db: Session = Depends(get_db),
+    _admin=Depends(require_system_admin),
+):
+    git_platform_service.delete_connection(db, connection_id)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.get("/repositories", response_model=list[DevopsRepositoryRead])

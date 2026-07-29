@@ -1,5 +1,25 @@
 import { http } from './http'
 
+export function fetchGitPlatforms() {
+  return http.get('/devops/git-platforms')
+}
+
+export function createGitPlatform(data) {
+  return http.post('/devops/git-platforms', data)
+}
+
+export function updateGitPlatform(id, data) {
+  return http.put(`/devops/git-platforms/${id}`, data)
+}
+
+export function deleteGitPlatform(id) {
+  return http.delete(`/devops/git-platforms/${id}`)
+}
+
+export function testGitPlatformConnection(id) {
+  return http.post(`/devops/git-platforms/${id}/test`)
+}
+
 export function fetchDevopsRepositories() {
   return http.get('/devops/repositories')
 }

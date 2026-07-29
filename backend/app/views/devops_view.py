@@ -1,7 +1,41 @@
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict
+
+
+GitPlatformProvider = Literal["gitea", "gitlab", "github"]
+
+
+class DevopsGitPlatformConnectionCreate(BaseModel):
+    name: str
+    provider: GitPlatformProvider
+    base_url: str
+    access_token: str
+    enabled: int = 1
+
+
+class DevopsGitPlatformConnectionUpdate(BaseModel):
+    name: str | None = None
+    provider: GitPlatformProvider | None = None
+    base_url: str | None = None
+    access_token: str | None = None
+    enabled: int | None = None
+
+
+class DevopsGitPlatformConnectionRead(BaseModel):
+    id: int
+    name: str
+    provider: GitPlatformProvider
+    base_url: str
+    enabled: int
+    has_access_token: bool
+    authenticated_username: str | None = None
+    connection_status: str
+    last_verified_at: datetime | None = None
+    last_error: str | None = None
+    create_time: datetime | None = None
+    update_time: datetime | None = None
 
 
 class DevopsRepositoryBase(BaseModel):

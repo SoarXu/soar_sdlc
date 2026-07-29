@@ -18,7 +18,7 @@ from app.views.workflow_definition_view import WorkflowTemplateState, WorkflowTe
 
 
 def test_template_build_contract_uses_request_local_refs_not_status_columns():
-    assert set(WorkflowTemplateState.model_fields) >= {"ref", "status_name"}
+    assert set(WorkflowTemplateState.model_fields) >= {"ref", "status_name", "terminal_kind"}
     assert "status_key" not in WorkflowTemplateState.model_fields
     assert set(WorkflowTemplateTransition.model_fields) >= {"from_ref", "to_ref"}
     assert "from_status" not in WorkflowTemplateTransition.model_fields

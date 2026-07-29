@@ -6,6 +6,7 @@ import {
   filterWorkbenchItems,
   isTerminalWorkItem,
   itemStatusLabel,
+  itemStatusTag,
   shouldShowWorkbenchWorkflowActions,
   workbenchInlineActions,
   workbenchItemActionGroup,
@@ -62,6 +63,13 @@ import {
 }
 
 {
+  assert.equal(itemStatusTag({ object_type: 'bug', state_category: 'terminal', terminal_kind: 'completed' }), 'success')
+  assert.equal(itemStatusTag({ object_type: 'bug', state_category: 'terminal', terminal_kind: 'terminated' }), 'info')
+  assert.equal(itemStatusTag({ object_type: 'bug', state_category: 'terminal', terminal_kind: null }), 'info')
+  assert.equal(itemStatusTag({ object_type: 'bug', state_category: 'terminal', terminal_kind: 'unexpected' }), 'info')
+}
+
+{
   const viewModel = buildWorkbenchViewModel({
     pending_handling: { label: '待处理', items: [{ id: 1, object_type: 'task' }], total: 1 },
     unassigned: { label: '未分派', items: [{ id: 2, object_type: 'bug' }], total: 1 },
@@ -75,13 +83,15 @@ import {
   assert.deepEqual(viewModel.entryTabs.map((section) => section.key), [
     'pending_handling',
     'unassigned',
+    'completed',
+    'terminated',
     'exception_center',
     'following'
   ])
   assert.equal(viewModel.summaryCards[0].value, 1)
   assert.equal('unplanned' in viewModel.queueSectionsByKey, false)
   assert.equal(viewModel.summaryCards.some((card) => card.key === 'unplanned'), false)
-  assert.equal(viewModel.summaryCards.length, 4)
+  assert.equal(viewModel.summaryCards.length, 6)
 }
 
 {
@@ -103,6 +113,16 @@ import {
     'mentioned_me'
   ])
   assert.equal(viewModel.trackingTabsByKey.mentioned_me.total, 1)
+  assert.equal(viewModel.trackingTabsByKey.mentioned_me.description, '评论中通过 @ 提及到我的评论。')
+}
+
+{
+  const dashboardSource = readFileSync(new URL('../views/DashboardView.vue', import.meta.url), 'utf8')
+
+  assert.match(dashboardSource, /v-if="activeListSection\.key === 'mentioned_me'"/)
+  assert.match(dashboardSource, /label="评论内容"/)
+  assert.match(dashboardSource, /label="评论人"/)
+  assert.match(dashboardSource, /label="评论时间"/)
 }
 
 {

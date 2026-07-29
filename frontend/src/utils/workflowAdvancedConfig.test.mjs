@@ -10,6 +10,8 @@ import {
   createAdvancedConfigDraft,
   isAdvancedConfigDirty,
   moveAdvancedFormField,
+  validateWorkflowState,
+  validateWorkflowStates,
   validateAdvancedConfig
 } from './workflowAdvancedConfig.js'
 import { normalizeWorkflowTransition } from './workflowTransitionConfig.js'
@@ -96,6 +98,30 @@ const SECTION_OWNED_KEYS = {
 }
 
 assert.deepEqual(ADVANCED_SECTION_KEYS, ['rules', 'assignment', 'form', 'button', 'notification'])
+
+{
+  const invalidTerminalState = validateWorkflowState({ category: 'terminal', terminal_kind: null })
+  assert.equal(invalidTerminalState.valid, false)
+  assert.deepEqual(invalidTerminalState.errors, [{
+    field: 'terminal_kind',
+    message: '请选择终态归类'
+  }])
+  assert.equal(validateWorkflowState({ category: 'terminal', terminal_kind: 'completed' }).valid, true)
+  assert.equal(validateWorkflowState({ category: 'normal', terminal_kind: null }).valid, true)
+}
+
+{
+  const invalidTerminal = { id: 3, category: 'terminal', terminal_kind: null }
+  const result = validateWorkflowStates([
+    { id: 1, category: 'start' },
+    { id: 2, category: 'terminal', terminal_kind: 'completed' },
+    invalidTerminal
+  ])
+
+  assert.equal(result.valid, false)
+  assert.strictEqual(result.state, invalidTerminal)
+  assert.deepEqual(result.errors, [{ field: 'terminal_kind', message: '请选择终态归类' }])
+}
 
 {
   const draft = createAdvancedConfigDraft(createNormalizedTransition())

@@ -157,8 +157,8 @@ def _requirement_graph() -> WorkflowGraphSave:
             _state("pending_assignment", "待分派", "start", "#6b7280", 80, 100),
             _state("in_processing", "处理中", "normal", "#2563eb", 280, 100),
             _state("pending_confirmation", "待确认", "normal", "#7c3aed", 480, 100),
-            _state("completed", "已完成", "terminal", "#059669", 680, 100),
-            _state("canceled", "已取消", "terminal", "#94a3b8", 480, 240),
+            _state("completed", "已完成", "terminal", "#059669", 680, 100, terminal_kind="completed"),
+            _state("canceled", "已取消", "terminal", "#94a3b8", 480, 240, terminal_kind="terminated"),
         ],
         transitions=[
             _transition(
@@ -278,8 +278,8 @@ def _task_graph() -> WorkflowGraphSave:
             _state("pending_assignment", "待分派", "start", "#6b7280", 80, 120),
             _state("in_processing", "处理中", "normal", "#2563eb", 280, 120),
             _state("pending_confirmation", "待确认", "normal", "#7c3aed", 480, 120),
-            _state("completed", "已完成", "terminal", "#059669", 680, 120),
-            _state("canceled", "已取消", "terminal", "#94a3b8", 480, 260),
+            _state("completed", "已完成", "terminal", "#059669", 680, 120, terminal_kind="completed"),
+            _state("canceled", "已取消", "terminal", "#94a3b8", 480, 260, terminal_kind="terminated"),
         ],
         transitions=[
             _transition(
@@ -420,7 +420,7 @@ def _bug_graph() -> WorkflowGraphSave:
             _state("fixing", "修复中", "normal", "#2563eb", 280, 100),
             _state("pending_verification", "待验证", "normal", "#7c3aed", 480, 100),
             _state("verified", "已验证", "normal", "#0f766e", 680, 100),
-            _state("closed", "已关闭", "terminal", "#059669", 880, 100),
+            _state("closed", "已关闭", "terminal", "#059669", 880, 100, terminal_kind="completed"),
         ],
         transitions=[
             _transition(
@@ -610,8 +610,8 @@ def _iteration_graph() -> WorkflowGraphSave:
         states=[
             _state("planning", "规划中", "start", "#6b7280", 80, 120),
             _state("active", "进行中", "normal", "#2563eb", 280, 120),
-            _state("completed", "已完成", "terminal", "#059669", 480, 120),
-            _state("canceled", "已取消", "terminal", "#94a3b8", 480, 260),
+            _state("completed", "已完成", "terminal", "#059669", 480, 120, terminal_kind="completed"),
+            _state("canceled", "已取消", "terminal", "#94a3b8", 480, 260, terminal_kind="terminated"),
         ],
         transitions=[
             _transition(
@@ -633,7 +633,7 @@ def _project_graph() -> WorkflowGraphSave:
             _state("planning", "规划中", "start", "#6b7280", 80, 120),
             _state("active", "进行中", "normal", "#2563eb", 280, 120),
             _state("paused", "已暂停", "normal", "#7c3aed", 480, 120),
-            _state("closed", "已关闭", "terminal", "#059669", 680, 120),
+            _state("closed", "已关闭", "terminal", "#059669", 680, 120, terminal_kind="completed"),
         ],
         transitions=[
             _transition(
@@ -667,8 +667,8 @@ def _project_graph() -> WorkflowGraphSave:
     )
 
 
-def _state(ref: str, status_name: str, category: str, color: str, x: int, y: int) -> WorkflowStateBase:
-    return WorkflowStateBase(ref=ref, status_name=status_name, category=category, color=color, x=x, y=y)
+def _state(ref: str, status_name: str, category: str, color: str, x: int, y: int, terminal_kind: str | None = None) -> WorkflowStateBase:
+    return WorkflowStateBase(ref=ref, status_name=status_name, category=category, terminal_kind=terminal_kind, color=color, x=x, y=y)
 
 
 def _transition(

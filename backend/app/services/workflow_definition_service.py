@@ -26,6 +26,7 @@ from app.views.workflow_definition_view import (
 OBJECT_TYPES = {"requirement", "task", "bug", "iteration", "project"}
 SCOPE_TYPES = {"system", "project", "assignee_rule_config"}
 STATE_CATEGORIES = {"start", "normal", "terminal"}
+TERMINAL_KINDS = {"completed", "terminated"}
 IDENTITY_ROLES = {
     "system_admin", "project_owner", "project_member", "current_handler", "owner",
     "creator", "reporter", "proposer", "product_owner", "product_manager",
@@ -403,6 +404,15 @@ def _validate_graph(db: Session, definition: WorkflowDefinition, payload: Workfl
     for state in payload.states:
         if state.category not in STATE_CATEGORIES:
             raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Unknown state category")
+        if state.terminal_kind and state.terminal_kind not in TERMINAL_KINDS:
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Unknown terminal kind")
+        if state.category == "terminal" and not state.terminal_kind:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Terminal kind is required for a terminal state",
+            )
+        if state.category != "terminal" and state.terminal_kind is not None:
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Terminal kind requires a terminal state")
         if state.id in state_ids:
             raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Duplicate state id")
         state_ids.add(state.id)

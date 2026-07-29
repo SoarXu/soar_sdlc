@@ -58,6 +58,9 @@ def get_workbench(db: Session, user_id: int | None = None) -> WorkbenchResponse:
     unassigned_items = _unassigned_items(
         db, projects, iteration_names, project_scope_ids, active_iteration_ids
     )
+    terminal_items = _terminal_items(db, projects, iteration_names, project_scope_ids, active_iteration_ids)
+    completed_items = [item for item in terminal_items if item.terminal_kind == "completed"]
+    terminated_items = [item for item in terminal_items if item.terminal_kind == "terminated"]
     created_items = _created_by_me_items(
         db, projects, iteration_names, user_id, project_scope_ids, active_iteration_ids
     )
@@ -76,6 +79,8 @@ def get_workbench(db: Session, user_id: int | None = None) -> WorkbenchResponse:
         for section in [
             pending_items,
             unassigned_items,
+            completed_items,
+            terminated_items,
             created_items,
             watched_items,
             mentioned_items,
@@ -84,6 +89,7 @@ def get_workbench(db: Session, user_id: int | None = None) -> WorkbenchResponse:
         for item in section
         if item.owner_id
     }
+    owner_ids.update(item.mentioned_comment_author_id for item in mentioned_items if item.mentioned_comment_author_id)
     owner_ids.update(item.get("owner_id") for item in review_tasks if item.get("owner_id"))
     owners = [
         {"id": user.id, "full_name": user.full_name}
@@ -92,6 +98,8 @@ def get_workbench(db: Session, user_id: int | None = None) -> WorkbenchResponse:
     return WorkbenchResponse(
         pending_handling=WorkbenchSection(label="待处理", items=pending_items, total=len(pending_items)),
         unassigned=WorkbenchSection(label="未分派", items=unassigned_items, total=len(unassigned_items)),
+        completed=WorkbenchSection(label="已完成", items=completed_items, total=len(completed_items)),
+        terminated=WorkbenchSection(label="已终止", items=terminated_items, total=len(terminated_items)),
         created_by_me=WorkbenchSection(label="我发起的", items=created_items, total=len(created_items)),
         watched_by_me=WorkbenchSection(label="我关注的", items=watched_items, total=len(watched_items)),
         mentioned_me=WorkbenchSection(label="提到我的", items=mentioned_items, total=len(mentioned_items)),
@@ -162,6 +170,25 @@ def _unassigned_items(
         if not is_terminal_state(item)
         and item.iteration_id in active_iteration_ids
         and _in_project_scope(item.project_id, scoped_project_ids)
+    )
+    return _sort_workbench_items(items)
+
+
+def _terminal_items(db, projects, iteration_names, scoped_project_ids, active_iteration_ids):
+    items = [
+        _requirement_item(item, projects, iteration_names)
+        for item in db.query(Requirement).filter(Requirement.deleted == 0, terminal_state_clause(Requirement)).all()
+        if item.iteration_id in active_iteration_ids and _in_project_scope(item.project_id, scoped_project_ids)
+    ]
+    items.extend(
+        _task_item(item, projects, iteration_names, _effective_task_iteration_id(db, item))
+        for item in db.query(Task).filter(Task.deleted == 0, terminal_state_clause(Task)).all()
+        if _effective_task_iteration_id(db, item) in active_iteration_ids and _in_project_scope(item.project_id, scoped_project_ids)
+    )
+    items.extend(
+        _bug_item(item, projects, iteration_names)
+        for item in db.query(Bug).filter(Bug.deleted == 0, terminal_state_clause(Bug)).all()
+        if item.iteration_id in active_iteration_ids and _in_project_scope(item.project_id, scoped_project_ids)
     )
     return _sort_workbench_items(items)
 
@@ -246,12 +273,21 @@ def _mentioned_me_items(
                 "object_type": comment.object_type,
                 "id": comment.object_id,
                 "mentioned_in_comment_id": comment.id,
+                "mentioned_comment_id": comment.id,
+                "mentioned_comment_body": comment.body,
+                "mentioned_comment_author_id": comment.author_id,
+                "mentioned_comment_create_time": _datetime_value(comment.create_time),
             }
         )
-    return _filter_active_scoped_items(
-        _load_workbench_items_by_refs(db, projects, iteration_names, refs),
+    items = _filter_active_scoped_items(
+        _load_workbench_items_by_refs(db, projects, iteration_names, refs, preserve_duplicates=True),
         scoped_project_ids,
         active_iteration_ids,
+    )
+    return sorted(
+        items,
+        key=lambda item: (item.mentioned_comment_create_time or "", item.mentioned_comment_id or 0),
+        reverse=True,
     )
 
 
@@ -326,6 +362,7 @@ def _load_workbench_items_by_refs(
     projects: dict[int, Project],
     iteration_names: dict[int, str],
     refs: list[dict],
+    preserve_duplicates: bool = False,
 ) -> list[WorkbenchItem]:
     grouped_ids: dict[str, set[int]] = {}
     metadata_by_ref: dict[tuple[str, int], list[dict]] = {}
@@ -350,10 +387,10 @@ def _load_workbench_items_by_refs(
     seen: set[tuple[str, int]] = set()
     for ref in refs:
         key = (ref["object_type"], ref["id"])
-        if key in seen or key not in items_by_ref:
+        if (not preserve_duplicates and key in seen) or key not in items_by_ref:
             continue
         seen.add(key)
-        metadata_rows = metadata_by_ref[key]
+        metadata_rows = [ref] if preserve_duplicates else metadata_by_ref[key]
         metadata = {}
         for metadata_row in metadata_rows:
             metadata.update(metadata_row)
@@ -373,6 +410,10 @@ def _load_workbench_items_by_refs(
             update={
                 "watch_source": metadata.get("watch_source"),
                 "mentioned_in_comment_id": metadata.get("mentioned_in_comment_id"),
+                "mentioned_comment_id": metadata.get("mentioned_comment_id"),
+                "mentioned_comment_body": metadata.get("mentioned_comment_body"),
+                "mentioned_comment_author_id": metadata.get("mentioned_comment_author_id"),
+                "mentioned_comment_create_time": metadata.get("mentioned_comment_create_time"),
                 "exception_key": primary_exception.get("exception_key"),
                 "exception_label": primary_exception.get("exception_label"),
                 "exception_keys": exception_keys,
@@ -472,6 +513,7 @@ def _requirement_item(item: Requirement, projects: dict[int, Project], iteration
         current_state_id=item.current_state_id,
         status_name=current_state_name(item),
         state_category=item.state_category,
+        terminal_kind=getattr(item.current_state, "terminal_kind", None),
         priority=item.priority,
         create_time=_datetime_value(item.create_time),
         creator_id=item.creator_id,
@@ -503,6 +545,7 @@ def _task_item(
         current_state_id=item.current_state_id,
         status_name=current_state_name(item),
         state_category=item.state_category,
+        terminal_kind=getattr(item.current_state, "terminal_kind", None),
         priority=item.priority,
         due_date=_date_value(item.due_date),
         create_time=_datetime_value(item.create_time),
@@ -539,6 +582,7 @@ def _bug_item(item: Bug, projects: dict[int, Project], iteration_names: dict[int
         current_state_id=item.current_state_id,
         status_name=current_state_name(item),
         state_category=item.state_category,
+        terminal_kind=getattr(item.current_state, "terminal_kind", None),
         priority=item.priority,
         create_time=_datetime_value(item.create_time),
         creator_id=item.creator_id,

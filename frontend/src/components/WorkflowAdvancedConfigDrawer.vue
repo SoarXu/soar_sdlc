@@ -35,6 +35,12 @@
                 <el-option label="结束" value="terminal" />
               </el-select>
             </el-form-item>
+            <el-form-item v-if="state.category === 'terminal'" label="终态归类" :error="stateErrorFor('terminal_kind')">
+              <el-select v-model="state.terminal_kind" :clearable="false" required placeholder="请选择归类">
+                <el-option label="已完成" value="completed" />
+                <el-option label="已终止" value="terminated" />
+              </el-select>
+            </el-form-item>
             <el-form-item label="颜色"><el-color-picker v-model="state.color" /></el-form-item>
             <el-form-item label="启用"><el-switch v-model="state.enabled" /></el-form-item>
           </div>
@@ -356,6 +362,7 @@ import {
   clearAdvancedSection,
   createAdvancedConfigDraft,
   isAdvancedConfigDirty,
+  validateWorkflowState,
   validateAdvancedConfig
 } from '../utils/workflowAdvancedConfig'
 import { groupStateTransitions } from '../utils/workflowTransitionOrdering'
@@ -434,6 +441,7 @@ const receiverOptions = [
 const draft = ref(null)
 const activeSection = ref('basic')
 const errors = ref(createErrors())
+const stateErrors = ref([])
 const drawerVisible = ref(false)
 const draggedTransitionIdentity = ref(null)
 const actionGroups = [
@@ -461,6 +469,15 @@ watch(() => props.modelValue, (visible, wasVisible) => {
 watch(() => props.transition, () => {
   if (drawerVisible.value) initializeDraft()
 })
+
+watch(() => props.state?.category, (category) => {
+  if (category !== 'terminal' && props.state) props.state.terminal_kind = null
+  stateErrors.value = []
+})
+
+watch(() => props.state?.terminal_kind, () => {
+  stateErrors.value = []
+})
 const formPreset = computed({
   get: () => formPresetKey(draft.value?.form_config?.fields || []),
   set: (value) => {
@@ -485,6 +502,7 @@ function initializeDraft() {
   draft.value = props.transition ? createAdvancedConfigDraft(props.transition) : null
   activeSection.value = 'basic'
   errors.value = createErrors()
+  stateErrors.value = []
 }
 
 function open() {
@@ -521,6 +539,9 @@ function clearActiveSection() {
 }
 
 function applyPendingChanges() {
+  const stateValidation = validateWorkflowState(props.state)
+  stateErrors.value = stateValidation.errors
+  if (!stateValidation.valid) return false
   if (!draft.value || !props.transition) return true
   const result = validateAdvancedConfig(draft.value, props.states)
   errors.value = result.errors
@@ -554,6 +575,10 @@ async function resetDiagramRoute() {
 function errorFor(field) {
   const section = activeSection.value
   return errors.value[section]?.find((error) => error.field === field)?.message || ''
+}
+
+function stateErrorFor(field) {
+  return stateErrors.value.find((error) => error.field === field)?.message || ''
 }
 
 function addRoute() {

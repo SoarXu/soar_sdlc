@@ -36,6 +36,12 @@ assert.ok(
   saveGraphBody.indexOf('unsupportedWorkflowConfigSections') < saveGraphBody.indexOf('applyPendingChanges'),
   'unsupported historical configuration must block save before the drawer draft is reset'
 )
+assert.match(saveGraphBody, /const stateValidation = validateWorkflowStates\(states\.value\)/)
+assert.match(saveGraphBody, /if \(!stateValidation\.valid\) \{[\s\S]*selectState\(stateValidation\.state\)[\s\S]*return/)
+assert.ok(
+  saveGraphBody.indexOf('validateWorkflowStates(states.value)') < saveGraphBody.indexOf('saving.value = true'),
+  'every state must be validated before the save request starts'
+)
 
 assert.match(drawer, /主操作/)
 assert.match(drawer, /更多操作/)

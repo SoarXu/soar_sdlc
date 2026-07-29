@@ -10,6 +10,7 @@ from app.models.bug import Bug
 from app.models.iteration import Iteration
 from app.models.object_watch import ObjectWatch
 from app.models.project_member import ProjectMember
+from app.models.requirement import Requirement
 from app.models.role import Role, UserRole
 from app.models.task import Task
 from app.models.user import User
@@ -156,6 +157,71 @@ def test_workbench_returns_default_queue_sections_for_pending_and_unassigned(cli
     assert unassigned_bug["id"] in {item["id"] for item in data["unassigned"]["items"]}
     assert "project_board" not in data
     assert "iterations" not in data
+
+
+def test_workbench_partitions_active_iteration_terminal_items_by_terminal_kind(client: TestClient):
+    user_id, token = _create_user_with_role(f"terminal_partition_{uuid4().hex[:6]}", "developer")
+    project_id = _create_project(client, "Terminal partition project")
+    active_iteration_id = _create_iteration(client, project_id, "Terminal partition active")
+    inactive_iteration_id = _create_iteration(client, project_id, "Terminal partition inactive")
+    _start_iteration(client, active_iteration_id)
+    _add_project_member(project_id, user_id, "developer")
+    completed_requirement = client.post(
+        "/api/v1/requirements",
+        json={"project_id": project_id, "iteration_id": active_iteration_id, "title": "Completed requirement", "owner_id": user_id},
+    ).json()
+    terminated_task = client.post(
+        "/api/v1/tasks",
+        json={"project_id": project_id, "iteration_id": active_iteration_id, "title": "Terminated task", "owner_id": user_id},
+    ).json()
+    unclassified_bug = client.post(
+        "/api/v1/bugs",
+        json={"project_id": project_id, "iteration_id": active_iteration_id, "title": "Unclassified terminal bug", "owner_id": user_id},
+    ).json()
+    inactive_task = client.post(
+        "/api/v1/tasks",
+        json={"project_id": project_id, "iteration_id": inactive_iteration_id, "title": "Inactive terminal task", "owner_id": user_id},
+    ).json()
+
+    db = SessionLocal()
+    try:
+        def terminal_state(definition_id: int, status_name: str, terminal_kind: str | None) -> int:
+            state = WorkflowState(
+                definition_id=definition_id,
+                status_name=status_name,
+                category="terminal",
+                terminal_kind=terminal_kind,
+                enabled=True,
+            )
+            db.add(state)
+            db.flush()
+            return state.id
+
+        completed_state_id = terminal_state(completed_requirement["workflow_definition_id"], "Completed partition", "completed")
+        terminated_state_id = terminal_state(terminated_task["workflow_definition_id"], "Terminated partition", "terminated")
+        unclassified_state_id = terminal_state(unclassified_bug["workflow_definition_id"], "Unclassified partition", None)
+        inactive_state_id = terminal_state(inactive_task["workflow_definition_id"], "Inactive partition", "completed")
+        db.query(Requirement).filter(Requirement.id == completed_requirement["id"]).update(
+            {"current_state_id": completed_state_id}
+        )
+        db.query(Task).filter(Task.id == terminated_task["id"]).update({"current_state_id": terminated_state_id})
+        db.query(Bug).filter(Bug.id == unclassified_bug["id"]).update({"current_state_id": unclassified_state_id})
+        db.query(Task).filter(Task.id == inactive_task["id"]).update({"current_state_id": inactive_state_id})
+        db.commit()
+    finally:
+        db.close()
+
+    response = client.get("/api/v1/dashboard/workbench", headers={"Authorization": f"Bearer {token}"})
+
+    assert response.status_code == 200
+    data = response.json()
+    completed = {(item["object_type"], item["id"]): item for item in data["completed"]["items"]}
+    terminated = {(item["object_type"], item["id"]): item for item in data["terminated"]["items"]}
+    assert completed[("requirement", completed_requirement["id"])]["terminal_kind"] == "completed"
+    assert terminated[("task", terminated_task["id"])]["terminal_kind"] == "terminated"
+    terminal_refs = set(completed) | set(terminated)
+    assert ("bug", unclassified_bug["id"]) not in terminal_refs
+    assert ("task", inactive_task["id"]) not in terminal_refs
 
 
 def test_workbench_queue_uses_state_category_and_status_name(client: TestClient):
@@ -419,6 +485,55 @@ def test_workbench_returns_created_watched_mentioned_and_exception_center(client
     assert exception_item["threshold_hours"] == 24
     assert exception_item["threshold_count"] is None
     assert exception_item["overdue_hours"] >= 0
+
+
+def test_workbench_mentions_return_each_comment_with_its_content(client: TestClient):
+    user_id, token = _create_user_with_role(f"mentioned_comment_{uuid4().hex[:6]}", "developer")
+    project_id = _create_project(client, "Mention comment project")
+    iteration_id = _create_iteration(client, project_id, "Mention comment iteration")
+    _start_iteration(client, iteration_id)
+    bug = client.post(
+        "/api/v1/bugs",
+        json={"project_id": project_id, "iteration_id": iteration_id, "title": "Comment context bug"},
+    ).json()
+    _add_project_member(project_id, user_id, "developer")
+
+    db = SessionLocal()
+    try:
+        db.add_all([
+            WorkItemComment(
+                object_type="bug",
+                object_id=bug["id"],
+                author_id=user_id,
+                body="@mentioned_comment 请先确认复现步骤",
+                mentioned_user_ids=[user_id],
+                create_time=datetime(2026, 7, 28, 10, 0, 0),
+            ),
+            WorkItemComment(
+                object_type="bug",
+                object_id=bug["id"],
+                author_id=user_id,
+                body="@mentioned_comment 已补充日志，请跟进",
+                mentioned_user_ids=[user_id],
+                create_time=datetime(2026, 7, 28, 11, 0, 0),
+            ),
+        ])
+        db.commit()
+    finally:
+        db.close()
+
+    response = client.get("/api/v1/dashboard/workbench", headers={"Authorization": f"Bearer {token}"})
+
+    assert response.status_code == 200
+    mentions = [item for item in response.json()["mentioned_me"]["items"] if item["id"] == bug["id"]]
+    assert [item["mentioned_comment_body"] for item in mentions] == [
+        "@mentioned_comment 已补充日志，请跟进",
+        "@mentioned_comment 请先确认复现步骤",
+    ]
+    assert len({item["mentioned_comment_id"] for item in mentions}) == 2
+    assert all(item["mentioned_comment_author_id"] == user_id for item in mentions)
+    assert all(item["mentioned_comment_create_time"] for item in mentions)
+    assert user_id in {user["id"] for user in response.json()["owners"]}
 
 
 def test_authenticated_creates_immediately_appear_in_created_by_me(client: TestClient):

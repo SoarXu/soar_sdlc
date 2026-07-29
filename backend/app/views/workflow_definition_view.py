@@ -44,6 +44,7 @@ class WorkflowStateBase(BaseModel):
     id: int
     status_name: str
     category: str = "normal"
+    terminal_kind: str | None = None
     color: str = "#2563eb"
     x: int = 0
     y: int = 0
@@ -124,6 +125,7 @@ class WorkflowTemplateState(BaseModel):
     ref: str
     status_name: str
     category: str = "normal"
+    terminal_kind: str | None = None
     color: str = "#2563eb"
     x: int = 0
     y: int = 0

@@ -25,6 +25,7 @@ class WorkbenchItem(BaseModel):
     current_state_id: int | None = None
     status_name: str | None = None
     state_category: str | None = None
+    terminal_kind: str | None = None
     priority: str | None = None
     due_date: str | None = None
     last_execute_time: str | None = None
@@ -41,6 +42,10 @@ class WorkbenchItem(BaseModel):
     reporter_id: int | None = None
     watch_source: str | None = None
     mentioned_in_comment_id: int | None = None
+    mentioned_comment_id: int | None = None
+    mentioned_comment_body: str | None = None
+    mentioned_comment_author_id: int | None = None
+    mentioned_comment_create_time: str | None = None
     exception_key: str | None = None
     exception_label: str | None = None
     exception_keys: list[str] = Field(default_factory=list)
@@ -60,6 +65,8 @@ class WorkbenchSection(BaseModel):
 class WorkbenchResponse(BaseModel):
     pending_handling: WorkbenchSection = Field(default_factory=lambda: WorkbenchSection(label="待处理"))
     unassigned: WorkbenchSection = Field(default_factory=lambda: WorkbenchSection(label="未分派"))
+    completed: WorkbenchSection = Field(default_factory=lambda: WorkbenchSection(label="已完成"))
+    terminated: WorkbenchSection = Field(default_factory=lambda: WorkbenchSection(label="已终止"))
     created_by_me: WorkbenchSection = Field(default_factory=lambda: WorkbenchSection(label="我发起的"))
     watched_by_me: WorkbenchSection = Field(default_factory=lambda: WorkbenchSection(label="我关注的"))
     mentioned_me: WorkbenchSection = Field(default_factory=lambda: WorkbenchSection(label="提到我的"))

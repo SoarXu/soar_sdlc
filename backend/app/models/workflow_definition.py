@@ -44,6 +44,7 @@ class WorkflowState(Base):
     )
     status_name: Mapped[str] = mapped_column(String(100))
     category: Mapped[str] = mapped_column(String(32), default="normal")
+    terminal_kind: Mapped[str | None] = mapped_column(String(32), nullable=True)
     color: Mapped[str] = mapped_column(String(32), default="#2563eb")
     x: Mapped[int] = mapped_column(Integer, default=0)
     y: Mapped[int] = mapped_column(Integer, default=0)

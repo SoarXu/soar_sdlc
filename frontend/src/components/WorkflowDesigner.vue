@@ -229,7 +229,7 @@ import {
   serializeWorkflowTransition as serializeTransition,
   unsupportedWorkflowConfigSections
 } from '../utils/workflowTransitionConfig'
-import { applyAdvancedConfigDraft } from '../utils/workflowAdvancedConfig'
+import { applyAdvancedConfigDraft, validateWorkflowStates } from '../utils/workflowAdvancedConfig'
 import { moveStateTransition, nextGroupSortOrder } from '../utils/workflowTransitionOrdering'
 import {
   applyPanDelta,
@@ -555,6 +555,12 @@ async function saveGraph() {
   }
   if (advancedDrawer.value?.applyPendingChanges?.() === false) {
     ElMessage.warning('请先修正高级配置中的校验错误')
+    return
+  }
+  const stateValidation = validateWorkflowStates(states.value)
+  if (!stateValidation.valid) {
+    selectState(stateValidation.state)
+    ElMessage.warning(`${stateValidation.state.status_name}：${stateValidation.errors[0].message}`)
     return
   }
   saving.value = true

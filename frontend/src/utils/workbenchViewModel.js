@@ -1,6 +1,8 @@
 const ENTRY_TABS = [
   { key: 'pending_handling', label: '待处理', description: '当前处理人是当前登录用户。' },
   { key: 'unassigned', label: '未分派', description: '当前处理人为空，等待认领或指派。' },
+  { key: 'completed', label: '已完成', description: '当前进行中迭代内正常完成的工作项。' },
+  { key: 'terminated', label: '已终止', description: '当前进行中迭代内取消、拒绝或作废的工作项。' },
   { key: 'exception_center', label: '异常中心', description: '聚合默认工作流下需要额外关注的异常项。' },
   { key: 'following', label: '我发起/关注', description: '只显示我发起、关注或被评论提及的工作项。' }
 ]
@@ -8,7 +10,7 @@ const ENTRY_TABS = [
 const TRACKING_TABS = [
   { key: 'created_by_me', label: '我发起的', description: '由我创建、提出或上报的工作项。' },
   { key: 'watched_by_me', label: '我关注的', description: '我主动关注或被系统加入关注的工作项。' },
-  { key: 'mentioned_me', label: '提到我的', description: '评论中通过 @ 提及到我的工作项。' }
+  { key: 'mentioned_me', label: '提到我的', description: '评论中通过 @ 提及到我的评论。' }
 ]
 
 const TYPE_LABELS = {
@@ -73,6 +75,7 @@ function filterMatch(item, filters = {}) {
   }
   const haystack = [
     item.title,
+    item.mentioned_comment_body,
     item.project_name,
     item.iteration_name,
     item.exception_label
@@ -83,22 +86,28 @@ function filterMatch(item, filters = {}) {
 export function buildWorkbenchViewModel(payload = {}) {
   const pending = normalizeSection('pending_handling', payload.pending_handling, '待处理', ENTRY_TABS[0].description)
   const unassigned = normalizeSection('unassigned', payload.unassigned, '未分派', ENTRY_TABS[1].description)
-  const exceptionCenter = normalizeSection('exception_center', payload.exception_center, '异常中心', ENTRY_TABS[2].description)
+  const completed = normalizeSection('completed', payload.completed, '已完成', ENTRY_TABS[2].description)
+  const terminated = normalizeSection('terminated', payload.terminated, '已终止', ENTRY_TABS[3].description)
+  const exceptionCenter = normalizeSection('exception_center', payload.exception_center, '异常中心', ENTRY_TABS[4].description)
   const trackingTabs = TRACKING_TABS.map((tab) => normalizeSection(tab.key, payload[tab.key], tab.label, tab.description))
   const trackingTotal = trackingTabs.reduce((sum, tab) => sum + tab.total, 0)
   return {
     entryTabs: ENTRY_TABS,
-    queueSections: [pending, unassigned, exceptionCenter],
+    queueSections: [pending, unassigned, completed, terminated, exceptionCenter],
     trackingTabs,
     queueSectionsByKey: {
       pending_handling: pending,
       unassigned,
+      completed,
+      terminated,
       exception_center: exceptionCenter
     },
     trackingTabsByKey: Object.fromEntries(trackingTabs.map((tab) => [tab.key, tab])),
     summaryCards: [
       { key: 'pending_handling', label: pending.label, value: pending.total },
       { key: 'unassigned', label: unassigned.label, value: unassigned.total },
+      { key: 'completed', label: completed.label, value: completed.total },
+      { key: 'terminated', label: terminated.label, value: terminated.total },
       { key: 'exception_center', label: exceptionCenter.label, value: exceptionCenter.total },
       { key: 'following', label: '关注范围', value: trackingTotal }
     ],
@@ -151,7 +160,7 @@ export function itemStatusLabel(item = {}) {
 }
 
 export function itemStatusTag(item = {}) {
-  if (isTerminalWorkItem(item)) return 'success'
+  if (isTerminalWorkItem(item)) return item.terminal_kind === 'completed' ? 'success' : 'info'
   if (['requirement', 'task', 'bug'].includes(item.object_type)) {
     return item.state_category === 'start' ? 'info' : 'primary'
   }

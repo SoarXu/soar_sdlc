@@ -112,6 +112,15 @@
                 </el-button>
               </template>
             </el-table-column>
+            <el-table-column v-if="activeListSection.key === 'mentioned_me'" label="评论内容" min-width="300" show-overflow-tooltip>
+              <template #default="{ row }">{{ row.mentioned_comment_body || '-' }}</template>
+            </el-table-column>
+            <el-table-column v-if="activeListSection.key === 'mentioned_me'" label="评论人" width="130" show-overflow-tooltip>
+              <template #default="{ row }">{{ ownerName(row.mentioned_comment_author_id) }}</template>
+            </el-table-column>
+            <el-table-column v-if="activeListSection.key === 'mentioned_me'" label="评论时间" width="180">
+              <template #default="{ row }">{{ formatWorkbenchDateTime(row.mentioned_comment_create_time) }}</template>
+            </el-table-column>
             <el-table-column prop="project_name" label="项目" min-width="140" show-overflow-tooltip />
             <el-table-column label="迭代" min-width="140" show-overflow-tooltip>
               <template #default="{ row }">{{ iterationLabel(row.iteration_id, row.iteration_name) }}</template>
@@ -590,6 +599,8 @@ async function loadWorkflowTransitions(data) {
   const sections = [
     ['pending_handling', data.pending_handling?.items || []],
     ['unassigned', data.unassigned?.items || []],
+    ['completed', data.completed?.items || []],
+    ['terminated', data.terminated?.items || []],
     ['created_by_me', data.created_by_me?.items || []],
     ['watched_by_me', data.watched_by_me?.items || []],
     ['mentioned_me', data.mentioned_me?.items || []],

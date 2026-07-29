@@ -20,6 +20,24 @@ function clone(value) {
   return value === undefined ? undefined : structuredClone(toRaw(value))
 }
 
+export function validateWorkflowState(state) {
+  if (state?.category === 'terminal' && !String(state.terminal_kind || '').trim()) {
+    return {
+      valid: false,
+      errors: [{ field: 'terminal_kind', message: '请选择终态归类' }]
+    }
+  }
+  return { valid: true, errors: [] }
+}
+
+export function validateWorkflowStates(states) {
+  for (const state of states || []) {
+    const result = validateWorkflowState(state)
+    if (!result.valid) return { ...result, state }
+  }
+  return { valid: true, errors: [], state: null }
+}
+
 export function createAdvancedConfigDraft(transition) {
   return Object.fromEntries(ADVANCED_KEYS.map((key) => [key, clone(transition[key])]))
 }

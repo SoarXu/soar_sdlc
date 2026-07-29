@@ -386,7 +386,14 @@ def test_template_preview_does_not_persist_graph_changes(client: TestClient):
             "initial_state_id": -1,
             "states": [
                 {"id": -1, "status_name": "Saved start", "category": "start", "x": 10, "y": 20},
-                {"id": -2, "status_name": "Saved end", "category": "terminal", "x": 300, "y": 20},
+                {
+                    "id": -2,
+                    "status_name": "Saved end",
+                    "category": "terminal",
+                    "terminal_kind": "completed",
+                    "x": 300,
+                    "y": 20,
+                },
             ],
             "transitions": [
                 {"action_name": "Saved transition", "from_state_id": -1, "to_state_id": -2},
@@ -906,7 +913,7 @@ def _advanced_graph(transition_overrides: dict | None = None) -> dict:
         "states": [
             {"id": -1, "status_name": "Pending", "category": "start"},
             {"id": -2, "status_name": "Fixing", "category": "normal"},
-            {"id": -3, "status_name": "Closed", "category": "terminal"},
+            {"id": -3, "status_name": "Closed", "category": "terminal", "terminal_kind": "completed"},
         ],
         "transitions": [transition],
     }
@@ -1220,3 +1227,63 @@ def test_requirement_and_project_default_templates_expose_default_metadata(clien
     assert requirement_state_names == {"待分派", "处理中", "待确认", "已完成", "已取消"}
     requirement_action_names = {item["action_name"] for item in requirement_graph.json()["transitions"]}
     assert {"认领", "指派", "完成", "取消", "重新激活"} <= requirement_action_names
+
+
+def test_workflow_terminal_kind_is_saved_and_must_match_terminal_category(client: TestClient):
+    config_id = _create_config(client)
+    definition = client.post(
+        "/api/v1/workflow-definitions",
+        json={
+            "name": f"Terminal kind workflow {uuid4().hex[:8]}",
+            "object_type": "task",
+            "scope_type": "assignee_rule_config",
+            "scope_id": config_id,
+        },
+    ).json()
+    payload = {
+        "initial_state_id": -1,
+        "states": [
+            {"id": -1, "status_name": "开始", "category": "start"},
+            {"id": -2, "status_name": "已完成", "category": "terminal", "terminal_kind": "completed"},
+            {"id": -3, "status_name": "已取消", "category": "terminal", "terminal_kind": "terminated"},
+        ],
+        "transitions": [],
+    }
+
+    saved = client.put(f"/api/v1/workflow-definitions/{definition['id']}/graph", json=payload)
+
+    assert saved.status_code == 200, saved.text
+    terminal_kinds = {item["status_name"]: item["terminal_kind"] for item in saved.json()["states"]}
+    assert terminal_kinds == {"开始": None, "已完成": "completed", "已取消": "terminated"}
+
+    invalid = client.put(
+        f"/api/v1/workflow-definitions/{definition['id']}/graph",
+        json={**payload, "states": [{"id": -1, "status_name": "开始", "category": "start", "terminal_kind": "completed"}]},
+    )
+    assert invalid.status_code == 422
+
+    missing_terminal_kind = client.put(
+        f"/api/v1/workflow-definitions/{definition['id']}/graph",
+        json={
+            **payload,
+            "states": [
+                {"id": -1, "status_name": "开始", "category": "start"},
+                {"id": -2, "status_name": "已完成", "category": "terminal"},
+            ],
+        },
+    )
+    assert missing_terminal_kind.status_code == 422
+    assert missing_terminal_kind.json()["detail"] == "Terminal kind is required for a terminal state"
+
+    empty_terminal_kind = client.put(
+        f"/api/v1/workflow-definitions/{definition['id']}/graph",
+        json={
+            **payload,
+            "states": [
+                {"id": -1, "status_name": "开始", "category": "start"},
+                {"id": -2, "status_name": "已完成", "category": "terminal", "terminal_kind": ""},
+            ],
+        },
+    )
+    assert empty_terminal_kind.status_code == 422
+    assert empty_terminal_kind.json()["detail"] == "Terminal kind is required for a terminal state"

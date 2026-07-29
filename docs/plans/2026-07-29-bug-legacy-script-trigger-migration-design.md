@@ -18,9 +18,8 @@ Remove the empty `legacy_script` trigger from the affected Bug transition. The
 transition itself, its states, permissions, ownership rules, and action name
 remain unchanged.
 
-Add validation so unsupported automation types cannot be persisted through the
-workflow-definition API, plus a migration regression test proving the cleanup is
-scoped to the legacy trigger.
+The workflow-definition API already rejects unsupported automation types. Add a
+migration regression test proving the cleanup is scoped to the legacy trigger.
 
 ## Verification
 

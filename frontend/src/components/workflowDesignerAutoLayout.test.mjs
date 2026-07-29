@@ -2,6 +2,8 @@ import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
 
+import { selectEnabledWorkflowDefinition } from '../utils/workflowDefinitionSelection.js'
+
 const componentPath = fileURLToPath(new URL('./WorkflowDesigner.vue', import.meta.url))
 const source = await readFile(componentPath, 'utf8')
 
@@ -230,6 +232,15 @@ const loadDefinitionBody = functionBody('loadDefinition', 'organizeLayout')
 assert.match(loadDefinitionBody, /applyGraph\(graph\.data\)/)
 assert.match(loadDefinitionBody, /applyGraph\(graph\.data\)[\s\S]*captureSavedGraphSnapshot\(\)/)
 assert.doesNotMatch(loadDefinitionBody, /applyGraph\(graph\.data, \{ organize: true \}\)/)
+
+{
+  const selected = selectEnabledWorkflowDefinition([
+    { id: 466, enabled: false },
+    { id: 33, enabled: true }
+  ])
+
+  assert.equal(selected.id, 33)
+}
 
 const applyTemplateBody = functionBody('applyTemplate', 'changeObjectType')
 assert.match(applyTemplateBody, /confirmDiscardWorkflowChanges\(\{[\s\S]*force: true/)

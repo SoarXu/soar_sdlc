@@ -223,6 +223,7 @@ import {
   moveManualSegment
 } from '../utils/workflowManualRoute'
 import { requestWorkflowOrganization } from '../utils/workflowLayoutInteraction'
+import { selectEnabledWorkflowDefinition } from '../utils/workflowDefinitionSelection'
 import {
   normalizeWorkflowTransition as normalizeTransition,
   serializeWorkflowTransition as serializeTransition,
@@ -446,7 +447,7 @@ async function loadDefinition({ discardPendingChanges = true } = {}) {
       scope_type: 'assignee_rule_config',
       scope_id: props.configId
     })
-    let current = list.data[0]
+    let current = selectEnabledWorkflowDefinition(list.data)
     if (!current) {
       const created = await createWorkflowDefinition({
         name: `${props.configName || '工作流'}-${objectTypes.find((item) => item.value === activeObjectType.value)?.label}`,

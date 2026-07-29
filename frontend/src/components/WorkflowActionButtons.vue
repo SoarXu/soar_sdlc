@@ -412,6 +412,10 @@ async function submitActiveAction() {
   await submitAction(activeAction.value)
 }
 
+function isUnfinishedProjectIterationBlocker(error) {
+  return props.objectType === 'project' && error?.response?.data?.detail?.includes('unfinished iteration')
+}
+
 async function submitAction(action) {
   submittingAction.value = action.transition_id
   try {
@@ -444,6 +448,10 @@ async function submitAction(action) {
     if (props.autoLoad && props.objectId) await loadTransitions()
   } catch (error) {
     const detail = error?.response?.data?.detail
+    if (isUnfinishedProjectIterationBlocker(error)) {
+      ElMessage.warning('项目存在未结束迭代，无法关闭。')
+      return
+    }
     if (detail?.code === 'ITERATION_HAS_OPEN_ITEMS') {
       blockerDetail.value = detail
       blockerTypeFilter.value = 'all'

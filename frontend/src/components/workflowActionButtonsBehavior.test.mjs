@@ -60,4 +60,27 @@ assert.match(source, /blockerRows/)
 assert.match(source, /blockerDetailRoute\(row\)/)
 assert.match(source, /存在未完成事项，无法结束迭代/)
 
+const workflowSubmitBlock = source.slice(
+  source.indexOf('async function submitAction'),
+  source.indexOf('async function loadTransitions')
+)
+
+assert.match(
+  source,
+  /function isUnfinishedProjectIterationBlocker\(error\) \{[\s\S]*?props\.objectType === 'project'[\s\S]*?unfinished iteration/,
+  'Project-close iteration blockers must be recognized before generic action feedback'
+)
+assert.match(
+  workflowSubmitBlock,
+  /if \(isUnfinishedProjectIterationBlocker\(error\)\) \{\s*ElMessage\.warning\('项目存在未结束迭代，无法关闭。'\)\s*return\s*\}/,
+  'Project-close iteration blockers must use an automatically dismissed Chinese warning message'
+)
+const iterationBlockerStart = workflowSubmitBlock.indexOf('if (isUnfinishedProjectIterationBlocker(error))')
+const delegateReasonCheckStart = workflowSubmitBlock.indexOf('if (isDelegateReasonRequiredError(error))')
+assert.doesNotMatch(
+  workflowSubmitBlock.slice(iterationBlockerStart, delegateReasonCheckStart),
+  /showActionError/,
+  'The iteration blocker branch must not open the generic modal error dialog'
+)
+
 console.log('workflow action button behavior tests passed')

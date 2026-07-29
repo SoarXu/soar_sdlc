@@ -310,7 +310,7 @@ def test_delivery_iteration_still_supports_ordinary_update(client: TestClient):
     assert response.json()["goal"] == "Ship the release"
 
 
-def test_iteration_lists_hide_requirement_pools_unless_explicitly_requested(client: TestClient):
+def test_project_iteration_page_includes_canonical_pool_while_global_lists_remain_delivery_only(client: TestClient):
     project = _create_project(client, "Pool list scope")
     pool_id = project["requirement_pool_iteration_id"]
     delivery = _create_delivery_iteration(client, project["id"], "Visible delivery")
@@ -325,4 +325,9 @@ def test_iteration_lists_hide_requirement_pools_unless_explicitly_requested(clie
     assert {item["id"] for item in default_items} == {delivery["id"]}
     assert {item["id"] for item in selector_items} == {pool_id, delivery["id"]}
     assert next(item for item in selector_items if item["id"] == pool_id)["is_requirement_pool"] is True
-    assert {item["id"] for item in project_page["items"]} == {delivery["id"]}
+    project_page_items = project_page["items"]
+    project_page_pools = [item for item in project_page_items if item["is_requirement_pool"]]
+
+    assert [item["id"] for item in project_page_items] == [delivery["id"], pool_id]
+    assert len(project_page_pools) == 1
+    assert project_page_pools[0]["id"] == pool_id

@@ -49,7 +49,6 @@ def list_project_iterations_page(
         .join(IterationProject, IterationProject.iteration_id == Iteration.id)
         .filter(
             Iteration.deleted == 0,
-            Iteration.is_requirement_pool.is_(False),
             IterationProject.project_id == project_id,
         )
     )

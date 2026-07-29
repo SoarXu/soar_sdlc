@@ -86,6 +86,7 @@ class ProjectMemberRead(ProjectMemberBase):
 
 class ProjectIterationPage(BaseModel):
     items: list[IterationRead]
+    requirement_pool: IterationRead | None = None
     total: int
     page: int
     page_size: int

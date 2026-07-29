@@ -19,7 +19,7 @@ from app.models.test_run import TestRun, TestRunCase
 from app.models.user import User
 from app.models.workflow_definition import WorkflowTransition
 from app.services.status_operation_service import create_status_operation, list_status_operations
-from app.services.requirement_pool_service import create_project_requirement_pool
+from app.services.requirement_pool_service import create_project_requirement_pool, requirement_pool_for_project
 from app.services.workflow_runtime_service import execute_transition
 from app.services.workflow_state_service import initial_system_workflow_values
 from app.views.project_view import ProjectCreate, ProjectMemberCreate, ProjectUpdate
@@ -43,12 +43,13 @@ def list_project_iterations_page(
     current_state_id: int | None = None,
     owner_id: int | None = None,
 ) -> dict:
-    _get_active_project(db, project_id)
+    project = _get_active_project(db, project_id)
     query = (
         db.query(Iteration)
         .join(IterationProject, IterationProject.iteration_id == Iteration.id)
         .filter(
             Iteration.deleted == 0,
+            Iteration.is_requirement_pool.is_(False),
             IterationProject.project_id == project_id,
         )
     )
@@ -60,6 +61,7 @@ def list_project_iterations_page(
         query = query.filter(Iteration.owner_id == owner_id)
     page_data = _paginate(query.order_by(Iteration.id.desc()), page, page_size)
     page_data["items"] = [_iteration_to_dict(db, item) for item in page_data["items"]]
+    page_data["requirement_pool"] = _iteration_to_dict(db, requirement_pool_for_project(db, project.id))
     return page_data
 
 

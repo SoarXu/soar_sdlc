@@ -5,7 +5,21 @@ import { fileURLToPath } from 'node:url'
 const componentPath = fileURLToPath(new URL('./WorkflowAdvancedConfigDrawer.vue', import.meta.url))
 const source = await readFile(componentPath, 'utf8').catch(() => '')
 
+assert.match(
+  source,
+  /<div class="drawer-header__leading">[\s\S]*?<el-button v-if="transition"[\s\S]*?<div>[\s\S]*?<h2>/
+)
+assert.match(
+  source,
+  /\.drawer-header\s*\{[^}]*justify-content:\s*flex-start/s
+)
+
 assert.match(source, /<el-drawer\b/)
+assert.match(
+  source,
+  /<el-dialog[\s\S]*?v-model="discardConfirmVisible"[\s\S]*?取消[\s\S]*?放弃修改[\s\S]*?应用并关闭/
+)
+assert.match(source, /function applyPendingChangesAndContinue\(\)/)
 for (const label of ['流转规则', '处理人与权限', '动作表单', '按钮展示', '通知']) {
   assert.match(source, new RegExp(label))
 }

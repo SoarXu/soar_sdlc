@@ -11,13 +11,15 @@
   >
     <template #header>
       <div class="drawer-header">
-        <el-button v-if="transition" text circle aria-label="返回流转列表" @click="requestBack">
-          <el-icon><ArrowLeft /></el-icon>
-        </el-button>
-        <div>
-          <h2>{{ transition?.action_name || state?.status_name || '流转配置' }}</h2>
-          <p v-if="transition">{{ stateName(transition.from_state_id) }} -&gt; {{ stateName(transition.to_state_id) }}</p>
-          <p v-else>配置该状态可以执行的流转动作</p>
+        <div class="drawer-header__leading">
+          <el-button v-if="transition" text circle aria-label="返回流转列表" @click="requestBack">
+            <el-icon><ArrowLeft /></el-icon>
+          </el-button>
+          <div>
+            <h2>{{ transition?.action_name || state?.status_name || '流转配置' }}</h2>
+            <p v-if="transition">{{ stateName(transition.from_state_id) }} -&gt; {{ stateName(transition.to_state_id) }}</p>
+            <p v-else>配置该状态可以执行的流转动作</p>
+          </div>
         </div>
         <span v-if="hasPendingChanges()" class="draft-status">未应用修改</span>
       </div>
@@ -349,6 +351,21 @@
       </footer>
     </div>
   </el-drawer>
+
+  <el-dialog
+    v-model="discardConfirmVisible"
+    title="关闭高级配置"
+    width="420px"
+    :close-on-click-modal="false"
+    @closed="resolveDiscardConfirmation(false)"
+  >
+    <p>放弃未应用的修改？</p>
+    <template #footer>
+      <el-button @click="resolveDiscardConfirmation(false)">取消</el-button>
+      <el-button type="danger" plain @click="resolveDiscardConfirmation(true)">放弃修改</el-button>
+      <el-button type="primary" @click="applyPendingChangesAndContinue">应用并关闭</el-button>
+    </template>
+  </el-dialog>
 </template>
 
 <script setup>
@@ -443,7 +460,9 @@ const activeSection = ref('basic')
 const errors = ref(createErrors())
 const stateErrors = ref([])
 const drawerVisible = ref(false)
+const discardConfirmVisible = ref(false)
 const draggedTransitionIdentity = ref(null)
+let discardConfirmationResolver = null
 const actionGroups = [
   { key: 'primary', label: '主操作' },
   { key: 'more', label: '更多操作' }
@@ -516,12 +535,25 @@ function hasPendingChanges() {
 
 async function confirmDiscardPendingChanges() {
   if (!hasPendingChanges()) return true
-  try {
-    await ElMessageBox.confirm('放弃未应用的修改？', '关闭高级配置', { type: 'warning' })
-    return true
-  } catch {
-    return false
+  discardConfirmVisible.value = true
+  return new Promise((resolve) => {
+    discardConfirmationResolver = resolve
+  })
+}
+
+function resolveDiscardConfirmation(result) {
+  discardConfirmVisible.value = false
+  const resolve = discardConfirmationResolver
+  discardConfirmationResolver = null
+  resolve?.(result)
+}
+
+function applyPendingChangesAndContinue() {
+  if (applyPendingChanges() === false) {
+    resolveDiscardConfirmation(false)
+    return
   }
+  resolveDiscardConfirmation(true)
 }
 
 async function requestClose(done) {
@@ -665,9 +697,16 @@ defineExpose({ open, hasPendingChanges, applyPendingChanges, confirmDiscardPendi
 .drawer-header {
   display: flex;
   align-items: flex-start;
-  justify-content: space-between;
+  justify-content: flex-start;
   gap: 12px;
   padding-right: 28px;
+}
+
+.drawer-header__leading {
+  display: flex;
+  align-items: flex-start;
+  min-width: 0;
+  gap: 8px;
 }
 
 .drawer-header h2,

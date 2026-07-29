@@ -192,6 +192,22 @@
       @reset-diagram-route="resetSelectedDiagramRoute"
       @back="returnToStateActions"
     />
+    <el-dialog
+      v-model="workflowDiscardDialogVisible"
+      :title="workflowDiscardDialogTitle"
+      width="440px"
+      :close-on-click-modal="false"
+      :close-on-press-escape="!workflowDiscardSaving"
+      :show-close="!workflowDiscardSaving"
+      @closed="resolveWorkflowDiscardDialog(false)"
+    >
+      <p>{{ workflowDiscardDialogMessage }}</p>
+      <template #footer>
+        <el-button :disabled="workflowDiscardSaving" @click="resolveWorkflowDiscardDialog(false)">取消</el-button>
+        <el-button type="danger" plain :disabled="workflowDiscardSaving" @click="resolveWorkflowDiscardDialog(true)">放弃修改</el-button>
+        <el-button type="primary" :loading="workflowDiscardSaving" @click="saveWorkflowAndContinue">保存流程图并继续</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -285,6 +301,10 @@ const saving = ref(false)
 const savedGraphSnapshot = ref('')
 const advancedDrawer = ref(null)
 const advancedDrawerVisible = ref(false)
+const workflowDiscardDialogVisible = ref(false)
+const workflowDiscardDialogTitle = ref('')
+const workflowDiscardDialogMessage = ref('')
+const workflowDiscardSaving = ref(false)
 const suppressCanvasClamp = ref(false)
 const suppressedStateClickId = ref(null)
 const dragFrame = ref(null)
@@ -294,6 +314,7 @@ const canvasRenderedSize = reactive({ ...viewportSize })
 const activeNodeActionStateId = ref(null)
 const activeNodeActionAnchor = reactive({ left: 0, top: 0, bottom: 0 })
 const viewportOffset = reactive({ x: 0, y: 0 })
+let workflowDiscardResolver = null
 const dragging = reactive({
   state: null,
   startX: 0,
@@ -548,20 +569,20 @@ async function changeObjectType(nextObjectType) {
 }
 
 async function saveGraph() {
-  if (!definition.value?.id) return
+  if (!definition.value?.id) return false
   if (transitions.value.some((item) => unsupportedWorkflowConfigSections(item).length)) {
     ElMessage.error('存在未支持的历史配置，请先完成迁移后再保存。')
-    return
+    return false
   }
   if (advancedDrawer.value?.applyPendingChanges?.() === false) {
     ElMessage.warning('请先修正高级配置中的校验错误')
-    return
+    return false
   }
   const stateValidation = validateWorkflowStates(states.value)
   if (!stateValidation.valid) {
     selectState(stateValidation.state)
     ElMessage.warning(`${stateValidation.state.status_name}：${stateValidation.errors[0].message}`)
-    return
+    return false
   }
   saving.value = true
   try {
@@ -576,6 +597,7 @@ async function saveGraph() {
     replaceExistingTransitionsOnSave.value = false
     captureSavedGraphSnapshot()
     ElMessage.success('流程图已保存')
+    return true
   } finally {
     saving.value = false
   }
@@ -727,12 +749,42 @@ async function confirmDiscardWorkflowChanges({
   message = '当前流程图或高级配置有未保存修改，确认放弃？'
 } = {}) {
   if (!force && !hasPendingWorkflowChanges()) return true
+  return openWorkflowDiscardDialog({ title, message })
+}
+
+function openWorkflowDiscardDialog({ title, message }) {
+  workflowDiscardDialogTitle.value = title
+  workflowDiscardDialogMessage.value = message
+  workflowDiscardDialogVisible.value = true
+  return new Promise((resolve) => {
+    workflowDiscardResolver = resolve
+  })
+}
+
+function resolveWorkflowDiscardDialog(result) {
+  if (workflowDiscardSaving.value && result === false) return
+  workflowDiscardDialogVisible.value = false
+  workflowDiscardSaving.value = false
+  const resolve = workflowDiscardResolver
+  workflowDiscardResolver = null
+  resolve?.(result)
+}
+
+async function saveWorkflowAndContinue() {
+  workflowDiscardSaving.value = true
+  let saved = false
   try {
-    await ElMessageBox.confirm(message, title, { type: 'warning' })
-    return true
+    saved = await saveGraph()
   } catch {
-    return false
+    saved = false
   }
+  if (!saved) {
+    workflowDiscardSaving.value = false
+    resolveWorkflowDiscardDialog(false)
+    return
+  }
+  advancedDrawerVisible.value = false
+  resolveWorkflowDiscardDialog(true)
 }
 
 defineExpose({ confirmDiscardWorkflowChanges })

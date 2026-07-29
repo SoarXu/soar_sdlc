@@ -257,6 +257,7 @@ assert.match(saveGraphBody, /replace_existing_transitions: replaceExistingTransi
 assert.match(saveGraphBody, /applyGraph\(graph\.data\)/)
 assert.match(saveGraphBody, /applyGraph\(graph\.data\)[\s\S]*replaceExistingTransitionsOnSave\.value = false/)
 assert.match(saveGraphBody, /applyGraph\(graph\.data\)[\s\S]*captureSavedGraphSnapshot\(\)/)
+assert.match(saveGraphBody, /return true/)
 assert.doesNotMatch(saveGraphBody, /applyGraph\(graph\.data, \{ organize: true \}\)/)
 
 assert.match(source, /const savedGraphSnapshot = ref\(''\)/)
@@ -271,7 +272,15 @@ const hasPendingBody = functionBody('hasPendingWorkflowChanges', 'confirmDiscard
 assert.match(hasPendingBody, /hasUnsavedGraphChanges\.value/)
 assert.match(hasPendingBody, /advancedDrawer\.value\?\.hasPendingChanges\?\.\(\)/)
 assert.match(confirmDiscardBody, /hasPendingWorkflowChanges\(\)/)
-assert.match(confirmDiscardBody, /ElMessageBox\.confirm/)
+assert.match(confirmDiscardBody, /openWorkflowDiscardDialog\(/)
+assert.match(source, /<el-dialog[\s\S]*?v-model="workflowDiscardDialogVisible"[\s\S]*?取消[\s\S]*?放弃修改[\s\S]*?保存流程图并继续/)
+assert.match(source, /function saveWorkflowAndContinue\(\)/)
+assert.match(source, /:show-close="!workflowDiscardSaving"/)
+assert.match(source, /:close-on-press-escape="!workflowDiscardSaving"/)
+assert.match(
+  source,
+  /function resolveWorkflowDiscardDialog\(result\) \{[\s\S]*?if \(workflowDiscardSaving\.value && result === false\) return/
+)
 
 const beforeUnloadBody = functionBody('onBeforeUnload', 'eventToCanvasPoint')
 assert.match(beforeUnloadBody, /hasPendingWorkflowChanges\(\)/)

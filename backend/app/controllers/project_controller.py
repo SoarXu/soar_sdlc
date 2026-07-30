@@ -179,6 +179,8 @@ def post_project(
 ):
     ensure_authenticated(current_user)
     payload = resolve_project_create_payload(db, payload)
+    if payload.owner_id is None:
+        payload = payload.model_copy(update={"owner_id": current_user.id})
     if payload.parent_id:
         ensure_project_governance_permission(db, payload.parent_id, current_user)
     ensure_project_create_permission(db, payload.program_id, current_user)
@@ -273,6 +275,6 @@ def remove_project(
     db: Session = Depends(get_db),
     current_user: User | None = Depends(get_optional_current_user),
 ):
-    ensure_project_delete_permission(db, current_user)
+    ensure_project_delete_permission(db, project_id, current_user)
     delete_project(db, project_id)
     return Response(status_code=status.HTTP_204_NO_CONTENT)

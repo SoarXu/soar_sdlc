@@ -58,13 +58,13 @@
               >
                 <template #after-primary>
                   <el-button link type="primary" @click="openEdit(row)">编辑</el-button>
-                  <el-button v-if="canCreateProject" link type="success" @click="openCreate(row)">新增项目</el-button>
+                  <el-button v-if="canManageProjectRow(row)" link type="success" @click="openCreate(row)">新增项目</el-button>
                 </template>
               </WorkflowActionButtons>
               <template v-else>
-                <el-button v-if="canCreateProject" link type="success" @click="openCreate(row)">新增项目</el-button>
+                <el-button v-if="canManageProjectRow(row)" link type="success" @click="openCreate(row)">新增项目</el-button>
               </template>
-              <el-popconfirm v-if="canDeleteProjectRow" title="确认删除该项目？子项目将一并删除。" @confirm="removeProject(row.id)">
+              <el-popconfirm v-if="canManageProjectRow(row)" title="确认删除该项目？子项目将一并删除。" @confirm="removeProject(row.id)">
                 <template #reference><el-button link type="danger">删除</el-button></template>
               </el-popconfirm>
             </div>
@@ -180,7 +180,7 @@ import { fetchUsers } from '../api/users'
 import { fetchWorkflowTransitionsBatch } from '../api/workflowRuntime'
 import WorkflowActionButtons from '../components/WorkflowActionButtons.vue'
 import { showActionError } from '../utils/actionFeedback'
-import { canDeleteProject, canManageProject, currentUserFromStorage, isSystemAdmin } from '../utils/permissions'
+import { canManageProject, currentUserFromStorage } from '../utils/permissions'
 import { labelById, userLabel } from '../utils/referenceLabels'
 import { usePagination } from '../utils/usePagination'
 import { workflowActionColumnWidth } from '../utils/workflowActionColumn'
@@ -201,8 +201,7 @@ const users = ref([])
 const workflowSchemes = ref([])
 const workflowTransitions = ref({})
 const currentUser = computed(() => currentUserFromStorage(users.value))
-const canCreateProject = computed(() => isSystemAdmin(currentUser.value))
-const canDeleteProjectRow = computed(() => canDeleteProject(currentUser.value))
+const canCreateProject = computed(() => Boolean(currentUser.value))
 const PROJECT_TREE_INDENT = 24
 const projectTree = computed(() => buildProjectTree(projects.value))
 const enabledWorkflowSchemes = computed(() => (
@@ -260,10 +259,50 @@ function workflowSchemeLabel(configId) {
   return workflowSchemes.value.find((item) => item.id === configId)?.name || `#${configId}`
 }
 function membersForProject(projectId) { return projectMembersById.value[projectId] || [] }
-function canManageProjectRow(row) { return canManageProject(row, currentUser.value, membersForProject(row.id)) }
+function canManageProjectRow(row) {
+  return (
+    canManageProject(row, currentUser.value, membersForProject(row.id))
+    || isProjectOwnerAncestor(row)
+    || isProgramOwnerAncestor(row.program_id)
+  )
+}
+
+function isProjectOwnerAncestor(row) {
+  const visitedProjectIds = new Set()
+  let current = row
+  while (current && !visitedProjectIds.has(current.id)) {
+    visitedProjectIds.add(current.id)
+    if (canManageProject(current, currentUser.value, membersForProject(current.id))) return true
+    current = projects.value.find((item) => item.id === current.parent_id)
+  }
+  return false
+}
+
+function isProgramOwnerAncestor(programId) {
+  const currentUserId = Number(currentUser.value?.id || 0)
+  const visitedProgramIds = new Set()
+  let current = programs.value.find((item) => item.id === programId)
+  while (current && !visitedProgramIds.has(current.id)) {
+    visitedProgramIds.add(current.id)
+    if (Number(current.owner_id) === currentUserId) return true
+    current = programs.value.find((item) => item.id === current.parent_id)
+  }
+  return false
+}
 
 function resetForm() {
-  Object.assign(form, { parent_id: null, program_id: null, name: '', owner_id: null, assignee_rule_config_id: null, start_date: null, end_date: null, is_long_term: false, description: '' })
+  const currentUserId = Number(localStorage.getItem('current_user_id') || 0)
+  Object.assign(form, {
+    parent_id: null,
+    program_id: null,
+    name: '',
+    owner_id: users.value.some((user) => user.id === currentUserId) ? currentUserId : null,
+    assignee_rule_config_id: null,
+    start_date: null,
+    end_date: null,
+    is_long_term: false,
+    description: ''
+  })
 }
 
 function buildProjectTree(items) {

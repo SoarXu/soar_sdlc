@@ -86,7 +86,7 @@ def test_project_member_cannot_manage_project_configuration_or_members(client: T
     assert owner_member_update.status_code == 200
 
 
-def test_only_system_admin_can_delete_project(client: TestClient):
+def test_project_owner_and_system_admin_can_delete_project(client: TestClient):
     owner_id, owner_token = _create_user("Permission Delete Owner")
     admin_id, admin_token = _create_user("Permission System Admin", "system_admin")
     project = client.post("/api/v1/projects", json={"name": f"Delete Project {uuid4().hex[:8]}", "owner_id": owner_id}).json()
@@ -95,9 +95,9 @@ def test_only_system_admin_can_delete_project(client: TestClient):
     owner_delete = client.delete(f"/api/v1/projects/{project['id']}", headers=_auth(owner_token))
     admin_delete = client.delete(f"/api/v1/projects/{admin_project['id']}", headers=_auth(admin_token))
 
-    assert owner_delete.status_code == 403
+    assert owner_delete.status_code == 204
     assert admin_delete.status_code == 204
-    assert client.get(f"/api/v1/projects/{project['id']}").status_code == 200
+    assert client.get(f"/api/v1/projects/{project['id']}").status_code == 404
     assert client.get(f"/api/v1/projects/{admin_project['id']}").status_code == 404
     assert admin_id
 

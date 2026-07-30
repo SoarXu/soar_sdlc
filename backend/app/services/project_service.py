@@ -237,6 +237,7 @@ def _resolve_parent_project_program(
 def create_project(db: Session, payload: ProjectCreate) -> Project:
     payload = resolve_project_create_payload(db, payload)
     data = payload.model_dump()
+    _require_unique_project_name(db, data["name"], data.get("program_id"), data.get("parent_id"))
     _validate_workflow_scheme_binding(db, data.get("assignee_rule_config_id"))
     if data.get("is_long_term"):
         data["end_date"] = None
@@ -256,7 +257,7 @@ def create_project(db: Session, payload: ProjectCreate) -> Project:
 
 
 def update_project(db: Session, project_id: int, payload: ProjectUpdate, actor_id: int | None = None) -> Project:
-    project, payload, _target_parent = resolve_project_update_payload(db, project_id, payload)
+    project, payload, target_parent = resolve_project_update_payload(db, project_id, payload)
     data = payload.model_dump(exclude_unset=True)
     data.pop("lifecycle_phase", None)
     data.pop("maintenance_start_time", None)
@@ -271,6 +272,15 @@ def update_project(db: Session, project_id: int, payload: ProjectUpdate, actor_i
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="项目不能选择下级项目作为上级项目")
     if data.get("is_long_term"):
         data["end_date"] = None
+    if {"name", "program_id", "parent_id"}.intersection(data):
+        target_program_id = data.get("program_id", target_parent.program_id if target_parent else project.program_id)
+        _require_unique_project_name(
+            db,
+            data.get("name", project.name),
+            target_program_id,
+            data.get("parent_id", project.parent_id),
+            excluding_project_id=project.id,
+        )
     before_data, after_data = _project_change_data(project, data)
     for field, value in data.items():
         setattr(project, field, value)
@@ -288,6 +298,30 @@ def update_project(db: Session, project_id: int, payload: ProjectUpdate, actor_i
     db.commit()
     db.refresh(project)
     return project
+
+
+def _require_unique_project_name(
+    db: Session,
+    name: str,
+    program_id: int | None,
+    parent_id: int | None,
+    *,
+    excluding_project_id: int | None = None,
+) -> None:
+    if program_id is None:
+        return
+
+    query = db.query(Project).filter(Project.deleted == 0, Project.program_id == program_id)
+    if parent_id is None:
+        query = query.filter(Project.parent_id.is_(None))
+    else:
+        query = query.filter(Project.parent_id == parent_id)
+    if excluding_project_id is not None:
+        query = query.filter(Project.id != excluding_project_id)
+
+    normalized_name = name.strip().lower()
+    if any(existing.name.strip().lower() == normalized_name for existing in query.all()):
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="项目名称已存在")
 
 
 def _validate_workflow_scheme_binding(db: Session, config_id: int | None) -> None:

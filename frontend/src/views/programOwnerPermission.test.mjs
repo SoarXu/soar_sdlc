@@ -5,6 +5,12 @@ const source = await readFile(new URL('./ProgramsView.vue', import.meta.url), 'u
 
 assert.match(source, /import \{ actionErrorMessage \} from '\.\.\/utils\/permissions'/,
   'program mutation failures must reuse the shared action error formatter')
+assert.match(source, /import \{ ElMessage, ElMessageBox \} from 'element-plus'/,
+  'program deletion must use Element Plus modal confirmation')
+assert.match(source, /@click="confirmRemoveProgram\(row\.id\)"/,
+  'program deletion button must open the modal confirmation')
+assert.doesNotMatch(source, /<el-popconfirm/,
+  'program deletion must not use an inline confirmation bubble')
 
 function functionBlock(name, nextName) {
   const start = source.indexOf(`function ${name}`)
@@ -56,5 +62,11 @@ assert.equal((changeProgramStatus.match(/ElMessage\.error/g) || []).length, 1,
 const removeProgram = asyncFunctionBlock('removeProgram', 'onMounted(loadData)')
 assert.match(removeProgram, /catch \(error\) \{[\s\S]*?ElMessage\.error\(actionErrorMessage\(error, '项目集删除失败'\)\)[\s\S]*?await loadData\(\)/,
   'failed program deletion must show an error and reload server state')
+
+const confirmRemoveProgram = asyncFunctionBlock('confirmRemoveProgram', 'onMounted(loadData)')
+assert.match(confirmRemoveProgram, /await ElMessageBox\.confirm\('确认删除该项目集？子项目集及下属项目将一并删除。', '提示', \{ type: 'warning' \}\)/,
+  'program deletion must warn about the cascading deletion in a modal')
+assert.match(confirmRemoveProgram, /await removeProgram\(id\)/,
+  'program deletion must run only after confirmation resolves')
 
 console.log('program owner permission UI contract passed')

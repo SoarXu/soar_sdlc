@@ -189,7 +189,7 @@ def update_program(db: Session, program_id: int, payload: ProgramUpdate, actor_i
 def delete_program(db: Session, program_id: int, actor_id: int) -> None:
     program = _get_active_program(db, program_id)
     if not can_delete_program(db, program_id, actor_id):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Program governance permission required")
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="无权限")
     now = datetime.now()
 
     descendant_ids = _collect_descendant_program_ids(db, program_id)
@@ -443,12 +443,12 @@ def _get_active_parent_program(db: Session, parent_id: int) -> Program:
 
 def _require_program_governance(db: Session, program_id: int, actor_id: int | None) -> None:
     if not can_manage_program(db, program_id, actor_id):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Program governance permission required")
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="无权限")
 
 
 def _require_child_program_governance(db: Session, parent_id: int, actor_id: int | None) -> None:
     if not can_create_child_program(db, parent_id, actor_id):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Program governance permission required")
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="无权限")
 
 
 def _validate_parent_mutation(db: Session, program_id: int, parent_id: int | None) -> None:

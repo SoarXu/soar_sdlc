@@ -63,9 +63,7 @@
                 <el-button link type="primary" @click="openEdit(row)">编辑</el-button>
                 <el-button link type="success" @click="openCreate(row.id)">新增项目集</el-button>
                 <el-button link type="success" @click="openProjectCreate(row.id)">新增项目</el-button>
-                <el-popconfirm title="确认删除该项目集？子项目集及下属项目将一并删除。" @confirm="removeProgram(row.id)">
-                  <template #reference><el-button link type="danger">删除</el-button></template>
-                </el-popconfirm>
+                <el-button link type="danger" @click="confirmRemoveProgram(row.id)">删除</el-button>
               </div>
             </template>
             <template v-else>
@@ -211,7 +209,7 @@
 
 <script setup>
 import { computed, onMounted, reactive, ref } from 'vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { useRouter } from 'vue-router'
 
 import {
@@ -655,6 +653,15 @@ async function removeProgram(id) {
   } catch (error) {
     ElMessage.error(actionErrorMessage(error, '项目集删除失败'))
     await loadData()
+  }
+}
+
+async function confirmRemoveProgram(id) {
+  try {
+    await ElMessageBox.confirm('确认删除该项目集？子项目集及下属项目将一并删除。', '提示', { type: 'warning' })
+    await removeProgram(id)
+  } catch {
+    // The confirmation dialog rejects when the user cancels.
   }
 }
 

@@ -34,7 +34,7 @@ def _create_program(client: TestClient, name: str, *, parent_id: int | None = No
 
 def _assert_program_name_conflict(response) -> None:
     assert response.status_code == 422
-    assert response.json()["detail"] == "Program name already exists in this parent scope"
+    assert response.json()["detail"] == "项目集名称已存在"
 
 
 def test_rejects_duplicate_top_level_program_name(client: TestClient):
@@ -535,7 +535,7 @@ def test_mysql_program_name_lookup_uses_generated_index_columns_when_available(m
     try:
         program_service._require_unique_program_name(db, "Example", None)
     except Exception as exc:
-        assert getattr(exc, "detail", None) == "Program name already exists in this parent scope"
+        assert getattr(exc, "detail", None) == "项目集名称已存在"
     else:
         raise AssertionError("generated-column lookup must reject an existing active program")
 
@@ -575,4 +575,4 @@ def test_program_name_unique_index_integrity_error_becomes_domain_conflict():
         program_service._commit_program_name_change(db)
 
     assert raised.value.status_code == 422
-    assert raised.value.detail == "Program name already exists in this parent scope"
+    assert raised.value.detail == "项目集名称已存在"

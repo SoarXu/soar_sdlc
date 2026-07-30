@@ -357,7 +357,7 @@ def _require_unique_program_name(
         if existing_program_id is not None:
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail="Program name already exists in this parent scope",
+                detail="项目集名称已存在",
             )
         return
 
@@ -373,7 +373,7 @@ def _require_unique_program_name(
         if existing_program.name.strip().lower() == normalized_name:
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail="Program name already exists in this parent scope",
+                detail="项目集名称已存在",
             )
 
 
@@ -419,7 +419,7 @@ def _commit_program_name_change(db: Session) -> None:
         if _is_program_name_unique_constraint_error(error):
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail="Program name already exists in this parent scope",
+                detail="项目集名称已存在",
             ) from error
         raise
 

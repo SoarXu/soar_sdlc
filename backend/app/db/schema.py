@@ -33,6 +33,128 @@ LEGACY_WORKFLOW_COLUMNS = {
     "workflow_transitions": ("from_status", "to_status"),
 }
 
+PROGRAM_NAME_SCOPE_COLUMN = "program_name_scope"
+PROGRAM_NAME_NORMALIZED_COLUMN = "program_name_normalized"
+PROGRAM_NAME_UNIQUE_INDEX = "uk_program_name_scope_normalized"
+PROGRAM_NAME_NORMALIZATION_SQL = (
+    "LOWER(REGEXP_REPLACE({value}, '^[[:space:]]+|[[:space:]]+$', ''))"
+)
+
+
+def _is_mysql_family(engine: Engine) -> bool:
+    return engine.dialect.name in {"mysql", "mariadb"}
+
+
+def _format_program_name_duplicates(rows) -> str:
+    groups: list[str] = []
+    for row in rows:
+        values = getattr(row, "_mapping", row)
+        if isinstance(values, tuple):
+            scope, normalized_name, ids, names = values
+        else:
+            scope = values["scope"]
+            normalized_name = values["normalized_name"]
+            ids = values["ids"]
+            names = values["names"]
+        groups.append(
+            f"scope={scope}, normalized_name={normalized_name!r}, ids=[{ids}], names=[{names}]"
+        )
+    return "; ".join(groups)
+
+
+def _require_no_duplicate_active_program_names(engine: Engine) -> None:
+    duplicate_statement = text(
+        "SELECT COALESCE(parent_id, 0) AS scope, "
+        + PROGRAM_NAME_NORMALIZATION_SQL.format(value="name")
+        + " AS normalized_name, "
+        "GROUP_CONCAT(id ORDER BY id) AS ids, "
+        "GROUP_CONCAT(name ORDER BY id SEPARATOR ' | ') AS names "
+        "FROM programs WHERE deleted = 0 "
+        "GROUP BY COALESCE(parent_id, 0), "
+        + PROGRAM_NAME_NORMALIZATION_SQL.format(value="name")
+        + " HAVING COUNT(*) > 1"
+    )
+    with engine.begin() as connection:
+        duplicates = connection.execute(duplicate_statement).all()
+    if duplicates:
+        raise RuntimeError(
+            "Cannot add the program name uniqueness constraint because active duplicate "
+            "program names exist: "
+            + _format_program_name_duplicates(duplicates)
+        )
+
+
+def _ensure_program_name_uniqueness_schema(engine: Engine) -> None:
+    """Install the MySQL active-program-name uniqueness backstop without touching SQLite."""
+    if not _is_mysql_family(engine):
+        return
+
+    inspector = inspect(engine)
+    if "programs" not in inspector.get_table_names():
+        return
+    columns = {column["name"] for column in inspector.get_columns("programs")}
+    indexes = inspector.get_indexes("programs")
+    matching_index = next(
+        (
+            index
+            for index in indexes
+            if index.get("name") == PROGRAM_NAME_UNIQUE_INDEX
+        ),
+        None,
+    )
+    if matching_index:
+        if (
+            matching_index.get("unique")
+            and matching_index.get("column_names")
+            == [PROGRAM_NAME_SCOPE_COLUMN, PROGRAM_NAME_NORMALIZED_COLUMN]
+        ):
+            return
+        raise RuntimeError(
+            f"Program name index {PROGRAM_NAME_UNIQUE_INDEX!r} has an incompatible definition; "
+            "expected a unique index on "
+            f"({PROGRAM_NAME_SCOPE_COLUMN}, {PROGRAM_NAME_NORMALIZED_COLUMN})"
+        )
+    alternate_index = next(
+        (
+            index
+            for index in indexes
+            if index.get("column_names") == [PROGRAM_NAME_SCOPE_COLUMN, PROGRAM_NAME_NORMALIZED_COLUMN]
+        ),
+        None,
+    )
+    if alternate_index:
+        raise RuntimeError(
+            f"Program name index {alternate_index.get('name')!r} is not the required "
+            f"canonical index {PROGRAM_NAME_UNIQUE_INDEX!r}"
+        )
+
+    _require_no_duplicate_active_program_names(engine)
+    with engine.begin() as connection:
+        if PROGRAM_NAME_SCOPE_COLUMN not in columns:
+            connection.execute(
+                text(
+                    "ALTER TABLE programs ADD COLUMN program_name_scope "
+                    "BIGINT GENERATED ALWAYS AS "
+                    "(CASE WHEN deleted = 0 THEN COALESCE(parent_id, 0) ELSE NULL END) STORED"
+                )
+            )
+        if PROGRAM_NAME_NORMALIZED_COLUMN not in columns:
+            connection.execute(
+                text(
+                    "ALTER TABLE programs ADD COLUMN program_name_normalized "
+                    "VARCHAR(150) GENERATED ALWAYS AS "
+                    "(CASE WHEN deleted = 0 THEN "
+                    "LOWER(REGEXP_REPLACE(name, '^[[:space:]]+|[[:space:]]+$', '')) "
+                    "ELSE NULL END) STORED"
+                )
+            )
+        connection.execute(
+            text(
+                "CREATE UNIQUE INDEX uk_program_name_scope_normalized ON programs "
+                "(program_name_scope, program_name_normalized)"
+            )
+        )
+
 
 def _ensure_column(engine: Engine, table: str, col: str, ddl: str, index_ddl: str | None = None) -> None:
     inspector = inspect(engine)
@@ -168,6 +290,7 @@ def _history_open_lookup_index_exists(indexes: list[dict], canonical_name: str =
 def ensure_runtime_schema(engine: Engine) -> None:
     _validate_final_workflow_schema(engine)
     _ensure_requirement_pool_identity_columns(engine)
+    _ensure_program_name_uniqueness_schema(engine)
     inspector0 = inspect(engine)
     if "status_operation_log" in inspector0.get_table_names():
         _ensure_column(

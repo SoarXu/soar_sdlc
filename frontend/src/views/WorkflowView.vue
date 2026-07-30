@@ -73,26 +73,30 @@
         <h1>{{ editingId ? '工作流方案详情' : '新增工作流方案' }}</h1>
         <p>一个方案内分别维护需求、任务、Bug 的可视化工作流，并绑定到项目后生效。</p>
       </div>
-      <div class="page-actions">
-        <el-button @click="backToAdmin">返回后台管理</el-button>
-        <el-button @click="backToList">返回列表</el-button>
-        <el-button
-          v-if="editingId && form.lifecycle_status === 'draft' && canEditWorkflow"
-          :loading="lifecycleBusyIds.has(editingId)"
-          @click="enableConfig(currentConfig)"
-        >启用</el-button>
-        <el-popconfirm
-          v-if="editingId && form.lifecycle_status === 'enabled' && canEditWorkflow"
-          title="确认停用该方案？"
-          @confirm="disableConfig(currentConfig)"
-        >
-          <template #reference>
-            <el-button type="danger" plain :loading="lifecycleBusyIds.has(editingId)">停用</el-button>
-          </template>
-        </el-popconfirm>
-        <el-button v-if="canEditWorkflow" type="primary" :loading="saving" @click="saveDetail">
-          {{ editingId ? '保存' : '创建方案' }}
-        </el-button>
+      <div class="page-actions workflow-detail-actions">
+        <div class="workflow-detail-actions__navigation">
+          <el-button @click="backToAdmin">返回后台管理</el-button>
+          <el-button @click="backToList">返回列表</el-button>
+        </div>
+        <div class="workflow-detail-actions__editing">
+          <el-button
+            v-if="editingId && form.lifecycle_status === 'draft' && canEditWorkflow"
+            :loading="lifecycleBusyIds.has(editingId)"
+            @click="enableConfig(currentConfig)"
+          >启用</el-button>
+          <el-popconfirm
+            v-if="editingId && form.lifecycle_status === 'enabled' && canEditWorkflow"
+            title="确认停用该方案？"
+            @confirm="disableConfig(currentConfig)"
+          >
+            <template #reference>
+              <el-button type="danger" plain :loading="lifecycleBusyIds.has(editingId)">停用</el-button>
+            </template>
+          </el-popconfirm>
+          <el-button v-if="canEditWorkflow" type="primary" :loading="saving" @click="saveDetail">
+            {{ editingId ? '保存' : '创建方案' }}
+          </el-button>
+        </div>
       </div>
     </div>
 
@@ -542,3 +546,41 @@ function pruneTransferTargets() {
 
 onMounted(loadData)
 </script>
+
+<style scoped>
+.workflow-detail-actions {
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.workflow-detail-actions__navigation,
+.workflow-detail-actions__editing {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.workflow-detail-actions__editing {
+  margin-left: auto;
+}
+
+@media (max-width: 767px) {
+  .workflow-detail-actions {
+    flex-wrap: wrap;
+    align-items: flex-start;
+  }
+}
+
+@media (max-width: 480px) {
+  .workflow-detail-actions__navigation,
+  .workflow-detail-actions__editing {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .workflow-detail-actions__editing {
+    margin-left: 0;
+  }
+}
+</style>

@@ -380,7 +380,7 @@ async function submitProject() {
   if (!form.name.trim()) return ElMessage.warning('请填写项目名称')
   saving.value = true
   try {
-    const payload = { ...form, program_id: form.program_id || null, owner_id: form.owner_id || null, assignee_rule_config_id: form.assignee_rule_config_id || null, end_date: form.is_long_term ? null : form.end_date }
+    const payload = { ...form, parent_id: form.parent_id || null, program_id: form.program_id || null, owner_id: form.owner_id || null, assignee_rule_config_id: form.assignee_rule_config_id || null, end_date: form.is_long_term ? null : form.end_date }
     if (editingId.value) await updateProject(editingId.value, payload)
     else await createProject(payload)
     dialogVisible.value = false

@@ -11,7 +11,7 @@
     <el-table :data="components" stripe>
       <el-table-column prop="name" label="组件" min-width="180" />
       <el-table-column label="来源项目" min-width="180"><template #default="{ row }">{{ row.source_project_name_snapshot || '-' }}</template></el-table-column>
-      <el-table-column label="成员" width="100"><template #default="{ row }">{{ row.members?.length || 0 }}</template></el-table-column>
+      <el-table-column label="成员" min-width="240"><template #default="{ row }">{{ memberLabel(row.members) }}</template></el-table-column>
       <el-table-column label="工作流方案" width="140"><template #default="{ row }">{{ row.workflow_scheme_id || '项目默认' }}</template></el-table-column>
       <el-table-column label="状态" width="100"><template #default="{ row }"><el-tag :type="row.enabled ? 'success' : 'info'">{{ row.enabled ? '启用' : '停用' }}</el-tag></template></el-table-column>
     </el-table>
@@ -42,6 +42,7 @@ import { useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { createBusinessComponentFromProject, fetchBusinessComponents } from '../api/businessComponents'
 import { fetchProject, fetchProjects } from '../api/projects'
+import { fetchUsers } from '../api/users'
 
 const route = useRoute()
 const projectId = computed(() => Number(route.params.id))
@@ -51,6 +52,7 @@ const dialogVisible = ref(false)
 const project = ref({})
 const projects = ref([])
 const components = ref([])
+const users = ref([])
 const form = reactive({ source_project_id: null, name: '', description: '' })
 const projectClosed = computed(() => project.value.state_category === 'terminal')
 const closedProjects = computed(() => projects.value.filter((item) => item.id !== projectId.value && item.state_category === 'terminal'))
@@ -64,17 +66,27 @@ function syncName(sourceProjectId) {
   if (source && !form.name) form.name = source.name
 }
 
+function memberLabel(members) {
+  if (!members?.length) return '-'
+  return members.map((member) => {
+    const user = users.value.find((item) => item.id === member.user_id)
+    return `${user?.full_name || user?.username || member.user_id} (${member.component_role})`
+  }).join('、')
+}
+
 async function loadData() {
   loading.value = true
   try {
-    const [projectRes, projectsRes, componentsRes] = await Promise.all([
+    const [projectRes, projectsRes, componentsRes, usersRes] = await Promise.all([
       fetchProject(projectId.value),
       fetchProjects(),
-      fetchBusinessComponents(projectId.value)
+      fetchBusinessComponents(projectId.value),
+      fetchUsers()
     ])
     project.value = projectRes.data
     projects.value = projectsRes.data
     components.value = componentsRes.data
+    users.value = usersRes.data
   } finally {
     loading.value = false
   }

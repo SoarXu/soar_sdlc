@@ -13,7 +13,6 @@
       </el-button>
       <slot name="after-primary" />
     </div>
-    <slot name="after-primary" />
     <el-dropdown v-if="moreActions.length" trigger="click" @command="handleMoreCommand">
       <el-button :link="mode === 'list'" type="primary" class="workflow-action-more">更多</el-button>
       <template #dropdown>

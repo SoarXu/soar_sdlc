@@ -1,6 +1,8 @@
 from datetime import date, datetime
 
 from fastapi import HTTPException, status
+from sqlalchemy import inspect, text
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.models.program import Program
@@ -18,6 +20,9 @@ PROGRAM_STATUS_OPTIONS = [
     {"label": "已挂起", "value": "paused"},
     {"label": "已关闭", "value": "closed"},
 ]
+
+PROGRAM_NAME_UNIQUE_INDEX = "uk_program_name_scope_normalized"
+_PROGRAM_NAME_CONTRACT_CACHE: dict[int, tuple[object, bool]] = {}
 
 
 def list_programs(db: Session) -> list[Program]:
@@ -124,6 +129,7 @@ def _build_unbound_project_tree(projects: list[Project]) -> list[dict]:
 
 def create_program(db: Session, payload: ProgramCreate, actor_id: int) -> Program:
     data = payload.model_dump()
+    data["name"] = _normalize_program_name(data["name"])
     data["creator_id"] = actor_id
     data["updater_id"] = actor_id
     if data["owner_id"] is None:
@@ -132,12 +138,13 @@ def create_program(db: Session, payload: ProgramCreate, actor_id: int) -> Progra
     if data["parent_id"] is not None:
         _get_active_parent_program(db, data["parent_id"])
         _require_child_program_governance(db, data["parent_id"], actor_id)
+    _require_unique_program_name(db, data["name"], data["parent_id"])
     if data.get("is_long_term"):
         data["planned_end_date"] = None
     data["status"] = "planning"
     program = Program(**data)
     db.add(program)
-    db.commit()
+    _commit_program_name_change(db)
     db.refresh(program)
     return program
 
@@ -148,6 +155,8 @@ def update_program(db: Session, program_id: int, payload: ProgramUpdate, actor_i
     data = payload.model_dump(exclude_unset=True)
     data.pop("creator_id", None)
     data.pop("updater_id", None)
+    if "name" in data:
+        data["name"] = _normalize_program_name(data["name"])
     if "owner_id" in data:
         _require_active_owner(db, data["owner_id"])
     if "parent_id" in data and data["parent_id"] != program.parent_id:
@@ -157,13 +166,22 @@ def update_program(db: Session, program_id: int, payload: ProgramUpdate, actor_i
         _validate_parent_mutation(db, program_id, data["parent_id"])
         if data["parent_id"] is not None:
             _require_child_program_governance(db, data["parent_id"], actor_id)
+    effective_name = _normalize_program_name(data.get("name", program.name))
+    data["name"] = effective_name
+    effective_parent_id = data.get("parent_id", program.parent_id)
+    _require_unique_program_name(
+        db,
+        effective_name,
+        effective_parent_id,
+        excluding_program_id=program_id,
+    )
     if data.get("is_long_term"):
         data["planned_end_date"] = None
     data.pop("status", None)
     for field, value in data.items():
         setattr(program, field, value)
     program.updater_id = actor_id
-    db.commit()
+    _commit_program_name_change(db)
     db.refresh(program)
     return program
 
@@ -304,6 +322,106 @@ def _get_active_program(db: Session, program_id: int) -> Program:
     if not program:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Program not found")
     return program
+
+
+def _normalize_program_name(name: str | None) -> str:
+    normalized_name = (name or "").strip()
+    if not normalized_name:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Program name must not be empty")
+    return normalized_name
+
+
+def _require_unique_program_name(
+    db: Session,
+    name: str,
+    parent_id: int | None,
+    *,
+    excluding_program_id: int | None = None,
+) -> None:
+    if _has_mysql_program_name_uniqueness_contract(db):
+        parameters = {
+            "scope": parent_id or 0,
+            "name": name,
+            "excluding_program_id": excluding_program_id or 0,
+        }
+        existing_program_id = db.execute(
+            text(
+                "SELECT id FROM programs "
+                "WHERE program_name_scope = :scope "
+                "AND program_name_normalized = "
+                "LOWER(REGEXP_REPLACE(:name, '^[[:space:]]+|[[:space:]]+$', '')) "
+                "AND id <> :excluding_program_id LIMIT 1"
+            ),
+            parameters,
+        ).scalar_one_or_none()
+        if existing_program_id is not None:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Program name already exists in this parent scope",
+            )
+        return
+
+    query = db.query(Program).filter(Program.deleted == 0)
+    if parent_id is None:
+        query = query.filter(Program.parent_id.is_(None))
+    else:
+        query = query.filter(Program.parent_id == parent_id)
+    if excluding_program_id is not None:
+        query = query.filter(Program.id != excluding_program_id)
+    normalized_name = name.lower()
+    for existing_program in query.all():
+        if existing_program.name.strip().lower() == normalized_name:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Program name already exists in this parent scope",
+            )
+
+
+def _has_mysql_program_name_uniqueness_contract(db: Session) -> bool:
+    bind = db.get_bind()
+    cache_key = id(bind)
+    cached = _PROGRAM_NAME_CONTRACT_CACHE.get(cache_key)
+    if cached and cached[0] is bind:
+        return cached[1]
+    result = _inspect_mysql_program_name_uniqueness_contract(bind)
+    if len(_PROGRAM_NAME_CONTRACT_CACHE) >= 16:
+        _PROGRAM_NAME_CONTRACT_CACHE.pop(next(iter(_PROGRAM_NAME_CONTRACT_CACHE)))
+    _PROGRAM_NAME_CONTRACT_CACHE[cache_key] = (bind, result)
+    return result
+
+
+def _inspect_mysql_program_name_uniqueness_contract(bind) -> bool:
+    if bind.dialect.name not in {"mysql", "mariadb"}:
+        return False
+    inspector = inspect(bind)
+    if "programs" not in inspector.get_table_names():
+        return False
+    columns = {column["name"] for column in inspector.get_columns("programs")}
+    if not {"program_name_scope", "program_name_normalized"}.issubset(columns):
+        return False
+    return any(
+        index.get("name") == PROGRAM_NAME_UNIQUE_INDEX
+        and index.get("unique")
+        and index.get("column_names") == ["program_name_scope", "program_name_normalized"]
+        for index in inspector.get_indexes("programs")
+    )
+
+
+def _is_program_name_unique_constraint_error(error: IntegrityError) -> bool:
+    return PROGRAM_NAME_UNIQUE_INDEX.lower() in str(error.orig or error).lower()
+
+
+def _commit_program_name_change(db: Session) -> None:
+    try:
+        db.commit()
+    except IntegrityError as error:
+        db.rollback()
+        if _is_program_name_unique_constraint_error(error):
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Program name already exists in this parent scope",
+            ) from error
+        raise
 
 
 def _require_active_owner(db: Session, owner_id: int | None) -> None:

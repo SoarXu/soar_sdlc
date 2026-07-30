@@ -578,18 +578,19 @@ def test_unrelated_user_cannot_create_or_govern_descendant_program_project(clien
     assert rejected_audit_history.status_code == 403
 
 
-def test_only_system_admin_creates_unbound_project(client: TestClient):
+def test_authenticated_user_creates_unbound_project_as_default_owner(client: TestClient):
     user_id, user_token = _create_program_permission_user("Unbound Project User")
 
-    rejected = client.post(
+    created_by_user = client.post(
         "/api/v1/projects",
-        json={"name": f"Rejected Unbound Project {uuid4().hex[:8]}"},
+        json={"name": f"User Unbound Project {uuid4().hex[:8]}"},
         headers=_program_auth(user_token),
     )
     created = client.post("/api/v1/projects", json={"name": f"Admin Unbound Project {uuid4().hex[:8]}"})
 
     assert user_id
-    assert rejected.status_code == 403
+    assert created_by_user.status_code == 200
+    assert created_by_user.json()["owner_id"] == user_id
     assert created.status_code == 200
 
 

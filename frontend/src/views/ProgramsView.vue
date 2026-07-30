@@ -453,11 +453,12 @@ function currentDateTimeValue() {
 }
 
 function resetProjectForm() {
+  const currentUserId = Number(localStorage.getItem('current_user_id') || 0)
   Object.assign(projectForm, {
     parent_id: null,
     program_id: null,
     name: '',
-    owner_id: null,
+    owner_id: users.value.some((user) => user.id === currentUserId) ? currentUserId : null,
     start_date: null,
     end_date: null,
     is_long_term: false,

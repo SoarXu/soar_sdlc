@@ -1,9 +1,14 @@
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 
+from app.models.bug import Bug
 from app.models.project import Project
 from app.models.project_member import ProjectMember
+from app.models.requirement import Requirement
 from app.models.role import Role, UserRole
+from app.models.task import Task
+from app.models.test_case import TestCase
+from app.models.test_run import TestRun
 from app.models.user import User
 from app.services.program_permission_service import is_program_governor
 
@@ -72,24 +77,26 @@ def can_manage_project(db: Session, project_id: int | None, actor: User | None) 
 
 
 def can_govern_project(db: Session, project_id: int | None, actor: User | None) -> bool:
-    if can_manage_project(db, project_id, actor):
-        return True
-    project = _get_active_project(db, project_id)
-    return bool(actor and is_program_governor(db, project.program_id if project else None, actor.id))
-
-
-def can_create_project(db: Session, program_id: int | None, actor: User | None) -> bool:
     if actor is None:
         return False
-    return is_system_admin(db, actor.id) or (
-        program_id is not None and is_program_governor(db, program_id, actor.id)
+    project = _get_active_project(db, project_id)
+    return (
+        can_manage_project(db, project_id, actor)
+        or _is_project_owner_ancestor(db, project_id, actor.id)
+        or is_program_governor(db, project.program_id if project else None, actor.id)
     )
 
 
-def can_delete_project(db: Session, actor: User | None) -> bool:
-    if actor is None:
+def can_create_project(db: Session, program_id: int | None, actor: User | None) -> bool:
+    return actor is not None
+
+
+def can_delete_project(db: Session, project_id: int | None, actor: User | None) -> bool:
+    if not can_govern_project(db, project_id, actor):
+        return False
+    if actor and is_system_admin(db, actor.id):
         return True
-    return is_system_admin(db, actor.id)
+    return not _has_active_project_children_or_work_items(db, project_id)
 
 
 def can_create_work_item(db: Session, project_id: int | None, actor: User | None) -> bool:
@@ -139,10 +146,7 @@ def can_view_audit(db: Session, project_id: int | None, actor: User | None) -> b
 
 
 def can_view_project_governance_audit(db: Session, project_id: int | None, actor: User | None) -> bool:
-    if can_view_audit(db, project_id, actor):
-        return True
-    project = _get_active_project(db, project_id)
-    return bool(actor and is_program_governor(db, project.program_id if project else None, actor.id))
+    return can_view_audit(db, project_id, actor) or can_govern_project(db, project_id, actor)
 
 
 def can_view_project_work_items(db: Session, project_id: int | None, actor: User | None) -> bool:
@@ -157,7 +161,7 @@ def can_admin_action(db: Session, project_id: int | None, actor_id: int | None) 
 
 def ensure_project_manage_permission(db: Session, project_id: int | None, actor: User | None) -> None:
     ensure_authenticated(actor)
-    if not can_manage_project(db, project_id, actor):
+    if not can_govern_project(db, project_id, actor):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="无权管理项目配置")
 
 
@@ -173,10 +177,10 @@ def ensure_project_create_permission(db: Session, program_id: int | None, actor:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="无权创建项目")
 
 
-def ensure_project_delete_permission(db: Session, actor: User | None) -> None:
+def ensure_project_delete_permission(db: Session, project_id: int | None, actor: User | None) -> None:
     ensure_authenticated(actor)
-    if not can_delete_project(db, actor):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="只有系统管理员可以删除项目")
+    if not can_delete_project(db, project_id, actor):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="无权删除项目")
 
 
 def ensure_work_item_action_permission(db: Session, item, actor_id: int | None, object_label: str) -> None:
@@ -193,6 +197,34 @@ def ensure_work_item_action_permission(db: Session, item, actor_id: int | None, 
 def ensure_authenticated(actor: User | None) -> None:
     if actor is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
+
+
+def _is_project_owner_ancestor(db: Session, project_id: int | None, user_id: int | None) -> bool:
+    if not project_id or user_id is None:
+        return False
+
+    current_project_id = project_id
+    visited_project_ids: set[int] = set()
+    while current_project_id is not None:
+        if current_project_id in visited_project_ids:
+            return False
+        visited_project_ids.add(current_project_id)
+        if is_project_owner(db, current_project_id, user_id):
+            return True
+        project = _get_active_project(db, current_project_id)
+        current_project_id = project.parent_id if project else None
+    return False
+
+
+def _has_active_project_children_or_work_items(db: Session, project_id: int | None) -> bool:
+    if not project_id:
+        return False
+    if db.query(Project.id).filter(Project.parent_id == project_id, Project.deleted == 0).first():
+        return True
+    for model in (Requirement, Task, TestCase, Bug, TestRun):
+        if db.query(model.id).filter(model.project_id == project_id, model.deleted == 0).first():
+            return True
+    return False
 
 
 def ensure_workflow_fields_not_updated(fields: set[str]) -> None:

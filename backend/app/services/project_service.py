@@ -182,14 +182,62 @@ def get_project(db: Session, project_id: int) -> Project:
     return _get_active_project(db, project_id)
 
 
+def resolve_project_create_payload(db: Session, payload: ProjectCreate) -> ProjectCreate:
+    if not payload.parent_id:
+        return payload
+
+    parent, program_id = _resolve_parent_project_program(db, payload.parent_id, payload.program_id)
+    if payload.program_id is None:
+        return payload.model_copy(update={"program_id": program_id})
+    return payload
+
+
+def resolve_project_update_payload(
+    db: Session,
+    project_id: int,
+    payload: ProjectUpdate,
+) -> tuple[Project, ProjectUpdate, Project | None]:
+    project = _get_active_project(db, project_id)
+    fields = payload.model_fields_set
+    target_parent = None
+
+    if "parent_id" in fields and payload.parent_id is not None:
+        target_parent, target_program_id = _resolve_parent_project_program(
+            db,
+            payload.parent_id,
+            payload.program_id if "program_id" in fields else None,
+        )
+        if "program_id" not in fields:
+            payload = payload.model_copy(update={"program_id": target_program_id})
+    elif "program_id" in fields and project.parent_id is not None:
+        _parent, parent_program_id = _resolve_parent_project_program(db, project.parent_id, payload.program_id)
+        if payload.program_id != parent_program_id:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Child project program must match its parent project",
+            )
+
+    return project, payload, target_parent
+
+
+def _resolve_parent_project_program(
+    db: Session,
+    parent_id: int,
+    program_id: int | None,
+) -> tuple[Project, int | None]:
+    parent = _get_active_project(db, parent_id)
+    if program_id is not None and program_id != parent.program_id:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Child project program must match its parent project",
+        )
+    return parent, parent.program_id
+
+
 def create_project(db: Session, payload: ProjectCreate) -> Project:
+    payload = resolve_project_create_payload(db, payload)
     data = payload.model_dump()
     _validate_workflow_scheme_binding(db, data.get("assignee_rule_config_id"))
-    parent = None
-    if data.get("parent_id"):
-        parent = _get_active_project(db, data["parent_id"])
-        if not data.get("program_id"):
-            data["program_id"] = parent.program_id
     if data.get("is_long_term"):
         data["end_date"] = None
     data.update(initial_system_workflow_values(db, "project"))
@@ -208,7 +256,7 @@ def create_project(db: Session, payload: ProjectCreate) -> Project:
 
 
 def update_project(db: Session, project_id: int, payload: ProjectUpdate, actor_id: int | None = None) -> Project:
-    project = _get_active_project(db, project_id)
+    project, payload, _target_parent = resolve_project_update_payload(db, project_id, payload)
     data = payload.model_dump(exclude_unset=True)
     data.pop("lifecycle_phase", None)
     data.pop("maintenance_start_time", None)

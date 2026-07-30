@@ -5,6 +5,7 @@ from app.models.project import Project
 from app.models.project_member import ProjectMember
 from app.models.role import Role, UserRole
 from app.models.user import User
+from app.services.program_permission_service import is_program_governor
 
 
 SYSTEM_ADMIN_ROLE_KEYS = {"system_admin"}
@@ -64,7 +65,25 @@ def is_project_member(db: Session, project_id: int | None, user_id: int | None) 
 def can_manage_project(db: Session, project_id: int | None, actor: User | None) -> bool:
     if actor is None:
         return True
-    return is_system_admin(db, actor.id) or is_project_owner(db, project_id, actor.id)
+    return (
+        is_system_admin(db, actor.id)
+        or is_project_owner(db, project_id, actor.id)
+    )
+
+
+def can_govern_project(db: Session, project_id: int | None, actor: User | None) -> bool:
+    if can_manage_project(db, project_id, actor):
+        return True
+    project = _get_active_project(db, project_id)
+    return bool(actor and is_program_governor(db, project.program_id if project else None, actor.id))
+
+
+def can_create_project(db: Session, program_id: int | None, actor: User | None) -> bool:
+    if actor is None:
+        return False
+    return is_system_admin(db, actor.id) or (
+        program_id is not None and is_program_governor(db, program_id, actor.id)
+    )
 
 
 def can_delete_project(db: Session, actor: User | None) -> bool:
@@ -119,6 +138,13 @@ def can_view_audit(db: Session, project_id: int | None, actor: User | None) -> b
     )
 
 
+def can_view_project_governance_audit(db: Session, project_id: int | None, actor: User | None) -> bool:
+    if can_view_audit(db, project_id, actor):
+        return True
+    project = _get_active_project(db, project_id)
+    return bool(actor and is_program_governor(db, project.program_id if project else None, actor.id))
+
+
 def can_view_project_work_items(db: Session, project_id: int | None, actor: User | None) -> bool:
     return can_view_audit(db, project_id, actor)
 
@@ -133,6 +159,18 @@ def ensure_project_manage_permission(db: Session, project_id: int | None, actor:
     ensure_authenticated(actor)
     if not can_manage_project(db, project_id, actor):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="无权管理项目配置")
+
+
+def ensure_project_governance_permission(db: Session, project_id: int | None, actor: User | None) -> None:
+    ensure_authenticated(actor)
+    if not can_govern_project(db, project_id, actor):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="无权治理项目")
+
+
+def ensure_project_create_permission(db: Session, program_id: int | None, actor: User | None) -> None:
+    ensure_authenticated(actor)
+    if not can_create_project(db, program_id, actor):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="无权创建项目")
 
 
 def ensure_project_delete_permission(db: Session, actor: User | None) -> None:
@@ -202,6 +240,14 @@ def ensure_audit_view_permission(db: Session, project_id: int | None, actor: Use
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="无权查看审计历史")
 
 
+def ensure_project_governance_audit_view_permission(
+    db: Session, project_id: int | None, actor: User | None
+) -> None:
+    ensure_authenticated(actor)
+    if not can_view_project_governance_audit(db, project_id, actor):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="无权查看项目审计历史")
+
+
 def _has_role(db: Session, user_id: int, role_keys: set[str]) -> bool:
     return bool(
         db.query(Role)
@@ -223,6 +269,12 @@ def _has_project_role(db: Session, project_id: int | None, user_id: int, project
         )
         .first()
     )
+
+
+def _get_active_project(db: Session, project_id: int | None) -> Project | None:
+    if not project_id:
+        return None
+    return db.query(Project).filter(Project.id == project_id, Project.deleted == 0).first()
 
 
 def actor_role_keys(db: Session, project_id: int | None, user_id: int | None) -> set[str]:

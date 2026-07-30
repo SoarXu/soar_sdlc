@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, Response, status
 from sqlalchemy.orm import Session
 
-from app.core.auth_dependencies import get_optional_current_user, require_system_admin
+from app.core.auth_dependencies import get_current_user
 from app.db.session import get_db
 from app.models.user import User
 from app.services.program_service import (
@@ -43,9 +43,9 @@ def get_program_status_options():
 def post_program(
     payload: ProgramCreate,
     db: Session = Depends(get_db),
-    _admin=Depends(require_system_admin),
+    current_user: User = Depends(get_current_user),
 ):
-    return create_program(db, payload)
+    return create_program(db, payload, actor_id=current_user.id)
 
 
 @router.patch("/{program_id}", response_model=ProgramRead)
@@ -53,9 +53,9 @@ def patch_program(
     program_id: int,
     payload: ProgramUpdate,
     db: Session = Depends(get_db),
-    _admin=Depends(require_system_admin),
+    current_user: User = Depends(get_current_user),
 ):
-    return update_program(db, program_id, payload)
+    return update_program(db, program_id, payload, actor_id=current_user.id)
 
 
 @router.get("/{program_id}/status-operations", response_model=list[StatusOperationRead])
@@ -68,10 +68,9 @@ def start_program_status(
     program_id: int,
     payload: StatusOperationCreate | None = None,
     db: Session = Depends(get_db),
-    current_user: User | None = Depends(get_optional_current_user),
-    _admin=Depends(require_system_admin),
+    current_user: User = Depends(get_current_user),
 ):
-    return start_program(db, program_id, payload, actor_id=current_user.id if current_user else None)
+    return start_program(db, program_id, payload, actor_id=current_user.id)
 
 
 @router.post("/{program_id}/suspend", response_model=ProgramRead)
@@ -79,10 +78,9 @@ def suspend_program_status(
     program_id: int,
     payload: StatusOperationCreate | None = None,
     db: Session = Depends(get_db),
-    current_user: User | None = Depends(get_optional_current_user),
-    _admin=Depends(require_system_admin),
+    current_user: User = Depends(get_current_user),
 ):
-    return suspend_program(db, program_id, payload, actor_id=current_user.id if current_user else None)
+    return suspend_program(db, program_id, payload, actor_id=current_user.id)
 
 
 @router.post("/{program_id}/close", response_model=ProgramRead)
@@ -90,10 +88,9 @@ def close_program_status(
     program_id: int,
     payload: StatusOperationCreate | None = None,
     db: Session = Depends(get_db),
-    current_user: User | None = Depends(get_optional_current_user),
-    _admin=Depends(require_system_admin),
+    current_user: User = Depends(get_current_user),
 ):
-    return close_program(db, program_id, payload, actor_id=current_user.id if current_user else None)
+    return close_program(db, program_id, payload, actor_id=current_user.id)
 
 
 @router.post("/{program_id}/activate", response_model=ProgramRead)
@@ -101,17 +98,16 @@ def activate_program_status(
     program_id: int,
     payload: StatusOperationCreate | None = None,
     db: Session = Depends(get_db),
-    current_user: User | None = Depends(get_optional_current_user),
-    _admin=Depends(require_system_admin),
+    current_user: User = Depends(get_current_user),
 ):
-    return activate_program(db, program_id, payload, actor_id=current_user.id if current_user else None)
+    return activate_program(db, program_id, payload, actor_id=current_user.id)
 
 
 @router.delete("/{program_id}", status_code=status.HTTP_204_NO_CONTENT)
 def remove_program(
     program_id: int,
     db: Session = Depends(get_db),
-    _admin=Depends(require_system_admin),
+    current_user: User = Depends(get_current_user),
 ):
-    delete_program(db, program_id)
+    delete_program(db, program_id, actor_id=current_user.id)
     return Response(status_code=status.HTTP_204_NO_CONTENT)

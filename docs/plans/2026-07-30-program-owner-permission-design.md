@@ -1,73 +1,61 @@
-# Program Owner Permission Design
+# 项目集负责人权限设计
 
-## Decision
+## 决策
 
-`Program.owner_id` represents the accountable owner of a program and grants
-governance authority over that program and every descendant program and
-project. It is not a workflow role and does not make the user the owner or
-current handler of requirements, tasks, test cases, test runs, or bugs.
+`Program.owner_id` 表示项目集的责任负责人，并授予其对该项目集及所有下级
+项目集、项目的治理权限。它不是工作流角色，不会使该用户自动成为需求、任务、
+测试用例、测试执行或缺陷的负责人或当前处理人。
 
-Workflow runtime behavior is explicitly out of scope. A work-item owner is
-set only by the existing workflow advanced configuration and transition logic.
+工作流运行时行为明确不在本设计范围内。工作项负责人仅由既有的工作流高级配置
+和流转逻辑设置。
 
-## Creation
+## 创建
 
-- Any authenticated user may create a root program.
-- The program owner defaults to the authenticated creator when `owner_id` is
-  omitted. The creator may select another active user before saving.
-- Creating a child program requires governance authority on its parent. The
-  child owner still defaults to the authenticated creator and may be changed.
-- A creator has no lasting special authority once ownership is transferred.
+- 任一已登录用户均可创建顶层项目集。
+- 未传入 `owner_id` 时，项目集负责人默认取当前创建人；创建人可在保存前选择
+  其他有效用户。
+- 创建子项目集需要拥有父项目集的治理权限。子项目集负责人仍默认取当前创建人，
+  并允许修改。
+- 负责人发生交接后，创建人不再因创建记录本身保留特殊权限。
 
-## Governance Inheritance
+## 治理权限继承
 
-For a program, an actor has governance authority when the actor is a system
-administrator or is the owner of that program or one of its active ancestors.
-For a project, the same rule is evaluated from the project's assigned program
-and follows that program's ancestor chain.
+对于项目集，当操作者为系统管理员，或为该项目集、任一有效祖先项目集的负责人
+时，拥有治理权限。对于项目，从其所属项目集开始，按同一规则沿项目集父级链向上
+判断。
 
-Program governance includes viewing the program tree and all descendant
-projects, editing program metadata and ownership, creating child programs and
-projects, maintaining descendant project membership, and running project and
-program lifecycle actions. It does not bypass work-item workflow permissions
-or assign work-item owners.
+项目集治理权限包括查看项目集树和所有下级项目、编辑项目集基本信息及负责人、
+创建子项目集和项目、维护下级项目成员，以及执行项目集和项目的生命周期操作。
+该权限不绕过工作项工作流权限，也不分配工作项负责人。
 
-## Ownership Transfer
+## 负责人交接
 
-The current program owner, an owner of an active ancestor program, and a
-system administrator may change `owner_id`. The new owner must be an active,
-non-deleted user. The transfer takes effect immediately because permissions
-are derived from the current tree rather than copied into project-member rows.
+当前项目集负责人、任一有效祖先项目集负责人及系统管理员可修改 `owner_id`。
+新负责人必须是未删除且有效的用户。权限基于当前树结构动态计算，而非复制到项目
+成员表中，因此交接立即生效。
 
-## Deletion And Closure
+## 删除与关闭
 
-- A program owner may delete only an empty program: no active child programs
-  and no active projects are attached to it.
-- A non-empty program must be closed instead. The existing closure rule that
-  requires all descendants and projects to be closed remains in force.
-- A system administrator may remove a non-empty program tree only after all
-  descendant programs and projects are closed. Deletion remains soft deletion
-  so audit history is retained.
+- 项目集负责人只能删除空项目集：其下不存在有效的子项目集或项目。
+- 非空项目集必须关闭。现有的关闭规则仍然有效，即所有下级项目集和项目均须已
+  关闭。
+- 系统管理员仅可在项目集树内的所有项目集和项目均已关闭后，删除非空项目集树。
+  删除继续采用软删除，以保留审计历史。
 
-## Permission Precedence
+## 权限优先级
 
-1. System administrator has global authority.
-2. Program owner has inherited governance authority over the owned subtree.
-3. Project owner has governance authority only for that project.
-4. Project members retain their existing execution permissions.
+1. 系统管理员拥有全局权限。
+2. 项目集负责人拥有所属项目集子树的继承治理权限。
+3. 项目负责人只拥有本项目的治理权限。
+4. 项目成员保留其现有的执行权限。
 
-There is no separate global "program manager" role. Root-program creation is
-available to every authenticated user.
+不新增全局“项目集管理者”角色。任何已登录用户都可以创建顶层项目集。
 
-## Acceptance Criteria
+## 验收条件
 
-- An authenticated user can create a root program and becomes its owner by
-  default.
-- Parent or ancestor program owners can manage descendant programs and
-  projects without being inserted into each project's member list.
-- Ownership transfer immediately revokes the former owner's inherited access
-  unless another applicable authority remains.
-- Program ownership alone never changes a work item's `owner_id` or bypasses
-  workflow transition authorization.
-- A non-administrator cannot delete a non-empty program; a closed tree can be
-  removed only by an administrator.
+- 已登录用户可以创建顶层项目集，且默认成为其负责人。
+- 父级或祖先项目集负责人无需被写入每个项目的成员表，即可管理下级项目集和
+  项目。
+- 负责人交接后，原负责人的继承权限立即撤销，除非其仍具备其他适用权限。
+- 仅拥有项目集负责人身份不会修改工作项 `owner_id`，也不会绕过工作流流转授权。
+- 非系统管理员不能删除非空项目集；只有系统管理员可以删除已关闭的项目集树。

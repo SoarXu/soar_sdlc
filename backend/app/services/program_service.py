@@ -5,6 +5,8 @@ from sqlalchemy.orm import Session
 
 from app.models.program import Program
 from app.models.project import Project
+from app.models.user import User
+from app.services.program_permission_service import can_create_child_program, can_delete_program, can_manage_program
 from app.services.status_operation_service import create_status_operation, list_status_operations
 from app.services.workflow_state_query_service import non_terminal_state_clause
 from app.views.program_view import ProgramCreate, ProgramUpdate
@@ -120,8 +122,16 @@ def _build_unbound_project_tree(projects: list[Project]) -> list[dict]:
     return roots
 
 
-def create_program(db: Session, payload: ProgramCreate) -> Program:
+def create_program(db: Session, payload: ProgramCreate, actor_id: int) -> Program:
     data = payload.model_dump()
+    data["creator_id"] = actor_id
+    data["updater_id"] = actor_id
+    if data["owner_id"] is None:
+        data["owner_id"] = actor_id
+    _require_active_owner(db, data["owner_id"])
+    if data["parent_id"] is not None:
+        _get_active_parent_program(db, data["parent_id"])
+        _require_child_program_governance(db, data["parent_id"], actor_id)
     if data.get("is_long_term"):
         data["planned_end_date"] = None
     data["status"] = "planning"
@@ -132,21 +142,36 @@ def create_program(db: Session, payload: ProgramCreate) -> Program:
     return program
 
 
-def update_program(db: Session, program_id: int, payload: ProgramUpdate) -> Program:
+def update_program(db: Session, program_id: int, payload: ProgramUpdate, actor_id: int) -> Program:
     program = _get_active_program(db, program_id)
+    _require_program_governance(db, program_id, actor_id)
     data = payload.model_dump(exclude_unset=True)
+    data.pop("creator_id", None)
+    data.pop("updater_id", None)
+    if "owner_id" in data:
+        _require_active_owner(db, data["owner_id"])
+    if "parent_id" in data and data["parent_id"] != program.parent_id:
+        if program.parent_id is not None:
+            _get_active_parent_program(db, program.parent_id)
+            _require_child_program_governance(db, program.parent_id, actor_id)
+        _validate_parent_mutation(db, program_id, data["parent_id"])
+        if data["parent_id"] is not None:
+            _require_child_program_governance(db, data["parent_id"], actor_id)
     if data.get("is_long_term"):
         data["planned_end_date"] = None
     data.pop("status", None)
     for field, value in data.items():
         setattr(program, field, value)
+    program.updater_id = actor_id
     db.commit()
     db.refresh(program)
     return program
 
 
-def delete_program(db: Session, program_id: int) -> None:
+def delete_program(db: Session, program_id: int, actor_id: int) -> None:
     program = _get_active_program(db, program_id)
+    if not can_delete_program(db, program_id, actor_id):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Program governance permission required")
     now = datetime.now()
 
     descendant_ids = _collect_descendant_program_ids(db, program_id)
@@ -177,6 +202,7 @@ def delete_program(db: Session, program_id: int) -> None:
 
 def start_program(db: Session, program_id: int, payload: StatusOperationCreate | None = None, actor_id: int | None = None) -> Program:
     program = _get_active_program(db, program_id)
+    _require_program_governance(db, program_id, actor_id)
     _require_status(program.status, {"planning", "paused"}, "只有规划中或已挂起的项目集可以启动")
     from_status = program.status
     program.status = "active"
@@ -201,6 +227,7 @@ def start_program(db: Session, program_id: int, payload: StatusOperationCreate |
 
 def suspend_program(db: Session, program_id: int, payload: StatusOperationCreate | None = None, actor_id: int | None = None) -> Program:
     program = _get_active_program(db, program_id)
+    _require_program_governance(db, program_id, actor_id)
     _require_status(program.status, {"active"}, "只有进行中的项目集可以挂起")
     from_status = program.status
     program.status = "paused"
@@ -221,6 +248,7 @@ def suspend_program(db: Session, program_id: int, payload: StatusOperationCreate
 
 def close_program(db: Session, program_id: int, payload: StatusOperationCreate | None = None, actor_id: int | None = None) -> Program:
     program = _get_active_program(db, program_id)
+    _require_program_governance(db, program_id, actor_id)
     _require_status(program.status, {"active", "paused"}, "只有进行中或已挂起的项目集可以关闭")
     if _has_unclosed_children(db, program_id):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="存在子项目集或项目为未关闭状态")
@@ -245,6 +273,7 @@ def close_program(db: Session, program_id: int, payload: StatusOperationCreate |
 
 def activate_program(db: Session, program_id: int, payload: StatusOperationCreate | None = None, actor_id: int | None = None) -> Program:
     program = _get_active_program(db, program_id)
+    _require_program_governance(db, program_id, actor_id)
     _require_status(program.status, {"closed"}, "只有已关闭的项目集可以激活")
     from_status = program.status
     program.status = "active"
@@ -275,6 +304,50 @@ def _get_active_program(db: Session, program_id: int) -> Program:
     if not program:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Program not found")
     return program
+
+
+def _require_active_owner(db: Session, owner_id: int | None) -> None:
+    owner = (
+        db.query(User)
+        .filter(User.id == owner_id, User.deleted == 0, User.is_active.is_(True))
+        .first()
+    )
+    if not owner:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Program owner must be active")
+
+
+def _get_active_parent_program(db: Session, parent_id: int) -> Program:
+    parent = db.query(Program).filter(Program.id == parent_id, Program.deleted == 0).first()
+    if not parent:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Program parent must be active")
+    return parent
+
+
+def _require_program_governance(db: Session, program_id: int, actor_id: int | None) -> None:
+    if not can_manage_program(db, program_id, actor_id):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Program governance permission required")
+
+
+def _require_child_program_governance(db: Session, parent_id: int, actor_id: int | None) -> None:
+    if not can_create_child_program(db, parent_id, actor_id):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Program governance permission required")
+
+
+def _validate_parent_mutation(db: Session, program_id: int, parent_id: int | None) -> None:
+    if parent_id is None:
+        return
+    if parent_id == program_id:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Program cannot be its own parent")
+
+    current = _get_active_parent_program(db, parent_id)
+    visited_program_ids: set[int] = set()
+    while current.parent_id is not None:
+        if current.id in visited_program_ids:
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Program hierarchy contains a cycle")
+        visited_program_ids.add(current.id)
+        if current.parent_id == program_id:
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Program cannot be moved beneath its descendant")
+        current = _get_active_parent_program(db, current.parent_id)
 
 
 def _require_status(current_status: str, allowed_statuses: set[str], message: str) -> None:

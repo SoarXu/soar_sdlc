@@ -34,7 +34,6 @@ class ProgramUpdate(BaseModel):
     actual_end_date: date | None = None
     is_long_term: bool | None = None
     description: str | None = None
-    updater_id: int | None = None
 
 
 class ProgramRead(ProgramBase):

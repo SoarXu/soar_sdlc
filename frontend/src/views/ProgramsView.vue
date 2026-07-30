@@ -239,6 +239,7 @@ import {
 import { fetchUsers } from '../api/users'
 import { fetchWorkflowTransitionsBatch } from '../api/workflowRuntime'
 import WorkflowActionButtons from '../components/WorkflowActionButtons.vue'
+import { actionErrorMessage } from '../utils/permissions'
 import { userLabel } from '../utils/referenceLabels'
 import { usePagination } from '../utils/usePagination'
 import { workflowActionColumnWidth } from '../utils/workflowActionColumn'
@@ -404,10 +405,11 @@ function flattenProjects(nodes) {
 }
 
 function resetForm(parentId = null) {
+  const currentUserId = Number(localStorage.getItem('current_user_id') || 0)
   Object.assign(form, {
     parent_id: parentId,
     name: '',
-    owner_id: null,
+    owner_id: users.value.some((user) => user.id === currentUserId) ? currentUserId : null,
     planned_start_date: null,
     planned_end_date: null,
     is_long_term: false,
@@ -560,6 +562,9 @@ async function submitProgram() {
     else await createProgram(payload)
     dialogVisible.value = false
     await loadData()
+  } catch (error) {
+    ElMessage.error(actionErrorMessage(error, '项目集保存失败'))
+    await loadData()
   } finally {
     saving.value = false
   }
@@ -576,7 +581,8 @@ async function changeProgramStatus(id, action, payload = {}) {
     await actions[action](id, payload)
     await loadData()
   } catch (error) {
-    ElMessage.error(error.response?.data?.detail || '项目集状态更新失败')
+    ElMessage.error(actionErrorMessage(error, '项目集状态更新失败'))
+    await loadData()
     throw error
   }
 }
@@ -643,8 +649,13 @@ function buildStatusPayload() {
 }
 
 async function removeProgram(id) {
-  await deleteProgram(id)
-  await loadData()
+  try {
+    await deleteProgram(id)
+    await loadData()
+  } catch (error) {
+    ElMessage.error(actionErrorMessage(error, '项目集删除失败'))
+    await loadData()
+  }
 }
 
 onMounted(loadData)

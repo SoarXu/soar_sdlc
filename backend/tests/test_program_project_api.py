@@ -8,7 +8,907 @@ from app.core.security import get_password_hash
 from app.core.security import create_access_token
 from app.models.user import User
 from app.models.requirement import Requirement
-from app.models.workflow_definition import WorkflowState
+from app.models.task import Task
+from app.models.bug import Bug
+from app.models.business_component import BusinessComponent
+from app.models.program import Program
+from app.models.project import Project
+from app.models.workflow_definition import WorkflowState, WorkflowTransition
+
+
+def _create_program_permission_user(full_name: str) -> tuple[int, str]:
+    db = SessionLocal()
+    try:
+        user = User(
+            username=f"program_permission_api_{uuid4().hex[:8]}",
+            full_name=full_name,
+            password_hash=get_password_hash("User123456"),
+            is_active=True,
+        )
+        db.add(user)
+        db.commit()
+        db.refresh(user)
+        return user.id, create_access_token(user.username)
+    finally:
+        db.close()
+
+
+def _program_auth(token: str) -> dict[str, str]:
+    return {"Authorization": f"Bearer {token}"}
+
+
+def _seed_program(
+    *,
+    owner_id: int | None,
+    parent_id: int | None = None,
+    status: str = "planning",
+) -> Program:
+    db = SessionLocal()
+    try:
+        program = Program(
+            name=f"Program Permission API {uuid4().hex[:8]}",
+            owner_id=owner_id,
+            parent_id=parent_id,
+            status=status,
+        )
+        db.add(program)
+        db.commit()
+        db.refresh(program)
+        return program
+    finally:
+        db.close()
+
+
+def _seed_program_project(*, program_id: int, state_category: str) -> Project:
+    db = SessionLocal()
+    try:
+        state = db.query(WorkflowState).filter(WorkflowState.category == state_category).first()
+        assert state is not None
+        project = Project(
+            name=f"Program Permission Project {uuid4().hex[:8]}",
+            program_id=program_id,
+            workflow_definition_id=state.definition_id,
+            current_state_id=state.id,
+        )
+        db.add(project)
+        db.commit()
+        db.refresh(project)
+        return project
+    finally:
+        db.close()
+
+
+def _seed_business_component(project_id: int) -> BusinessComponent:
+    db = SessionLocal()
+    try:
+        component = BusinessComponent(
+            project_id=project_id,
+            name=f"Program Permission Component {uuid4().hex[:8]}",
+        )
+        db.add(component)
+        db.commit()
+        db.refresh(component)
+        return component
+    finally:
+        db.close()
+
+
+def _first_current_transition_id(object_type: str, object_id: int) -> int:
+    model_by_type = {
+        "requirement": Requirement,
+        "task": Task,
+        "bug": Bug,
+    }
+    db = SessionLocal()
+    try:
+        item = db.query(model_by_type[object_type]).filter(model_by_type[object_type].id == object_id).one()
+        transitions = (
+            db.query(WorkflowTransition)
+            .filter(
+                WorkflowTransition.definition_id == item.workflow_definition_id,
+                WorkflowTransition.from_state_id == item.current_state_id,
+                WorkflowTransition.enabled.is_(True),
+            )
+            .order_by(WorkflowTransition.sort_order.asc(), WorkflowTransition.id.asc())
+            .all()
+        )
+        transition = next(
+            (
+                candidate
+                for candidate in transitions
+                if not (candidate.ui_config or {}).get("hidden")
+                and not (candidate.ui_config or {}).get("system_action")
+                and not (candidate.ui_config or {}).get("command_type")
+                and (candidate.ui_config or {}).get("action_category", "process") == "process"
+            ),
+            None,
+        )
+        assert transition is not None
+        return transition.id
+    finally:
+        db.close()
+
+
+def test_ancestor_program_owner_governs_descendant_project_but_not_its_work_items(client: TestClient):
+    governor_id, governor_token = _create_program_permission_user("Project Governance Program Owner")
+    handler_id, _handler_token = _create_program_permission_user("Project Work Item Handler")
+    root = _seed_program(owner_id=governor_id)
+    descendant = _seed_program(owner_id=None, parent_id=root.id)
+
+    created = client.post(
+        "/api/v1/projects",
+        json={"name": f"Descendant Governed Project {uuid4().hex[:8]}", "program_id": descendant.id},
+        headers=_program_auth(governor_token),
+    )
+
+    assert created.status_code == 200, created.text
+    project = created.json()
+    assert project["owner_id"] is None
+
+    updated = client.patch(
+        f"/api/v1/projects/{project['id']}",
+        json={"description": "ancestor program governor can update metadata"},
+        headers=_program_auth(governor_token),
+    )
+    members = client.put(
+        f"/api/v1/projects/{project['id']}/members",
+        json=[{"user_id": handler_id, "project_role": "developer", "sort_order": 0}],
+        headers=_program_auth(governor_token),
+    )
+    started = client.post(
+        f"/api/v1/projects/{project['id']}/start",
+        json={"effective_time": "2026-07-30T09:00:00"},
+        headers=_program_auth(governor_token),
+    )
+    status_history = client.get(
+        f"/api/v1/projects/{project['id']}/status-operations",
+        headers=_program_auth(governor_token),
+    )
+    audit_history = client.get(
+        f"/api/v1/projects/{project['id']}/audit-logs",
+        headers=_program_auth(governor_token),
+    )
+
+    assert updated.status_code == 200
+    assert members.status_code == 200
+    assert started.status_code == 200
+    assert status_history.status_code == 200
+    assert audit_history.status_code == 200
+
+    requirement = client.post(
+        "/api/v1/requirements",
+        json={"project_id": project["id"], "title": "Protected requirement", "owner_id": handler_id},
+    ).json()
+    task = client.post(
+        "/api/v1/tasks",
+        json={
+            "project_id": project["id"],
+            "title": "Protected task",
+            "task_type": "standalone_operation",
+            "owner_id": handler_id,
+        },
+    ).json()
+    bug = client.post(
+        "/api/v1/bugs",
+        json={"project_id": project["id"], "title": "Protected bug", "owner_id": handler_id},
+    ).json()
+
+    assert {requirement["owner_id"], task["owner_id"], bug["owner_id"]} == {handler_id}
+    for endpoint, work_item in (("requirements", requirement), ("tasks", task), ("bugs", bug)):
+        rejected_create = client.post(
+            f"/api/v1/{endpoint}",
+            json={
+                "project_id": project["id"],
+                "title": f"Program governor cannot create {endpoint}",
+                "owner_id": governor_id,
+                **({"task_type": "standalone_operation"} if endpoint == "tasks" else {}),
+            },
+            headers=_program_auth(governor_token),
+        )
+        rejected_update = client.patch(
+            f"/api/v1/{endpoint}/{work_item['id']}",
+            json=(
+                {"severity": "1"}
+                if endpoint == "bugs"
+                else {"description": "program governance is not work-item ownership"}
+            ),
+            headers=_program_auth(governor_token),
+        )
+        rejected_transition = client.post(
+            f"/api/v1/workflow-runtime/{endpoint[:-1]}/{work_item['id']}/transition",
+            json={"transition_id": _first_current_transition_id(endpoint[:-1], work_item["id"])},
+            headers={**_program_auth(governor_token), "X-Test-Raw-Transition-Request": "1"},
+        )
+        rejected_delete = client.delete(
+            f"/api/v1/{endpoint}/{work_item['id']}",
+            headers=_program_auth(governor_token),
+        )
+
+        assert rejected_create.status_code == 403
+        assert rejected_update.status_code == 403
+        assert rejected_transition.status_code == 403
+        assert rejected_delete.status_code == 403
+
+
+def test_program_governor_cannot_change_business_workflows_or_iteration_work_item_associations(client: TestClient):
+    governor_id, governor_token = _create_program_permission_user("Governance Boundary Program Owner")
+    root = _seed_program(owner_id=governor_id)
+    descendant = _seed_program(owner_id=None, parent_id=root.id)
+    project = client.post(
+        "/api/v1/projects",
+        json={"name": f"Governance Boundary Project {uuid4().hex[:8]}", "program_id": descendant.id},
+    ).json()
+    component = _seed_business_component(project["id"])
+    requirement = client.post(
+        "/api/v1/requirements",
+        json={"project_id": project["id"], "title": "Governance boundary requirement"},
+    ).json()
+    transition_id = _first_current_transition_id("requirement", requirement["id"])
+    source_iteration = client.post(
+        "/api/v1/iterations",
+        json={"name": f"Governance source iteration {uuid4().hex[:8]}", "project_ids": [project["id"]]},
+    ).json()
+    target_iteration = client.post(
+        "/api/v1/iterations",
+        json={"name": f"Governance target iteration {uuid4().hex[:8]}", "project_ids": [project["id"]]},
+    ).json()
+
+    route_update = client.put(
+        f"/api/v1/projects/{project['id']}/business-components/{component.id}/transition-routes",
+        json=[{"object_type": "requirement", "transition_id": transition_id}],
+        headers=_program_auth(governor_token),
+    )
+    workflow_migration = client.post(
+        f"/api/v1/projects/{project['id']}/business-components/{component.id}/work-items/requirement/{requirement['id']}/workflow-migrations",
+        json={
+            "new_definition_id": requirement["workflow_definition_id"],
+            "new_state_id": requirement["current_state_id"],
+            "reason": "program governance must not migrate workflow",
+        },
+        headers=_program_auth(governor_token),
+    )
+    link_requirement = client.post(
+        f"/api/v1/iterations/{source_iteration['id']}/requirements",
+        json={"requirement_ids": [requirement["id"]]},
+        headers=_program_auth(governor_token),
+    )
+    defer_requirement = client.post(
+        f"/api/v1/iterations/{source_iteration['id']}/defer-work-items",
+        json={"target_iteration_id": target_iteration["id"], "requirement_ids": [requirement["id"]]},
+        headers=_program_auth(governor_token),
+    )
+
+    assert route_update.status_code == 403
+    assert workflow_migration.status_code == 403
+    assert link_requirement.status_code == 403
+    assert defer_requirement.status_code == 403
+
+
+def test_program_governor_can_read_project_audit_but_not_work_item_comments_or_watches(client: TestClient):
+    governor_id, governor_token = _create_program_permission_user("Project Audit Only Governor")
+    root = _seed_program(owner_id=governor_id)
+    descendant = _seed_program(owner_id=None, parent_id=root.id)
+    project = client.post(
+        "/api/v1/projects",
+        json={"name": f"Project Audit Boundary {uuid4().hex[:8]}", "program_id": descendant.id},
+        headers=_program_auth(governor_token),
+    ).json()
+    work_items = {
+        "requirement": client.post(
+            "/api/v1/requirements",
+            json={"project_id": project["id"], "title": "Audit boundary requirement"},
+        ).json(),
+        "task": client.post(
+            "/api/v1/tasks",
+            json={
+                "project_id": project["id"],
+                "title": "Audit boundary task",
+                "task_type": "standalone_operation",
+            },
+        ).json(),
+        "bug": client.post(
+            "/api/v1/bugs",
+            json={"project_id": project["id"], "title": "Audit boundary bug"},
+        ).json(),
+    }
+
+    assert client.get(
+        f"/api/v1/projects/{project['id']}/status-operations",
+        headers=_program_auth(governor_token),
+    ).status_code == 200
+    assert client.get(
+        f"/api/v1/projects/{project['id']}/audit-logs",
+        headers=_program_auth(governor_token),
+    ).status_code == 200
+
+    for object_type, work_item in work_items.items():
+        comment_list = client.get(
+            f"/api/v1/work-item-comments?object_type={object_type}&object_id={work_item['id']}",
+            headers=_program_auth(governor_token),
+        )
+        comment_create = client.post(
+            "/api/v1/work-item-comments",
+            json={"object_type": object_type, "object_id": work_item["id"], "body": "unauthorized comment"},
+            headers=_program_auth(governor_token),
+        )
+        watch_get = client.get(
+            f"/api/v1/object-watches?object_type={object_type}&object_id={work_item['id']}",
+            headers=_program_auth(governor_token),
+        )
+        watch_create = client.post(
+            "/api/v1/object-watches",
+            json={"object_type": object_type, "object_id": work_item["id"]},
+            headers=_program_auth(governor_token),
+        )
+        watch_delete = client.delete(
+            f"/api/v1/object-watches?object_type={object_type}&object_id={work_item['id']}",
+            headers=_program_auth(governor_token),
+        )
+
+        assert comment_list.status_code == 403
+        assert comment_create.status_code == 403
+        assert watch_get.status_code == 403
+        assert watch_create.status_code == 403
+        assert watch_delete.status_code == 403
+
+    added_membership = client.put(
+        f"/api/v1/projects/{project['id']}/members",
+        json=[{"user_id": governor_id, "project_role": "developer", "sort_order": 0}],
+        headers=_program_auth(governor_token),
+    )
+    member_comment = client.post(
+        "/api/v1/work-item-comments",
+        json={
+            "object_type": "requirement",
+            "object_id": work_items["requirement"]["id"],
+            "body": "project member comment",
+        },
+        headers=_program_auth(governor_token),
+    )
+    member_watch = client.post(
+        "/api/v1/object-watches",
+        json={"object_type": "requirement", "object_id": work_items["requirement"]["id"]},
+        headers=_program_auth(governor_token),
+    )
+
+    assert added_membership.status_code == 200
+    assert member_comment.status_code == 201
+    assert member_watch.status_code == 200
+
+
+def test_program_governor_creates_child_project_with_parent_program_inheritance(client: TestClient):
+    governor_id, governor_token = _create_program_permission_user("Child Project Program Governor")
+    program = _seed_program(owner_id=governor_id)
+    parent = client.post(
+        "/api/v1/projects",
+        json={"name": f"Governed Parent Project {uuid4().hex[:8]}", "program_id": program.id},
+    ).json()
+
+    created = client.post(
+        "/api/v1/projects",
+        json={"name": f"Inherited Program Child Project {uuid4().hex[:8]}", "parent_id": parent["id"]},
+        headers=_program_auth(governor_token),
+    )
+
+    assert created.status_code == 200, created.text
+    assert created.json()["parent_id"] == parent["id"]
+    assert created.json()["program_id"] == program.id
+
+
+def test_program_governor_cannot_attach_project_to_parent_in_another_program(client: TestClient):
+    governor_id, governor_token = _create_program_permission_user("Cross Program Parent Governor")
+    governed_program = _seed_program(owner_id=governor_id)
+    unrelated_program = _seed_program(owner_id=None)
+    foreign_parent = client.post(
+        "/api/v1/projects",
+        json={"name": f"Foreign Parent Project {uuid4().hex[:8]}", "program_id": unrelated_program.id},
+    ).json()
+    project_name = f"Cross Program Project {uuid4().hex[:8]}"
+
+    rejected = client.post(
+        "/api/v1/projects",
+        json={"name": project_name, "program_id": governed_program.id, "parent_id": foreign_parent["id"]},
+        headers=_program_auth(governor_token),
+    )
+
+    assert rejected.status_code in {403, 422}
+    assert not any(project["name"] == project_name for project in client.get("/api/v1/projects").json())
+
+
+def test_parent_project_rejects_explicit_mismatched_program_id_even_for_governor_of_both(client: TestClient):
+    governor_id, governor_token = _create_program_permission_user("Mismatched Program Governor")
+    parent_program = _seed_program(owner_id=governor_id)
+    mismatched_program = _seed_program(owner_id=governor_id)
+    parent = client.post(
+        "/api/v1/projects",
+        json={"name": f"Mismatched Program Parent {uuid4().hex[:8]}", "program_id": parent_program.id},
+    ).json()
+    project_name = f"Mismatched Program Child {uuid4().hex[:8]}"
+
+    rejected = client.post(
+        "/api/v1/projects",
+        json={"name": project_name, "parent_id": parent["id"], "program_id": mismatched_program.id},
+        headers=_program_auth(governor_token),
+    )
+
+    assert rejected.status_code == 422
+    assert not any(project["name"] == project_name for project in client.get("/api/v1/projects").json())
+
+
+def test_program_governor_cannot_move_project_to_ungoverned_program_or_parent(client: TestClient):
+    governor_id, governor_token = _create_program_permission_user("Source Only Program Governor")
+    source_program = _seed_program(owner_id=governor_id)
+    target_program = _seed_program(owner_id=None)
+    program_move_project = client.post(
+        "/api/v1/projects",
+        json={"name": f"Program Move Source Project {uuid4().hex[:8]}", "program_id": source_program.id},
+    ).json()
+    parent_move_project = client.post(
+        "/api/v1/projects",
+        json={"name": f"Parent Move Source Project {uuid4().hex[:8]}", "program_id": source_program.id},
+    ).json()
+    target_parent = client.post(
+        "/api/v1/projects",
+        json={"name": f"Target Program Parent {uuid4().hex[:8]}", "program_id": target_program.id},
+    ).json()
+
+    program_move = client.patch(
+        f"/api/v1/projects/{program_move_project['id']}",
+        json={"program_id": target_program.id},
+        headers=_program_auth(governor_token),
+    )
+    parent_move = client.patch(
+        f"/api/v1/projects/{parent_move_project['id']}",
+        json={"parent_id": target_parent["id"]},
+        headers=_program_auth(governor_token),
+    )
+
+    assert program_move.status_code == 403
+    assert parent_move.status_code == 403
+    unchanged_program_move = client.get(f"/api/v1/projects/{program_move_project['id']}").json()
+    unchanged_parent_move = client.get(f"/api/v1/projects/{parent_move_project['id']}").json()
+    assert unchanged_program_move["program_id"] == source_program.id
+    assert unchanged_parent_move["parent_id"] is None
+
+
+def test_project_move_rejects_parent_program_mismatch_even_when_governing_all_targets(client: TestClient):
+    governor_id, governor_token = _create_program_permission_user("All Targets Program Governor")
+    source_program = _seed_program(owner_id=governor_id)
+    parent_program = _seed_program(owner_id=governor_id)
+    mismatched_program = _seed_program(owner_id=governor_id)
+    source_project = client.post(
+        "/api/v1/projects",
+        json={"name": f"Mismatch Source Project {uuid4().hex[:8]}", "program_id": source_program.id},
+    ).json()
+    parent = client.post(
+        "/api/v1/projects",
+        json={"name": f"Mismatch Parent Project {uuid4().hex[:8]}", "program_id": parent_program.id},
+    ).json()
+
+    rejected = client.patch(
+        f"/api/v1/projects/{source_project['id']}",
+        json={"parent_id": parent["id"], "program_id": mismatched_program.id},
+        headers=_program_auth(governor_token),
+    )
+
+    assert rejected.status_code == 422
+    unchanged = client.get(f"/api/v1/projects/{source_project['id']}").json()
+    assert unchanged["program_id"] == source_program.id
+    assert unchanged["parent_id"] is None
+
+
+def test_program_governor_can_move_project_when_governing_source_target_and_parent(client: TestClient):
+    governor_id, governor_token = _create_program_permission_user("Cross Program Governor")
+    source_program = _seed_program(owner_id=governor_id)
+    target_program = _seed_program(owner_id=governor_id)
+    source_project = client.post(
+        "/api/v1/projects",
+        json={"name": f"Movable Source Project {uuid4().hex[:8]}", "program_id": source_program.id},
+    ).json()
+    target_parent = client.post(
+        "/api/v1/projects",
+        json={"name": f"Movable Target Parent {uuid4().hex[:8]}", "program_id": target_program.id},
+    ).json()
+
+    moved = client.patch(
+        f"/api/v1/projects/{source_project['id']}",
+        json={"parent_id": target_parent["id"], "program_id": target_program.id},
+        headers=_program_auth(governor_token),
+    )
+
+    assert moved.status_code == 200, moved.text
+    assert moved.json()["program_id"] == target_program.id
+    assert moved.json()["parent_id"] == target_parent["id"]
+
+
+def test_project_creation_authenticates_before_validating_parent_project(client: TestClient):
+    response = client.post(
+        "/api/v1/projects",
+        json={"name": f"Unauthenticated Parent Project {uuid4().hex[:8]}", "parent_id": 999999999},
+        headers={"X-Test-No-Auth": "1"},
+    )
+
+    assert response.status_code == 401
+
+
+def test_unrelated_user_cannot_create_or_govern_descendant_program_project(client: TestClient):
+    governor_id, _governor_token = _create_program_permission_user("Related Program Governor")
+    unrelated_id, unrelated_token = _create_program_permission_user("Unrelated Project User")
+    root = _seed_program(owner_id=governor_id)
+    descendant = _seed_program(owner_id=None, parent_id=root.id)
+    project = client.post(
+        "/api/v1/projects",
+        json={"name": f"Unrelated Governance Project {uuid4().hex[:8]}", "program_id": descendant.id},
+    ).json()
+
+    rejected_creation = client.post(
+        "/api/v1/projects",
+        json={"name": f"Unauthorized Descendant Project {uuid4().hex[:8]}", "program_id": descendant.id},
+        headers=_program_auth(unrelated_token),
+    )
+    rejected_update = client.patch(
+        f"/api/v1/projects/{project['id']}",
+        json={"description": "unrelated user cannot update"},
+        headers=_program_auth(unrelated_token),
+    )
+    rejected_members = client.put(
+        f"/api/v1/projects/{project['id']}/members",
+        json=[{"user_id": unrelated_id, "project_role": "developer", "sort_order": 0}],
+        headers=_program_auth(unrelated_token),
+    )
+    rejected_lifecycle = client.post(
+        f"/api/v1/projects/{project['id']}/start",
+        json={"effective_time": "2026-07-30T09:00:00"},
+        headers=_program_auth(unrelated_token),
+    )
+    rejected_status_history = client.get(
+        f"/api/v1/projects/{project['id']}/status-operations",
+        headers=_program_auth(unrelated_token),
+    )
+    rejected_audit_history = client.get(
+        f"/api/v1/projects/{project['id']}/audit-logs",
+        headers=_program_auth(unrelated_token),
+    )
+
+    assert rejected_creation.status_code == 403
+    assert rejected_update.status_code == 403
+    assert rejected_members.status_code == 403
+    assert rejected_lifecycle.status_code == 403
+    assert rejected_status_history.status_code == 403
+    assert rejected_audit_history.status_code == 403
+
+
+def test_only_system_admin_creates_unbound_project(client: TestClient):
+    user_id, user_token = _create_program_permission_user("Unbound Project User")
+
+    rejected = client.post(
+        "/api/v1/projects",
+        json={"name": f"Rejected Unbound Project {uuid4().hex[:8]}"},
+        headers=_program_auth(user_token),
+    )
+    created = client.post("/api/v1/projects", json={"name": f"Admin Unbound Project {uuid4().hex[:8]}"})
+
+    assert user_id
+    assert rejected.status_code == 403
+    assert created.status_code == 200
+
+
+def test_any_authenticated_active_user_creates_root_program_and_becomes_default_owner(client: TestClient):
+    actor_id, actor_token = _create_program_permission_user("Program Root Creator")
+
+    created = client.post(
+        "/api/v1/programs",
+        json={"name": f"User Root Program {uuid4().hex[:8]}"},
+        headers=_program_auth(actor_token),
+    )
+
+    assert created.status_code == 200, created.text
+    assert created.json()["parent_id"] is None
+    assert created.json()["owner_id"] == actor_id
+
+
+def test_program_creation_requires_authentication(client: TestClient):
+    response = client.post(
+        "/api/v1/programs",
+        json={"name": f"Unauthenticated Program {uuid4().hex[:8]}"},
+        headers={"X-Test-No-Auth": "1"},
+    )
+
+    assert response.status_code == 401
+
+
+def test_ancestor_program_owner_can_create_child_program(client: TestClient):
+    owner_id, owner_token = _create_program_permission_user("Program Ancestor Owner")
+    child_owner_id, _child_owner_token = _create_program_permission_user("Program Child Owner")
+    root = _seed_program(owner_id=owner_id)
+
+    created = client.post(
+        "/api/v1/programs",
+        json={
+            "name": f"Owned Child Program {uuid4().hex[:8]}",
+            "parent_id": root.id,
+            "owner_id": child_owner_id,
+        },
+        headers=_program_auth(owner_token),
+    )
+
+    assert created.status_code == 200, created.text
+    child = created.json()
+    assert child["parent_id"] == root.id
+    assert child["owner_id"] == child_owner_id
+
+    grandchild = client.post(
+        "/api/v1/programs",
+        json={"name": f"Owned Grandchild Program {uuid4().hex[:8]}", "parent_id": child["id"]},
+        headers=_program_auth(owner_token),
+    )
+
+    assert grandchild.status_code == 200, grandchild.text
+    assert grandchild.json()["parent_id"] == child["id"]
+    assert grandchild.json()["owner_id"] == owner_id
+
+
+def test_unrelated_user_cannot_create_or_govern_child_program(client: TestClient):
+    owner_id, _owner_token = _create_program_permission_user("Program Tree Owner")
+    unrelated_id, unrelated_token = _create_program_permission_user("Unrelated Program User")
+    replacement_owner_id, _replacement_owner_token = _create_program_permission_user("Replacement Program Owner")
+    root = _seed_program(owner_id=owner_id)
+    child = _seed_program(owner_id=None, parent_id=root.id)
+
+    child_creation = client.post(
+        "/api/v1/programs",
+        json={"name": f"Unauthorized Child {uuid4().hex[:8]}", "parent_id": root.id},
+        headers=_program_auth(unrelated_token),
+    )
+    update = client.patch(
+        f"/api/v1/programs/{child.id}",
+        json={"description": "unrelated user cannot update"},
+        headers=_program_auth(unrelated_token),
+    )
+    lifecycle = client.post(
+        f"/api/v1/programs/{child.id}/start",
+        json={"effective_time": "2026-06-01T09:00:00"},
+        headers=_program_auth(unrelated_token),
+    )
+    owner_transfer = client.patch(
+        f"/api/v1/programs/{child.id}",
+        json={"owner_id": replacement_owner_id},
+        headers=_program_auth(unrelated_token),
+    )
+
+    assert unrelated_id != owner_id
+    assert child_creation.status_code == 403
+    assert update.status_code == 403
+    assert lifecycle.status_code == 403
+    assert owner_transfer.status_code == 403
+
+
+def test_program_parent_change_requires_new_parent_governance_and_rejects_descendant_cycle(client: TestClient):
+    owner_id, owner_token = _create_program_permission_user("Program Parent Owner")
+    other_owner_id, _other_owner_token = _create_program_permission_user("Other Program Parent Owner")
+    root = _seed_program(owner_id=owner_id)
+    child = _seed_program(owner_id=None, parent_id=root.id)
+    other_root = _seed_program(owner_id=other_owner_id)
+
+    unauthorized_move = client.patch(
+        f"/api/v1/programs/{child.id}",
+        json={"parent_id": other_root.id},
+        headers=_program_auth(owner_token),
+    )
+    cycle = client.patch(
+        f"/api/v1/programs/{root.id}",
+        json={"parent_id": child.id},
+        headers=_program_auth(owner_token),
+    )
+
+    assert unauthorized_move.status_code == 403
+    assert cycle.status_code == 422
+
+
+def test_program_creation_rejects_inactive_or_deleted_explicit_owner(client: TestClient):
+    creator_id, creator_token = _create_program_permission_user("Program Owner Validator")
+    inactive_owner_id, _inactive_token = _create_program_permission_user("Inactive Program Owner")
+    deleted_owner_id, _deleted_token = _create_program_permission_user("Deleted Program Owner")
+
+    db = SessionLocal()
+    try:
+        db.query(User).filter(User.id == inactive_owner_id).update({"is_active": False})
+        db.query(User).filter(User.id == deleted_owner_id).update({"deleted": 1})
+        db.commit()
+    finally:
+        db.close()
+
+    inactive = client.post(
+        "/api/v1/programs",
+        json={"name": f"Inactive Owner Program {uuid4().hex[:8]}", "owner_id": inactive_owner_id},
+        headers=_program_auth(creator_token),
+    )
+    deleted = client.post(
+        "/api/v1/programs",
+        json={"name": f"Deleted Owner Program {uuid4().hex[:8]}", "owner_id": deleted_owner_id},
+        headers=_program_auth(creator_token),
+    )
+
+    assert creator_id not in {inactive_owner_id, deleted_owner_id}
+    assert inactive.status_code == 422
+    assert deleted.status_code == 422
+
+
+def test_program_owner_transfer_immediately_revokes_former_owner_governance(client: TestClient):
+    former_owner_id, former_owner_token = _create_program_permission_user("Former Program Owner")
+    replacement_owner_id, replacement_owner_token = _create_program_permission_user("Replacement Program Owner")
+    program = _seed_program(owner_id=former_owner_id)
+
+    transferred = client.patch(
+        f"/api/v1/programs/{program.id}",
+        json={"owner_id": replacement_owner_id},
+        headers=_program_auth(former_owner_token),
+    )
+    former_owner_update = client.patch(
+        f"/api/v1/programs/{program.id}",
+        json={"description": "former owner cannot govern"},
+        headers=_program_auth(former_owner_token),
+    )
+    former_owner_start = client.post(
+        f"/api/v1/programs/{program.id}/start",
+        json={"effective_time": "2026-06-01T09:00:00"},
+        headers=_program_auth(former_owner_token),
+    )
+    replacement_update = client.patch(
+        f"/api/v1/programs/{program.id}",
+        json={"description": "replacement owner can govern"},
+        headers=_program_auth(replacement_owner_token),
+    )
+
+    assert transferred.status_code == 200
+    assert transferred.json()["owner_id"] == replacement_owner_id
+    assert former_owner_update.status_code == 403
+    assert former_owner_start.status_code == 403
+    assert replacement_update.status_code == 200
+
+
+def test_program_owner_transfer_rejects_inactive_or_deleted_replacement(client: TestClient):
+    owner_id, owner_token = _create_program_permission_user("Program Owner Transfer Validator")
+    inactive_owner_id, _inactive_token = _create_program_permission_user("Inactive Transfer Owner")
+    deleted_owner_id, _deleted_token = _create_program_permission_user("Deleted Transfer Owner")
+    program = _seed_program(owner_id=owner_id)
+
+    db = SessionLocal()
+    try:
+        db.query(User).filter(User.id == inactive_owner_id).update({"is_active": False})
+        db.query(User).filter(User.id == deleted_owner_id).update({"deleted": 1})
+        db.commit()
+    finally:
+        db.close()
+
+    inactive = client.patch(
+        f"/api/v1/programs/{program.id}",
+        json={"owner_id": inactive_owner_id},
+        headers=_program_auth(owner_token),
+    )
+    deleted = client.patch(
+        f"/api/v1/programs/{program.id}",
+        json={"owner_id": deleted_owner_id},
+        headers=_program_auth(owner_token),
+    )
+
+    assert inactive.status_code == 422
+    assert deleted.status_code == 422
+
+
+def test_program_audit_actors_are_authenticated_user_not_client_payload(client: TestClient):
+    actor_id, actor_token = _create_program_permission_user("Program Audit Actor")
+    forged_actor_id, _forged_actor_token = _create_program_permission_user("Forged Program Audit Actor")
+
+    created = client.post(
+        "/api/v1/programs",
+        json={
+            "name": f"Program Audit Actor {uuid4().hex[:8]}",
+            "creator_id": forged_actor_id,
+            "updater_id": forged_actor_id,
+        },
+        headers=_program_auth(actor_token),
+    )
+    assert created.status_code == 200
+    assert created.json()["creator_id"] == actor_id
+    assert created.json()["updater_id"] == actor_id
+
+    updated = client.patch(
+        f"/api/v1/programs/{created.json()['id']}",
+        json={
+            "description": "audit actor must be server controlled",
+            "creator_id": forged_actor_id,
+            "updater_id": forged_actor_id,
+        },
+        headers=_program_auth(actor_token),
+    )
+
+    assert updated.status_code == 200
+    assert updated.json()["creator_id"] == actor_id
+    assert updated.json()["updater_id"] == actor_id
+
+
+def test_program_parent_change_requires_governance_on_old_and_new_parent(client: TestClient):
+    old_parent_owner_id, old_parent_owner_token = _create_program_permission_user("Old Parent Program Owner")
+    child_owner_id, child_owner_token = _create_program_permission_user("Child Only Program Owner")
+    old_parent = _seed_program(owner_id=old_parent_owner_id)
+    child_for_detach = _seed_program(owner_id=child_owner_id, parent_id=old_parent.id)
+    child_for_move = _seed_program(owner_id=child_owner_id, parent_id=old_parent.id)
+    child_for_approved_move = _seed_program(owner_id=child_owner_id, parent_id=old_parent.id)
+    child_owner_root = _seed_program(owner_id=child_owner_id)
+    old_parent_owner_root = _seed_program(owner_id=old_parent_owner_id)
+
+    detached = client.patch(
+        f"/api/v1/programs/{child_for_detach.id}",
+        json={"parent_id": None},
+        headers=_program_auth(child_owner_token),
+    )
+    moved_without_old_parent = client.patch(
+        f"/api/v1/programs/{child_for_move.id}",
+        json={"parent_id": child_owner_root.id},
+        headers=_program_auth(child_owner_token),
+    )
+    approved_move = client.patch(
+        f"/api/v1/programs/{child_for_approved_move.id}",
+        json={"parent_id": old_parent_owner_root.id},
+        headers=_program_auth(old_parent_owner_token),
+    )
+
+    assert detached.status_code == 403
+    assert moved_without_old_parent.status_code == 403
+    assert approved_move.status_code == 200
+    assert approved_move.json()["parent_id"] == old_parent_owner_root.id
+
+
+def test_program_owner_can_delete_empty_program_but_not_nonempty_program(client: TestClient):
+    owner_id, owner_token = _create_program_permission_user("Program Delete Owner")
+    empty_program = _seed_program(owner_id=owner_id)
+    nonempty_program = _seed_program(owner_id=owner_id)
+    _seed_program(owner_id=None, parent_id=nonempty_program.id)
+
+    empty_deleted = client.delete(
+        f"/api/v1/programs/{empty_program.id}",
+        headers=_program_auth(owner_token),
+    )
+    nonempty_deleted = client.delete(
+        f"/api/v1/programs/{nonempty_program.id}",
+        headers=_program_auth(owner_token),
+    )
+
+    assert empty_deleted.status_code == 204
+    assert nonempty_deleted.status_code == 403
+
+
+def test_system_admin_deletes_nonempty_program_tree_only_when_closed_and_terminal(client: TestClient):
+    root = _seed_program(owner_id=None, status="closed")
+    child = _seed_program(owner_id=None, parent_id=root.id, status="planning")
+    project = _seed_program_project(program_id=child.id, state_category="start")
+
+    open_child = client.delete(f"/api/v1/programs/{root.id}")
+    assert open_child.status_code == 403
+
+    db = SessionLocal()
+    try:
+        terminal_state = db.query(WorkflowState).filter(WorkflowState.category == "terminal").first()
+        assert terminal_state is not None
+        terminal_state_id = terminal_state.id
+        db.query(Program).filter(Program.id == child.id).update({"status": "closed"})
+        db.commit()
+    finally:
+        db.close()
+
+    open_project = client.delete(f"/api/v1/programs/{root.id}")
+    assert open_project.status_code == 403
+
+    db = SessionLocal()
+    try:
+        db.query(Project).filter(Project.id == project.id).update({"current_state_id": terminal_state_id})
+        db.commit()
+    finally:
+        db.close()
+
+    deleted = client.delete(f"/api/v1/programs/{root.id}")
+    assert deleted.status_code == 204
 
 
 def test_project_creation_uses_system_workflow_initial_state(client: TestClient):

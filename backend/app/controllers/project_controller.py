@@ -1,13 +1,15 @@
 from fastapi import APIRouter, Depends, Response, status
 from sqlalchemy.orm import Session
 
-from app.core.auth_dependencies import get_optional_current_user, require_system_admin
+from app.core.auth_dependencies import get_optional_current_user
 from app.db.session import get_db
 from app.models.user import User
 from app.services.project_permission_service import (
-    ensure_audit_view_permission,
+    ensure_authenticated,
+    ensure_project_create_permission,
     ensure_project_delete_permission,
-    ensure_project_manage_permission,
+    ensure_project_governance_audit_view_permission,
+    ensure_project_governance_permission,
 )
 from app.services.project_service import (
     activate_project,
@@ -26,6 +28,8 @@ from app.services.project_service import (
     list_project_test_runs_page,
     list_projects,
     replace_project_members,
+    resolve_project_create_payload,
+    resolve_project_update_payload,
     start_project,
     suspend_project,
     update_project,
@@ -75,7 +79,7 @@ def put_project_members(
     db: Session = Depends(get_db),
     current_user: User | None = Depends(get_optional_current_user),
 ):
-    ensure_project_manage_permission(db, project_id, current_user)
+    ensure_project_governance_permission(db, project_id, current_user)
     return replace_project_members(db, project_id, payload)
 
 
@@ -171,8 +175,13 @@ def get_project_bugs(
 def post_project(
     payload: ProjectCreate,
     db: Session = Depends(get_db),
-    _admin=Depends(require_system_admin),
+    current_user: User | None = Depends(get_optional_current_user),
 ):
+    ensure_authenticated(current_user)
+    payload = resolve_project_create_payload(db, payload)
+    if payload.parent_id:
+        ensure_project_governance_permission(db, payload.parent_id, current_user)
+    ensure_project_create_permission(db, payload.program_id, current_user)
     return create_project(db, payload)
 
 
@@ -183,7 +192,14 @@ def patch_project(
     db: Session = Depends(get_db),
     current_user: User | None = Depends(get_optional_current_user),
 ):
-    ensure_project_manage_permission(db, project_id, current_user)
+    project = get_project(db, project_id)
+    ensure_project_governance_permission(db, project_id, current_user)
+    project, payload, target_parent = resolve_project_update_payload(db, project_id, payload)
+    update_fields = payload.model_fields_set
+    if "program_id" in update_fields and payload.program_id != project.program_id:
+        ensure_project_create_permission(db, payload.program_id, current_user)
+    if target_parent and target_parent.id != project.parent_id:
+        ensure_project_governance_permission(db, target_parent.id, current_user)
     return update_project(db, project_id, payload, actor_id=current_user.id if current_user else None)
 
 
@@ -193,7 +209,7 @@ def get_project_status_operations(
     db: Session = Depends(get_db),
     current_user: User | None = Depends(get_optional_current_user),
 ):
-    ensure_audit_view_permission(db, project_id, current_user)
+    ensure_project_governance_audit_view_permission(db, project_id, current_user)
     return list_project_status_operations(db, project_id)
 
 
@@ -203,7 +219,7 @@ def get_project_audit_logs(
     db: Session = Depends(get_db),
     current_user: User | None = Depends(get_optional_current_user),
 ):
-    ensure_audit_view_permission(db, project_id, current_user)
+    ensure_project_governance_audit_view_permission(db, project_id, current_user)
     return list_project_audit_logs(db, project_id)
 
 
@@ -214,7 +230,7 @@ def start_project_status(
     db: Session = Depends(get_db),
     current_user: User | None = Depends(get_optional_current_user),
 ):
-    ensure_project_manage_permission(db, project_id, current_user)
+    ensure_project_governance_permission(db, project_id, current_user)
     return start_project(db, project_id, payload, actor_id=current_user.id if current_user else None)
 
 
@@ -225,7 +241,7 @@ def suspend_project_status(
     db: Session = Depends(get_db),
     current_user: User | None = Depends(get_optional_current_user),
 ):
-    ensure_project_manage_permission(db, project_id, current_user)
+    ensure_project_governance_permission(db, project_id, current_user)
     return suspend_project(db, project_id, payload, actor_id=current_user.id if current_user else None)
 
 
@@ -236,7 +252,7 @@ def close_project_status(
     db: Session = Depends(get_db),
     current_user: User | None = Depends(get_optional_current_user),
 ):
-    ensure_project_manage_permission(db, project_id, current_user)
+    ensure_project_governance_permission(db, project_id, current_user)
     return close_project(db, project_id, payload, actor_id=current_user.id if current_user else None)
 
 
@@ -247,7 +263,7 @@ def activate_project_status(
     db: Session = Depends(get_db),
     current_user: User | None = Depends(get_optional_current_user),
 ):
-    ensure_project_manage_permission(db, project_id, current_user)
+    ensure_project_governance_permission(db, project_id, current_user)
     return activate_project(db, project_id, payload, actor_id=current_user.id if current_user else None)
 
 

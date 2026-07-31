@@ -638,7 +638,7 @@ def _project_graph() -> WorkflowGraphSave:
         transitions=[
             _transition(
                 "start",
-                "开始",
+                "启动",
                 "planning",
                 "active",
                 form_config={"fields": [{"field": "effective_time", "label": "实际开始日期", "type": "date", "required": True}]},

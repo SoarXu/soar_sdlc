@@ -82,6 +82,6 @@ assert.match(
 assert.match(projectsView, /class="table-actions project-list-actions"/)
 assert.match(programsView, /class="table-actions project-list-actions"/)
 assert.match(styles, /\.project-list-actions \.(?:el-button|workflow-action-buttons-list)/)
-assert.match(styles, /\.project-list-actions \.el-button[\s\S]*?min-height: 28px/)
+assert.match(styles, /\.project-list-actions \.el-button[\s\S]*?min-height: 30px/)
 assert.match(projectsView, /label="分派规则方案"/)
 assert.match(projectsView, /if \(!configId\) return '默认系统工作流'/)

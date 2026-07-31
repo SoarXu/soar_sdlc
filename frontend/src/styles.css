@@ -795,7 +795,8 @@ body {
 }
 
 .project-list-actions {
-  gap: 6px;
+  --workflow-action-gap: 6px;
+  gap: var(--workflow-action-gap);
   min-height: 28px;
 }
 

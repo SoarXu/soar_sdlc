@@ -499,11 +499,11 @@ onMounted(loadTransitions)
 }
 
 .workflow-action-buttons {
-  gap: 8px;
+  gap: var(--workflow-action-gap, 8px);
 }
 
 .workflow-primary-actions {
-  gap: 4px;
+  gap: var(--workflow-action-gap, 4px);
 }
 
 .workflow-blocker-filter {

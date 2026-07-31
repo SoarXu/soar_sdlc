@@ -813,6 +813,13 @@ body {
   line-height: 20px;
 }
 
+.project-list-actions .workflow-action-buttons-list .el-button {
+  min-height: 28px;
+  padding: 4px 6px;
+  font-size: 14px;
+  line-height: 20px;
+}
+
 .project-tree-table .el-table__body .el-table__cell:first-child .cell {
   display: flex;
   align-items: center;

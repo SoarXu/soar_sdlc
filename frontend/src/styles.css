@@ -808,16 +808,18 @@ body {
 }
 
 .project-list-actions .el-button {
-  min-height: 28px;
-  padding: 4px 6px;
-  line-height: 20px;
+  height: 30px;
+  min-height: 30px;
+  padding: 0 6px;
+  line-height: 23px;
 }
 
 .project-list-actions .workflow-action-buttons-list .el-button {
-  min-height: 28px;
-  padding: 4px 6px;
+  height: 30px;
+  min-height: 30px;
+  padding: 0 6px;
   font-size: 14px;
-  line-height: 20px;
+  line-height: 23px;
 }
 
 .project-tree-table .el-table__body .el-table__cell:first-child .cell {

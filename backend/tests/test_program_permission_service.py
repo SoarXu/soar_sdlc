@@ -272,18 +272,18 @@ def test_create_child_and_manage_helpers_follow_program_governance():
     assert _program_permission(can_manage_program, child.id, unrelated.id) is False
 
 
-def test_program_owner_can_delete_closed_nonempty_safe_tree():
+def test_program_owner_can_delete_nonempty_tree_regardless_of_lifecycle_state():
     owner = _create_user()
     empty_program = _create_program(owner_id=owner.id)
-    root = _create_program(owner_id=owner.id, status="closed")
-    child = _create_program(owner_id=None, parent_id=root.id, status="closed")
-    _create_project(program_id=child.id, terminal=True)
+    root = _create_program(owner_id=owner.id, status="planning")
+    child = _create_program(owner_id=None, parent_id=root.id, status="active")
+    _create_project(program_id=child.id, terminal=False)
 
     assert _program_permission(can_delete_program, empty_program.id, owner.id) is True
     assert _program_permission(can_delete_program, root.id, owner.id) is True
 
 
-def test_system_admin_can_delete_nonempty_closed_tree_only_after_project_is_terminal():
+def test_system_admin_can_delete_nonempty_tree_regardless_of_lifecycle_state():
     administrator = _create_user(system_admin=True)
     root = _create_program(owner_id=None, status="closed")
     child = _create_program(owner_id=None, parent_id=root.id, status="closed")
@@ -297,7 +297,7 @@ def test_system_admin_can_delete_nonempty_closed_tree_only_after_project_is_term
         db.commit()
     finally:
         db.close()
-    assert _program_permission(can_delete_program, root.id, administrator.id) is False
+    assert _program_permission(can_delete_program, root.id, administrator.id) is True
 
     db = SessionLocal()
     try:
@@ -308,7 +308,7 @@ def test_system_admin_can_delete_nonempty_closed_tree_only_after_project_is_term
         db.commit()
     finally:
         db.close()
-    assert _program_permission(can_delete_program, root.id, administrator.id) is False
+    assert _program_permission(can_delete_program, root.id, administrator.id) is True
 
 
 def test_admin_tree_delete_uses_batched_subtree_queries_for_wide_tree():

@@ -62,9 +62,6 @@ def can_delete_program(db: Session, program_id: int | None, user_id: int | None)
     assert program_id is not None
     assert user_id is not None
 
-    if not _is_system_admin(db, user_id):
-        return not _has_active_direct_children(db, program_id)
-
     subtree_programs = _collect_active_subtree_programs(db, program_id)
     program_ids = {program.id for program in subtree_programs}
     has_active_projects = bool(

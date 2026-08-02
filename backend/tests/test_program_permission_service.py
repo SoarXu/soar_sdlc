@@ -272,17 +272,15 @@ def test_create_child_and_manage_helpers_follow_program_governance():
     assert _program_permission(can_manage_program, child.id, unrelated.id) is False
 
 
-def test_non_admin_owner_can_delete_only_empty_program():
+def test_program_owner_can_delete_closed_nonempty_safe_tree():
     owner = _create_user()
     empty_program = _create_program(owner_id=owner.id)
-    program_with_child = _create_program(owner_id=owner.id)
-    _create_program(owner_id=None, parent_id=program_with_child.id)
-    program_with_project = _create_program(owner_id=owner.id)
-    _create_project(program_id=program_with_project.id, terminal=True)
+    root = _create_program(owner_id=owner.id, status="closed")
+    child = _create_program(owner_id=None, parent_id=root.id, status="closed")
+    _create_project(program_id=child.id, terminal=True)
 
     assert _program_permission(can_delete_program, empty_program.id, owner.id) is True
-    assert _program_permission(can_delete_program, program_with_child.id, owner.id) is False
-    assert _program_permission(can_delete_program, program_with_project.id, owner.id) is False
+    assert _program_permission(can_delete_program, root.id, owner.id) is True
 
 
 def test_system_admin_can_delete_nonempty_closed_tree_only_after_project_is_terminal():

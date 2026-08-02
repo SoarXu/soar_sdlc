@@ -308,9 +308,6 @@ def _require_unique_project_name(
     *,
     excluding_project_id: int | None = None,
 ) -> None:
-    if program_id is None:
-        return
-
     query = db.query(Project).filter(Project.deleted == 0, Project.program_id == program_id)
     if parent_id is None:
         query = query.filter(Project.parent_id.is_(None))

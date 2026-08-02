@@ -60,6 +60,15 @@ def test_rejects_case_and_whitespace_variant_of_sibling_project_name(client: Tes
     _assert_project_name_conflict(duplicate)
 
 
+def test_rejects_duplicate_unbound_root_project_name(client: TestClient):
+    name = _unique_name("unbound-root-project")
+    _create_project(client, name)
+
+    duplicate = client.post("/api/v1/projects", json={"name": name})
+
+    _assert_project_name_conflict(duplicate)
+
+
 def test_rejects_project_rename_that_conflicts_with_sibling(client: TestClient):
     program = _create_program(client)
     existing = _create_project(client, _unique_name("rename-existing"), program_id=program["id"])
@@ -87,7 +96,7 @@ def test_rejects_move_to_parent_or_program_with_same_name_sibling(client: TestCl
     _assert_project_name_conflict(conflict)
 
 
-def test_allows_same_project_name_in_different_parent_program_or_unbound_scope(client: TestClient):
+def test_allows_same_project_name_in_different_parent_or_program_scope(client: TestClient):
     first_program = _create_program(client)
     second_program = _create_program(client)
     first_parent = _create_project(client, _unique_name("first-parent"), program_id=first_program["id"])
@@ -103,8 +112,10 @@ def test_allows_same_project_name_in_different_parent_program_or_unbound_scope(c
         "/api/v1/projects",
         json={"name": name, "program_id": first_program["id"], "parent_id": second_parent["id"]},
     )
-    unbound_first = client.post("/api/v1/projects", json={"name": name})
-    unbound_second = client.post("/api/v1/projects", json={"name": name})
+    first_unbound_parent = _create_project(client, _unique_name("first-unbound-parent"))
+    second_unbound_parent = _create_project(client, _unique_name("second-unbound-parent"))
+    unbound_first = client.post("/api/v1/projects", json={"name": name, "parent_id": first_unbound_parent["id"]})
+    unbound_second = client.post("/api/v1/projects", json={"name": name, "parent_id": second_unbound_parent["id"]})
 
     assert same_parent_name_in_other_program.status_code == 200, same_parent_name_in_other_program.text
     assert different_parent.status_code == 200, different_parent.text

@@ -652,6 +652,7 @@ function buildStatusPayload() {
 async function removeProgram(id) {
   try {
     await deleteProgram(id)
+    ElMessage.success('项目集删除成功')
     await loadData()
   } catch (error) {
     ElMessage.error(actionErrorMessage(error, '项目集删除失败'))

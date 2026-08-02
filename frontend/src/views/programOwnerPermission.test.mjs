@@ -3,7 +3,7 @@ import { readFile } from 'node:fs/promises'
 
 const source = await readFile(new URL('./ProgramsView.vue', import.meta.url), 'utf8')
 
-assert.match(source, /import \{ actionErrorMessage \} from '\.\.\/utils\/permissions'/,
+assert.match(source, /import \{[^}]*\bactionErrorMessage\b[^}]*\} from '\.\.\/utils\/permissions'/,
   'program mutation failures must reuse the shared action error formatter')
 assert.match(source, /import \{ ElMessage, ElMessageBox \} from 'element-plus'/,
   'program deletion must use Element Plus modal confirmation')

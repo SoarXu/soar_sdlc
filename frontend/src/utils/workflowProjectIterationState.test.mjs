@@ -41,7 +41,7 @@ assert.match(programsSource, /fetchWorkflowTransitionsBatch/, 'ProgramsView.vue 
 assert.doesNotMatch(programsSource, /action_key/, 'ProgramsView.vue must not depend on internal transition action keys')
 assert.match(projectActionBranch, /WorkflowActionButtons/, 'ProgramsView.vue project actions must use runtime transition buttons')
 assert.match(programsSource, /row\.status_name/, 'ProgramsView.vue project status display must use status_name')
-assert.match(programsSource, /programOperationWidth[\s\S]*flatProjects\.value/, 'ProgramsView.vue operation width must include nested project rows')
+assert.match(programsSource, /programOperationWidth[\s\S]*allProjects\.value/, 'ProgramsView.vue operation width must include nested project rows')
 assert.match(projectsSource, /projectOperationWidth[\s\S]*projects\.value/, 'ProjectsView.vue operation width must include child project rows')
 const projectsOperationColumn = projectsSource.match(/<el-table-column label="操作"[\s\S]*?<\/el-table-column>/)?.[0] || ''
 assert.match(projectsOperationColumn, /<template #after-primary>/, 'ProjectsView.vue must insert local actions after primary workflow actions')

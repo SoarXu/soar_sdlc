@@ -69,6 +69,7 @@
             <template v-else>
               <div class="table-actions project-list-actions">
                 <WorkflowActionButtons
+                  v-if="canManageProjectRow(row)"
                   object-type="project"
                   :object-id="row.id"
                   mode="list"
@@ -82,6 +83,7 @@
                     <el-button link type="success" @click="openSubProjectCreate(row)">新增项目</el-button>
                   </template>
                 </WorkflowActionButtons>
+                <el-button v-if="canManageProjectRow(row)" link type="danger" @click="confirmRemoveProject(row.id)">删除</el-button>
               </div>
             </template>
           </template>
@@ -228,7 +230,9 @@ import {
   activateProject,
   closeProject,
   createProject,
+  deleteProject,
   fetchProject,
+  fetchProjectMembers,
   fetchProjectStatusOperations,
   startProject,
   suspendProject,
@@ -237,7 +241,8 @@ import {
 import { fetchUsers } from '../api/users'
 import { fetchWorkflowTransitionsBatch } from '../api/workflowRuntime'
 import WorkflowActionButtons from '../components/WorkflowActionButtons.vue'
-import { actionErrorMessage } from '../utils/permissions'
+import { showActionError } from '../utils/actionFeedback'
+import { actionErrorMessage, canManageProject, currentUserFromStorage } from '../utils/permissions'
 import { userLabel } from '../utils/referenceLabels'
 import { usePagination } from '../utils/usePagination'
 import { workflowActionColumnWidth } from '../utils/workflowActionColumn'
@@ -257,6 +262,7 @@ const statusTargetType = ref('')
 const statusAction = ref('')
 const statusHistory = ref([])
 const programTree = ref([])
+const projectMembersById = ref({})
 const projectWorkflowTransitions = ref({})
 const statusOptions = ref([])
 const users = ref([])
@@ -304,9 +310,12 @@ const statusDateRequired = computed(() => statusAction.value === 'close' || (sta
 const statusDateLabel = computed(() => (statusAction.value === 'start' ? '实际开始日期' : '实际完成日期'))
 
 const treeRows = computed(() => programTree.value.map(toTreeRow))
-const flatPrograms = computed(() => flattenPrograms(programTree.value))
+const allPrograms = computed(() => flattenPrograms(programTree.value))
+const allProjects = computed(() => flattenProjects(programTree.value))
+const currentUser = computed(() => currentUserFromStorage(users.value))
+const flatPrograms = computed(() => allPrograms.value)
 const flatProjects = computed(() => {
-  const all = flattenProjects(programTree.value)
+  const all = allProjects.value
   if (!projectEditingId.value) return all
   const excludeIds = new Set([projectEditingId.value])
   // collect descendants from current editing project
@@ -324,10 +333,45 @@ const {
   pagedItems: pagedTreeRows
 } = usePagination(treeRows)
 const programOperationWidth = computed(() => workflowActionColumnWidth(
-  flatProjects.value
-    .map((row) => projectWorkflowTransitions.value[row.id] || []),
-  { minWidth: 600, extraWidth: 150 }
+  allProjects.value
+    .map((row) => (canManageProjectRow(row) ? projectWorkflowTransitions.value[row.id] || [] : [])),
+  { minWidth: 600, extraWidth: 190 }
 ))
+
+function membersForProject(projectId) {
+  return projectMembersById.value[projectId] || []
+}
+
+function canManageProjectRow(row) {
+  return (
+    canManageProject(row, currentUser.value, membersForProject(row.id))
+    || isProjectOwnerAncestor(row)
+    || isProgramOwnerAncestor(row.program_id)
+  )
+}
+
+function isProjectOwnerAncestor(row) {
+  const visitedProjectIds = new Set()
+  let current = row
+  while (current && !visitedProjectIds.has(current.id)) {
+    visitedProjectIds.add(current.id)
+    if (canManageProject(current, currentUser.value, membersForProject(current.id))) return true
+    current = allProjects.value.find((item) => item.id === current.parent_id)
+  }
+  return false
+}
+
+function isProgramOwnerAncestor(programId) {
+  const currentUserId = Number(currentUser.value?.id || 0)
+  const visitedProgramIds = new Set()
+  let current = allPrograms.value.find((item) => item.id === programId)
+  while (current && !visitedProgramIds.has(current.id)) {
+    visitedProgramIds.add(current.id)
+    if (Number(current.owner_id) === currentUserId) return true
+    current = allPrograms.value.find((item) => item.id === current.parent_id)
+  }
+  return false
+}
 
 function statusLabel(row) {
   if ('from_state_name' in row || 'to_state_name' in row) {
@@ -389,15 +433,15 @@ function toTreeRow(node) {
 
 function flattenPrograms(nodes) {
   return nodes.flatMap((node) => [
-    { id: node.id, name: node.name },
+    node,
     ...flattenPrograms(node.children || [])
   ])
 }
 
 function flattenProjects(nodes) {
   return nodes.flatMap((node) => [
-    ...(node.node_type === 'project' ? [{ id: node.id, name: node.name, parent_id: node.parent_id }] : []),
-    ...(node.projects || []).map((project) => ({ id: project.id, name: project.name, parent_id: project.parent_id })),
+    ...(node.node_type === 'project' ? [node] : []),
+    ...(node.projects || []).map((project) => ({ ...project, program_id: node.id })),
     ...flattenProjects(node.children || [])
   ])
 }
@@ -528,7 +572,7 @@ async function loadData() {
       ElMessage.error('项目集树加载失败')
       return
     }
-    await loadProjectWorkflowTransitions()
+    await Promise.all([loadProjectMembers(), loadProjectWorkflowTransitions()])
   } finally {
     loading.value = false
   }
@@ -544,6 +588,18 @@ async function loadProjectWorkflowTransitions() {
   } catch {
     ElMessage.error('项目动作加载失败')
   }
+}
+
+async function loadProjectMembers() {
+  const entries = await Promise.all(allProjects.value.map(async (project) => {
+    try {
+      const { data } = await fetchProjectMembers(project.id)
+      return [project.id, data]
+    } catch {
+      return [project.id, []]
+    }
+  }))
+  projectMembersById.value = Object.fromEntries(entries)
 }
 
 async function submitProgram() {
@@ -657,6 +713,24 @@ async function removeProgram(id) {
   } catch (error) {
     ElMessage.error(actionErrorMessage(error, '项目集删除失败'))
     await loadData()
+  }
+}
+
+async function removeProject(id) {
+  try {
+    await deleteProject(id)
+    await loadData()
+  } catch (error) {
+    showActionError(error, '项目删除失败')
+  }
+}
+
+async function confirmRemoveProject(id) {
+  try {
+    await ElMessageBox.confirm('确认删除该项目？子项目将一并删除。', '提示', { type: 'warning' })
+    await removeProject(id)
+  } catch {
+    // The confirmation dialog rejects when the user cancels.
   }
 }
 

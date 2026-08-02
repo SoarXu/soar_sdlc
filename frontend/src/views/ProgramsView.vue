@@ -604,6 +604,8 @@ async function submitProject() {
     }
     projectDialogVisible.value = false
     await loadData()
+  } catch (error) {
+    ElMessage.error(actionErrorMessage(error, projectEditingId.value ? '项目保存失败' : '项目创建失败'))
   } finally {
     saving.value = false
   }

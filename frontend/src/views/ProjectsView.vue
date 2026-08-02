@@ -180,7 +180,7 @@ import { fetchUsers } from '../api/users'
 import { fetchWorkflowTransitionsBatch } from '../api/workflowRuntime'
 import WorkflowActionButtons from '../components/WorkflowActionButtons.vue'
 import { showActionError } from '../utils/actionFeedback'
-import { canManageProject, currentUserFromStorage } from '../utils/permissions'
+import { actionErrorMessage, canManageProject, currentUserFromStorage } from '../utils/permissions'
 import { labelById, userLabel } from '../utils/referenceLabels'
 import { usePagination } from '../utils/usePagination'
 import { workflowActionColumnWidth } from '../utils/workflowActionColumn'
@@ -425,7 +425,7 @@ async function submitProject() {
     dialogVisible.value = false
     await loadData()
   } catch (error) {
-    showActionError(error, editingId.value ? '项目保存失败' : '项目创建失败')
+    ElMessage.error(actionErrorMessage(error, editingId.value ? '项目保存失败' : '项目创建失败'))
   } finally {
     saving.value = false
   }

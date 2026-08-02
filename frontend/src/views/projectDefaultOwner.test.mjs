@@ -26,7 +26,7 @@ for (const formReset of [resetProjectForm, resetForm]) {
 
 assert.match(projectsView, /const canCreateProject = computed\(\(\) => Boolean\(currentUser\.value\)\)/,
   'any authenticated user must see the project creation action')
-assert.match(projectsView, /<el-popconfirm v-if="canManageProjectRow\(row\)" title="确认删除该项目？子项目将一并删除。"/,
+assert.match(projectsView, /<el-button v-if="canManageProjectRow\(row\)" link type="danger" @click="confirmRemoveProject\(row\.id\)">删除<\/el-button>/,
   'project deletion must use the unified project governance permission')
 assert.match(projectsView, /function canManageProjectRow\(row\) \{[\s\S]*?isProgramOwnerAncestor\(row\.program_id\)/,
   'project-set owners must manage projects in their project-set hierarchy')

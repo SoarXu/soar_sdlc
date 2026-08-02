@@ -64,9 +64,7 @@
               <template v-else>
                 <el-button v-if="canManageProjectRow(row)" link type="success" @click="openCreate(row)">新增项目</el-button>
               </template>
-              <el-popconfirm v-if="canManageProjectRow(row)" title="确认删除该项目？子项目将一并删除。" @confirm="removeProject(row.id)">
-                <template #reference><el-button link type="danger">删除</el-button></template>
-              </el-popconfirm>
+              <el-button v-if="canManageProjectRow(row)" link type="danger" @click="confirmRemoveProject(row.id)">删除</el-button>
             </div>
           </template>
         </el-table-column>
@@ -160,7 +158,7 @@
 
 <script setup>
 import { computed, onMounted, reactive, ref } from 'vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 
 import { fetchPrograms } from '../api/programs'
 import { fetchAssigneeRuleConfigs } from '../api/assigneeRuleConfigs'
@@ -474,6 +472,15 @@ async function removeProject(id) {
     await loadData()
   } catch (error) {
     showActionError(error, '项目删除失败')
+  }
+}
+
+async function confirmRemoveProject(id) {
+  try {
+    await ElMessageBox.confirm('确认删除该项目？子项目将一并删除。', '提示', { type: 'warning' })
+    await removeProject(id)
+  } catch {
+    // The confirmation dialog rejects when the user cancels.
   }
 }
 onMounted(loadData)

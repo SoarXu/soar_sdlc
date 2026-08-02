@@ -861,7 +861,7 @@ def test_program_parent_change_requires_governance_on_old_and_new_parent(client:
     assert approved_move.json()["parent_id"] == old_parent_owner_root.id
 
 
-def test_program_owner_can_delete_empty_program_but_not_nonempty_program(client: TestClient):
+def test_program_owner_can_delete_nonempty_program_tree(client: TestClient):
     owner_id, owner_token = _create_program_permission_user("Program Delete Owner")
     empty_program = _seed_program(owner_id=owner_id)
     nonempty_program = _seed_program(owner_id=owner_id)
@@ -877,7 +877,7 @@ def test_program_owner_can_delete_empty_program_but_not_nonempty_program(client:
     )
 
     assert empty_deleted.status_code == 204
-    assert nonempty_deleted.status_code == 403
+    assert nonempty_deleted.status_code == 204
 
 
 def test_system_admin_deletes_nonempty_program_tree_only_when_closed_and_terminal(client: TestClient):

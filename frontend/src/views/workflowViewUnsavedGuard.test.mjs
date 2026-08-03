@@ -16,6 +16,16 @@ assert.match(
   /defineExpose\(\{[\s\S]*confirmDiscardWorkflowChanges[\s\S]*\}\)/
 )
 
+const saveGraphStart = designerSource.indexOf('async function saveGraph()')
+const addStateStart = designerSource.indexOf('function addState()', saveGraphStart)
+assert.notEqual(saveGraphStart, -1)
+assert.notEqual(addStateStart, -1)
+const saveGraphBody = designerSource.slice(saveGraphStart, addStateStart)
+assert.match(
+  saveGraphBody,
+  /applyGraph\(graph\.data\)[\s\S]*?await nextTick\(\)[\s\S]*?advancedDrawer\.value\?\.refreshDraft\?\.\(\)[\s\S]*?captureSavedGraphSnapshot\(\)/
+)
+
 const backToListStart = viewSource.indexOf('async function backToList()')
 const backToListEnd = viewSource.indexOf('async function loadData()', backToListStart)
 assert.notEqual(backToListStart, -1)

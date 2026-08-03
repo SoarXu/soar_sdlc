@@ -51,6 +51,18 @@ assert.deepEqual(diagramRoutePoints(from, to, generated), initialView.points)
 assert.equal(diagramRoutePoints(from, to, { ...manual, routing_mode: 'unknown' }), null)
 assert.deepEqual(generatedDiagramConfigFromView(initialView, from, to), generated)
 
+const alignedTarget = { ...from, id: 3, x: 360 }
+assert.deepEqual(
+  diagramRoutePoints(from, alignedTarget, {
+    version: 1,
+    routing_mode: 'generated',
+    source_anchor: { side: 'right', ratio: 0.5 },
+    target_anchor: { side: 'left', ratio: 0.5 },
+    waypoints: []
+  }),
+  [{ x: 218, y: 121 }, { x: 360, y: 121 }]
+)
+
 const movedTo = { ...to, x: 440, y: 300 }
 assert.deepEqual(diagramRoutePoints(from, movedTo, manual), [
   { x: 159, y: 142 },

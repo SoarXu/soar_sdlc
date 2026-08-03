@@ -545,6 +545,7 @@ function resolveDiscardConfirmation(result) {
   discardConfirmVisible.value = false
   const resolve = discardConfirmationResolver
   discardConfirmationResolver = null
+  if (result) initializeDraft()
   resolve?.(result)
 }
 
@@ -677,7 +678,7 @@ function toggleNotification(key, enabled) {
     : null
 }
 
-defineExpose({ open, hasPendingChanges, applyPendingChanges, confirmDiscardPendingChanges })
+defineExpose({ open, hasPendingChanges, applyPendingChanges, confirmDiscardPendingChanges, refreshDraft: initializeDraft })
 </script>
 
 <style scoped>

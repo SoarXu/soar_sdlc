@@ -58,6 +58,7 @@ export function diagramRoutePoints(from, to, config) {
     ? config.waypoints.filter(finitePoint).map(copyPoint)
     : []
   if (!waypoints.length) waypoints = defaultWaypoints(start, end, config.source_anchor.side)
+  if (!waypoints.length) return [start, end]
 
   if (config.source_anchor.side === 'top' || config.source_anchor.side === 'bottom') {
     waypoints[0].x = start.x

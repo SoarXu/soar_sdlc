@@ -598,6 +598,8 @@ async function saveGraph() {
       }
       const graph = await saveWorkflowDefinitionGraph(definition.value.id, payload)
       applyGraph(graph.data)
+      await nextTick()
+      advancedDrawer.value?.refreshDraft?.()
       replaceExistingTransitionsOnSave.value = false
       captureSavedGraphSnapshot()
       ElMessage.success('流程图已保存')

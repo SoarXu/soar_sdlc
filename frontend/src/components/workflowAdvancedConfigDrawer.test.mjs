@@ -20,6 +20,11 @@ assert.match(
   /<el-dialog[\s\S]*?v-model="discardConfirmVisible"[\s\S]*?取消[\s\S]*?放弃修改[\s\S]*?应用并关闭/
 )
 assert.match(source, /function applyPendingChangesAndContinue\(\)/)
+assert.match(
+  source,
+  /function resolveDiscardConfirmation\(result\) \{[\s\S]*?if \(result\) initializeDraft\(\)/
+)
+assert.match(source, /defineExpose\(\{[\s\S]*?refreshDraft[\s\S]*?\}\)/)
 for (const label of ['流转规则', '处理人与权限', '动作表单', '按钮展示', '通知']) {
   assert.match(source, new RegExp(label))
 }

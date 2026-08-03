@@ -32,19 +32,76 @@ SCHEME_WORKFLOW_LABELS = {
     "bug": "Bug",
     "project": "项目",
 }
+DEFAULT_SCHEME_WORKFLOW_OBJECT_TYPES = ("requirement", "task", "bug")
 
 
 def ensure_default_assignee_rule_config(db: Session) -> None:
+    default_config = db.query(AssigneeRuleConfig).filter(
+        AssigneeRuleConfig.name == DEFAULT_ASSIGNEE_RULE_CONFIG["name"]
+    ).first()
+    if default_config:
+        _backfill_empty_default_workflows(db, default_config)
+        db.commit()
+        return
+
     legacy_default = db.query(AssigneeRuleConfig).filter(AssigneeRuleConfig.name == "默认责任人规则").first()
     if legacy_default:
         for field, value in DEFAULT_ASSIGNEE_RULE_CONFIG.items():
             setattr(legacy_default, field, value)
-        legacy_default.update_time = datetime.now()
-        db.commit()
+        default_config = legacy_default
+    elif not db.query(AssigneeRuleConfig).first():
+        default_config = AssigneeRuleConfig(**DEFAULT_ASSIGNEE_RULE_CONFIG)
+        db.add(default_config)
+        db.flush()
+    else:
         return
-    if not db.query(AssigneeRuleConfig).first():
-        db.add(AssigneeRuleConfig(**DEFAULT_ASSIGNEE_RULE_CONFIG))
-        db.commit()
+
+    default_config.update_time = datetime.now()
+    _backfill_empty_default_workflows(db, default_config)
+    db.commit()
+
+
+def _backfill_empty_default_workflows(db: Session, config: AssigneeRuleConfig) -> None:
+    ensure_default_workflow_templates(db)
+    source_definitions = _source_definitions(
+        db,
+        SimpleNamespace(source_type="system", source_id="system-standard"),
+    )
+    definitions_by_type = {
+        item.object_type: item
+        for item in db.query(WorkflowDefinition)
+        .filter(
+            WorkflowDefinition.scope_type == "assignee_rule_config",
+            WorkflowDefinition.scope_id == config.id,
+            WorkflowDefinition.object_type.in_(DEFAULT_SCHEME_WORKFLOW_OBJECT_TYPES),
+            WorkflowDefinition.enabled.is_(True),
+        )
+        .order_by(WorkflowDefinition.id.asc())
+        .all()
+    }
+    for object_type in DEFAULT_SCHEME_WORKFLOW_OBJECT_TYPES:
+        definition = definitions_by_type.get(object_type)
+        if definition is None:
+            definition = WorkflowDefinition(
+                name=f"{config.name}-{SCHEME_WORKFLOW_LABELS[object_type]}工作流",
+                object_type=object_type,
+                scope_type="assignee_rule_config",
+                scope_id=config.id,
+                template_key=None,
+                parent_definition_id=None,
+                is_default_template=False,
+                enabled=True,
+                version=1,
+            )
+            db.add(definition)
+            db.flush()
+        has_states = db.query(WorkflowState.id).filter(WorkflowState.definition_id == definition.id).first()
+        has_transitions = db.query(WorkflowTransition.id).filter(
+            WorkflowTransition.definition_id == definition.id
+        ).first()
+        if has_states or has_transitions:
+            continue
+        _clone_graph(db, source_definitions[object_type], definition)
 
 
 def list_configs(db: Session) -> list[AssigneeRuleConfig]:
@@ -276,6 +333,7 @@ def _clone_graph(db: Session, source: WorkflowDefinition, target: WorkflowDefini
             definition_id=target.id,
             status_name=item.status_name,
             category=item.category,
+            terminal_kind=item.terminal_kind,
             color=item.color,
             x=item.x,
             y=item.y,
@@ -311,6 +369,7 @@ def _clone_graph(db: Session, source: WorkflowDefinition, target: WorkflowDefini
                 post_action_config=deepcopy(item.post_action_config),
                 ui_config=deepcopy(item.ui_config),
                 form_config=deepcopy(item.form_config),
+                diagram_config=deepcopy(item.diagram_config),
                 enabled=item.enabled,
                 sort_order=item.sort_order,
             )

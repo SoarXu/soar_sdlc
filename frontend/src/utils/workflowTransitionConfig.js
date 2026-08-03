@@ -67,7 +67,7 @@ export function serializeWorkflowTransition(item) {
   } = item
   const conditionConfig = { ...(rest.condition_config || {}) }
   const uiConfig = { ...(rest.ui_config || {}) }
-  for (const key of ['hidden', 'list_priority', 'visible_in_detail', 'visible_in_list']) delete uiConfig[key]
+  for (const key of ['hidden', 'list_priority', 'visible_in_detail', 'visible_in_list', 'migration_origin']) delete uiConfig[key]
   uiConfig.list_display = uiConfig.list_display === 'primary' ? 'primary' : 'more'
   const formConfig = { ...(rest.form_config || {}) }
   formConfig.fields = (formConfig.fields || []).map(({ option_lines, ...field }) => ({

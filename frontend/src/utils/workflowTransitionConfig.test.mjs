@@ -82,4 +82,11 @@ const legacyRouteSource = {
 const legacyRouteRoundTrip = serializeWorkflowTransition(normalizeWorkflowTransition(legacyRouteSource))
 assert.deepEqual(legacyRouteRoundTrip.condition_config.routes, legacyRouteSource.condition_config.routes)
 
+const historicalUiSource = {
+  ...source,
+  ui_config: { ...source.ui_config, migration_origin: '20260717_001' }
+}
+const historicalUiRoundTrip = serializeWorkflowTransition(normalizeWorkflowTransition(historicalUiSource))
+assert.equal('migration_origin' in historicalUiRoundTrip.ui_config, false)
+
 console.log('workflow transition config tests passed')

@@ -53,7 +53,7 @@ CONDITION_CONFIG_KEYS = {
     "task_types", "field", "routes", "route_dictionary", "routing_mode", "allow_override_roles",
     "target_state_id_by_owner", "target_status_by_owner",
 }
-FORM_CONFIG_KEYS = {"title", "submit_text", "fields", "allow_manual_owner"}
+FORM_CONFIG_KEYS = {"title", "submit_text", "fields", "allow_manual_owner", "allow_unassigned"}
 FORM_FIELD_KEYS = {
     "field", "label", "type", "required", "options", "dictionary", "placeholder", "min", "max",
 }

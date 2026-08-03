@@ -668,6 +668,7 @@ def test_save_graph_preserves_transition_ui_and_form_config(client: TestClient):
                     "form_config": {
                         "title": "解决 Bug",
                         "submit_text": "确认解决",
+                        "allow_unassigned": True,
                         "fields": [
                             {
                                 "field": "resolution",
@@ -696,6 +697,7 @@ def test_save_graph_preserves_transition_ui_and_form_config(client: TestClient):
     assert transition["ui_config"]["button_type"] == "success"
     assert transition["ui_config"]["list_display"] == "primary"
     assert transition["form_config"]["title"] == "解决 Bug"
+    assert transition["form_config"]["allow_unassigned"] is True
     loaded = client.get(f"/api/v1/workflow-definitions/{definition['id']}")
     assert loaded.json()["transitions"][0]["form_config"]["fields"][0]["field"] == "resolution"
 

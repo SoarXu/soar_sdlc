@@ -2,6 +2,8 @@ from uuid import uuid4
 
 from fastapi.testclient import TestClient
 
+from app.services import assignee_rule_config_service
+
 
 def _definitions_for_config(client: TestClient, config_id: int) -> dict[str, dict]:
     response = client.get(f"/api/v1/workflow-definitions?scope_type=assignee_rule_config&scope_id={config_id}")
@@ -43,6 +45,33 @@ def test_blank_creation_builds_project_and_work_item_draft_definitions(client: T
     assert config["lifecycle_status"] == "draft"
     for definition in definitions.values():
         graph = client.get(f"/api/v1/workflow-definitions/{definition['id']}").json()
+        assert graph["definition"]["initial_state_id"] is None
+        assert graph["states"] == []
+        assert graph["transitions"] == []
+
+
+def test_listing_configs_recovers_only_empty_default_workflows(client: TestClient, monkeypatch):
+    default_config = _create_draft_config(client)
+    blank_config = _create_draft_config(client)
+    monkeypatch.setitem(
+        assignee_rule_config_service.DEFAULT_ASSIGNEE_RULE_CONFIG,
+        "name",
+        default_config["name"],
+    )
+
+    configs = client.get("/api/v1/assignee-rule-configs")
+
+    assert configs.status_code == 200
+    default_definitions = _definitions_for_config(client, default_config["id"])
+    for object_type in ("requirement", "task", "bug"):
+        graph = client.get(f"/api/v1/workflow-definitions/{default_definitions[object_type]['id']}").json()
+        assert graph["definition"]["initial_state_id"] is not None
+        assert graph["states"]
+        assert graph["transitions"]
+
+    blank_definitions = _definitions_for_config(client, blank_config["id"])
+    for object_type in ("requirement", "task", "bug"):
+        graph = client.get(f"/api/v1/workflow-definitions/{blank_definitions[object_type]['id']}").json()
         assert graph["definition"]["initial_state_id"] is None
         assert graph["states"] == []
         assert graph["transitions"] == []

@@ -261,6 +261,7 @@ const props = defineProps({
 })
 
 const objectTypes = [
+  { label: '项目', value: 'project' },
   { label: '需求', value: 'requirement' },
   { label: '任务', value: 'task' },
   { label: '缺陷', value: 'bug' }

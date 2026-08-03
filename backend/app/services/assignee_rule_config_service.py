@@ -25,6 +25,14 @@ DEFAULT_ASSIGNEE_RULE_CONFIG = {
     "enabled": True,
 }
 
+SCHEME_WORKFLOW_OBJECT_TYPES = ("requirement", "task", "bug", "project")
+SCHEME_WORKFLOW_LABELS = {
+    "requirement": "需求",
+    "task": "任务",
+    "bug": "Bug",
+    "project": "项目",
+}
+
 
 def ensure_default_assignee_rule_config(db: Session) -> None:
     legacy_default = db.query(AssigneeRuleConfig).filter(AssigneeRuleConfig.name == "默认责任人规则").first()
@@ -61,7 +69,7 @@ def list_template_sources(db: Session) -> list[dict]:
             "source_type": "system",
             "source_id": "system-standard",
             "name": "系统标准方案",
-            "description": "系统内置的需求、任务和 Bug 标准工作流",
+            "description": "系统内置的项目、需求、任务和 Bug 标准工作流",
             "lifecycle_status": "enabled",
         }
     ]
@@ -71,11 +79,11 @@ def list_template_sources(db: Session) -> list[dict]:
             db.query(WorkflowDefinition.scope_id)
             .filter(
                 WorkflowDefinition.scope_type == "assignee_rule_config",
-                WorkflowDefinition.object_type.in_(("requirement", "task", "bug")),
+                WorkflowDefinition.object_type.in_(SCHEME_WORKFLOW_OBJECT_TYPES),
                 WorkflowDefinition.enabled.is_(True),
             )
             .group_by(WorkflowDefinition.scope_id)
-            .having(func.count(func.distinct(WorkflowDefinition.object_type)) == 3)
+            .having(func.count(func.distinct(WorkflowDefinition.object_type)) == len(SCHEME_WORKFLOW_OBJECT_TYPES))
             .all()
         )
     }
@@ -122,10 +130,10 @@ def create_config(db: Session, payload: AssigneeRuleConfigCreate) -> AssigneeRul
         config = AssigneeRuleConfig(**data, lifecycle_status="draft", enabled=False)
         db.add(config)
         db.flush()
-        for object_type, label in (("requirement", "需求"), ("task", "任务"), ("bug", "Bug")):
+        for object_type in SCHEME_WORKFLOW_OBJECT_TYPES:
             db.add(
                 WorkflowDefinition(
-                    name=f"{config.name}-{label}工作流",
+                    name=f"{config.name}-{SCHEME_WORKFLOW_LABELS[object_type]}工作流",
                     object_type=object_type,
                     scope_type="assignee_rule_config",
                     scope_id=config.id,
@@ -175,10 +183,10 @@ def clone_enabled_config(db: Session, source_config_id: int, name: str) -> Assig
     )
     db.add(clone)
     db.flush()
-    for object_type, label in (("requirement", "需求"), ("task", "任务"), ("bug", "Bug")):
+    for object_type in SCHEME_WORKFLOW_OBJECT_TYPES:
         db.add(
             WorkflowDefinition(
-                name=f"{clone.name}-{label}工作流",
+                name=f"{clone.name}-{SCHEME_WORKFLOW_LABELS[object_type]}工作流",
                 object_type=object_type,
                 scope_type="assignee_rule_config",
                 scope_id=clone.id,
@@ -215,7 +223,7 @@ def _copy_template_source(db: Session, config_id: int, source) -> None:
         )
         .all()
     }
-    for object_type in ("requirement", "task", "bug"):
+    for object_type in SCHEME_WORKFLOW_OBJECT_TYPES:
         _clone_graph(db, source_definitions[object_type], target_definitions[object_type])
 
 
@@ -227,7 +235,7 @@ def _source_definitions(db: Session, source) -> dict[str, WorkflowDefinition]:
         query = db.query(WorkflowDefinition).filter(
             WorkflowDefinition.scope_type == "system",
             WorkflowDefinition.is_default_template.is_(True),
-            WorkflowDefinition.object_type.in_(("requirement", "task", "bug")),
+            WorkflowDefinition.object_type.in_(SCHEME_WORKFLOW_OBJECT_TYPES),
         )
     else:
         try:
@@ -240,13 +248,13 @@ def _source_definitions(db: Session, source) -> dict[str, WorkflowDefinition]:
         query = db.query(WorkflowDefinition).filter(
             WorkflowDefinition.scope_type == "assignee_rule_config",
             WorkflowDefinition.scope_id == source_config_id,
-            WorkflowDefinition.object_type.in_(("requirement", "task", "bug")),
+            WorkflowDefinition.object_type.in_(SCHEME_WORKFLOW_OBJECT_TYPES),
             WorkflowDefinition.enabled.is_(True),
         )
     definitions: dict[str, WorkflowDefinition] = {}
     for item in query.order_by(WorkflowDefinition.id.desc()).all():
         definitions.setdefault(item.object_type, item)
-    missing = {"requirement", "task", "bug"} - set(definitions)
+    missing = set(SCHEME_WORKFLOW_OBJECT_TYPES) - set(definitions)
     if missing:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -399,7 +407,7 @@ def disable_config(db: Session, config_id: int) -> AssigneeRuleConfig:
 
 def _invalid_core_workflows(db: Session, config_id: int) -> dict[str, str]:
     invalid: dict[str, str] = {}
-    for object_type in ("requirement", "task", "bug"):
+    for object_type in SCHEME_WORKFLOW_OBJECT_TYPES:
         definitions = (
             db.query(WorkflowDefinition)
             .filter(

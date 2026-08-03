@@ -3,7 +3,7 @@
     <div class="page-head">
       <div>
         <h1>工作流配置</h1>
-        <p>维护工作流方案，点击方案名称进入详情页面编辑需求、任务、Bug 的流转和项目关联。</p>
+        <p>维护工作流方案，点击方案名称进入详情页面编辑项目、需求、任务、Bug 的流转和项目关联。</p>
       </div>
       <div class="page-actions">
         <el-button @click="backToAdmin">返回后台管理</el-button>
@@ -71,7 +71,7 @@
     <div class="page-head">
       <div>
         <h1>{{ editingId ? '工作流方案详情' : '新增工作流方案' }}</h1>
-        <p>一个方案内分别维护需求、任务、Bug 的可视化工作流，并绑定到项目后生效。</p>
+        <p>一个方案内分别维护项目、需求、任务、Bug 的可视化工作流，并绑定到项目后生效。</p>
       </div>
       <div class="page-actions workflow-detail-actions">
         <div class="workflow-detail-actions__navigation">

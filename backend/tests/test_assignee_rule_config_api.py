@@ -29,17 +29,17 @@ def _create_draft_config(client: TestClient) -> dict:
 
 def _configure_core_workflows(client: TestClient, config_id: int) -> None:
     definitions = _definitions_for_config(client, config_id)
-    for object_type in ("requirement", "task", "bug"):
+    for object_type in ("requirement", "task", "bug", "project"):
         applied = client.post(f"/api/v1/workflow-definitions/{definitions[object_type]['id']}/apply-template")
         assert applied.status_code == 200
 
 
-def test_blank_creation_builds_three_empty_draft_definitions(client: TestClient):
+def test_blank_creation_builds_project_and_work_item_draft_definitions(client: TestClient):
     config = _create_draft_config(client)
 
     definitions = _definitions_for_config(client, config["id"])
 
-    assert set(definitions) == {"requirement", "task", "bug"}
+    assert set(definitions) == {"requirement", "task", "bug", "project"}
     assert config["lifecycle_status"] == "draft"
     for definition in definitions.values():
         graph = client.get(f"/api/v1/workflow-definitions/{definition['id']}").json()
@@ -147,9 +147,9 @@ def test_system_and_existing_scheme_templates_create_independent_full_copies(cli
 
     source_definitions = _definitions_for_config(client, source_scheme["id"])
     copied_definitions = _definitions_for_config(client, copied_scheme["id"])
-    assert set(source_definitions) == set(copied_definitions) == {"requirement", "task", "bug"}
+    assert set(source_definitions) == set(copied_definitions) == {"requirement", "task", "bug", "project"}
 
-    for object_type in ("requirement", "task", "bug"):
+    for object_type in ("requirement", "task", "bug", "project"):
         source_graph = client.get(f"/api/v1/workflow-definitions/{source_definitions[object_type]['id']}").json()
         copied_graph = client.get(f"/api/v1/workflow-definitions/{copied_definitions[object_type]['id']}").json()
 
@@ -192,7 +192,7 @@ def test_workflow_scheme_lifecycle_guards_project_binding_and_disable(client: Te
 
     invalid_enable = client.post(f"/api/v1/assignee-rule-configs/{config['id']}/enable")
     assert invalid_enable.status_code == 422
-    assert set(invalid_enable.json()["detail"]["invalid_object_types"]) == {"requirement", "task", "bug"}
+    assert set(invalid_enable.json()["detail"]["invalid_object_types"]) == {"requirement", "task", "bug", "project"}
 
     _configure_core_workflows(client, config["id"])
     enabled = client.post(f"/api/v1/assignee-rule-configs/{config['id']}/enable")

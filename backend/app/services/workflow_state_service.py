@@ -8,7 +8,7 @@ from app.models.workflow_definition import WorkflowDefinition, WorkflowState
 from app.services.default_workflow_template_service import ensure_default_workflow_templates
 
 
-CORE_OBJECT_TYPES = {"requirement", "task", "bug"}
+CORE_OBJECT_TYPES = {"requirement", "task", "bug", "project"}
 SYSTEM_OBJECT_TYPES = {"project", "iteration"}
 
 
@@ -114,7 +114,7 @@ def resolve_effective_workflow(
             .all()
         )
         if len(definitions) != 1:
-            object_label = {"requirement": "需求", "task": "任务", "bug": "Bug"}[object_type]
+            object_label = {"requirement": "需求", "task": "任务", "bug": "Bug", "project": "项目"}[object_type]
             if definitions:
                 conflicts = "、".join(f"ID {item.id}（{item.name}）" for item in definitions)
                 detail = (

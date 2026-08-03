@@ -21,7 +21,7 @@ from app.models.workflow_definition import WorkflowTransition
 from app.services.status_operation_service import create_status_operation, list_status_operations
 from app.services.requirement_pool_service import create_project_requirement_pool, requirement_pool_for_project
 from app.services.workflow_runtime_service import execute_transition
-from app.services.workflow_state_service import initial_system_workflow_values
+from app.services.workflow_state_service import initial_system_workflow_values, initial_workflow_values
 from app.views.project_view import ProjectCreate, ProjectMemberCreate, ProjectUpdate
 from app.views.status_operation_view import StatusOperationCreate
 from app.views.workflow_runtime_view import WorkflowTransitionExecuteRequest
@@ -247,6 +247,9 @@ def create_project(db: Session, payload: ProjectCreate) -> Project:
     try:
         db.add(project)
         db.flush()
+        project_workflow_values = initial_workflow_values(db, "project", project.id)
+        project.workflow_definition_id = project_workflow_values["workflow_definition_id"]
+        project.current_state_id = project_workflow_values["current_state_id"]
         create_project_requirement_pool(db, project, workflow_values=iteration_workflow_values)
         db.commit()
         db.refresh(project)

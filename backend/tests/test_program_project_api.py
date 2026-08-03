@@ -965,12 +965,66 @@ def _configure_and_enable_scheme(client: TestClient, config_id: int) -> None:
         f"/api/v1/workflow-definitions?scope_type=assignee_rule_config&scope_id={config_id}"
     ).json()
     by_object_type = {item["object_type"]: item for item in definitions}
-    for object_type in ("requirement", "task", "bug"):
+    for object_type in ("requirement", "task", "bug", "project"):
         assert client.post(
             f"/api/v1/workflow-definitions/{by_object_type[object_type]['id']}/apply-template"
         ).status_code == 200
     enabled = client.post(f"/api/v1/assignee-rule-configs/{config_id}/enable")
     assert enabled.status_code == 200, enabled.text
+
+
+def test_project_creation_uses_selected_scheme_project_workflow(client: TestClient):
+    config_response = client.post(
+        "/api/v1/assignee-rule-configs",
+        json={"name": f"Project Workflow Scheme-{uuid4().hex[:8]}"},
+    )
+    assert config_response.status_code == 201, config_response.text
+    config = config_response.json()
+    _configure_and_enable_scheme(client, config["id"])
+
+    scheme_definitions = client.get(
+        f"/api/v1/workflow-definitions?scope_type=assignee_rule_config&scope_id={config['id']}"
+    ).json()
+    scheme_project_definition = next(item for item in scheme_definitions if item["object_type"] == "project")
+
+    scheme_project = client.post(
+        "/api/v1/projects",
+        json={
+            "name": f"Scheme Project-{uuid4().hex[:8]}",
+            "assignee_rule_config_id": config["id"],
+        },
+    )
+    assert scheme_project.status_code == 200, scheme_project.text
+    assert scheme_project.json()["workflow_definition_id"] == scheme_project_definition["id"]
+    assert scheme_project.json()["current_state_id"] == scheme_project_definition["initial_state_id"]
+    runtime_transitions = client.get(
+        f"/api/v1/workflow-runtime/project/{scheme_project.json()['id']}/transitions"
+    )
+    assert runtime_transitions.status_code == 200, runtime_transitions.text
+    runtime_transition_ids = [item["transition_id"] for item in runtime_transitions.json()]
+    db = SessionLocal()
+    try:
+        runtime_definition_ids = {
+            item.definition_id
+            for item in db.query(WorkflowTransition)
+            .filter(WorkflowTransition.id.in_(runtime_transition_ids))
+            .all()
+        }
+    finally:
+        db.close()
+    assert runtime_definition_ids == {scheme_project_definition["id"]}
+
+    system_definitions = client.get(
+        "/api/v1/workflow-definitions?scope_type=system&object_type=project"
+    ).json()
+    system_project_definition = next(item for item in system_definitions if item["is_default_template"])
+    system_project = client.post(
+        "/api/v1/projects",
+        json={"name": f"System Project-{uuid4().hex[:8]}"},
+    )
+    assert system_project.status_code == 200, system_project.text
+    assert system_project.json()["workflow_definition_id"] == system_project_definition["id"]
+    assert system_project.json()["current_state_id"] == system_project_definition["initial_state_id"]
 
 
 def test_program_crud_persists_to_database(client: TestClient):

@@ -19,8 +19,10 @@ http.interceptors.request.use((config) => {
 
 const handleSessionExpired = createSessionExpirationHandler({
   storage: localStorage,
-  notify: (message) => ElMessage.warning(message),
-  navigate: (location) => router.replace(location),
+  notify: (message) => new Promise((resolve) => {
+    ElMessage.warning({ message, onClose: resolve })
+  }),
+  navigate: (location) => window.location.replace(router.resolve(location).href),
   getCurrentPath: () => router.currentRoute.value.fullPath
 })
 
@@ -28,8 +30,8 @@ http.interceptors.response.use(
   (response) => response,
   async (error) => {
     if (error?.response?.status === 401) {
-      error.sessionExpired = true
-      await handleSessionExpired(error?.config?.url)
+      const sessionExpired = await handleSessionExpired(error?.config?.url)
+      if (sessionExpired) error.sessionExpired = true
     }
     return Promise.reject(error)
   }

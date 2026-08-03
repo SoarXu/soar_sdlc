@@ -11,21 +11,22 @@ export function createSessionExpirationHandler({ storage, notify, navigate, getC
   let inProgress = null
 
   return async function handleSessionExpired(requestUrl) {
-    if (isLoginRequest(requestUrl)) return
+    if (isLoginRequest(requestUrl)) return false
     if (inProgress) return inProgress
 
+    const redirect = getCurrentPath()
     inProgress = (async () => {
       SESSION_KEYS.forEach((key) => storage.removeItem(key))
       await notify('登录状态已失效，请重新登录')
 
-      const redirect = getCurrentPath()
       if (redirect !== '/login') {
         await navigate({ name: 'login', query: { redirect } })
       }
+      return true
     })()
 
     try {
-      await inProgress
+      return await inProgress
     } finally {
       inProgress = null
     }

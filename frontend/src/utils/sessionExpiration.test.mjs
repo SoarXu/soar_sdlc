@@ -61,6 +61,8 @@ function createStorage() {
   let resolveNotice
   let noticeCount = 0
   let navigationCount = 0
+  let currentPath = '/dashboard'
+  let redirectLocation = null
   const handleSessionExpired = createSessionExpirationHandler({
     storage,
     notify: () => {
@@ -69,19 +71,23 @@ function createStorage() {
         resolveNotice = resolve
       })
     },
-    navigate: async () => {
+    navigate: async (location) => {
       navigationCount += 1
+      redirectLocation = location
     },
-    getCurrentPath: () => '/dashboard'
+    getCurrentPath: () => currentPath
   })
 
   const firstRequest = handleSessionExpired('/workbench')
   const secondRequest = handleSessionExpired('/users')
   assert.equal(noticeCount, 1)
+  assert.equal(navigationCount, 0)
+  currentPath = '/login'
   resolveNotice()
   await Promise.all([firstRequest, secondRequest])
 
   assert.equal(navigationCount, 1)
+  assert.deepEqual(redirectLocation, { name: 'login', query: { redirect: '/dashboard' } })
 }
 
 console.log('session expiration tests passed')

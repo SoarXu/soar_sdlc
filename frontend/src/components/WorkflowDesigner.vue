@@ -418,6 +418,7 @@ onBeforeRouteLeave(async () => confirmDiscardWorkflowChanges())
 
 let workflowCanvasResizeObserver = null
 let suppressedStateClickTimer = null
+let saveGraphInFlight = null
 
 onMounted(() => {
   window.addEventListener('mousemove', onDrag)
@@ -570,37 +571,45 @@ async function changeObjectType(nextObjectType) {
 }
 
 async function saveGraph() {
-  if (!definition.value?.id) return false
-  if (transitions.value.some((item) => unsupportedWorkflowConfigSections(item).length)) {
-    ElMessage.error('存在未支持的历史配置，请先完成迁移后再保存。')
-    return false
-  }
-  if (advancedDrawer.value?.applyPendingChanges?.() === false) {
-    ElMessage.warning('请先修正高级配置中的校验错误')
-    return false
-  }
-  const stateValidation = validateWorkflowStates(states.value)
-  if (!stateValidation.valid) {
-    selectState(stateValidation.state)
-    ElMessage.warning(`${stateValidation.state.status_name}：${stateValidation.errors[0].message}`)
-    return false
-  }
-  saving.value = true
-  try {
-    const payload = {
-      initial_state_id: initialStateId.value,
-      replace_existing_transitions: replaceExistingTransitionsOnSave.value,
-      states: states.value.map(({ definition_id, ...item }) => item),
-      transitions: transitions.value.map((item) => serializeTransition(item))
+  if (saveGraphInFlight) return saveGraphInFlight
+  saveGraphInFlight = (async () => {
+    if (!definition.value?.id) return false
+    if (transitions.value.some((item) => unsupportedWorkflowConfigSections(item).length)) {
+      ElMessage.error('存在未支持的历史配置，请先完成迁移后再保存。')
+      return false
     }
-    const graph = await saveWorkflowDefinitionGraph(definition.value.id, payload)
-    applyGraph(graph.data)
-    replaceExistingTransitionsOnSave.value = false
-    captureSavedGraphSnapshot()
-    ElMessage.success('流程图已保存')
-    return true
+    if (advancedDrawer.value?.applyPendingChanges?.() === false) {
+      ElMessage.warning('请先修正高级配置中的校验错误')
+      return false
+    }
+    const stateValidation = validateWorkflowStates(states.value)
+    if (!stateValidation.valid) {
+      selectState(stateValidation.state)
+      ElMessage.warning(`${stateValidation.state.status_name}：${stateValidation.errors[0].message}`)
+      return false
+    }
+    saving.value = true
+    try {
+      const payload = {
+        initial_state_id: initialStateId.value,
+        replace_existing_transitions: replaceExistingTransitionsOnSave.value,
+        states: states.value.map(({ definition_id, ...item }) => item),
+        transitions: transitions.value.map((item) => serializeTransition(item))
+      }
+      const graph = await saveWorkflowDefinitionGraph(definition.value.id, payload)
+      applyGraph(graph.data)
+      replaceExistingTransitionsOnSave.value = false
+      captureSavedGraphSnapshot()
+      ElMessage.success('流程图已保存')
+      return true
+    } finally {
+      saving.value = false
+    }
+  })()
+  try {
+    return await saveGraphInFlight
   } finally {
-    saving.value = false
+    saveGraphInFlight = null
   }
 }
 
@@ -749,6 +758,7 @@ async function confirmDiscardWorkflowChanges({
   title = '放弃未保存修改',
   message = '当前流程图或高级配置有未保存修改，确认放弃？'
 } = {}) {
+  if (saving.value) return false
   if (!force && !hasPendingWorkflowChanges()) return true
   return openWorkflowDiscardDialog({ title, message })
 }

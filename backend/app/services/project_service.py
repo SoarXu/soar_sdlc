@@ -18,6 +18,7 @@ from app.models.test_case_execution import TestCaseExecutionLog
 from app.models.test_run import TestRun, TestRunCase
 from app.models.user import User
 from app.models.workflow_definition import WorkflowTransition
+from app.services.assignee_rule_config_service import default_project_workflow_scheme
 from app.services.status_operation_service import create_status_operation, list_status_operations
 from app.services.requirement_pool_service import create_project_requirement_pool, requirement_pool_for_project
 from app.services.workflow_runtime_service import execute_transition
@@ -183,13 +184,16 @@ def get_project(db: Session, project_id: int) -> Project:
 
 
 def resolve_project_create_payload(db: Session, payload: ProjectCreate) -> ProjectCreate:
+    updates = {}
+    if payload.assignee_rule_config_id is None:
+        updates["assignee_rule_config_id"] = default_project_workflow_scheme(db).id
     if not payload.parent_id:
-        return payload
+        return payload.model_copy(update=updates) if updates else payload
 
     parent, program_id = _resolve_parent_project_program(db, payload.parent_id, payload.program_id)
     if payload.program_id is None:
-        return payload.model_copy(update={"program_id": program_id})
-    return payload
+        updates["program_id"] = program_id
+    return payload.model_copy(update=updates) if updates else payload
 
 
 def resolve_project_update_payload(

@@ -100,7 +100,7 @@
             </el-select>
           </el-form-item>
           <el-form-item label="工作流方案">
-            <el-select v-model="form.assignee_rule_config_id" clearable filterable placeholder="请选择工作流方案">
+            <el-select v-model="form.assignee_rule_config_id" filterable placeholder="请选择工作流方案">
               <el-option v-for="scheme in enabledWorkflowSchemes" :key="scheme.id" :label="scheme.name" :value="scheme.id" />
             </el-select>
           </el-form-item>
@@ -201,9 +201,13 @@ const workflowTransitions = ref({})
 const currentUser = computed(() => currentUserFromStorage(users.value))
 const canCreateProject = computed(() => Boolean(currentUser.value))
 const PROJECT_TREE_INDENT = 24
+const DEFAULT_WORKFLOW_SCHEME_NAME = '默认工作流规则'
 const projectTree = computed(() => buildProjectTree(projects.value))
 const enabledWorkflowSchemes = computed(() => (
   workflowSchemes.value.filter((item) => item.lifecycle_status === 'enabled')
+))
+const defaultWorkflowScheme = computed(() => (
+  enabledWorkflowSchemes.value.find((scheme) => scheme.name === DEFAULT_WORKFLOW_SCHEME_NAME) || null
 ))
 function collectDescendantIds(projectId) {
   const ids = new Set()
@@ -295,7 +299,7 @@ function resetForm() {
     program_id: null,
     name: '',
     owner_id: users.value.some((user) => user.id === currentUserId) ? currentUserId : null,
-    assignee_rule_config_id: null,
+    assignee_rule_config_id: defaultWorkflowScheme.value?.id ?? null,
     start_date: null,
     end_date: null,
     is_long_term: false,

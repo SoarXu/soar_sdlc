@@ -32,7 +32,7 @@ SCHEME_WORKFLOW_LABELS = {
     "bug": "Bug",
     "project": "项目",
 }
-DEFAULT_SCHEME_WORKFLOW_OBJECT_TYPES = ("requirement", "task", "bug")
+DEFAULT_SCHEME_WORKFLOW_OBJECT_TYPES = SCHEME_WORKFLOW_OBJECT_TYPES
 
 
 def ensure_default_assignee_rule_config(db: Session) -> None:
@@ -49,12 +49,10 @@ def ensure_default_assignee_rule_config(db: Session) -> None:
         for field, value in DEFAULT_ASSIGNEE_RULE_CONFIG.items():
             setattr(legacy_default, field, value)
         default_config = legacy_default
-    elif not db.query(AssigneeRuleConfig).first():
+    else:
         default_config = AssigneeRuleConfig(**DEFAULT_ASSIGNEE_RULE_CONFIG)
         db.add(default_config)
         db.flush()
-    else:
-        return
 
     default_config.update_time = datetime.now()
     _backfill_empty_default_workflows(db, default_config)
@@ -117,6 +115,18 @@ def list_project_options(db: Session) -> list[AssigneeRuleConfig]:
         .order_by(AssigneeRuleConfig.id.asc())
         .all()
     )
+
+
+def default_project_workflow_scheme(db: Session) -> AssigneeRuleConfig:
+    ensure_default_assignee_rule_config(db)
+    config = db.query(AssigneeRuleConfig).filter(
+        AssigneeRuleConfig.name == DEFAULT_ASSIGNEE_RULE_CONFIG["name"]
+    ).first()
+    if not config:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Default workflow scheme not found")
+    if config.lifecycle_status != "enabled":
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Default workflow scheme is not enabled")
+    return config
 
 
 def list_template_sources(db: Session) -> list[dict]:

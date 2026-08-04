@@ -13,7 +13,8 @@ from app.models.bug import Bug
 from app.models.business_component import BusinessComponent
 from app.models.program import Program
 from app.models.project import Project
-from app.models.workflow_definition import WorkflowState, WorkflowTransition
+from app.models.assignee_rule_config import AssigneeRuleConfig
+from app.models.workflow_definition import WorkflowDefinition, WorkflowState, WorkflowTransition
 
 
 def _create_program_permission_user(full_name: str) -> tuple[int, str]:
@@ -912,17 +913,29 @@ def test_system_admin_deletes_nonempty_program_tree_only_when_closed_and_termina
     assert deleted.status_code == 204
 
 
-def test_project_creation_uses_system_workflow_initial_state(client: TestClient):
+def test_project_creation_binds_default_workflow_scheme(client: TestClient):
     created = client.post("/api/v1/projects", json={"name": f"ID 项目-{uuid4().hex[:8]}"})
 
     assert created.status_code == 200
     data = created.json()
+    assert data["assignee_rule_config_id"] is not None
     assert isinstance(data["workflow_definition_id"], int)
     assert isinstance(data["current_state_id"], int)
     assert data["status_name"]
 
     db = SessionLocal()
     try:
+        default_scheme = db.query(AssigneeRuleConfig).filter(
+            AssigneeRuleConfig.name == "默认工作流规则"
+        ).one()
+        assert data["assignee_rule_config_id"] == default_scheme.id
+        scheme_definition = db.query(WorkflowDefinition).filter(
+            WorkflowDefinition.scope_type == "assignee_rule_config",
+            WorkflowDefinition.scope_id == default_scheme.id,
+            WorkflowDefinition.object_type == "project",
+            WorkflowDefinition.enabled.is_(True),
+        ).one()
+        assert data["workflow_definition_id"] == scheme_definition.id
         state = db.query(WorkflowState).filter(WorkflowState.id == data["current_state_id"]).one()
         assert state.definition_id == data["workflow_definition_id"]
         assert data["status_name"] == state.status_name
@@ -1014,17 +1027,27 @@ def test_project_creation_uses_selected_scheme_project_workflow(client: TestClie
         db.close()
     assert runtime_definition_ids == {scheme_project_definition["id"]}
 
-    system_definitions = client.get(
-        "/api/v1/workflow-definitions?scope_type=system&object_type=project"
-    ).json()
-    system_project_definition = next(item for item in system_definitions if item["is_default_template"])
-    system_project = client.post(
+    default_project = client.post(
         "/api/v1/projects",
-        json={"name": f"System Project-{uuid4().hex[:8]}"},
+        json={"name": f"Default Scheme Project-{uuid4().hex[:8]}"},
     )
-    assert system_project.status_code == 200, system_project.text
-    assert system_project.json()["workflow_definition_id"] == system_project_definition["id"]
-    assert system_project.json()["current_state_id"] == system_project_definition["initial_state_id"]
+    assert default_project.status_code == 200, default_project.text
+    db = SessionLocal()
+    try:
+        default_scheme = db.query(AssigneeRuleConfig).filter(
+            AssigneeRuleConfig.name == "默认工作流规则"
+        ).one()
+        default_definition = db.query(WorkflowDefinition).filter(
+            WorkflowDefinition.scope_type == "assignee_rule_config",
+            WorkflowDefinition.scope_id == default_scheme.id,
+            WorkflowDefinition.object_type == "project",
+            WorkflowDefinition.enabled.is_(True),
+        ).one()
+    finally:
+        db.close()
+    assert default_project.json()["assignee_rule_config_id"] == default_scheme.id
+    assert default_project.json()["workflow_definition_id"] == default_definition.id
+    assert default_project.json()["current_state_id"] == default_definition.initial_state_id
 
 
 def test_program_crud_persists_to_database(client: TestClient):

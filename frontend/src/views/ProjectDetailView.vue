@@ -82,26 +82,12 @@
           <el-input v-model="projectListFilters.iterations.keyword" clearable placeholder="搜索迭代名称" class="project-tab-search" @keyup.enter="resetProjectListSearch('iterations')" @clear="resetProjectListSearch('iterations')" />
           <el-button v-if="canManageCurrentProject" type="primary" @click="openIterationCreate">新增迭代</el-button>
         </div>
-        <el-table v-if="projectRequirementPoolRow" :data="projectRequirementPoolRow ? [projectRequirementPoolRow] : []" stripe width="100%">
-          <el-table-column prop="id" label="ID" width="80" />
-          <el-table-column label="迭代名称" min-width="180" show-overflow-tooltip>
-            <template #default="{ row }"><el-tag type="info">{{ requirementIterationLabel(row) }}</el-tag></template>
-          </el-table-column>
-          <el-table-column label="负责人" width="150"><template #default>-</template></el-table-column>
-          <el-table-column label="开始日期" width="130"><template #default>-</template></el-table-column>
-          <el-table-column label="结束日期" width="130"><template #default>-</template></el-table-column>
-          <el-table-column label="实际开始" width="130"><template #default>-</template></el-table-column>
-          <el-table-column label="实际结束" width="130"><template #default>-</template></el-table-column>
-          <el-table-column label="状态" width="120"><template #default>-</template></el-table-column>
-          <el-table-column label="操作" width="250" fixed="right">
-            <template #default="{ row }"><el-button v-if="canManageCurrentProject" link type="primary" @click="openIterationEdit(row)">编辑</el-button></template>
-          </el-table-column>
-        </el-table>
         <el-table :data="pagedProjectIterations" stripe width="100%">
           <el-table-column prop="id" label="ID" width="80" />
           <el-table-column label="迭代名称" min-width="180" show-overflow-tooltip>
             <template #default="{ row }">
-              <router-link class="table-link" :to="{ name: 'iteration-detail', params: { id: row.id }, query: { from: 'project', projectId, tab: 'iterations' } }">{{ row.name }}</router-link>
+              <el-tag v-if="row.is_requirement_pool" type="info">{{ requirementIterationLabel(row) }}</el-tag>
+              <router-link v-else class="table-link" :to="{ name: 'iteration-detail', params: { id: row.id }, query: { from: 'project', projectId, tab: 'iterations' } }">{{ row.name }}</router-link>
             </template>
           </el-table-column>
           <el-table-column label="负责人" width="150"><template #default="{ row }">{{ userLabel(users, row.owner_id) }}</template></el-table-column>
@@ -400,7 +386,6 @@
               <el-form-item label="工作流方案">
                 <el-select
                   v-model="settingsForm.assignee_rule_config_id"
-                  clearable
                   filterable
                   :disabled="!canManageCurrentProject"
                   placeholder="请选择工作流方案"
@@ -884,7 +869,11 @@ const selectedWorkflowSchemeDescription = computed(() => selectedWorkflowScheme.
 const projectTestCases = computed(() => projectTestCaseRows.value)
 const projectTestRuns = computed(() => projectTestRunRows.value)
 const projectBugs = computed(() => projectBugRows.value)
-const pagedProjectIterations = computed(() => projectIterations.value)
+const pagedProjectIterations = computed(() => (
+  projectRequirementPoolRow.value
+    ? [projectRequirementPoolRow.value, ...projectIterations.value]
+    : projectIterations.value
+))
 const pagedProjectRequirements = computed(() => projectRequirements.value)
 const pagedProjectTasks = computed(() => projectTasks.value)
 const pagedProjectTestCases = computed(() => projectTestCases.value)

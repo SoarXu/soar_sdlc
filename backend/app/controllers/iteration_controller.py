@@ -5,8 +5,15 @@ from app.core.auth_dependencies import get_optional_current_user
 from app.db.session import get_db
 from app.models.iteration import Iteration, IterationProject
 from app.models.user import User
-from app.services.project_permission_service import ensure_project_manage_permission
-from app.services.project_permission_service import ensure_audit_view_permission
+from app.services.project_permission_service import (
+    can_view_audit,
+    ensure_audit_view_permission,
+    ensure_iteration_management_permission,
+    ensure_iteration_owner_assignment_permission,
+    ensure_iteration_owner_membership,
+    ensure_project_manage_permission,
+    iteration_project_ids,
+)
 from app.services.iteration_service import (
     available_requirements,
     available_tasks,
@@ -53,7 +60,9 @@ def post_iteration(
     db: Session = Depends(get_db),
     current_user: User | None = Depends(get_optional_current_user),
 ):
-    _ensure_can_manage_projects(db, _payload_project_ids(payload), current_user)
+    project_ids = _payload_project_ids(payload)
+    _ensure_can_manage_projects(db, project_ids, current_user)
+    ensure_iteration_owner_membership(db, payload.owner_id, project_ids)
     return create_iteration(db, payload)
 
 
@@ -64,10 +73,17 @@ def patch_iteration(
     db: Session = Depends(get_db),
     current_user: User | None = Depends(get_optional_current_user),
 ):
-    _ensure_can_manage_iteration(db, iteration_id, current_user)
+    changed_fields = payload.model_fields_set
     target_project_ids = _payload_project_ids(payload)
-    if target_project_ids:
+    current_project_ids = iteration_project_ids(db, iteration_id)
+    if changed_fields & {"project_id", "project_ids", "owner_id", "actual_start_date", "actual_end_date", "lifecycle_phase"}:
+        ensure_iteration_owner_assignment_permission(db, iteration_id, current_user)
+    else:
+        ensure_iteration_management_permission(db, iteration_id, current_user)
+    if target_project_ids and changed_fields & {"project_id", "project_ids"}:
         _ensure_can_manage_projects(db, target_project_ids, current_user)
+    if "owner_id" in changed_fields:
+        ensure_iteration_owner_membership(db, payload.owner_id, target_project_ids or current_project_ids)
     return update_iteration(
         db,
         iteration_id,
@@ -77,8 +93,13 @@ def patch_iteration(
 
 
 @router.get("/{iteration_id}/detail")
-def get_iteration_detail_view(iteration_id: int, db: Session = Depends(get_db)):
+def get_iteration_detail_view(
+    iteration_id: int,
+    db: Session = Depends(get_db),
+    current_user: User | None = Depends(get_optional_current_user),
+):
     _ensure_delivery_iteration_operation(db, iteration_id)
+    _ensure_can_view_iteration(db, iteration_id, current_user)
     return get_iteration_detail(db, iteration_id)
 
 
@@ -180,7 +201,7 @@ def remove_iteration(
     current_user: User | None = Depends(get_optional_current_user),
 ):
     _ensure_delivery_iteration_operation(db, iteration_id)
-    _ensure_can_manage_iteration(db, iteration_id, current_user)
+    ensure_iteration_owner_assignment_permission(db, iteration_id, current_user)
     delete_iteration(db, iteration_id)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
@@ -198,16 +219,14 @@ def _ensure_can_manage_projects(db: Session, project_ids: list[int], current_use
 
 
 def _ensure_can_manage_iteration(db: Session, iteration_id: int, current_user: User | None) -> None:
-    project_ids = [
-        item.project_id
-        for item in db.query(IterationProject).filter(IterationProject.iteration_id == iteration_id).all()
-    ]
-    if not project_ids:
-        iteration = db.query(Iteration).filter(Iteration.id == iteration_id, Iteration.deleted == 0).first()
-        legacy_project_id = getattr(iteration, "project_id", None) if iteration else None
-        if legacy_project_id:
-            project_ids = [legacy_project_id]
-    _ensure_can_manage_projects(db, project_ids, current_user)
+    ensure_iteration_management_permission(db, iteration_id, current_user)
+
+
+def _ensure_can_view_iteration(db: Session, iteration_id: int, current_user: User | None) -> None:
+    project_ids = iteration_project_ids(db, iteration_id)
+    if current_user and project_ids and all(can_view_audit(db, project_id, current_user) for project_id in project_ids):
+        return
+    ensure_iteration_management_permission(db, iteration_id, current_user)
 
 
 def _ensure_delivery_iteration_operation(db: Session, iteration_id: int) -> None:
@@ -217,15 +236,7 @@ def _ensure_delivery_iteration_operation(db: Session, iteration_id: int) -> None
 
 
 def _ensure_can_view_iteration_audit(db: Session, iteration_id: int, current_user: User | None) -> None:
-    project_ids = [
-        item.project_id
-        for item in db.query(IterationProject).filter(IterationProject.iteration_id == iteration_id).all()
-    ]
-    if not project_ids:
-        iteration = db.query(Iteration).filter(Iteration.id == iteration_id, Iteration.deleted == 0).first()
-        legacy_project_id = getattr(iteration, "project_id", None) if iteration else None
-        if legacy_project_id:
-            project_ids = [legacy_project_id]
+    project_ids = iteration_project_ids(db, iteration_id)
     if not project_ids:
         ensure_audit_view_permission(db, None, current_user)
     for project_id in project_ids:

@@ -77,7 +77,7 @@ const workflowSubmitBlock = source.slice(
 
 assert.match(
   source,
-  /function isUnfinishedProjectIterationBlocker\(error\) \{[\s\S]*?props\.objectType === 'project'[\s\S]*?unfinished iteration/,
+  /function isUnfinishedProjectIterationBlocker\(error\) \{[\s\S]*?props\.objectType === 'project'[\s\S]*?PROJECT_HAS_UNFINISHED_ITEMS/,
   'Project-close iteration blockers must be recognized before generic action feedback'
 )
 assert.match(

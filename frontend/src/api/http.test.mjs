@@ -13,5 +13,8 @@ assert.match(source, /ElMessage\.warning\(\{[\s\S]*?onClose: resolve/)
 assert.match(source, /router\.resolve\(location\)\.href/)
 assert.match(source, /window\.location\.replace\(/)
 assert.doesNotMatch(source, /navigate: \(location\) => router\.replace\(location\)/)
+assert.match(source, /detail\.message/)
+assert.match(source, /error\.apiMessage/)
+assert.match(source, /error\.apiErrorCode/)
 
 console.log('http interceptor tests passed')

@@ -412,7 +412,7 @@ async function submitActiveAction() {
 }
 
 function isUnfinishedProjectIterationBlocker(error) {
-  return props.objectType === 'project' && error?.response?.data?.detail?.includes('unfinished iteration')
+  return props.objectType === 'project' && error?.response?.data?.detail?.code === 'PROJECT_HAS_UNFINISHED_ITEMS'
 }
 
 async function submitAction(action) {

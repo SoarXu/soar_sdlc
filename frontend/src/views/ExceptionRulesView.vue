@@ -82,6 +82,7 @@ import { useRouter } from 'vue-router'
 
 import { createExceptionRule, deleteExceptionRule, fetchExceptionRules, updateExceptionRule } from '../api/exceptionRules'
 import { fetchProjects } from '../api/projects'
+import { actionErrorMessage } from '../utils/permissions'
 
 const router = useRouter()
 const loading = ref(false)
@@ -125,7 +126,7 @@ async function loadData() {
     rules.value = ruleResponse.data || []
     projects.value = projectResponse.data || []
   } catch (error) {
-    ElMessage.error(error.response?.data?.detail || '加载异常规则失败')
+    ElMessage.error(actionErrorMessage(error))
   } finally {
     loading.value = false
   }
@@ -157,7 +158,7 @@ async function saveRow(row) {
     ElMessage.success('异常规则已保存')
     await loadData()
   } catch (error) {
-    ElMessage.error(error.response?.data?.detail || '保存失败')
+    ElMessage.error(actionErrorMessage(error))
   } finally {
     savingId.value = null
   }
@@ -171,7 +172,7 @@ async function submitCreate() {
     ElMessage.success('覆盖规则已创建')
     await loadData()
   } catch (error) {
-    ElMessage.error(error.response?.data?.detail || '创建失败')
+    ElMessage.error(actionErrorMessage(error))
   } finally {
     creating.value = false
   }
@@ -183,7 +184,7 @@ async function removeRow(row) {
     ElMessage.success('异常规则已删除')
     await loadData()
   } catch (error) {
-    ElMessage.error(error.response?.data?.detail || '删除失败')
+    ElMessage.error(actionErrorMessage(error))
   }
 }
 

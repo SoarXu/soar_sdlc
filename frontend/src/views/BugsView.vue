@@ -52,6 +52,7 @@
         <el-form-item label="Bug 标题" required><el-input v-model="form.title" /></el-form-item>
         <div class="form-grid">
           <el-form-item label="项目" required><el-select v-model="form.project_id" filterable placeholder="请选择项目"><el-option v-for="project in projects" :key="project.id" :label="project.name" :value="project.id" /></el-select></el-form-item>
+          <el-form-item label="业务组件"><BusinessComponentSelect v-model="form.primary_component_id" :project-id="form.project_id" /></el-form-item>
           <el-form-item label="需求"><el-select v-model="form.requirement_id" clearable filterable placeholder="请选择需求"><el-option v-for="requirement in requirements" :key="requirement.id" :label="requirement.title" :value="requirement.id" /></el-select></el-form-item>
           <el-form-item label="任务"><el-select v-model="form.task_id" clearable filterable placeholder="请选择任务"><el-option v-for="task in tasks" :key="task.id" :label="task.title" :value="task.id" /></el-select></el-form-item>
           <el-form-item label="来源用例"><el-select v-model="form.test_case_id" clearable filterable placeholder="请选择用例"><el-option v-for="item in testCases" :key="item.id" :label="item.title" :value="item.id" /></el-select></el-form-item>
@@ -94,6 +95,7 @@ import RichTextPasteEditor from '../components/RichTextPasteEditor.vue'
 import WorkflowActionButtons from '../components/WorkflowActionButtons.vue'
 import BatchAssignmentBar from '../components/BatchAssignmentBar.vue'
 import BugEditDialog from '../components/work-items/BugEditDialog.vue'
+import BusinessComponentSelect from '../components/work-items/BusinessComponentSelect.vue'
 import WatchToggleButton from '../components/WatchToggleButton.vue'
 import { showActionError } from '../utils/actionFeedback'
 import { labelById, userLabel } from '../utils/referenceLabels'
@@ -129,7 +131,7 @@ const priorityLevelOptions = [
   { label: '④ 低', value: '4' },
   { label: '⑤ 最低', value: '5' }
 ]
-const form = reactive({ project_id: null, iteration_id: null, requirement_id: null, task_id: null, test_case_id: null, test_run_id: null, title: '', severity: '3', priority: '3', owner_id: null, reporter_id: null, reproduce_steps: '', expected_result: '', actual_result: '' })
+const form = reactive({ project_id: null, primary_component_id: null, iteration_id: null, requirement_id: null, task_id: null, test_case_id: null, test_run_id: null, title: '', severity: '3', priority: '3', owner_id: null, reporter_id: null, reproduce_steps: '', expected_result: '', actual_result: '' })
 const currentUser = computed(() => currentUserFromStorage(users.value))
 const canCreateAnyBug = computed(() => projects.value.some((project) => canCreateWorkItem(project, currentUser.value, membersForProject(project.id))))
 const editableIterationOptions = computed(() => bugIterationOptions(iterations.value, projects.value, form.project_id))
@@ -161,7 +163,7 @@ function canDeleteBugRow(row) {
   const project = projectForBug(row)
   return canDeleteWorkItem(project, currentUser.value, membersForProject(project?.id))
 }
-function resetForm() { Object.assign(form, { project_id: null, iteration_id: null, requirement_id: null, task_id: null, test_case_id: null, test_run_id: null, title: '', severity: '3', priority: '3', owner_id: null, reporter_id: null, reproduce_steps: '', expected_result: '', actual_result: '' }) }
+function resetForm() { Object.assign(form, { project_id: null, primary_component_id: null, iteration_id: null, requirement_id: null, task_id: null, test_case_id: null, test_run_id: null, title: '', severity: '3', priority: '3', owner_id: null, reporter_id: null, reproduce_steps: '', expected_result: '', actual_result: '' }) }
 function openCreate() { editingId.value = null; resetForm(); dialogVisible.value = true }
 function openEdit(row) { editingId.value = row.id; editDialogVisible.value = true }
 function handleWorkflowCommand(row, { commandType }) {

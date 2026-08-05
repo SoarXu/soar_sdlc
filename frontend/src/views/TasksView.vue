@@ -64,6 +64,7 @@
               <el-option v-for="project in projects" :key="project.id" :label="project.name" :value="project.id" />
             </el-select>
           </el-form-item>
+          <el-form-item label="业务组件"><BusinessComponentSelect v-model="form.primary_component_id" :project-id="form.project_id" /></el-form-item>
           <el-form-item label="来源项目">
             <el-select v-model="form.source_project_id" clearable filterable placeholder="请选择来源项目" @change="onSourceProjectChange">
               <el-option v-for="project in projects" :key="project.id" :label="project.name" :value="project.id" />
@@ -109,6 +110,7 @@ import { fetchWorkflowTransitionsBatch } from '../api/workflowRuntime'
 import WorkflowActionButtons from '../components/WorkflowActionButtons.vue'
 import BatchAssignmentBar from '../components/BatchAssignmentBar.vue'
 import TaskEditDialog from '../components/work-items/TaskEditDialog.vue'
+import BusinessComponentSelect from '../components/work-items/BusinessComponentSelect.vue'
 import WatchToggleButton from '../components/WatchToggleButton.vue'
 import { showActionError } from '../utils/actionFeedback'
 import { canCreateWorkItem, canDeleteWorkItem, currentUserFromStorage } from '../utils/permissions'
@@ -148,7 +150,7 @@ const workflowOperationWidth = computed(() => workflowActionColumnWidth(
   pagedTasks.value.map((row) => workflowTransitionsFor(row)),
   { minWidth: 180, extraWidth: 90 }
 ))
-const form = reactive({ project_id: null, source_project_id: null, requirement_id: null, title: '', task_type: 'standalone_operation', priority: 'medium', owner_id: null, due_date: null, description: '' })
+const form = reactive({ project_id: null, primary_component_id: null, source_project_id: null, requirement_id: null, title: '', task_type: 'standalone_operation', priority: 'medium', owner_id: null, due_date: null, description: '' })
 const ownerManuallySet = ref(false)
 const availableRequirements = computed(() => {
   if (!form.project_id) return requirements.value
@@ -182,7 +184,7 @@ function canDeleteTaskRow(row) {
   const project = projectForTask(row)
   return !isTaskProjectClosed(row) && canDeleteWorkItem(project, currentUser.value, membersForProject(project?.id))
 }
-function resetForm() { Object.assign(form, { project_id: null, source_project_id: null, requirement_id: null, title: '', task_type: 'standalone_operation', priority: 'medium', owner_id: null, due_date: null, description: '' }); ownerManuallySet.value = false }
+function resetForm() { Object.assign(form, { project_id: null, primary_component_id: null, source_project_id: null, requirement_id: null, title: '', task_type: 'standalone_operation', priority: 'medium', owner_id: null, due_date: null, description: '' }); ownerManuallySet.value = false }
 function openCreate() { editingId.value = null; resetForm(); dialogVisible.value = true }
 function openEdit(row) {
   editingId.value = row.id

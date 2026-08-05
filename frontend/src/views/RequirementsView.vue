@@ -67,6 +67,7 @@
               <el-option v-for="project in projects" :key="project.id" :label="project.name" :value="project.id" />
             </el-select>
           </el-form-item>
+          <el-form-item label="业务组件"><BusinessComponentSelect v-model="form.primary_component_id" :project-id="form.project_id" /></el-form-item>
           <el-form-item label="来源项目">
             <el-select v-model="form.source_project_id" clearable filterable placeholder="请选择来源项目" @change="onSourceProjectChange">
               <el-option v-for="project in projects" :key="project.id" :label="project.name" :value="project.id" />
@@ -202,6 +203,7 @@ import WatchToggleButton from '../components/WatchToggleButton.vue'
 import WorkflowActionButtons from '../components/WorkflowActionButtons.vue'
 import BatchAssignmentBar from '../components/BatchAssignmentBar.vue'
 import RequirementEditDialog from '../components/work-items/RequirementEditDialog.vue'
+import BusinessComponentSelect from '../components/work-items/BusinessComponentSelect.vue'
 import { showActionError } from '../utils/actionFeedback'
 import { currentUserId } from '../utils/currentUser'
 import { loadCloseReasonMap } from '../utils/closeReasonTooltip'
@@ -245,7 +247,7 @@ const workflowOperationWidth = computed(() => workflowActionColumnWidth(
   pagedRequirements.value.map((row) => workflowTransitionsFor(row)),
   { minWidth: 220, extraWidth: 150 }
 ))
-const form = reactive({ project_id: null, source_project_id: null, iteration_id: null, title: '', requirement_type: '功能', priority: '3', owner_id: null, proposer_id: null, description: '', acceptance_criteria: '' })
+const form = reactive({ project_id: null, primary_component_id: null, source_project_id: null, iteration_id: null, title: '', requirement_type: '功能', priority: '3', owner_id: null, proposer_id: null, description: '', acceptance_criteria: '' })
 const ownerManuallySet = ref(false)
 const generateForm = reactive({ title: '', task_type: 'requirement_implementation', description: '' })
 const importFile = ref(null)
@@ -300,7 +302,7 @@ function canDeleteRequirement(row) {
   const project = projectForRequirement(row)
   return !isRequirementProjectClosed(row) && canDeleteWorkItem(project, currentUser.value, membersForProject(project?.id))
 }
-function resetForm() { Object.assign(form, { project_id: null, source_project_id: null, iteration_id: null, title: '', requirement_type: '功能', priority: '3', owner_id: null, proposer_id: currentUserId(users.value), description: '', acceptance_criteria: '' }); ownerManuallySet.value = false }
+function resetForm() { Object.assign(form, { project_id: null, primary_component_id: null, source_project_id: null, iteration_id: null, title: '', requirement_type: '功能', priority: '3', owner_id: null, proposer_id: currentUserId(users.value), description: '', acceptance_criteria: '' }); ownerManuallySet.value = false }
 function openCreate() { editingId.value = null; resetForm(); dialogVisible.value = true }
 function onSourceProjectChange() {}
 function onOwnerChange() { ownerManuallySet.value = true }

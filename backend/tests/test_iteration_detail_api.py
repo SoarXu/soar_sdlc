@@ -576,6 +576,68 @@ def test_iteration_crud_persists_to_database(client: TestClient):
     assert deleted.status_code == 204
 
 
+def test_iteration_create_and_project_scope_update_reject_terminal_project(client: TestClient):
+    active_project_id = _create_project(client, "Active iteration project")
+    closed_project_id = _create_project(client, "Closed iteration project")
+    iteration_id = _create_iteration(client, [active_project_id])
+
+    db = SessionLocal()
+    try:
+        project = db.query(Project).filter(Project.id == closed_project_id).one()
+        terminal_state = (
+            db.query(WorkflowState)
+            .filter(
+                WorkflowState.definition_id == project.workflow_definition_id,
+                WorkflowState.category == "terminal",
+            )
+            .first()
+        )
+        assert terminal_state is not None
+        project.current_state_id = terminal_state.id
+        db.commit()
+    finally:
+        db.close()
+
+    created = client.post(
+        "/api/v1/iterations",
+        json={"project_ids": [closed_project_id], "name": "Closed project iteration"},
+    )
+    updated = client.patch(
+        f"/api/v1/iterations/{iteration_id}",
+        json={"project_ids": [closed_project_id]},
+    )
+
+    assert created.status_code == 409
+    assert updated.status_code == 409
+    assert client.get(f"/api/v1/iterations/{iteration_id}/detail").json()["iteration"]["project_ids"] == [active_project_id]
+
+
+def test_auto_start_due_iteration_skips_closed_project(client: TestClient):
+    project_id = _create_project(client, "Auto start closed project")
+    iteration_id = _create_iteration(client, [project_id], "Blocked auto start", status="planning")
+    assert client.patch(f"/api/v1/iterations/{iteration_id}", json={"start_date": "2026-06-01"}).status_code == 200
+
+    db = SessionLocal()
+    try:
+        project = db.query(Project).filter(Project.id == project_id).one()
+        terminal_state = (
+            db.query(WorkflowState)
+            .filter(
+                WorkflowState.definition_id == project.workflow_definition_id,
+                WorkflowState.category == "terminal",
+            )
+            .first()
+        )
+        assert terminal_state is not None
+        project.current_state_id = terminal_state.id
+        db.commit()
+    finally:
+        db.close()
+
+    assert run_auto_start_due_iterations() == 0
+    assert client.get(f"/api/v1/iterations/{iteration_id}/detail").json()["iteration"]["state_category"] == "start"
+
+
 def test_iteration_crud_serializes_requirement_pool_identity(client: TestClient):
     project_id = _create_project(client)
 

@@ -80,7 +80,7 @@
       <template v-else-if="activeTab === 'iterations'">
         <div class="project-tab-toolbar">
           <el-input v-model="projectListFilters.iterations.keyword" clearable placeholder="搜索迭代名称" class="project-tab-search" @keyup.enter="resetProjectListSearch('iterations')" @clear="resetProjectListSearch('iterations')" />
-          <el-button v-if="canManageCurrentProject" type="primary" @click="openIterationCreate">新增迭代</el-button>
+          <el-button v-if="canManageCurrentProject && !projectClosed" type="primary" @click="openIterationCreate">新增迭代</el-button>
         </div>
         <el-table :data="pagedProjectIterations" stripe width="100%">
           <el-table-column prop="id" label="ID" width="80" />

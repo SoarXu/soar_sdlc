@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 
-const projectDetail = await readFile(new URL('./ProjectDetailView.vue', import.meta.url), 'utf8')
-const requirements = await readFile(new URL('./RequirementsView.vue', import.meta.url), 'utf8')
-const requirementDetail = await readFile(new URL('./RequirementDetailView.vue', import.meta.url), 'utf8')
+const projectDetail = (await readFile(new URL('./ProjectDetailView.vue', import.meta.url), 'utf8')).replace(/\r\n/g, '\n')
+const requirements = (await readFile(new URL('./RequirementsView.vue', import.meta.url), 'utf8')).replace(/\r\n/g, '\n')
+const requirementDetail = (await readFile(new URL('./RequirementDetailView.vue', import.meta.url), 'utf8')).replace(/\r\n/g, '\n')
 
 for (const source of [projectDetail, requirements, requirementDetail]) {
   assert.match(source, /requirementIterationOptions/)

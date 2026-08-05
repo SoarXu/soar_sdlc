@@ -12,8 +12,11 @@
       <el-table-column prop="name" label="组件" min-width="180" />
       <el-table-column label="来源项目" min-width="180"><template #default="{ row }">{{ row.source_project_name_snapshot || '-' }}</template></el-table-column>
       <el-table-column label="成员" min-width="240"><template #default="{ row }">{{ memberLabel(row.members) }}</template></el-table-column>
-      <el-table-column label="工作流方案" width="140"><template #default="{ row }">{{ row.workflow_scheme_id || '项目默认' }}</template></el-table-column>
+      <el-table-column label="工作流方案" min-width="180"><template #default="{ row }">{{ workflowSchemeLabel(row.workflow_scheme_id) }}</template></el-table-column>
       <el-table-column label="状态" width="100"><template #default="{ row }"><el-tag :type="row.enabled ? 'success' : 'info'">{{ row.enabled ? '启用' : '停用' }}</el-tag></template></el-table-column>
+      <el-table-column v-if="!projectClosed" label="操作" fixed="right" width="88">
+        <template #default="{ row }"><el-button link type="primary" @click="openEditDialog(row)">编辑</el-button></template>
+      </el-table-column>
     </el-table>
 
     <el-empty v-if="!loading && !components.length" description="暂无业务组件" />
@@ -33,6 +36,37 @@
         <el-button type="primary" :loading="saving" @click="submit">创建</el-button>
       </template>
     </el-dialog>
+
+    <el-dialog v-model="editDialogVisible" title="编辑业务组件" width="680px" @closed="resetEditForm">
+      <el-form label-width="100px">
+        <el-form-item label="组件名称" required><el-input v-model="editForm.name" /></el-form-item>
+        <el-form-item label="说明"><el-input v-model="editForm.description" type="textarea" :rows="3" /></el-form-item>
+        <el-form-item label="工作流方案">
+          <el-select v-model="editForm.workflow_scheme_id" clearable filterable class="form-select" placeholder="请选择工作流方案">
+            <el-option v-for="scheme in enabledWorkflowSchemes" :key="scheme.id" :label="scheme.name" :value="scheme.id" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="状态"><el-switch v-model="editForm.enabled" active-text="启用" inactive-text="停用" /></el-form-item>
+        <el-form-item label="组件成员">
+          <div class="component-members-editor">
+            <div v-for="(member, index) in editForm.members" :key="`${member.user_id}-${index}`" class="component-member-row">
+              <el-select v-model="member.user_id" filterable placeholder="选择成员">
+                <el-option v-for="user in projectUsers" :key="user.id" :label="user.full_name || user.username" :value="user.id" />
+              </el-select>
+              <el-select v-model="member.component_role" placeholder="组件角色">
+                <el-option v-for="role in componentMemberRoles" :key="role.value" :label="role.label" :value="role.value" />
+              </el-select>
+              <el-button link type="danger" @click="removeEditMember(index)">删除</el-button>
+            </div>
+            <el-button link type="primary" @click="addEditMember">新增成员</el-button>
+          </div>
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="editDialogVisible = false">取消</el-button>
+        <el-button type="primary" :loading="saving" @click="saveComponent">保存</el-button>
+      </template>
+    </el-dialog>
   </section>
 </template>
 
@@ -40,22 +74,38 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { createBusinessComponentFromProject, fetchBusinessComponents } from '../api/businessComponents'
-import { fetchProject, fetchProjects } from '../api/projects'
+import { createBusinessComponentFromProject, fetchBusinessComponents, saveBusinessComponentMembers, updateBusinessComponent } from '../api/businessComponents'
+import { fetchProject, fetchProjectMembers, fetchProjects } from '../api/projects'
 import { fetchUsers } from '../api/users'
+import { fetchAssigneeRuleConfigs } from '../api/assigneeRuleConfigs'
 
 const route = useRoute()
 const projectId = computed(() => Number(route.params.id))
 const loading = ref(false)
 const saving = ref(false)
 const dialogVisible = ref(false)
+const editDialogVisible = ref(false)
 const project = ref({})
 const projects = ref([])
 const components = ref([])
 const users = ref([])
+const projectMembers = ref([])
+const workflowSchemes = ref([])
 const form = reactive({ source_project_id: null, name: '', description: '' })
+const editForm = reactive({ id: null, name: '', description: '', workflow_scheme_id: null, enabled: true, members: [] })
 const projectClosed = computed(() => project.value.state_category === 'terminal')
 const closedProjects = computed(() => projects.value.filter((item) => item.id !== projectId.value && item.state_category === 'terminal'))
+const enabledWorkflowSchemes = computed(() => workflowSchemes.value.filter((item) => item.lifecycle_status === 'enabled'))
+const projectUsers = computed(() => {
+  const memberIds = new Set(projectMembers.value.map((item) => item.user_id))
+  return users.value.filter((item) => memberIds.has(item.id))
+})
+const componentMemberRoles = [
+  { label: '负责人', value: 'owner' },
+  { label: '处理人', value: 'handler' },
+  { label: '评审人', value: 'reviewer' },
+  { label: '审批人', value: 'approver' }
+]
 
 function resetForm() {
   Object.assign(form, { source_project_id: null, name: '', description: '' })
@@ -64,6 +114,35 @@ function resetForm() {
 function syncName(sourceProjectId) {
   const source = closedProjects.value.find((item) => item.id === sourceProjectId)
   if (source && !form.name) form.name = source.name
+}
+
+function workflowSchemeLabel(schemeId) {
+  if (!schemeId) return '项目默认'
+  return workflowSchemes.value.find((item) => item.id === schemeId)?.name || '工作流方案不可用'
+}
+
+function resetEditForm() {
+  Object.assign(editForm, { id: null, name: '', description: '', workflow_scheme_id: null, enabled: true, members: [] })
+}
+
+function openEditDialog(component) {
+  Object.assign(editForm, {
+    id: component.id,
+    name: component.name,
+    description: component.description || '',
+    workflow_scheme_id: component.workflow_scheme_id || null,
+    enabled: component.enabled,
+    members: (component.members || []).map((member) => ({ user_id: member.user_id, component_role: member.component_role }))
+  })
+  editDialogVisible.value = true
+}
+
+function addEditMember() {
+  editForm.members.push({ user_id: null, component_role: 'handler' })
+}
+
+function removeEditMember(index) {
+  editForm.members.splice(index, 1)
 }
 
 function memberLabel(members) {
@@ -77,18 +156,45 @@ function memberLabel(members) {
 async function loadData() {
   loading.value = true
   try {
-    const [projectRes, projectsRes, componentsRes, usersRes] = await Promise.all([
+    const [projectRes, projectsRes, componentsRes, usersRes, membersRes, schemesRes] = await Promise.all([
       fetchProject(projectId.value),
       fetchProjects(),
       fetchBusinessComponents(projectId.value),
-      fetchUsers()
+      fetchUsers(),
+      fetchProjectMembers(projectId.value),
+      fetchAssigneeRuleConfigs()
     ])
     project.value = projectRes.data
     projects.value = projectsRes.data
     components.value = componentsRes.data
     users.value = usersRes.data
+    projectMembers.value = membersRes.data
+    workflowSchemes.value = schemesRes.data
   } finally {
     loading.value = false
+  }
+}
+
+async function saveComponent() {
+  if (!editForm.name.trim()) return ElMessage.warning('请填写组件名称')
+  if (editForm.members.some((member) => !member.user_id)) return ElMessage.warning('请选择组件成员')
+  if (new Set(editForm.members.map((member) => member.user_id)).size !== editForm.members.length) return ElMessage.warning('组件成员不可重复')
+  saving.value = true
+  try {
+    await updateBusinessComponent(projectId.value, editForm.id, {
+      name: editForm.name.trim(),
+      description: editForm.description || null,
+      workflow_scheme_id: editForm.workflow_scheme_id,
+      enabled: editForm.enabled
+    })
+    await saveBusinessComponentMembers(projectId.value, editForm.id, editForm.members)
+    ElMessage.success('业务组件已保存')
+    editDialogVisible.value = false
+    await loadData()
+  } catch (error) {
+    ElMessage.error(error?.response?.data?.detail || '保存业务组件失败')
+  } finally {
+    saving.value = false
   }
 }
 
@@ -109,3 +215,18 @@ async function submit() {
 
 onMounted(loadData)
 </script>
+
+<style scoped>
+.component-members-editor {
+  display: grid;
+  gap: 8px;
+  width: 100%;
+}
+
+.component-member-row {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) minmax(140px, 0.8fr) auto;
+  align-items: center;
+  gap: 8px;
+}
+</style>

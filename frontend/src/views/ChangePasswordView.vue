@@ -27,6 +27,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 
 import { useAuthStore } from '../stores/auth'
+import { actionErrorMessage } from '../utils/permissions'
 
 const route = useRoute()
 const router = useRouter()
@@ -48,7 +49,7 @@ async function submit() {
     ElMessage.success('密码已修改')
     router.push(redirectPath())
   } catch (error) {
-    ElMessage.error(error?.response?.data?.detail || '修改密码失败')
+    ElMessage.error(actionErrorMessage(error))
   } finally {
     loading.value = false
   }

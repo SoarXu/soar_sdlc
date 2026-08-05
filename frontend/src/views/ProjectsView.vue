@@ -253,7 +253,7 @@ function statusActionLabel(value) {
 }
 
 function isUnfinishedIterationBlocker(error) {
-  return error.response?.data?.detail?.includes('unfinished iteration')
+  return error.response?.data?.detail?.code === 'PROJECT_HAS_UNFINISHED_ITEMS'
 }
 
 function workflowSchemeLabel(configId) {

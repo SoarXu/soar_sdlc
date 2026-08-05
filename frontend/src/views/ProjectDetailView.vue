@@ -699,7 +699,7 @@ import { loadCloseReasonMap } from '../utils/closeReasonTooltip'
 import { labelById, userLabel } from '../utils/referenceLabels'
 import { formatAuditValue } from '../utils/auditHistoryLabels'
 import { bugIterationOptions, includeSelectedIterationOption } from '../utils/bugIterations'
-import { canCreateWorkItem, canDeleteWorkItem, canExecuteWorkItem, canManageProject, canManageTestCase, currentUserFromStorage } from '../utils/permissions'
+import { actionErrorMessage, canCreateWorkItem, canDeleteWorkItem, canExecuteWorkItem, canManageProject, canManageTestCase, currentUserFromStorage } from '../utils/permissions'
 import { deriveTaskBranch, TASK_BRANCH_OPTIONS, taskBranchLabel } from '../utils/taskBranchRules'
 import { DEFAULT_BUG_TYPE_KEY } from '../utils/bugTypeOptions'
 import { useBugTypes } from '../utils/useBugTypes'
@@ -1110,7 +1110,7 @@ async function loadProjectWorkflowTransitions(objectType, rows) {
     }
   }
 }
-function apiErrorMessage(error, fallback) { return error?.response?.data?.detail || fallback }
+function apiErrorMessage(error) { return actionErrorMessage(error) }
 function showActionError(error, fallback) { ElMessageBox.alert(apiErrorMessage(error, fallback), '提示', { type: 'warning' }) }
 function isHistoryExpanded(key) {
   return expandedHistoryKeys.value.has(key)

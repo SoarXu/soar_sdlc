@@ -26,9 +26,17 @@ const handleSessionExpired = createSessionExpirationHandler({
   getCurrentPath: () => router.currentRoute.value.fullPath
 })
 
+function attachApiErrorMessage(error) {
+  const detail = error?.response?.data?.detail
+  if (!detail || typeof detail !== 'object' || Array.isArray(detail) || !detail.message) return
+  error.apiMessage = detail.message
+  error.apiErrorCode = detail.code
+}
+
 http.interceptors.response.use(
   (response) => response,
   async (error) => {
+    attachApiErrorMessage(error)
     if (error?.response?.status === 401) {
       const sessionExpired = await handleSessionExpired(error?.config?.url)
       if (sessionExpired) error.sessionExpired = true

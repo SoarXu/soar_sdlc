@@ -82,22 +82,17 @@ const members = [
 }
 
 {
-  assert.equal(actionErrorMessage({ response: { data: { detail: '无权操作' } } }, '保存失败'), '无权操作')
   assert.equal(
-    actionErrorMessage({ response: { data: { detail: '新当前处理人不是对象所属项目成员' } } }, '认领失败'),
-    '你不是该项目成员，无法认领。请联系项目负责人加入项目。'
+    actionErrorMessage({ response: { data: { detail: { code: 'PROJECT_ACCESS_DENIED', message: '无权操作' } } } }, '保存失败'),
+    '无权操作'
   )
   assert.equal(
-    actionErrorMessage({ response: { data: { detail: '处理人必须是对象所属项目成员' } } }, '认领失败'),
-    '你不是该项目成员，无法认领。请联系项目负责人加入项目。'
-  )
-  assert.equal(
-    actionErrorMessage({ response: { data: { detail: '处理人必须是对象所属项目成员' } } }, '指派失败'),
-    '当前处理人必须是该工作项所属项目成员，请先将该用户加入项目成员后再指派。'
+    actionErrorMessage({ apiMessage: '后端统一消息' }, '认领失败'),
+    '后端统一消息'
   )
   assert.equal(
     actionErrorMessage({ response: { data: { detail: 'Delegate reason is required' } } }, '激活失败'),
-    '请填写代处理原因'
+    ''
   )
   assert.equal(
     actionErrorMessage({
@@ -112,9 +107,12 @@ const members = [
     }, '保存失败'),
     '模板来源不完整'
   )
-  assert.equal(isDelegateReasonRequiredError({ response: { data: { detail: 'Delegate reason is required' } } }), true)
+  assert.equal(
+    isDelegateReasonRequiredError({ response: { data: { detail: { code: 'DELEGATE_REASON_REQUIRED', message: '请填写代处理原因' } } } }),
+    true
+  )
   assert.equal(isDelegateReasonRequiredError({ response: { data: { detail: '其他错误' } } }), false)
-  assert.equal(actionErrorMessage({}, '保存失败'), '保存失败')
+  assert.equal(actionErrorMessage({}, '保存失败'), '')
 }
 
 console.log('permissions tests passed')

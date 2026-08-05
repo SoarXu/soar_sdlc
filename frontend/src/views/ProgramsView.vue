@@ -678,7 +678,7 @@ async function changeProjectStatus(id, action, payload = {}) {
     await actions[action](id, payload)
     await loadData()
   } catch (error) {
-    ElMessage.error(error.response?.data?.detail || '项目状态更新失败')
+    ElMessage.error(actionErrorMessage(error))
     throw error
   }
 }

@@ -412,7 +412,7 @@ import RichTextPasteEditor from '../components/RichTextPasteEditor.vue'
 import WorkflowActionButtons from '../components/WorkflowActionButtons.vue'
 import { loadCloseReasonMap } from '../utils/closeReasonTooltip'
 import { labelById, userLabel } from '../utils/referenceLabels'
-import { canCreateWorkItem, canDeleteWorkItem, canExecuteWorkItem, canManageProject, canManageTestCase, currentUserFromStorage } from '../utils/permissions'
+import { actionErrorMessage, canCreateWorkItem, canDeleteWorkItem, canExecuteWorkItem, canManageProject, canManageTestCase, currentUserFromStorage } from '../utils/permissions'
 import { deriveTaskBranch, TASK_BRANCH_OPTIONS, taskBranchLabel } from '../utils/taskBranchRules'
 import { DEFAULT_BUG_TYPE_KEY } from '../utils/bugTypeOptions'
 import { useBugTypes } from '../utils/useBugTypes'
@@ -566,7 +566,7 @@ function setActiveTab(key) {
   activeTab.value = key
   router.replace({ name: 'iteration-detail', params: { id: iterationId.value }, query: { ...route.query, tab: key } })
 }
-function apiErrorMessage(error, fallback) { return error?.response?.data?.detail || fallback }
+function apiErrorMessage(error) { return actionErrorMessage(error) }
 function showActionError(error, fallback) { ElMessageBox.alert(apiErrorMessage(error, fallback), '提示', { type: 'warning' }) }
 function goProjectTab(projectId, tab) { router.push({ name: 'project-detail', params: { id: projectId }, query: { tab } }) }
 function iterationWorkflowTransitionKey(objectType, id) { return `${objectType}:${id}` }

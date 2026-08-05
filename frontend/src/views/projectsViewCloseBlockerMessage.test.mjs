@@ -9,7 +9,7 @@ const statusHandler = source.slice(
 
 assert.match(
   source,
-  /function isUnfinishedIterationBlocker\(error\) \{[\s\S]*?unfinished iteration/,
+  /function isUnfinishedIterationBlocker\(error\) \{[\s\S]*?PROJECT_HAS_UNFINISHED_ITEMS/,
   'Project close blocker detection must recognize the iteration blocker returned by the API'
 )
 

@@ -69,40 +69,14 @@ export function canManageTestCase(project, user, members = []) {
   )
 }
 
-export function actionErrorMessage(error, fallback = '操作失败') {
+export function actionErrorMessage(error) {
   const detail = error?.response?.data?.detail
-  if (Array.isArray(detail)) return detail.map((item) => item.msg || item.message || String(item)).join('；')
-  const message = detail && typeof detail === 'object' ? detail.message : detail
-  return friendlyErrorMessage(message || error?.message, fallback) || fallback
+  return error?.apiMessage || detail?.message || ''
 }
 
 export function isDelegateReasonRequiredError(error) {
-  const detail = error?.response?.data?.detail || error?.message
-  return String(detail || '') === 'Delegate reason is required' || String(detail || '') === '请填写代处理原因'
-}
-
-function friendlyErrorMessage(message, fallback = '') {
-  if (!message) return ''
-  const text = String(message)
-  if (text === 'Delegate reason is required') {
-    return '请填写代处理原因'
-  }
-  if ((text === '新当前处理人不是对象所属项目成员' || text === '处理人必须是对象所属项目成员') && fallback.includes('认领')) {
-    return '你不是该项目成员，无法认领。请联系项目负责人加入项目。'
-  }
-  if (text === '新当前处理人不是对象所属项目成员' || text === '处理人必须是对象所属项目成员') {
-    return '当前处理人必须是该工作项所属项目成员，请先将该用户加入项目成员后再指派。'
-  }
-  if (text === 'Work item already assigned') {
-    return '该工作项已被认领或指派，请刷新工作台后查看最新状态。'
-  }
-  if (text === 'Terminal work item cannot be assigned') {
-    return '该工作项已完成或已关闭，不能再认领或指派。'
-  }
-  if (text === 'No auto assignment target found') {
-    return '没有找到符合规则的自动分配对象，请手动选择项目成员进行指派。'
-  }
-  return text
+  const detail = error?.response?.data?.detail
+  return error?.apiErrorCode === 'DELEGATE_REASON_REQUIRED' || detail?.code === 'DELEGATE_REASON_REQUIRED'
 }
 
 function hasEnabledRole(user, roleKeys) {

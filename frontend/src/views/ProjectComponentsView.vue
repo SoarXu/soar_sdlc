@@ -78,6 +78,7 @@ import { createBusinessComponentFromProject, fetchBusinessComponents, saveBusine
 import { fetchProject, fetchProjectMembers, fetchProjects } from '../api/projects'
 import { fetchUsers } from '../api/users'
 import { fetchAssigneeRuleConfigs } from '../api/assigneeRuleConfigs'
+import { actionErrorMessage } from '../utils/permissions'
 
 const route = useRoute()
 const projectId = computed(() => Number(route.params.id))
@@ -192,7 +193,7 @@ async function saveComponent() {
     editDialogVisible.value = false
     await loadData()
   } catch (error) {
-    ElMessage.error(error?.response?.data?.detail || '保存业务组件失败')
+    ElMessage.error(actionErrorMessage(error))
   } finally {
     saving.value = false
   }
@@ -207,7 +208,7 @@ async function submit() {
     dialogVisible.value = false
     await loadData()
   } catch (error) {
-    ElMessage.error(error?.response?.data?.detail || '创建业务组件失败')
+    ElMessage.error(actionErrorMessage(error))
   } finally {
     saving.value = false
   }

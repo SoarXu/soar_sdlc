@@ -1650,7 +1650,10 @@ def test_scoped_workflow_does_not_fallback_to_system_action(client: TestClient):
     assert listed.status_code == 200
     assert listed.json() == []
     assert executed.status_code == 422
-    assert any(error["loc"][-1] == "transition_id" for error in executed.json()["detail"])
+    assert executed.json()["detail"] == {
+        "code": "REQUEST_VALIDATION_ERROR",
+        "message": "请求参数不符合要求",
+    }
 
 
 def test_runtime_owner_transfer_and_admin_change_handler_are_atomic_and_audited(client: TestClient):

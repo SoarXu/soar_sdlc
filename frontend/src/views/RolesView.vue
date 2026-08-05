@@ -148,6 +148,7 @@ import { useRouter } from 'vue-router'
 
 import { createRole, deleteRole, fetchRoles, updateRole } from '../api/roles'
 import { assignUserRoles, createUser, fetchUsers, resetUserPassword } from '../api/users'
+import { actionErrorMessage } from '../utils/permissions'
 
 const router = useRouter()
 const loading = ref(false)
@@ -217,7 +218,7 @@ async function submitUser() {
     passwordDialogVisible.value = true
     await loadData()
   } catch (error) {
-    ElMessage.error(error?.response?.data?.detail || '创建用户失败')
+    ElMessage.error(actionErrorMessage(error))
   } finally {
     saving.value = false
   }

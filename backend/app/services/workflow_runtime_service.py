@@ -1618,19 +1618,35 @@ def ensure_iteration_items_complete(db: Session, iteration_id: int) -> None:
     blockers["task"] = [item for item in tasks if not is_terminal_state(item)]
     bugs = db.query(Bug).filter(Bug.iteration_id == iteration_id, Bug.deleted == 0).with_for_update().all()
     blockers["bug"] = [item for item in bugs if not is_terminal_state(item)]
+    requirement_ids = [item.id for item in requirements]
+    if requirement_ids:
+        test_cases = (
+            db.query(TestCase)
+            .filter(TestCase.requirement_id.in_(requirement_ids), TestCase.deleted == 0)
+            .with_for_update()
+            .all()
+        )
+        blocking_test_cases = [item for item in test_cases if item.last_execute_result != "passed"]
+        if blocking_test_cases:
+            blockers["test_case"] = blocking_test_cases
     test_runs = db.query(TestRun).filter(TestRun.iteration_id == iteration_id, TestRun.deleted == 0).with_for_update().all()
     blockers["test_run"] = [item for item in test_runs if not _test_run_is_terminal(item)]
     if any(blockers.values()):
         items = []
         for object_type, rows in blockers.items():
             for item in rows:
+                test_case_status = (
+                    "未执行" if item.last_execute_time is None
+                    else "通过" if item.last_execute_result == "passed"
+                    else "未通过"
+                ) if object_type == "test_case" else None
                 items.append(
                     {
                         "object_type": object_type,
                         "id": item.id,
                         "title": getattr(item, "title", None) or getattr(item, "name", None),
-                        "status_name": getattr(item, "status_name", None) or getattr(item, "status", None),
-                        "owner_id": getattr(item, "owner_id", None) or getattr(item, "test_owner_id", None),
+                        "status_name": test_case_status or getattr(item, "status_name", None) or getattr(item, "status", None),
+                        "owner_id": getattr(item, "owner_id", None) or getattr(item, "test_owner_id", None) or getattr(item, "default_tester_id", None),
                     }
                 )
         raise HTTPException(

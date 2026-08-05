@@ -13,6 +13,7 @@ from app.models.assignee_rule_config import AssigneeRuleConfig
 from app.models.bug import Bug
 from app.models.iteration import Iteration, IterationProject
 from app.models.notification import Notification
+from app.models.program import Program
 from app.models.project import Project
 from app.models.project_member import ProjectMember
 from app.models.relation import ObjectRelation
@@ -236,6 +237,8 @@ def _execute_transition(
                 "resolved_target_status": resolved_target_status,
             }
         )
+    if object_type == "iteration" and transition.action_key == "start":
+        _sync_iteration_start_hierarchy(db, item, request, actor)
     _apply_domain_payload(db, object_type, item, transition, request, actor, selected_values)
     _run_transition_validator(db, object_type, item, transition, resolved_target_state)
     automation_results = _run_transition_automations(
@@ -379,6 +382,114 @@ def _execute_transition(
         operation_log_id=operation.id,
         audit_trail=audit_trail,
     )
+
+
+def _sync_iteration_start_hierarchy(
+    db: Session,
+    iteration: Iteration,
+    request: WorkflowTransitionExecuteRequest,
+    actor: User | None,
+) -> None:
+    effective_time = _parse_effective_time(request.payload) or datetime.now()
+    project_ids = [
+        project_id
+        for project_id, in (
+            db.query(IterationProject.project_id)
+            .filter(IterationProject.iteration_id == iteration.id)
+            .order_by(IterationProject.project_id.asc())
+            .with_for_update()
+            .all()
+        )
+    ]
+    if not project_ids:
+        return
+
+    projects = (
+        db.query(Project)
+        .filter(Project.id.in_(project_ids), Project.deleted == 0)
+        .order_by(Project.id.asc())
+        .with_for_update()
+        .populate_existing()
+        .all()
+    )
+    if len(projects) != len(set(project_ids)):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Iteration has an unavailable linked project")
+
+    programs = _lock_iteration_program_ancestors(db, projects)
+    project_starts: list[tuple[Project, WorkflowTransition]] = []
+    for project in projects:
+        if is_terminal_state(project):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Cannot start iteration because a linked project is closed")
+        if project.current_state.category == "start":
+            transition = (
+                db.query(WorkflowTransition)
+                .filter(
+                    WorkflowTransition.definition_id == project.workflow_definition_id,
+                    WorkflowTransition.from_state_id == project.current_state_id,
+                    WorkflowTransition.action_key == "start",
+                    WorkflowTransition.enabled.is_(True),
+                )
+                .order_by(WorkflowTransition.sort_order.asc(), WorkflowTransition.id.asc())
+                .first()
+            )
+            if not transition:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Cannot start iteration because a linked project has no start transition",
+                )
+            project_starts.append((project, transition))
+
+    for program in programs:
+        if program.status == "closed":
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Cannot start iteration because a parent program is closed")
+
+    sync_payload = dict(request.payload or {})
+    sync_payload["effective_time"] = effective_time.isoformat()
+    for project, transition in project_starts:
+        _execute_transition(
+            db,
+            "project",
+            project,
+            WorkflowTransitionExecuteRequest(
+                transition_id=transition.id,
+                payload=sync_payload,
+                selected_values={
+                    "source": "iteration_start_sync",
+                    "source_iteration_id": iteration.id,
+                },
+            ),
+            actor,
+            commit=False,
+        )
+
+    for program in programs:
+        if not program.actual_start_date:
+            program.actual_start_date = effective_time.date()
+        if program.status != "active":
+            program.status = "active"
+
+
+def _lock_iteration_program_ancestors(db: Session, projects: list[Project]) -> list[Program]:
+    programs_by_id: dict[int, Program] = {}
+    pending_program_ids = sorted({project.program_id for project in projects if project.program_id is not None})
+    while pending_program_ids:
+        program_id = pending_program_ids.pop(0)
+        if program_id in programs_by_id:
+            continue
+        program = (
+            db.query(Program)
+            .filter(Program.id == program_id, Program.deleted == 0)
+            .with_for_update()
+            .populate_existing()
+            .first()
+        )
+        if not program:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Linked project has an unavailable program")
+        programs_by_id[program.id] = program
+        if program.parent_id is not None and program.parent_id not in programs_by_id:
+            pending_program_ids.append(program.parent_id)
+            pending_program_ids.sort()
+    return [programs_by_id[program_id] for program_id in sorted(programs_by_id)]
 
 
 def _get_item(db: Session, object_type: str, object_id: int):

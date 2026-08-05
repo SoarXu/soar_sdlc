@@ -1,3 +1,4 @@
+from datetime import date
 from uuid import uuid4
 from types import SimpleNamespace
 
@@ -10,6 +11,9 @@ from app.jobs.iteration_jobs import run_auto_start_due_iterations
 from app.models.requirement import Requirement
 from app.models.bug import Bug
 from app.models.iteration import Iteration
+from app.models.program import Program
+from app.models.project import Project
+from app.models.status_operation import StatusOperationLog
 from app.models.task import Task
 from app.models.work_item_iteration_history import WorkItemIterationHistory
 from app.models.workflow_definition import WorkflowState, WorkflowTransition
@@ -221,6 +225,205 @@ def _create_iteration(client: TestClient, project_ids: list[int], name: str | No
         )
         assert started.status_code == 200, started.text
     return iteration_id
+
+
+def _execute_iteration_action(client: TestClient, iteration_id: int, action_key: str, payload: dict) -> object:
+    actions = client.get(f"/api/v1/workflow-runtime/iteration/{iteration_id}/transitions")
+    assert actions.status_code == 200, actions.text
+    transition = next(item for item in actions.json() if item["action_key"] == action_key)
+    return client.post(
+        f"/api/v1/workflow-runtime/iteration/{iteration_id}/transition",
+        json={"transition_id": transition["transition_id"], "payload": payload},
+    )
+
+
+def _create_program_scoped_project(client: TestClient, parent_program_id: int | None = None) -> tuple[int, int]:
+    program = client.post(
+        "/api/v1/programs",
+        json={"name": f"Iteration hierarchy program-{uuid4().hex[:8]}", "parent_id": parent_program_id},
+    )
+    assert program.status_code == 200, program.text
+    project = client.post(
+        "/api/v1/projects",
+        json={"name": f"Iteration hierarchy project-{uuid4().hex[:8]}", "program_id": program.json()["id"]},
+    )
+    assert project.status_code == 200, project.text
+    return program.json()["id"], project.json()["id"]
+
+
+def test_iteration_start_activates_linked_project_and_program_ancestors(client: TestClient):
+    parent_program = client.post(
+        "/api/v1/programs",
+        json={"name": f"Iteration hierarchy root-{uuid4().hex[:8]}"},
+    )
+    assert parent_program.status_code == 200, parent_program.text
+    program_id, project_id = _create_program_scoped_project(client, parent_program.json()["id"])
+    iteration_id = _create_iteration(client, [project_id])
+
+    started = _execute_iteration_action(
+        client,
+        iteration_id,
+        "start",
+        {"effective_time": "2026-08-05T09:30:00"},
+    )
+
+    assert started.status_code == 200, started.text
+    project = client.get(f"/api/v1/projects/{project_id}").json()
+    assert project["state_category"] == "normal"
+    assert project["actual_start_date"] == "2026-08-05"
+    programs = {item["id"]: item for item in client.get("/api/v1/programs").json()}
+    for current_program_id in (program_id, parent_program.json()["id"]):
+        assert programs[current_program_id]["status"] == "active"
+        assert programs[current_program_id]["actual_start_date"] == "2026-08-05"
+
+    db = SessionLocal()
+    try:
+        project_start = (
+            db.query(StatusOperationLog)
+            .filter(
+                StatusOperationLog.object_type == "project",
+                StatusOperationLog.object_id == project_id,
+                StatusOperationLog.action == "start",
+            )
+            .one()
+        )
+        assert project_start.effective_time.date().isoformat() == "2026-08-05"
+        assert project_start.actor_id is not None
+        assert project_start.selected_values == {
+            "source": "iteration_start_sync",
+            "source_iteration_id": iteration_id,
+        }
+    finally:
+        db.close()
+
+
+def test_iteration_start_activates_every_linked_planning_project(client: TestClient):
+    parent_program = client.post(
+        "/api/v1/programs",
+        json={"name": f"Iteration multi-project root-{uuid4().hex[:8]}"},
+    )
+    assert parent_program.status_code == 200, parent_program.text
+    first_program_id, first_project_id = _create_program_scoped_project(client, parent_program.json()["id"])
+    second_program_id, second_project_id = _create_program_scoped_project(client, parent_program.json()["id"])
+    iteration_id = _create_iteration(client, [first_project_id, second_project_id])
+
+    started = _execute_iteration_action(
+        client,
+        iteration_id,
+        "start",
+        {"effective_time": "2026-08-05T09:30:00"},
+    )
+
+    assert started.status_code == 200, started.text
+    for project_id in (first_project_id, second_project_id):
+        project = client.get(f"/api/v1/projects/{project_id}").json()
+        assert project["state_category"] == "normal"
+        assert project["actual_start_date"] == "2026-08-05"
+    programs = {item["id"]: item for item in client.get("/api/v1/programs").json()}
+    for program_id in (first_program_id, second_program_id, parent_program.json()["id"]):
+        assert programs[program_id]["status"] == "active"
+        assert programs[program_id]["actual_start_date"] == "2026-08-05"
+
+
+def test_iteration_start_backfills_active_program_date_without_restarting_project(client: TestClient):
+    parent_program = client.post(
+        "/api/v1/programs",
+        json={"name": f"Iteration active program root-{uuid4().hex[:8]}"},
+    )
+    assert parent_program.status_code == 200, parent_program.text
+    program_id, project_id = _create_program_scoped_project(client, parent_program.json()["id"])
+    iteration_id = _create_iteration(client, [project_id])
+
+    db = SessionLocal()
+    try:
+        project = db.query(Project).filter(Project.id == project_id).one()
+        active_project_state = (
+            db.query(WorkflowState)
+            .filter(
+                WorkflowState.definition_id == project.workflow_definition_id,
+                WorkflowState.category == "normal",
+            )
+            .first()
+        )
+        assert active_project_state is not None
+        project.current_state_id = active_project_state.id
+        project.actual_start_date = date(2026, 8, 1)
+        active_program = db.query(Program).filter(Program.id == program_id).one()
+        active_program.status = "active"
+        active_program.actual_start_date = None
+        db.commit()
+    finally:
+        db.close()
+
+    started = _execute_iteration_action(
+        client,
+        iteration_id,
+        "start",
+        {"effective_time": "2026-08-05T09:30:00"},
+    )
+
+    assert started.status_code == 200, started.text
+    project = client.get(f"/api/v1/projects/{project_id}").json()
+    assert project["state_category"] == "normal"
+    assert project["actual_start_date"] == "2026-08-01"
+    programs = {item["id"]: item for item in client.get("/api/v1/programs").json()}
+    assert programs[program_id]["status"] == "active"
+    assert programs[program_id]["actual_start_date"] == "2026-08-05"
+
+
+@pytest.mark.parametrize("blocked_parent", ["project", "program"])
+def test_iteration_start_rejects_terminal_hierarchy_without_partial_changes(
+    client: TestClient,
+    blocked_parent: str,
+):
+    parent_program = client.post(
+        "/api/v1/programs",
+        json={"name": f"Iteration blocked hierarchy root-{uuid4().hex[:8]}"},
+    )
+    assert parent_program.status_code == 200, parent_program.text
+    program_id, project_id = _create_program_scoped_project(client, parent_program.json()["id"])
+    iteration_id = _create_iteration(client, [project_id])
+
+    db = SessionLocal()
+    try:
+        if blocked_parent == "project":
+            project = db.query(Project).filter(Project.id == project_id).one()
+            terminal_state = (
+                db.query(WorkflowState)
+                .filter(
+                    WorkflowState.definition_id == project.workflow_definition_id,
+                    WorkflowState.category == "terminal",
+                )
+                .first()
+            )
+            assert terminal_state is not None
+            project.current_state_id = terminal_state.id
+        else:
+            db.query(Program).filter(Program.id == parent_program.json()["id"]).update({"status": "closed"})
+        db.commit()
+    finally:
+        db.close()
+
+    rejected = _execute_iteration_action(
+        client,
+        iteration_id,
+        "start",
+        {"effective_time": "2026-08-05T09:30:00"},
+    )
+
+    assert rejected.status_code == 400
+    db = SessionLocal()
+    try:
+        iteration = db.query(Iteration).filter(Iteration.id == iteration_id).one()
+        assert iteration.current_state.category == "start"
+    finally:
+        db.close()
+    assert client.get(f"/api/v1/projects/{project_id}").json()["state_category"] == (
+        "terminal" if blocked_parent == "project" else "start"
+    )
+    programs = {item["id"]: item for item in client.get("/api/v1/programs").json()}
+    assert programs[program_id]["status"] == "planning"
+    assert programs[parent_program.json()["id"]]["status"] == ("closed" if blocked_parent == "program" else "planning")
 
 
 def _create_requirement(client: TestClient, project_id: int, title: str | None = None, owner_id: int | None = None) -> int:

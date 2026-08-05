@@ -29,7 +29,7 @@
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="关联项目" min-width="260">
+        <el-table-column label="关联项目与组件" min-width="300">
           <template #default="{ row }">
             <div class="rule-project-tags">
               <el-tag v-for="project in projectsForConfig(row.id).slice(0, 4)" :key="project.id" effect="plain">
@@ -38,7 +38,13 @@
               <el-tag v-if="projectsForConfig(row.id).length > 4" type="info" effect="plain">
                 +{{ projectsForConfig(row.id).length - 4 }}
               </el-tag>
-              <span v-if="!projectsForConfig(row.id).length" class="muted-text">未关联项目</span>
+              <el-tag v-for="link in componentLinksForConfig(row.id).slice(0, 4)" :key="`component-${link.componentId}`" type="info" effect="plain">
+                {{ link.projectName }} / {{ link.componentName }}
+              </el-tag>
+              <el-tag v-if="componentLinksForConfig(row.id).length > 4" type="info" effect="plain">
+                +{{ componentLinksForConfig(row.id).length - 4 }} 个组件
+              </el-tag>
+              <span v-if="!projectsForConfig(row.id).length && !componentLinksForConfig(row.id).length" class="muted-text">未关联项目或组件</span>
             </div>
           </template>
         </el-table-column>
@@ -254,6 +260,7 @@ import {
 import { fetchPrograms } from '../api/programs'
 import { fetchProjects, updateProject } from '../api/projects'
 import { fetchUsers } from '../api/users'
+import { fetchBusinessComponents } from '../api/businessComponents'
 import WorkflowDesigner from '../components/WorkflowDesigner.vue'
 import { showActionError } from '../utils/actionFeedback'
 import { canConfigureWorkflow, currentUserFromStorage } from '../utils/permissions'
@@ -270,6 +277,7 @@ const saving = ref(false)
 const configs = ref([])
 const templateSources = ref([])
 const projects = ref([])
+const componentLinksByConfig = ref({})
 const programs = ref([])
 const users = ref([])
 const editingId = ref(null)
@@ -388,6 +396,25 @@ async function loadData() {
     configs.value = configRes.data
     templateSources.value = templateSourceRes.data
     projects.value = projectRes.data
+    const componentResults = await Promise.all(projects.value.map(async (project) => {
+      try {
+        const { data } = await fetchBusinessComponents(project.id)
+        return data.map((component) => ({
+          configId: component.workflow_scheme_id,
+          componentId: component.id,
+          componentName: component.name,
+          projectName: project.name
+        }))
+      } catch {
+        return []
+      }
+    }))
+    componentLinksByConfig.value = componentResults.flat().reduce((result, link) => {
+      if (!link.configId) return result
+      if (!result[link.configId]) result[link.configId] = []
+      result[link.configId].push(link)
+      return result
+    }, {})
     programs.value = programRes.data
     users.value = userRes.data
     pruneTransferTargets()
@@ -514,6 +541,10 @@ async function updateProjectRule(project, configId, message) {
 function projectsForConfig(configId) {
   if (!configId) return []
   return projects.value.filter((item) => item.assignee_rule_config_id === configId)
+}
+
+function componentLinksForConfig(configId) {
+  return componentLinksByConfig.value[configId] || []
 }
 
 function programName(programId) {

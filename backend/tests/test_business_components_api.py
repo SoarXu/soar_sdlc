@@ -5,6 +5,7 @@ from fastapi.testclient import TestClient
 from app.core.security import create_access_token, get_password_hash
 from app.db.session import SessionLocal
 from app.models.project_member import ProjectMember
+from app.models.role import Role, UserRole
 from app.models.user import User
 from app.models.workflow_definition import WorkflowDefinition, WorkflowTransition
 from app.models.business_component import WorkflowMigrationLog
@@ -44,6 +45,7 @@ def _add_source_member(project_id: int, role: str = "developer") -> int:
         db.add(user)
         db.flush()
         db.add(ProjectMember(project_id=project_id, user_id=user.id, project_role=role))
+        _assign_existing_or_new_enabled_role(db, user.id, role)
         db.commit()
         return user.id
     finally:
@@ -62,10 +64,46 @@ def _add_project_user_with_token(project_id: int, role: str = "developer") -> tu
         db.add(user)
         db.flush()
         db.add(ProjectMember(project_id=project_id, user_id=user.id, project_role=role))
+        _assign_existing_or_new_enabled_role(db, user.id, role)
         db.commit()
         return user.id, create_access_token(user.username)
     finally:
         db.close()
+
+
+def _assign_enabled_backend_role(user_id: int, role_key: str) -> None:
+    db = SessionLocal()
+    try:
+        role = _create_or_get_enabled_role(db, role_key)
+        if not db.query(UserRole).filter(UserRole.user_id == user_id, UserRole.role_id == role.id).first():
+            db.add(UserRole(user_id=user_id, role_id=role.id))
+        db.commit()
+    finally:
+        db.close()
+
+
+def _assign_existing_or_new_enabled_role(db, user_id: int, role_key: str) -> None:
+    role = _create_or_get_enabled_role(db, role_key)
+    if not db.query(UserRole).filter(UserRole.user_id == user_id, UserRole.role_id == role.id).first():
+        db.add(UserRole(user_id=user_id, role_id=role.id))
+
+
+def _create_enabled_backend_role(role_key: str) -> None:
+    db = SessionLocal()
+    try:
+        _create_or_get_enabled_role(db, role_key)
+        db.commit()
+    finally:
+        db.close()
+
+
+def _create_or_get_enabled_role(db, role_key: str) -> Role:
+    role = db.query(Role).filter(Role.role_key == role_key).first()
+    if not role:
+        role = Role(role_key=role_key, role_name=f"组件测试角色-{role_key}", enabled=True)
+        db.add(role)
+        db.flush()
+    return role
 
 
 def _create_enabled_workflow_scheme(client: TestClient) -> int:
@@ -139,7 +177,7 @@ def test_component_creation_copies_source_members_into_independent_component_tea
 
     assert created.status_code == 201, created.text
     assert created.json()["members"] == [
-        {"user_id": source_member_id, "component_role": "reviewer", "enabled": True}
+        {"user_id": source_member_id, "component_role": "tester", "enabled": True}
     ]
     target_members = client.get(f"/api/v1/projects/{operations_project['id']}/members")
     assert source_member_id in {member["user_id"] for member in target_members.json()}
@@ -177,16 +215,48 @@ def test_component_members_are_maintained_independently_from_source_project(clie
 
     replaced = client.put(
         f"/api/v1/projects/{operations_project['id']}/business-components/{component['id']}/members",
-        json=[{"user_id": target_member_id, "component_role": "reviewer"}],
+        json=[{"user_id": target_member_id, "component_role": "tester"}],
     )
 
     assert replaced.status_code == 200, replaced.text
     assert replaced.json()["members"] == [
-        {"user_id": target_member_id, "component_role": "reviewer", "enabled": True}
+        {"user_id": target_member_id, "component_role": "tester", "enabled": True}
     ]
     source_members = client.get(f"/api/v1/projects/{source_project['id']}/members").json()
     assert source_member_id in {member["user_id"] for member in source_members}
     assert target_member_id not in {member["user_id"] for member in source_members}
+
+
+def test_component_member_role_must_be_enabled_role_assigned_to_project_member(client: TestClient):
+    operations_project = _create_project(client, "InnovateX Platform Operations")
+    source_project = _create_project(client, "QA Archive Management")
+    _close_project(client, source_project["id"])
+    component = client.post(
+        f"/api/v1/projects/{operations_project['id']}/business-components/from-project",
+        json={"source_project_id": source_project["id"], "name": "QA Archive Management"},
+    ).json()
+    member_id, _ = _add_project_user_with_token(operations_project["id"])
+    role_key = f"component_role_{uuid4().hex[:8]}"
+    _create_enabled_backend_role(role_key)
+
+    missing_role = client.put(
+        f"/api/v1/projects/{operations_project['id']}/business-components/{component['id']}/members",
+        json=[{"user_id": member_id, "component_role": role_key}],
+    )
+
+    assert missing_role.status_code == 422
+    assert missing_role.json()["detail"]["code"] == "COMPONENT_MEMBER_ROLE_NOT_ASSIGNED"
+
+    _assign_enabled_backend_role(member_id, role_key)
+    saved = client.put(
+        f"/api/v1/projects/{operations_project['id']}/business-components/{component['id']}/members",
+        json=[{"user_id": member_id, "component_role": role_key}],
+    )
+
+    assert saved.status_code == 200, saved.text
+    assert saved.json()["members"] == [
+        {"user_id": member_id, "component_role": role_key, "enabled": True}
+    ]
 
 
 def test_requirement_uses_primary_component_for_source_and_workflow(client: TestClient):

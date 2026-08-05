@@ -6,6 +6,7 @@ from app.models.business_component import WorkItemComponent
 from app.models.bug import Bug
 from app.models.project import Project
 from app.models.project_member import ProjectMember
+from app.models.role import Role, UserRole
 from app.models.requirement import Requirement
 from app.models.task import Task
 from app.models.workflow_definition import WorkflowDefinition, WorkflowState, WorkflowTransition
@@ -21,7 +22,6 @@ from app.views.business_component_view import (
 )
 
 
-COMPONENT_MEMBER_ROLES = {"owner", "handler", "reviewer", "approver"}
 WORK_ITEM_MODELS = {"requirement": Requirement, "task": Task, "bug": Bug}
 
 
@@ -77,12 +77,14 @@ def create_business_component_from_source_project(
             f"{component.name}-运维组件方案-{component.id}",
         )
         component.workflow_scheme_id = cloned_scheme.id
-    for source_member in (
+    source_members = (
         db.query(ProjectMember)
         .filter(ProjectMember.project_id == source_project.id)
         .order_by(ProjectMember.sort_order.asc(), ProjectMember.id.asc())
         .all()
-    ):
+    )
+    role_keys_by_user = _enabled_user_role_keys(db, {member.user_id for member in source_members})
+    for source_member in source_members:
         target_member = (
             db.query(ProjectMember)
             .filter(ProjectMember.project_id == target_project.id, ProjectMember.user_id == source_member.user_id)
@@ -98,13 +100,18 @@ def create_business_component_from_source_project(
                     sort_order=source_member.sort_order,
                 )
             )
-        db.add(
-            BusinessComponentMember(
-                component_id=component.id,
-                user_id=source_member.user_id,
-                component_role=_component_role_for_project_role(source_member.project_role),
-            )
+        role_key = _matching_enabled_user_role_key(
+            source_member.project_role,
+            role_keys_by_user.get(source_member.user_id, set()),
         )
+        if role_key:
+            db.add(
+                BusinessComponentMember(
+                    component_id=component.id,
+                    user_id=source_member.user_id,
+                    component_role=role_key,
+                )
+            )
     db.commit()
     db.refresh(component)
     return component
@@ -123,11 +130,22 @@ def replace_business_component_members(
     user_ids = [item.user_id for item in payload]
     if len(user_ids) != len(set(user_ids)):
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Component members must be unique")
-    invalid_roles = sorted({item.component_role for item in payload} - COMPONENT_MEMBER_ROLES)
+    requested_roles = {item.component_role for item in payload}
+    enabled_roles = {
+        role_key
+        for (role_key,) in db.query(Role.role_key)
+        .filter(Role.role_key.in_(requested_roles), Role.enabled.is_(True))
+        .all()
+    }
+    invalid_roles = sorted(requested_roles - enabled_roles)
     if invalid_roles:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail={"message": "Unknown component roles", "roles": invalid_roles},
+            detail={
+                "code": "COMPONENT_MEMBER_ROLE_INVALID",
+                "message": "所选组件成员角色不存在或已停用",
+                "role_keys": invalid_roles,
+            },
         )
     target_member_ids = {
         row.user_id
@@ -140,6 +158,32 @@ def replace_business_component_members(
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail={"message": "Component members must belong to the target project", "user_ids": missing_user_ids},
+        )
+
+    assigned_role_pairs = {
+        (user_id, role_key)
+        for user_id, role_key in db.query(UserRole.user_id, Role.role_key)
+        .join(Role, Role.id == UserRole.role_id)
+        .filter(
+            UserRole.user_id.in_(user_ids),
+            Role.role_key.in_(requested_roles),
+            Role.enabled.is_(True),
+        )
+        .all()
+    }
+    unassigned_members = [
+        {"user_id": item.user_id, "role_key": item.component_role}
+        for item in payload
+        if (item.user_id, item.component_role) not in assigned_role_pairs
+    ]
+    if unassigned_members:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={
+                "code": "COMPONENT_MEMBER_ROLE_NOT_ASSIGNED",
+                "message": "组件成员未被分配所选后台角色",
+                "members": unassigned_members,
+            },
         )
 
     db.query(BusinessComponentMember).filter(BusinessComponentMember.component_id == component.id).delete(
@@ -374,7 +418,7 @@ def _member_ids_for_route(
         return sorted({member.user_id for member in members if member.user_id in user_ids})
     roles = _split_csv(roles_value)
     if not roles:
-        roles = ["handler", "owner"]
+        return sorted({member.user_id for member in members})
     return sorted({member.user_id for member in members if member.component_role in roles})
 
 
@@ -401,7 +445,6 @@ def default_primary_component_handler_id(db: Session, object_type: str, item) ->
         .filter(
             BusinessComponentMember.component_id == primary_component_id,
             BusinessComponentMember.enabled.is_(True),
-            BusinessComponentMember.component_role.in_(("handler", "owner")),
         )
         .order_by(BusinessComponentMember.component_role.asc(), BusinessComponentMember.id.asc())
         .first()
@@ -500,12 +543,22 @@ def _definition_belongs_to_component_scheme(definition_id: int, scheme_id: int, 
     )
 
 
-def _component_role_for_project_role(project_role: str) -> str:
-    normalized = (project_role or "").strip().lower()
-    if normalized in {"project_owner", "product_owner", "product_manager"}:
-        return "owner"
-    if normalized in {"tester", "test_lead", "qa", "quality_assurance"}:
-        return "reviewer"
-    if normalized in {"approver", "auditor"}:
-        return "approver"
-    return "handler"
+def _enabled_user_role_keys(db: Session, user_ids: set[int]) -> dict[int, set[str]]:
+    if not user_ids:
+        return {}
+    result: dict[int, set[str]] = {}
+    for user_id, role_key in (
+        db.query(UserRole.user_id, Role.role_key)
+        .join(Role, Role.id == UserRole.role_id)
+        .filter(UserRole.user_id.in_(user_ids), Role.enabled.is_(True))
+        .all()
+    ):
+        result.setdefault(user_id, set()).add(role_key)
+    return result
+
+
+def _matching_enabled_user_role_key(project_role: str, role_keys: set[str]) -> str | None:
+    normalized_project_role = (project_role or "").strip()
+    if normalized_project_role in role_keys:
+        return normalized_project_role
+    return None

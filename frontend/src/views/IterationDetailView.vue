@@ -434,7 +434,7 @@ const historicalBugs = ref([])
 const iterationWorkflowTransitions = ref({})
 const requirementOperationWidth = computed(() => workflowActionColumnWidth(
   requirements.value.map((row) => iterationWorkflowTransitionsFor('requirement', row.id)),
-  { minWidth: 260, extraWidth: 220 }
+  { minWidth: 300, extraWidth: 340 }
 ))
 const taskOperationWidth = computed(() => workflowActionColumnWidth(
   tasks.value.map((row) => iterationWorkflowTransitionsFor('task', row.id)),

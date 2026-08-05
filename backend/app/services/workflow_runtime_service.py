@@ -911,11 +911,6 @@ def _ensure_can_execute(
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Transition role not allowed")
     if (transition.handler_rule or {}).get("target_type") == "explicit_owner" and not request.next_owner_id:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Next handler is required")
-    if transition.action_key == "reactivate" and request.next_owner_id:
-        project_id = _project_id_for_item(db, object_type, item)
-        if not can_admin_action(db, project_id, actor.id if actor else None):
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only project administrators can select a reactivation handler")
-
 
 def _handler_allowed(
     db: Session,

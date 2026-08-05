@@ -568,6 +568,19 @@ def test_reactivate_uses_handler_presence_and_completed_requirement_can_reactiva
     assert assigned.json()["status_name"] == "处理中"
     assert assigned.json()["owner_id"] == restored_id
 
+    _set_requirement_owner_and_status(requirement["id"], None, "canceled")
+    creator_assigned = client.post(
+        f"/api/v1/workflow-runtime/requirement/{requirement['id']}/transition",
+        json={
+            "action_key": "reactivate",
+            "next_owner_id": restored_id,
+            "payload": {"reason": "creator selects an eligible handler"},
+        },
+        headers={"Authorization": f"Bearer {creator_token}"},
+    )
+    assert creator_assigned.status_code == 200, creator_assigned.text
+    assert creator_assigned.json()["owner_id"] == restored_id
+
     _set_requirement_owner_and_status(requirement["id"], restored_id, "completed")
     completed_actions = _action_keys(client, "requirement", requirement["id"], manager_token)
     assert "reactivate" in completed_actions

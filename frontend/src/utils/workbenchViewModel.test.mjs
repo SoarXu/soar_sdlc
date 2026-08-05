@@ -140,6 +140,16 @@ import {
 }
 
 {
+  const dashboardSource = readFileSync(new URL('../views/DashboardView.vue', import.meta.url), 'utf8')
+
+  assert.match(dashboardSource, /<el-table-column :label="handlerColumnLabel" width="130">/)
+  assert.match(
+    dashboardSource,
+    /const handlerColumnLabel = computed\(\(\) => \(\['completed', 'terminated'\]\.includes\(activeListSection\.value\?\.key\) \? '最后处理人' : '当前处理人'\)\)/
+  )
+}
+
+{
   assert.equal(
     workbenchMetaText('exception_center', { exception_label: 'Timed out', overdue_hours: 6 }),
     'Timed out - overdue 6h'

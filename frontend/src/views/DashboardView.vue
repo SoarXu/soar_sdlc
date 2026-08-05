@@ -125,7 +125,7 @@
             <el-table-column label="迭代" min-width="140" show-overflow-tooltip>
               <template #default="{ row }">{{ iterationLabel(row.iteration_id, row.iteration_name) }}</template>
             </el-table-column>
-            <el-table-column label="当前处理人" width="130">
+            <el-table-column :label="handlerColumnLabel" width="130">
               <template #default="{ row }">{{ ownerName(row.owner_id) }}</template>
             </el-table-column>
             <el-table-column label="状态" width="120">
@@ -392,6 +392,7 @@ const extraInfoLabel = computed(() => {
   if (['watched_by_me', 'mentioned_me'].includes(activeListSection.value?.key)) return '来源'
   return '附加信息'
 })
+const handlerColumnLabel = computed(() => (['completed', 'terminated'].includes(activeListSection.value?.key) ? '最后处理人' : '当前处理人'))
 
 function ownerName(id) {
   return users.value.find((item) => item.id === id)?.full_name || '未分配'

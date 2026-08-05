@@ -793,6 +793,36 @@ def test_iteration_finish_is_blocked_by_unfinished_direct_items(client: TestClie
     assert client.get(f"/api/v1/iterations/{iteration_id}/detail").json()["iteration"]["state_category"] == "normal"
 
 
+def test_iteration_finish_is_blocked_by_unexecuted_requirement_test_cases(client: TestClient):
+    project_id = _create_project(client)
+    iteration_id = _create_iteration(client, [project_id], status="active")
+    requirement_id = _create_requirement(client, project_id, "Requirement with unexecuted case")
+    assert client.post(f"/api/v1/iterations/{iteration_id}/requirements", json={"requirement_ids": [requirement_id]}).status_code == 200
+    _set_item_state_category(Requirement, requirement_id, "terminal")
+    test_case = client.post(
+        "/api/v1/test-cases",
+        json={"project_id": project_id, "requirement_id": requirement_id, "title": "Unexecuted requirement case"},
+    )
+    assert test_case.status_code == 200, test_case.text
+
+    finished = client.post(
+        f"/api/v1/workflow-runtime/iteration/{iteration_id}/transition",
+        json={"action_key": "complete", "payload": {"effective_time": "2026-06-10T18:00:00"}},
+    )
+
+    assert finished.status_code == 400
+    detail = finished.json()["detail"]
+    assert detail["code"] == "ITERATION_HAS_OPEN_ITEMS"
+    assert detail["counts"]["test_case"] == 1
+    assert detail["items"] == [{
+        "object_type": "test_case",
+        "id": test_case.json()["id"],
+        "title": "Unexecuted requirement case",
+        "status_name": "未执行",
+        "owner_id": None,
+    }]
+
+
 def test_terminal_iteration_rejects_scope_mutations(client: TestClient):
     project_id = _create_project(client)
     iteration_id = _create_iteration(client, [project_id], status="active")

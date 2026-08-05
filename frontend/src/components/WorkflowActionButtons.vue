@@ -153,7 +153,7 @@
       </template>
     </el-dialog>
 
-    <el-dialog v-model="blockerDialogVisible" title="存在未完成事项，无法结束迭代" width="760px">
+    <el-dialog v-model="blockerDialogVisible" title="存在未完成事项，无法结束迭代" width="760px" append-to-body>
       <el-alert :title="blockerCountsText" type="warning" :closable="false" show-icon />
       <div class="workflow-blocker-filter">
         <el-segmented v-model="blockerTypeFilter" :options="blockerTypeOptions" />

@@ -2,6 +2,7 @@ from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 
 from app.models.bug import Bug
+from app.models.iteration import Iteration, IterationProject
 from app.models.project import Project
 from app.models.project_member import ProjectMember
 from app.models.requirement import Requirement
@@ -157,6 +158,75 @@ def can_admin_action(db: Session, project_id: int | None, actor_id: int | None) 
     if actor_id is None:
         return True
     return is_system_admin(db, actor_id) or is_project_owner(db, project_id, actor_id)
+
+
+def iteration_project_ids(db: Session, iteration_id: int) -> list[int]:
+    project_ids = [
+        row.project_id
+        for row in db.query(IterationProject).filter(IterationProject.iteration_id == iteration_id).all()
+    ]
+    if project_ids:
+        return project_ids
+    iteration = db.query(Iteration).filter(Iteration.id == iteration_id, Iteration.deleted == 0).first()
+    legacy_project_id = getattr(iteration, "project_id", None) if iteration else None
+    return [legacy_project_id] if legacy_project_id else []
+
+
+def is_iteration_owner(db: Session, iteration_id: int, actor: User | None) -> bool:
+    if actor is None:
+        return False
+    iteration = db.query(Iteration).filter(Iteration.id == iteration_id, Iteration.deleted == 0).first()
+    if not iteration or iteration.owner_id != actor.id:
+        return False
+    project_ids = iteration_project_ids(db, iteration_id)
+    if not project_ids:
+        return False
+    for project_id in project_ids:
+        project = _get_active_project(db, project_id)
+        if not project or project.state_category == "terminal" or not is_project_member(db, project_id, actor.id):
+            return False
+    return True
+
+
+def can_govern_iteration(db: Session, iteration_id: int, actor: User | None) -> bool:
+    project_ids = iteration_project_ids(db, iteration_id)
+    return bool(project_ids) and all(can_govern_project(db, project_id, actor) for project_id in project_ids)
+
+
+def can_manage_iteration(db: Session, iteration_id: int, actor: User | None) -> bool:
+    return is_iteration_owner(db, iteration_id, actor) or can_govern_iteration(db, iteration_id, actor)
+
+
+def can_assign_iteration_owner(db: Session, iteration_id: int, actor: User | None) -> bool:
+    if actor is None:
+        return False
+    project_ids = iteration_project_ids(db, iteration_id)
+    return bool(project_ids) and (
+        is_system_admin(db, actor.id)
+        or all(is_project_owner(db, project_id, actor.id) for project_id in project_ids)
+    )
+
+
+def ensure_iteration_owner_membership(db: Session, owner_id: int | None, project_ids: list[int]) -> None:
+    if owner_id is None:
+        return
+    if not project_ids or any(not is_project_member(db, project_id, owner_id) for project_id in project_ids):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Iteration owner must be an active member of every iteration project",
+        )
+
+
+def ensure_iteration_management_permission(db: Session, iteration_id: int, actor: User | None) -> None:
+    ensure_authenticated(actor)
+    if not can_manage_iteration(db, iteration_id, actor):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="No permission to manage iteration delivery")
+
+
+def ensure_iteration_owner_assignment_permission(db: Session, iteration_id: int, actor: User | None) -> None:
+    ensure_authenticated(actor)
+    if not can_assign_iteration_owner(db, iteration_id, actor):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only project owners or system administrators can change iteration owner")
 
 
 def ensure_project_manage_permission(db: Session, project_id: int | None, actor: User | None) -> None:

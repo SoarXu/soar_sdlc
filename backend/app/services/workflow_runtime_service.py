@@ -30,6 +30,7 @@ from app.services.bug_type_service import bug_type_options, get_enabled_bug_type
 from app.services.project_permission_service import (
     actor_role_keys,
     can_admin_action,
+    can_manage_iteration,
     can_view_project_work_items,
     ensure_authenticated,
     is_project_member,
@@ -812,6 +813,8 @@ def _handler_allowed(
     transition: WorkflowTransition,
     actor: User | None,
 ) -> bool:
+    if object_type == "iteration":
+        return can_manage_iteration(db, item.id, actor)
     scope = (transition.ui_config or {}).get("handler_scope")
     if not actor:
         return object_type in {"iteration", "project"}
@@ -846,6 +849,8 @@ def _matches_ownerless_visibility(object_type: str, item, transition: WorkflowTr
 
 
 def _role_allowed(db: Session, object_type: str, item, transition: WorkflowTransition, actor: User | None) -> bool:
+    if object_type == "iteration":
+        return can_manage_iteration(db, item.id, actor)
     roles = _split_csv(transition.allowed_roles)
     if not roles:
         return True

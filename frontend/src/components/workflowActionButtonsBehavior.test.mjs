@@ -60,6 +60,16 @@ assert.match(source, /blockerRows/)
 assert.match(source, /blockerDetailRoute\(row\)/)
 assert.match(source, /存在未完成事项，无法结束迭代/)
 
+const blockerDialogStart = source.indexOf('<el-dialog v-model="blockerDialogVisible"')
+const blockerDialogEnd = source.indexOf('</el-dialog>', blockerDialogStart)
+assert.notEqual(blockerDialogStart, -1)
+assert.notEqual(blockerDialogEnd, -1)
+assert.match(
+  source.slice(blockerDialogStart, blockerDialogEnd),
+  /\bappend-to-body\b/,
+  'the iteration blocker dialog must escape table stacking contexts'
+)
+
 const workflowSubmitBlock = source.slice(
   source.indexOf('async function submitAction'),
   source.indexOf('async function loadTransitions')

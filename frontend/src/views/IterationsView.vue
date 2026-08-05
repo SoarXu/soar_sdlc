@@ -99,7 +99,8 @@ const {
   pagedItems: pagedIterations
 } = usePagination(iterations)
 const projectOptions = computed(() => {
-  const childrenByParent = projects.value.reduce((result, project) => {
+  const activeProjects = projects.value.filter((project) => project.state_category !== 'terminal')
+  const childrenByParent = activeProjects.reduce((result, project) => {
     const key = project.parent_id || 0
     if (!result[key]) result[key] = []
     result[key].push(project)

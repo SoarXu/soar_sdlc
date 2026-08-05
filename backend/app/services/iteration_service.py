@@ -541,7 +541,10 @@ def auto_start_due_iterations(db: Session, iteration_id: int | None = None) -> i
     if iteration_id:
         query = query.filter(Iteration.id == iteration_id)
     iterations = query.all()
+    started_count = 0
     for iteration in iterations:
+        if _has_terminal_linked_project(db, iteration.id):
+            continue
         _start_iteration_record(
             db,
             iteration,
@@ -549,9 +552,10 @@ def auto_start_due_iterations(db: Session, iteration_id: int | None = None) -> i
             remark="到达计划开始日期自动开始",
             actor_id=None,
         )
-    if iterations:
+        started_count += 1
+    if started_count:
         db.commit()
-    return len(iterations)
+    return started_count
 
 
 def _iteration_scoped_project_ids(db: Session, iteration_id: int) -> set[int]:
@@ -788,3 +792,19 @@ def _validate_iteration_projects(db: Session, project_ids: list[int]) -> None:
         project = db.query(Project).filter(Project.id == pid, Project.deleted == 0).first()
         if not project:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"项目 {pid} 不存在")
+        if is_terminal_state(project):
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=f"项目 {pid} 已关闭，不能关联迭代")
+
+
+def _has_terminal_linked_project(db: Session, iteration_id: int) -> bool:
+    projects = (
+        db.query(Project)
+        .join(IterationProject, IterationProject.project_id == Project.id)
+        .filter(
+            IterationProject.iteration_id == iteration_id,
+            Project.deleted == 0,
+        )
+        .with_for_update()
+        .all()
+    )
+    return any(is_terminal_state(project) for project in projects)

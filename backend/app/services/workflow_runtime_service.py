@@ -7,8 +7,10 @@ from sqlalchemy.orm import Session
 from app.models.audit_log import AuditLog
 from app.services.business_component_service import (
     active_primary_component_member_roles,
+    replace_work_item_components,
     resolve_component_transition_route,
 )
+from app.models.business_component import BusinessComponent, WorkflowMigrationLog
 from app.models.assignee_rule_config import AssigneeRuleConfig
 from app.models.bug import Bug
 from app.models.iteration import Iteration, IterationProject
@@ -50,6 +52,7 @@ from app.services.iteration_service import (
 )
 from app.services.work_item_iteration_history_service import move_work_item_to_iteration
 from app.services.workflow_state_query_service import current_state_name, is_terminal_state
+from app.services.workflow_state_service import initial_workflow_values
 from app.views.status_operation_view import StatusOperationCreate
 from app.views.workflow_runtime_view import (
     WorkflowBulkAssignmentRead,
@@ -271,6 +274,8 @@ def _execute_transition(
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Confirmation handler is required")
     if hasattr(item, "owner_id") and next_owner_id != original_owner_id:
         item.owner_id = next_owner_id
+    if object_type == "bug" and transition.action_key == "activate":
+        _apply_maintenance_component_workflow(db, item, request, actor, selected_values)
     if handler_routing["source_rule"] != "keep_current" or next_owner_id != original_owner_id:
         selected_values["handler_routing"] = handler_routing
     if object_type == "bug" and transition.action_key == "activate":
@@ -1213,6 +1218,7 @@ def _apply_bug_activation(
         )
 
     parsed_target_iteration_id = _request_target_iteration_id(payload)
+    maintenance_component_id = _parse_maintenance_component_id(payload.get("maintenance_component_id"))
     locked_iterations = getattr(bug, "_transition_locked_iterations", {})
     required_iteration_ids = {
         iteration_id
@@ -1241,6 +1247,18 @@ def _apply_bug_activation(
         )
 
     target_iteration = source_iteration
+    maintenance_component = None
+    if maintenance_component_id:
+        maintenance_component = (
+            db.query(BusinessComponent)
+            .filter(BusinessComponent.id == maintenance_component_id, BusinessComponent.enabled.is_(True))
+            .with_for_update()
+            .first()
+        )
+        if not maintenance_component or maintenance_component.source_project_id != bug.project_id:
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail={"code": "INVALID_MAINTENANCE_COMPONENT", "message": "维护组件未承接当前 Bug 所属项目"})
+        if not parsed_target_iteration_id:
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail={"code": "TARGET_ITERATION_REQUIRED", "message": "请选择维护项目的进行中迭代"})
     if parsed_target_iteration_id:
         target_iteration = locked_iterations.get(parsed_target_iteration_id)
         if not target_iteration:
@@ -1254,19 +1272,40 @@ def _apply_bug_activation(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail={"code": "TARGET_ITERATION_NOT_ACTIVE", "message": "目标迭代必须处于进行中"},
             )
-        if bug.project_id not in iteration_scoped_project_ids(db, target_iteration.id):
+        target_project_id = maintenance_component.project_id if maintenance_component else bug.project_id
+        if target_project_id not in iteration_scoped_project_ids(db, target_iteration.id):
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail={"code": "TARGET_ITERATION_OUT_OF_SCOPE", "message": "目标迭代不覆盖 Bug 所属项目"},
             )
 
-    if not can_view_project_work_items(db, bug.project_id, actor):
+    target_project_id = maintenance_component.project_id if maintenance_component else bug.project_id
+    if not can_view_project_work_items(db, target_project_id, actor):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail={"code": "PROJECT_ACCESS_DENIED", "message": "No access to target iteration project"},
         )
 
     original_owner_id = bug.owner_id
+    maintenance_context = None
+    if maintenance_component:
+        target_workflow_values = initial_workflow_values(
+            db,
+            "bug",
+            maintenance_component.project_id,
+            maintenance_component.id,
+        )
+        old_project_id = bug.project_id
+        old_definition_id = bug.workflow_definition_id
+        old_state_id = bug.current_state_id
+        maintenance_context = {
+            "component_id": maintenance_component.id,
+            "source_project_id": old_project_id,
+            "target_project_id": maintenance_component.project_id,
+            "old_definition_id": old_definition_id,
+            "old_state_id": old_state_id,
+            "workflow_values": target_workflow_values,
+        }
 
     if target_iteration and target_iteration.id != bug.iteration_id:
         move_work_item_to_iteration(
@@ -1287,6 +1326,11 @@ def _apply_bug_activation(
             record_same_iteration_transition=True,
         )
 
+    if maintenance_context:
+        bug.project_id = maintenance_context["target_project_id"]
+        replace_work_item_components(db, "bug", bug.id, bug.project_id, maintenance_context["component_id"], [])
+        bug._maintenance_activation_context = maintenance_context
+
     before_count = bug.reopen_count or 0
     bug.reopen_count = before_count + 1
     selected_values.update(
@@ -1299,6 +1343,45 @@ def _apply_bug_activation(
             "reopen_count_after": bug.reopen_count,
         }
     )
+
+
+def _parse_maintenance_component_id(value: Any) -> int | None:
+    if value is None or value == "":
+        return None
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail={"code": "INVALID_MAINTENANCE_COMPONENT", "message": "维护组件无效"}) from exc
+    if parsed <= 0:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail={"code": "INVALID_MAINTENANCE_COMPONENT", "message": "维护组件无效"})
+    return parsed
+
+
+def _apply_maintenance_component_workflow(
+    db: Session,
+    bug: Bug,
+    request: WorkflowTransitionExecuteRequest,
+    actor: User | None,
+    selected_values: dict[str, Any],
+) -> None:
+    context = getattr(bug, "_maintenance_activation_context", None)
+    if not context:
+        return
+    workflow_values = context["workflow_values"]
+    bug.workflow_definition_id = workflow_values["workflow_definition_id"]
+    bug.current_state_id = workflow_values["current_state_id"]
+    db.add(WorkflowMigrationLog(
+        object_type="bug", object_id=bug.id,
+        old_definition_id=context["old_definition_id"], old_state_id=context["old_state_id"],
+        new_definition_id=bug.workflow_definition_id, new_state_id=bug.current_state_id,
+        reason=str((request.payload or {}).get("reason") or "重新激活迁移至维护组件").strip(),
+        actor_id=actor.id if actor else None,
+    ))
+    selected_values.update({
+        "maintenance_component_id": context["component_id"],
+        "source_project_id": context["source_project_id"],
+        "target_project_id": context["target_project_id"],
+    })
 
 
 def _reactivation_handler_eligibility(
@@ -1377,6 +1460,17 @@ def _bug_activation_transition_read(
         and is_iteration_active(db, source_iteration)
     )
     options = []
+    maintenance_components = (
+        db.query(BusinessComponent, Project)
+        .join(Project, Project.id == BusinessComponent.project_id)
+        .filter(
+            BusinessComponent.source_project_id == bug.project_id,
+            BusinessComponent.enabled.is_(True),
+            Project.deleted == 0,
+        )
+        .order_by(Project.id.asc(), BusinessComponent.id.asc())
+        .all()
+    )
     for iteration in (
         db.query(Iteration)
         .filter(Iteration.deleted == 0, Iteration.is_requirement_pool.is_(False))
@@ -1402,6 +1496,16 @@ def _bug_activation_transition_read(
          "default_value": bug.reopen_count or 0},
         {"field": "target_status", "label": "目标状态", "type": "text", "readonly": True,
          "default_value": target_state.status_name if target_state else None},
+        {
+            "field": "maintenance_component_id",
+            "label": "维护项目 / 组件",
+            "type": "select",
+            "required": False,
+            "options": [
+                {"label": f"{project.name} / {component.name}", "value": component.id}
+                for component, project in maintenance_components
+            ],
+        },
         {
             "field": "target_iteration_id",
             "label": "目标进行中迭代",

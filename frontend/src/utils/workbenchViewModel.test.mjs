@@ -14,6 +14,14 @@ import {
 } from './workbenchViewModel.js'
 
 {
+  const styles = readFileSync(new URL('../styles.css', import.meta.url), 'utf8')
+  const terminalTitleRule = styles.match(/\.workbench-title-button\.is-terminal\s*\{[^}]*\}/)
+
+  assert.ok(terminalTitleRule)
+  assert.doesNotMatch(terminalTitleRule[0], /text-decoration\s*:\s*line-through/)
+}
+
+{
   const items = [
     {
       id: 1,

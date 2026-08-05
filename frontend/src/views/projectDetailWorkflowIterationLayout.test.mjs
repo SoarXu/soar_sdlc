@@ -37,5 +37,15 @@ assert.doesNotMatch(
   'requirement edit visibility must come from the workflow action configuration only'
 )
 assert.match(requirementsTemplate, /<WorkflowActionButtons/)
+assert.match(
+  requirementsTemplate,
+  /@command="handleRequirementWorkflowCommand\(row, \$event\)"/,
+  'the workflow edit command must open the project-detail requirement editor'
+)
+assert.match(
+  source,
+  /function handleRequirementWorkflowCommand\(row, \{ commandType \}\) \{\s*if \(commandType === 'edit'\) openRequirementEdit\(row\)/,
+  'the project detail must route workflow edit commands to the existing requirement edit dialog'
+)
 
 console.log('project detail workflow and iteration layout contract passed')

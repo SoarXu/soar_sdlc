@@ -153,6 +153,7 @@
                 :transitions="projectWorkflowTransitionsFor('requirement', row.id)"
                 :auto-load="false"
                 :users="users"
+                @command="handleRequirementWorkflowCommand(row, $event)"
                 @executed="refreshAfterMutation"
               />
               <el-button v-if="canCreateCurrentWorkItem && !projectClosed" link type="success" @click="openGenerate(row)">生成任务</el-button>
@@ -1255,6 +1256,9 @@ function openDeferWorkItems(row) {
 }
 function openRequirementCreate() { editingRequirementId.value = null; resetRequirementForm(); requirementDialogVisible.value = true }
 function openRequirementEdit(row) { editingRequirementId.value = row.id; Object.assign(requirementForm, { ...row, priority: normalizeRequirementPriority(row.priority), requirement_type: row.requirement_type || '', description: row.description || '', acceptance_criteria: row.acceptance_criteria || '' }); requirementDialogVisible.value = true }
+function handleRequirementWorkflowCommand(row, { commandType }) {
+  if (commandType === 'edit') openRequirementEdit(row)
+}
 function openGenerate(row) { editingTaskId.value = null; resetTaskForm(); Object.assign(taskForm, { requirement_id: row.id, title: row.title, task_type: 'requirement_implementation', owner_id: null }); taskDialogVisible.value = true }
 
 async function downloadImportTemplate() {

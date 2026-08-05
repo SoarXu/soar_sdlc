@@ -22,7 +22,6 @@
         <el-table-column label="操作" :width="workflowOperationWidth" fixed="right">
           <template #default="{ row }">
             <div class="table-actions">
-              <WatchToggleButton object-type="bug" :object-id="row.id" />
               <WorkflowActionButtons object-type="bug" :object-id="row.id" mode="list" :transitions="workflowTransitionsFor(row)" :auto-load="false" :users="users" @command="handleWorkflowCommand(row, $event)" @executed="loadData" /><el-popconfirm v-if="canDeleteBugRow(row)" title="确认删除该 Bug？" @confirm="removeBug(row.id)"><template #reference><el-button link type="danger">删除</el-button></template></el-popconfirm>
             </div>
           </template>
@@ -96,7 +95,6 @@ import WorkflowActionButtons from '../components/WorkflowActionButtons.vue'
 import BatchAssignmentBar from '../components/BatchAssignmentBar.vue'
 import BugEditDialog from '../components/work-items/BugEditDialog.vue'
 import BusinessComponentSelect from '../components/work-items/BusinessComponentSelect.vue'
-import WatchToggleButton from '../components/WatchToggleButton.vue'
 import { showActionError } from '../utils/actionFeedback'
 import { labelById, userLabel } from '../utils/referenceLabels'
 import { bugIterationOptions, includeSelectedIterationOption } from '../utils/bugIterations'
@@ -122,7 +120,7 @@ const {
 } = usePagination(bugs)
 const workflowOperationWidth = computed(() => workflowActionColumnWidth(
   pagedBugs.value.map((row) => workflowTransitionsFor(row)),
-  { minWidth: 240, extraWidth: 160 }
+  { minWidth: 180, extraWidth: 90 }
 ))
 const priorityLevelOptions = [
   { label: '① 最高', value: '1' },

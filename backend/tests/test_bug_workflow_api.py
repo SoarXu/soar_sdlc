@@ -410,6 +410,76 @@ def test_closed_bug_reactivates_into_active_iteration_and_retains_eligible_handl
         db.close()
 
 
+def test_closed_bug_reactivates_into_maintenance_component(client: TestClient):
+    reporter_id, reporter_token = _create_user("developer")
+    source_project_id = _create_project(client)
+    maintenance_project_id = _create_project(client)
+    for project_id in (source_project_id, maintenance_project_id):
+        _add_member(project_id, reporter_id, "developer")
+    source_iteration_id = _create_iteration(client, source_project_id, "Historical bug iteration", active=True)
+    bug = client.post(
+        "/api/v1/bugs",
+        json={
+            "project_id": source_project_id,
+            "iteration_id": source_iteration_id,
+            "title": "Historical maintenance bug",
+            "owner_id": reporter_id,
+            "reporter_id": reporter_id,
+        },
+        headers={"Authorization": f"Bearer {reporter_token}"},
+    ).json()
+    _set_bug_closed(bug["id"])
+    assert client.post(f"/api/v1/workflow-runtime/iteration/{source_iteration_id}/transition", json={"action_key": "complete"}).status_code == 200
+
+    db = SessionLocal()
+    try:
+        project = db.query(Project).filter(Project.id == source_project_id).one()
+        terminal_state_id = db.query(WorkflowTransition.to_state_id).filter(
+            WorkflowTransition.definition_id == project.workflow_definition_id,
+            WorkflowTransition.action_key == "close",
+        ).first()[0]
+        project.current_state_id = terminal_state_id
+        db.commit()
+    finally:
+        db.close()
+
+    component = client.post(
+        f"/api/v1/projects/{maintenance_project_id}/business-components/from-project",
+        json={"source_project_id": source_project_id, "name": "Historical maintenance"},
+    ).json()
+    target_iteration_id = _create_iteration(client, maintenance_project_id, "Maintenance iteration", active=True)
+    actions = client.get(
+        f"/api/v1/workflow-runtime/bug/{bug['id']}/transitions",
+        headers={"Authorization": f"Bearer {reporter_token}"},
+    ).json()
+    activate = next(action for action in actions if action["action_key"] == "activate")
+    component_field = next(field for field in activate["form_config"]["fields"] if field["field"] == "maintenance_component_id")
+    assert [option["value"] for option in component_field["options"]] == [component["id"]]
+
+    reactivated = client.post(
+        f"/api/v1/workflow-runtime/bug/{bug['id']}/transition",
+        json={
+            "action_key": "activate",
+            "next_owner_id": reporter_id,
+            "payload": {
+                "reason": "Reproduced during maintenance",
+                "maintenance_component_id": component["id"],
+                "target_iteration_id": target_iteration_id,
+            },
+        },
+        headers={"Authorization": f"Bearer {reporter_token}"},
+    )
+
+    assert reactivated.status_code == 200, reactivated.text
+    assert reactivated.json()["selected_values"].get("target_project_id") == maintenance_project_id
+    detail = client.get(f"/api/v1/bugs/{bug['id']}").json()
+    assert detail["project_id"] == maintenance_project_id
+    assert detail["iteration_id"] == target_iteration_id
+    assert detail["primary_component"]["id"] == component["id"]
+    assert reactivated.json()["selected_values"]["source_project_id"] == source_project_id
+    assert reactivated.json()["selected_values"]["target_project_id"] == maintenance_project_id
+
+
 def test_closed_bug_reactivation_accepts_legacy_iteration_id_alias(client: TestClient):
     reporter_id, reporter_token = _create_user("developer")
     project_id = _create_project(client)

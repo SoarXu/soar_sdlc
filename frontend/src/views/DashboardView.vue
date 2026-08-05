@@ -324,8 +324,6 @@ const caseBugForm = reactive({ title: '', bug_type: DEFAULT_BUG_TYPE_KEY, severi
 const itemTypes = [
   { label: '需求', value: 'requirement' },
   { label: '任务', value: 'task' },
-  { label: '测试用例', value: 'test_case' },
-  { label: '测试单', value: 'test_run' },
   { label: 'Bug', value: 'bug' }
 ]
 

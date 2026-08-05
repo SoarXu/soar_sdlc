@@ -13,7 +13,6 @@ import IterationDetailView from '../views/IterationDetailView.vue'
 import LoginView from '../views/LoginView.vue'
 import ProgramsView from '../views/ProgramsView.vue'
 import ProjectDetailView from '../views/ProjectDetailView.vue'
-import ProjectComponentsView from '../views/ProjectComponentsView.vue'
 import ProjectsView from '../views/ProjectsView.vue'
 import RequirementDetailView from '../views/RequirementDetailView.vue'
 import RequirementsView from '../views/RequirementsView.vue'
@@ -35,7 +34,15 @@ const routes = [
       { path: 'admin', name: 'admin', component: AdminView },
       { path: 'programs', name: 'programs', component: ProgramsView },
       { path: 'projects', name: 'projects', component: ProjectsView },
-      { path: 'projects/:id/components', name: 'project-components', component: ProjectComponentsView },
+      {
+        path: 'projects/:id/components',
+        name: 'project-components',
+        redirect: (to) => ({
+          name: 'project-detail',
+          params: { id: to.params.id },
+          query: { tab: 'settings', settingsTab: 'components' }
+        })
+      },
       { path: 'projects/:id', name: 'project-detail', component: ProjectDetailView },
       { path: 'requirements/:id', name: 'requirement-detail', component: RequirementDetailView },
       { path: 'tasks/:id', name: 'task-detail', component: TaskDetailView },

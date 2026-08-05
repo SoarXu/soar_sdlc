@@ -1,12 +1,13 @@
 <template>
   <section class="page-section" v-loading="loading">
-    <div class="page-header">
+    <div v-if="!embedded" class="page-header">
       <div>
         <el-button link type="primary" @click="$router.push({ name: 'project-detail', params: { id: projectId } })">返回项目</el-button>
         <h1>{{ project.name || '项目' }}业务组件</h1>
       </div>
       <el-button v-if="!projectClosed" type="primary" @click="dialogVisible = true">从已关闭项目创建组件</el-button>
     </div>
+    <el-button v-else-if="!projectClosed" type="primary" @click="dialogVisible = true">从已关闭项目创建组件</el-button>
 
     <el-table :data="components" stripe>
       <el-table-column prop="name" label="组件" min-width="180" />
@@ -81,8 +82,12 @@ import { fetchAssigneeRuleConfigs } from '../api/assigneeRuleConfigs'
 import { fetchRoles } from '../api/roles'
 import { actionErrorMessage } from '../utils/permissions'
 
+const props = defineProps({
+  projectId: { type: Number, default: null },
+  embedded: { type: Boolean, default: false }
+})
 const route = useRoute()
-const projectId = computed(() => Number(route.params.id))
+const projectId = computed(() => props.projectId || Number(route.params.id))
 const loading = ref(false)
 const saving = ref(false)
 const dialogVisible = ref(false)

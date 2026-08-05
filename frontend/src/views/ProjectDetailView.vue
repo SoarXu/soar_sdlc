@@ -3,7 +3,6 @@
     <div class="project-detail-head">
       <div>
         <el-button link type="primary" @click="$router.push('/projects')">返回项目列表</el-button>
-        <el-button link type="primary" @click="$router.push({ name: 'project-components', params: { id: projectId } })">业务组件</el-button>
         <h1>{{ project.name || '项目详情' }}</h1>
         <p>
           {{ labelById(programs, project.program_id) }} · {{ userLabel(users, project.owner_id) }} ·
@@ -381,7 +380,19 @@
 
       <template v-else-if="activeTab === 'settings'">
         <div class="project-settings">
-          <section class="project-settings-section">
+          <div class="project-settings-tabs" role="tablist" aria-label="项目配置">
+            <button
+              v-for="tab in settingsTabs"
+              :key="tab.key"
+              class="project-settings-tab"
+              :class="{ active: settingsTab === tab.key }"
+              type="button"
+              @click="setSettingsTab(tab.key)"
+            >
+              {{ tab.label }}
+            </button>
+          </div>
+          <section v-if="settingsTab === 'workflow'" class="project-settings-section">
             <div class="project-settings-head">
               <div>
                 <h2>工作流方案</h2>
@@ -426,6 +437,7 @@
               <el-button type="primary" :loading="saving" @click="submitProjectSettings">保存配置</el-button>
             </div>
           </section>
+          <ProjectComponentsView v-else :project-id="projectId" embedded />
         </div>
       </template>
 
@@ -694,6 +706,7 @@ import RichTextPasteEditor from '../components/RichTextPasteEditor.vue'
 import WorkflowActionButtons from '../components/WorkflowActionButtons.vue'
 import BatchAssignmentBar from '../components/BatchAssignmentBar.vue'
 import BusinessComponentSelect from '../components/work-items/BusinessComponentSelect.vue'
+import ProjectComponentsView from './ProjectComponentsView.vue'
 import { currentUserId } from '../utils/currentUser'
 import { loadCloseReasonMap } from '../utils/closeReasonTooltip'
 import { labelById, userLabel } from '../utils/referenceLabels'
@@ -712,6 +725,7 @@ const projectId = computed(() => Number(route.params.id))
 const loading = ref(false)
 const saving = ref(false)
 const activeTab = ref(normalizeProjectTab(route.query.tab))
+const settingsTab = ref(normalizeSettingsTab(route.query.settingsTab))
 const testTab = ref('cases')
 const project = ref({})
 const projects = ref([])
@@ -799,6 +813,10 @@ const tabs = [
   { key: 'bugs', label: 'Bug' },
   { key: 'members', label: '成员' },
   { key: 'settings', label: '配置' }
+]
+const settingsTabs = [
+  { key: 'workflow', label: '工作流方案' },
+  { key: 'components', label: '业务组件' }
 ]
 const requirementPriorityOptions = [
   { label: '1', value: '1' },
@@ -961,6 +979,9 @@ function optionLabel(options, value) { return options.find((option) => option.va
 function normalizeProjectTab(value) {
   return ['overview', 'iterations', 'requirements', 'tasks', 'tests', 'bugs', 'members', 'settings'].includes(value) ? value : 'overview'
 }
+function normalizeSettingsTab(value) {
+  return ['workflow', 'components'].includes(value) ? value : 'workflow'
+}
 function collectProjectAndAncestorIds(id) {
   const result = []
   const seen = new Set()
@@ -977,6 +998,14 @@ function setActiveTab(key) {
   clearProjectWorkItemSelection()
   activeTab.value = key
   router.replace({ name: 'project-detail', params: { id: projectId.value }, query: { ...route.query, tab: key } })
+}
+function setSettingsTab(key) {
+  settingsTab.value = key
+  router.replace({
+    name: 'project-detail',
+    params: { id: projectId.value },
+    query: { ...route.query, tab: 'settings', settingsTab: key }
+  })
 }
 function projectListParams(key) {
   const pager = projectListPagination[key]
@@ -1628,6 +1657,9 @@ watch(() => route.query.tab, async (value) => {
   activeTab.value = normalizeProjectTab(value)
   await refreshActiveProjectList()
 })
+watch(() => route.query.settingsTab, (value) => {
+  settingsTab.value = normalizeSettingsTab(value)
+})
 watch(testTab, async () => {
   if (activeTab.value === 'tests') await refreshActiveProjectList()
 })
@@ -1659,6 +1691,29 @@ function buildActualText(execution) {
 </script>
 
 <style scoped>
+.project-settings-tabs {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 16px;
+  border-bottom: 1px solid var(--el-border-color-lighter);
+}
+
+.project-settings-tab {
+  min-width: 104px;
+  height: 36px;
+  padding: 0 16px;
+  color: var(--el-text-color-regular);
+  background: transparent;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  cursor: pointer;
+}
+
+.project-settings-tab.active {
+  color: var(--el-color-primary);
+  border-bottom-color: var(--el-color-primary);
+}
+
 .defer-work-form {
   margin-top: 16px;
 }

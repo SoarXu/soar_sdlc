@@ -14,5 +14,12 @@ const width = workflowActionColumnWidth([
 assert.ok(width > 180)
 assert.equal(workflowActionColumnWidth([], { minWidth: 220 }), 220)
 assert.equal(workflowActionColumnWidth([[{ transition_id: 4, action_name: '关闭', list_display: 'more' }]], { minWidth: 180 }), 180)
+assert.equal(
+  workflowActionColumnWidth([[
+    { transition_id: 5, action_name: 'A', list_display: 'primary' },
+    { transition_id: 6, action_name: '更多', list_display: 'more' }
+  ]], { minWidth: 240, extraWidth: 160 }),
+  268
+)
 
 console.log('workflow action column tests passed')

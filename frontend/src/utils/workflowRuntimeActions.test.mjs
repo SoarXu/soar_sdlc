@@ -61,6 +61,18 @@ function action(transitionId, overrides = {}) {
 {
   const result = splitListActions([
     action(1, { action_key: 'start', sort_order: 20 }),
+    action(2, { action_key: 'complete', sort_order: 10 }),
+    action(3, { action_key: 'cancel', sort_order: 30 }),
+    action(4, { action_key: 'custom_iteration_action', sort_order: 40 })
+  ], 'iteration')
+
+  assert.deepEqual(result.primaryActions.map((item) => item.transition_id), [2, 1, 3, 4])
+  assert.deepEqual(result.moreActions, [])
+}
+
+{
+  const result = splitListActions([
+    action(1, { action_key: 'start', sort_order: 20 }),
     action(2, { action_key: 'suspend', sort_order: 10 }),
     action(3, { action_key: 'close', sort_order: 30 })
   ], 'requirement')

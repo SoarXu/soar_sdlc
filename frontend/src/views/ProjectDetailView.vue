@@ -300,7 +300,7 @@
           <el-table-column label="需求" width="180"><template #default="{ row }">{{ labelById(projectRequirementOptions, row.requirement_id, 'title') }}</template></el-table-column>
           <el-table-column label="任务" width="180"><template #default="{ row }">{{ labelById(projectTaskOptions, row.task_id, 'title') }}</template></el-table-column>
               <el-table-column label="当前处理人" width="140"><template #default="{ row }">{{ userLabel(users, row.owner_id) }}</template></el-table-column>
-          <el-table-column label="Bug 类型" width="120"><template #default="{ row }">{{ row.bug_type || '-' }}</template></el-table-column>
+          <el-table-column label="Bug 类型" width="120"><template #default="{ row }">{{ bugTypeLabel(row.bug_type) }}</template></el-table-column>
           <el-table-column label="严重程度" width="110"><template #default="{ row }"><RequirementPriorityBadge :value="row.severity" /></template></el-table-column>
           <el-table-column label="优先级" width="110"><template #default="{ row }"><RequirementPriorityBadge :value="row.priority" /></template></el-table-column>
           <el-table-column label="状态" width="120"><template #default="{ row }">{{ row.status_name || '-' }}</template></el-table-column>
@@ -831,7 +831,7 @@ const executionResultOptions = [
   { label: '失败', value: 'failed' },
   { label: '阻塞', value: 'blocked' }
 ]
-const { bugTypeOptions } = useBugTypes()
+const { bugTypeOptions, bugTypeLabel } = useBugTypes()
 const priorityLevelOptions = [
   { label: '① 最高', value: '1' },
   { label: '② 高', value: '2' },

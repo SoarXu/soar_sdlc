@@ -78,15 +78,20 @@ export function visibleDetailActions(actions = []) {
 
 export function splitListActions(actions = [], objectType = '') {
   const visibleActions = visibleListActions(actions)
+  const showAllActionsDirectly = objectType === 'iteration'
   const directProjectActions = objectType === 'project'
     ? new Set(['start', 'suspend', 'close'])
     : new Set()
   return {
     primaryActions: visibleActions.filter((action) => (
-      listDisplayOf(action) === 'primary' || directProjectActions.has(actionKeyOf(action))
+      showAllActionsDirectly ||
+      listDisplayOf(action) === 'primary' ||
+      directProjectActions.has(actionKeyOf(action))
     )),
     moreActions: visibleActions.filter((action) => (
-      listDisplayOf(action) !== 'primary' && !directProjectActions.has(actionKeyOf(action))
+      !showAllActionsDirectly &&
+      listDisplayOf(action) !== 'primary' &&
+      !directProjectActions.has(actionKeyOf(action))
     ))
   }
 }

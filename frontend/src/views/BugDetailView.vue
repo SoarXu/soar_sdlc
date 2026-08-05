@@ -54,6 +54,7 @@
         <el-descriptions-item label="负责人">{{ userLabel(users, bug.owner_id) }}</el-descriptions-item>
         <el-descriptions-item label="提出人">{{ userLabel(users, bug.reporter_id) }}</el-descriptions-item>
         <el-descriptions-item label="状态">{{ bug.status_name || '-' }}</el-descriptions-item>
+        <el-descriptions-item label="Bug 类型">{{ bugTypeLabel(bug.bug_type) }}</el-descriptions-item>
         <el-descriptions-item label="严重程度"><RequirementPriorityBadge :value="bug.severity" /></el-descriptions-item>
         <el-descriptions-item label="优先级"><RequirementPriorityBadge :value="bug.priority" /></el-descriptions-item>
         <el-descriptions-item label="解决方案">{{ resolutionLabel(bug.resolution) }}</el-descriptions-item>
@@ -261,7 +262,7 @@ const editableIterationOptions = computed(() => bugIterationOptions(iterations.v
 const editableIterationDisplayOptions = computed(() => includeSelectedIterationOption(editableIterationOptions.value, iterations.value, bugForm.value.iteration_id))
 
 const resolutionOptions = ['设计如此', '重复Bug', '外部原因', '已解决', '无法重现', '延期处理', '不予解决']
-const { bugTypeOptions } = useBugTypes()
+const { bugTypeOptions, bugTypeLabel } = useBugTypes()
 const priorityLevelOptions = [
   { label: '1级', value: '1' },
   { label: '2级', value: '2' },

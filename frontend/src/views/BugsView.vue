@@ -120,7 +120,7 @@ const {
 } = usePagination(bugs)
 const workflowOperationWidth = computed(() => workflowActionColumnWidth(
   pagedBugs.value.map((row) => workflowTransitionsFor(row)),
-  { minWidth: 180, extraWidth: 90 }
+  { minWidth: 240, extraWidth: 160 }
 ))
 const priorityLevelOptions = [
   { label: '① 最高', value: '1' },

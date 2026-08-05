@@ -1216,10 +1216,6 @@ body {
 
 .workbench-title-button.is-terminal {
   color: #667085;
-  text-decoration: line-through;
-  text-decoration-color: #64748b;
-  text-decoration-thickness: 2px;
-  text-underline-offset: 3px;
 }
 
 .workbench-list-table .el-table__row.workbench-row-terminal > td {

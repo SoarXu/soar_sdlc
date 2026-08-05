@@ -142,6 +142,7 @@ def defer_work_items(
         if requirement.project_id not in target_project_ids:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="存在需求不在目标迭代项目范围内")
         move_work_item_to_iteration(db, requirement, target_iteration.id, actor_id=actor_id, reason="deferred")
+        _sync_requirement_tasks_iteration(db, requirement.id, target_iteration.id, actor_id=actor_id, reason="deferred")
         moved_requirement_ids.append(requirement.id)
 
     for task in direct_tasks:
@@ -267,6 +268,7 @@ def link_requirements(
         ):
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="需求已关联其他迭代")
         move_work_item_to_iteration(db, requirement, iteration_id, actor_id=actor_id, reason="linked")
+        _sync_requirement_tasks_iteration(db, requirement.id, iteration_id, actor_id=actor_id, reason="linked")
     db.commit()
     return _linked_requirements(db, iteration_id)
 
@@ -290,6 +292,7 @@ def unlink_requirement(
     if requirement and requirement.iteration_id == iteration_id:
         pool = requirement_pool_for_project(db, requirement.project_id)
         move_work_item_to_iteration(db, requirement, pool.id, actor_id=actor_id, reason="unlinked")
+        _sync_requirement_tasks_iteration(db, requirement.id, None, actor_id=actor_id, reason="unlinked")
         db.commit()
 
 
@@ -617,6 +620,24 @@ def _linked_tasks(db: Session, iteration_id: int, requirement_ids: list[int]) ->
     for task in db.query(Task).filter(Task.deleted == 0, Task.iteration_id == iteration_id).all():
         tasks_by_id[task.id] = task
     return list(tasks_by_id.values())
+
+
+def _sync_requirement_tasks_iteration(
+    db: Session,
+    requirement_id: int,
+    target_iteration_id: int | None,
+    *,
+    actor_id: int | None,
+    reason: str,
+) -> None:
+    tasks = (
+        db.query(Task)
+        .filter(Task.deleted == 0, Task.requirement_id == requirement_id)
+        .with_for_update()
+        .all()
+    )
+    for task in tasks:
+        move_work_item_to_iteration(db, task, target_iteration_id, actor_id=actor_id, reason=reason)
 
 
 def _unfinished_requirements_for_defer(

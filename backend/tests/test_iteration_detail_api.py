@@ -647,6 +647,26 @@ def test_link_requirements_moves_pool_items_but_rejects_other_delivery_items(cli
     assert pool_rejected.json()["detail"]["code"] == "REQUIREMENT_POOL_OPERATION_FORBIDDEN"
 
 
+def test_linking_and_unlinking_requirement_syncs_linked_tasks_iteration(client: TestClient):
+    project_id = _create_project(client, "Requirement task sync project")
+    iteration_id = _create_iteration(client, [project_id], "Requirement task sync iteration")
+    requirement_id = _create_requirement(client, project_id, "Requirement with task")
+    task_id = _create_task(client, project_id, "Task under requirement", requirement_id=requirement_id)
+
+    linked = client.post(
+        f"/api/v1/iterations/{iteration_id}/requirements",
+        json={"requirement_ids": [requirement_id]},
+    )
+
+    assert linked.status_code == 200
+    assert client.get(f"/api/v1/tasks/{task_id}").json()["iteration_id"] == iteration_id
+
+    unlinked = client.delete(f"/api/v1/iterations/{iteration_id}/requirements/{requirement_id}")
+
+    assert unlinked.status_code == 204
+    assert client.get(f"/api/v1/tasks/{task_id}").json()["iteration_id"] is None
+
+
 def test_iteration_detail_collects_scoped_projects_and_linked_objects(client: TestClient):
     root_project = _create_project(client, "Root project")
     child_project = _create_project(client, "Child project", parent_id=root_project)
@@ -1065,7 +1085,7 @@ def test_iteration_finish_is_blocked_by_open_test_run(client: TestClient):
     assert finished.status_code == 400
 
 
-def test_iteration_finish_checks_only_directly_included_tasks(client: TestClient):
+def test_iteration_finish_checks_requirement_linked_tasks(client: TestClient):
     project_id = _create_project(client)
     iteration_id = _create_iteration(client, [project_id], status="active")
     requirement_id = _create_requirement(client, project_id, "Completed direct requirement")
@@ -1079,14 +1099,25 @@ def test_iteration_finish_checks_only_directly_included_tasks(client: TestClient
         f"/api/v1/iterations/{iteration_id}/requirements",
         json={"requirement_ids": [requirement_id]},
     ).status_code == 200
-    _set_requirement_status(requirement_id, "completed")
+    _set_item_state_category(Requirement, requirement_id, "terminal")
 
     finished = client.post(
         f"/api/v1/workflow-runtime/iteration/{iteration_id}/transition",
         json={"action_key": "complete", "payload": {"effective_time": "2026-06-10T18:00:00"}},
     )
 
-    assert finished.status_code == 200
+    assert finished.status_code == 400
+    detail = finished.json()["detail"]
+    assert detail["counts"] == {"requirement": 0, "task": 1, "bug": 0, "test_run": 0}
+    assert detail["items"] == [
+        {
+            "object_type": "task",
+            "id": linked_task_id,
+            "title": "Open task linked only through requirement",
+            "status_name": "待分派",
+            "owner_id": None,
+        }
+    ]
     assert client.get(f"/api/v1/tasks/{linked_task_id}").json()["state_category"] == "start"
 
 
@@ -1095,6 +1126,7 @@ def test_iteration_defer_moves_selected_unfinished_items(client: TestClient):
     current_iteration_id = _create_iteration(client, [project_id], "Current iteration", status="active")
     target_iteration_id = _create_iteration(client, [project_id], "Target iteration", status="planning")
     requirement_id = _create_requirement(client, project_id, "Deferred requirement")
+    requirement_task_id = _create_task(client, project_id, "Deferred requirement task", requirement_id=requirement_id)
     task_id = _create_task(client, project_id, "Deferred task")
     assert client.post(f"/api/v1/iterations/{current_iteration_id}/requirements", json={"requirement_ids": [requirement_id]}).status_code == 200
     assert client.post(f"/api/v1/iterations/{current_iteration_id}/tasks", json={"task_ids": [task_id]}).status_code == 200
@@ -1109,6 +1141,7 @@ def test_iteration_defer_moves_selected_unfinished_items(client: TestClient):
     assert deferred.status_code == 200
     assert deferred.json()["moved_requirement_ids"] == [requirement_id]
     assert deferred.json()["moved_task_ids"] == [task_id]
+    assert client.get(f"/api/v1/tasks/{requirement_task_id}").json()["iteration_id"] == target_iteration_id
     assert client.get(f"/api/v1/iterations/{target_iteration_id}/detail").status_code == 200
 
 

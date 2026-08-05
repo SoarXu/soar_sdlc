@@ -164,6 +164,24 @@ def test_requirement_and_task_create_default_to_template_statuses_and_prd_fields
     assert updated.json()["actual_hours"] == 1.5
 
 
+def test_task_created_for_iteration_requirement_inherits_requirement_iteration(client: TestClient):
+    project_id = _create_project(client)
+    iteration_id = _create_iteration(client, project_id)
+    requirement = client.post(
+        "/api/v1/requirements",
+        json={"project_id": project_id, "iteration_id": iteration_id, "title": "迭代需求"},
+    )
+    assert requirement.status_code == 200
+
+    task = client.post(
+        "/api/v1/tasks",
+        json={"project_id": project_id, "requirement_id": requirement.json()["id"], "title": "需求任务"},
+    )
+
+    assert task.status_code == 200
+    assert task.json()["iteration_id"] == iteration_id
+
+
 def test_new_work_items_always_enter_definition_initial_state_regardless_of_owner(client: TestClient):
     project_id = _create_project(client)
     payloads = {

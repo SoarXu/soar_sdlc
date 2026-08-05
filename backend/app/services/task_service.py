@@ -69,9 +69,16 @@ def create_task(db: Session, payload: TaskCreate, actor_id: int | None = None) -
     data = payload.model_dump()
     primary_component_id = data.pop("primary_component_id", None)
     related_component_ids = data.pop("related_component_ids", [])
-    if primary_component_id is None and data.get("requirement_id"):
+    requirement = None
+    if data.get("requirement_id"):
+        requirement = db.query(Requirement).filter(
+            Requirement.id == data["requirement_id"], Requirement.deleted == 0
+        ).first()
+        if requirement:
+            data["iteration_id"] = requirement.iteration_id
+    if primary_component_id is None and requirement:
         primary_component_id, inherited_related_component_ids = work_item_component_ids(
-            db, "requirement", data["requirement_id"]
+            db, "requirement", requirement.id
         )
         if not related_component_ids:
             related_component_ids = inherited_related_component_ids

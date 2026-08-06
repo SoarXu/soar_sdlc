@@ -225,6 +225,18 @@ body {
   min-width: 0;
 }
 
+.list-filter-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.list-filter-bar .el-input,
+.list-filter-bar .el-select {
+  width: 220px;
+}
+
 .import-template-action {
   display: flex;
   align-items: center;

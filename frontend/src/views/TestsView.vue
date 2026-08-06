@@ -11,6 +11,13 @@
     <el-tabs v-model="activeTab">
       <el-tab-pane label="用例库" name="cases">
         <el-card shadow="never">
+          <div class="list-filter-bar">
+            <el-input v-model="caseFilters.keyword" clearable placeholder="搜索用例标题" />
+            <el-select v-model="caseFilters.projectId" clearable filterable placeholder="项目">
+              <el-option v-for="project in projects" :key="project.id" :label="project.name" :value="project.id" />
+            </el-select>
+            <el-tooltip content="重置筛选"><el-button :icon="RefreshLeft" circle @click="resetCaseFilters" /></el-tooltip>
+          </div>
           <el-table v-loading="loading" :data="pagedTestCases" stripe>
             <el-table-column prop="id" label="ID" width="80" />
             <el-table-column label="用例标题" min-width="220">
@@ -38,6 +45,13 @@
       </el-tab-pane>
       <el-tab-pane label="测试单" name="runs">
         <el-card shadow="never">
+          <div class="list-filter-bar">
+            <el-input v-model="runFilters.keyword" clearable placeholder="搜索测试单名称" />
+            <el-select v-model="runFilters.projectId" clearable filterable placeholder="项目">
+              <el-option v-for="project in projects" :key="project.id" :label="project.name" :value="project.id" />
+            </el-select>
+            <el-tooltip content="重置筛选"><el-button :icon="RefreshLeft" circle @click="resetRunFilters" /></el-tooltip>
+          </div>
           <el-table v-loading="loading" :data="pagedTestRuns" stripe>
             <el-table-column prop="id" label="ID" width="80" />
             <el-table-column prop="name" label="测试单名称" min-width="220" />
@@ -166,8 +180,9 @@
 
 <script setup>
 import RichTextPasteEditor from '../components/RichTextPasteEditor.vue'
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
+import { RefreshLeft } from '@element-plus/icons-vue'
 import { fetchIterations } from '../api/iterations'
 import { fetchProjectMembers, fetchProjects } from '../api/projects'
 import { fetchRequirements } from '../api/requirements'
@@ -185,20 +200,36 @@ import { useBugTypes } from '../utils/useBugTypes'
 const activeTab = ref('cases'), saving = ref(false), loading = ref(false)
 const testCases = ref([]), testRuns = ref([]), testRunCases = ref([]), projects = ref([]), requirements = ref([]), iterations = ref([]), users = ref([])
 const projectMembersById = ref({})
+const caseFilters = reactive({ keyword: '', projectId: null })
+const runFilters = reactive({ keyword: '', projectId: null })
+const filteredTestCases = computed(() => {
+  const keyword = caseFilters.keyword.trim().toLowerCase()
+  return testCases.value.filter((item) => (
+    (!keyword || item.title?.toLowerCase().includes(keyword))
+    && (!caseFilters.projectId || item.project_id === caseFilters.projectId)
+  ))
+})
+const filteredTestRuns = computed(() => {
+  const keyword = runFilters.keyword.trim().toLowerCase()
+  return testRuns.value.filter((item) => (
+    (!keyword || item.name?.toLowerCase().includes(keyword))
+    && (!runFilters.projectId || item.project_id === runFilters.projectId)
+  ))
+})
 const {
   page: casePage,
   pageSize: casePageSize,
   pageSizes: casePageSizes,
   total: caseTotal,
   pagedItems: pagedTestCases
-} = usePagination(testCases)
+} = usePagination(filteredTestCases)
 const {
   page: runPage,
   pageSize: runPageSize,
   pageSizes: runPageSizes,
   total: runTotal,
   pagedItems: pagedTestRuns
-} = usePagination(testRuns)
+} = usePagination(filteredTestRuns)
 const caseDialogVisible = ref(false), runDialogVisible = ref(false), selectDialogVisible = ref(false), executionDialogVisible = ref(false), caseExecutionVisible = ref(false), caseBugVisible = ref(false)
 const editingCaseId = ref(null), editingRunId = ref(null), selectedRunId = ref(null)
 const selectedCase = ref(null)
@@ -245,6 +276,8 @@ const currentUser = computed(() => currentUserFromStorage(users.value))
 const canManageAnyTestAsset = computed(() => projects.value.some((project) => canManageTestCase(project, currentUser.value, membersForProject(project.id))))
 
 function runCaseLabel(item) { return `${labelById(testRuns.value, item.test_run_id, 'name')} / ${labelById(testCases.value, item.test_case_id, 'title')} / ${item.result}` }
+function resetCaseFilters() { Object.assign(caseFilters, { keyword: '', projectId: null }) }
+function resetRunFilters() { Object.assign(runFilters, { keyword: '', projectId: null }) }
 function membersForProject(projectId) { return projectMembersById.value[projectId] || [] }
 function projectForId(projectId) { return projects.value.find((item) => item.id === projectId) || null }
 function canManageCaseRow(row) { return canManageTestCase(projectForId(row.project_id), currentUser.value, membersForProject(row.project_id)) }
@@ -326,6 +359,8 @@ async function submitSelectCases() { if (!selectForm.test_case_ids.length) retur
 async function submitExecution() { if (!executionForm.run_case_id) return ElMessage.warning('请选择执行记录'); saving.value = true; try { await updateTestRunCase(executionForm.run_case_id, { result: executionForm.result, remark: executionForm.remark }); if (executionForm.result === 'failed' && executionForm.bug_title.trim()) await createBugFromTestRunCase(executionForm.run_case_id, { title: executionForm.bug_title, actual_result: executionForm.remark }); executionDialogVisible.value = false; await loadData(); ElMessage.success('执行结果已保存') } catch (error) { showActionError(error, '执行结果保存失败') } finally { saving.value = false } }
 async function removeCase(id) { try { await deleteTestCase(id); await loadData() } catch (error) { showActionError(error, '用例删除失败') } }
 async function removeRun(id) { try { await deleteTestRun(id); await loadData() } catch (error) { showActionError(error, '测试单删除失败') } }
+watch([() => caseFilters.keyword, () => caseFilters.projectId], () => { casePage.value = 1 })
+watch([() => runFilters.keyword, () => runFilters.projectId], () => { runPage.value = 1 })
 onMounted(loadData)
 
 async function openNextCaseAfterExecution(currentId, rows) {

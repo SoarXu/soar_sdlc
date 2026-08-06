@@ -9,6 +9,18 @@
     </div>
 
     <el-card shadow="never">
+      <div class="list-filter-bar">
+        <el-select v-model="bugFilters.projectId" clearable filterable placeholder="项目">
+          <el-option v-for="project in projects" :key="project.id" :label="project.name" :value="project.id" />
+        </el-select>
+        <el-select v-model="bugFilters.severity" clearable placeholder="严重程度">
+          <el-option v-for="option in priorityLevelOptions" :key="option.value" :label="option.label" :value="option.value" />
+        </el-select>
+        <el-select v-model="bugFilters.status" clearable filterable placeholder="状态">
+          <el-option v-for="status in bugStatusOptions" :key="status" :label="status" :value="status" />
+        </el-select>
+        <el-tooltip content="重置筛选"><el-button :icon="RefreshLeft" circle @click="resetBugFilters" /></el-tooltip>
+      </div>
       <el-table ref="bugTable" v-loading="loading" :data="pagedBugs" stripe @selection-change="onBugSelectionChange">
         <el-table-column type="selection" width="48" :selectable="canSelectBugForBatchAssignment" />
         <el-table-column prop="id" label="ID" width="80" />
@@ -80,6 +92,7 @@
 import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
+import { RefreshLeft } from '@element-plus/icons-vue'
 import { createBug, deleteBug, fetchBugs, updateBug } from '../api/bugs'
 import { fetchProjectMembers, fetchProjects } from '../api/projects'
 import { fetchRequirements } from '../api/requirements'
@@ -110,14 +123,20 @@ const projectMembersById = ref({})
 const workflowTransitions = ref({})
 const bugTable = ref(null)
 const selectedBugs = ref([])
+const bugFilters = reactive({ projectId: null, severity: '', status: '' })
 const selectedBugProjectId = computed(() => selectedBugs.value[0]?.project_id || null)
+const filteredBugs = computed(() => bugs.value.filter((bug) => (
+  (!bugFilters.projectId || bug.project_id === bugFilters.projectId)
+  && (!bugFilters.severity || bug.severity === bugFilters.severity)
+  && (!bugFilters.status || bug.status_name === bugFilters.status)
+)))
 const {
   page: bugPage,
   pageSize: bugPageSize,
   pageSizes: bugPageSizes,
   total: bugTotal,
   pagedItems: pagedBugs
-} = usePagination(bugs)
+} = usePagination(filteredBugs)
 const workflowOperationWidth = computed(() => workflowActionColumnWidth(
   pagedBugs.value.map((row) => workflowTransitionsFor(row)),
   { minWidth: 180, extraWidth: 90 }
@@ -129,6 +148,7 @@ const priorityLevelOptions = [
   { label: '④ 低', value: '4' },
   { label: '⑤ 最低', value: '5' }
 ]
+const bugStatusOptions = computed(() => [...new Set(bugs.value.map((bug) => bug.status_name).filter(Boolean))])
 const form = reactive({ project_id: null, primary_component_id: null, iteration_id: null, requirement_id: null, task_id: null, test_case_id: null, test_run_id: null, title: '', severity: '3', priority: '3', owner_id: null, reporter_id: null, reproduce_steps: '', expected_result: '', actual_result: '' })
 const currentUser = computed(() => currentUserFromStorage(users.value))
 const canCreateAnyBug = computed(() => projects.value.some((project) => canCreateWorkItem(project, currentUser.value, membersForProject(project.id))))
@@ -162,6 +182,7 @@ function canDeleteBugRow(row) {
   return canDeleteWorkItem(project, currentUser.value, membersForProject(project?.id))
 }
 function resetForm() { Object.assign(form, { project_id: null, primary_component_id: null, iteration_id: null, requirement_id: null, task_id: null, test_case_id: null, test_run_id: null, title: '', severity: '3', priority: '3', owner_id: null, reporter_id: null, reproduce_steps: '', expected_result: '', actual_result: '' }) }
+function resetBugFilters() { Object.assign(bugFilters, { projectId: null, severity: '', status: '' }) }
 function openCreate() { editingId.value = null; resetForm(); dialogVisible.value = true }
 function openEdit(row) { editingId.value = row.id; editDialogVisible.value = true }
 function handleWorkflowCommand(row, { commandType }) {
@@ -181,6 +202,10 @@ async function loadData() {
 }
 
 watch([bugPage, bugPageSize], clearBugSelection)
+watch([() => bugFilters.projectId, () => bugFilters.severity, () => bugFilters.status], () => {
+  bugPage.value = 1
+  clearBugSelection()
+})
 async function loadProjectMembers() {
   const entries = await Promise.all(projects.value.map(async (project) => {
     try {

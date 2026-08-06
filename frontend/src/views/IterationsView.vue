@@ -9,6 +9,15 @@
     </div>
 
     <el-card shadow="never">
+      <div class="list-filter-bar">
+        <el-select v-model="iterationFilters.projectId" clearable filterable placeholder="项目">
+          <el-option v-for="project in projects" :key="project.id" :label="project.name" :value="project.id" />
+        </el-select>
+        <el-select v-model="iterationFilters.status" clearable filterable placeholder="状态">
+          <el-option v-for="status in iterationStatusOptions" :key="status" :label="status" :value="status" />
+        </el-select>
+        <el-tooltip content="重置筛选"><el-button :icon="RefreshLeft" circle @click="resetIterationFilters" /></el-tooltip>
+      </div>
       <el-table v-loading="loading" :data="pagedIterations" stripe>
         <el-table-column prop="id" label="ID" width="80" />
         <el-table-column label="迭代名称" min-width="180">
@@ -73,8 +82,9 @@
 </template>
 
 <script setup>
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
+import { RefreshLeft } from '@element-plus/icons-vue'
 import { createIteration, deleteIteration, fetchIterations, updateIteration } from '../api/iterations'
 import { fetchProjects } from '../api/projects'
 import { fetchUsers } from '../api/users'
@@ -91,13 +101,21 @@ const iterations = ref([])
 const projects = ref([])
 const users = ref([])
 const workflowTransitions = ref({})
+const iterationFilters = reactive({ projectId: null, status: '' })
+const filteredIterations = computed(() => iterations.value.filter((iteration) => (
+  (!iterationFilters.projectId || (iteration.project_ids || []).includes(iterationFilters.projectId))
+  && (!iterationFilters.status || iteration.status_name === iterationFilters.status)
+)))
+const iterationStatusOptions = computed(() => [...new Set(
+  iterations.value.map((iteration) => iteration.status_name).filter(Boolean)
+)])
 const {
   page: iterationPage,
   pageSize: iterationPageSize,
   pageSizes: iterationPageSizes,
   total: iterationTotal,
   pagedItems: pagedIterations
-} = usePagination(iterations)
+} = usePagination(filteredIterations)
 const projectOptions = computed(() => {
   const activeProjects = projects.value.filter((project) => project.state_category !== 'terminal')
   const childrenByParent = activeProjects.reduce((result, project) => {
@@ -118,6 +136,7 @@ const projectOptions = computed(() => {
   return result
 })
 const form = reactive({ project_ids: [], name: '', owner_id: null, start_date: null, end_date: null, goal: '' })
+function resetIterationFilters() { Object.assign(iterationFilters, { projectId: null, status: '' }) }
 function resetForm() { Object.assign(form, { project_ids: [], name: '', owner_id: null, start_date: null, end_date: null, goal: '' }); delete form.status }
 function openCreate() { editingId.value = null; resetForm(); dialogVisible.value = true }
 function openEdit(row) { editingId.value = row.id; Object.assign(form, { ...row, project_ids: row.project_ids || [], goal: row.goal || '' }); dialogVisible.value = true }
@@ -154,5 +173,6 @@ async function submitIteration() {
 }
 
 async function removeIteration(id) { await deleteIteration(id); await loadData() }
+watch([() => iterationFilters.projectId, () => iterationFilters.status], () => { iterationPage.value = 1 })
 onMounted(loadData)
 </script>

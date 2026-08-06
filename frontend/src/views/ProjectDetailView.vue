@@ -82,7 +82,6 @@
           <el-button v-if="canManageCurrentProject && !projectClosed" type="primary" @click="openIterationCreate">新增迭代</el-button>
         </div>
         <el-table :data="pagedProjectIterations" stripe width="100%">
-          <el-table-column prop="id" label="ID" width="80" />
           <el-table-column label="迭代名称" min-width="180" show-overflow-tooltip>
             <template #default="{ row }">
               <el-tag v-if="row.is_requirement_pool" type="info">{{ requirementIterationLabel(row) }}</el-tag>

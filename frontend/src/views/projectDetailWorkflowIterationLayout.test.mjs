@@ -18,6 +18,7 @@ assert.notEqual(iterationsEnd, -1)
 const iterationsTemplate = source.slice(iterationsStart, iterationsEnd)
 
 assert.equal((iterationsTemplate.match(/<el-table(?:\s|>)/g) || []).length, 1)
+assert.doesNotMatch(iterationsTemplate, /<el-table-column prop="id" label="ID"/)
 assert.match(iterationsTemplate, /v-if="row\.is_requirement_pool"[^>]*>\{\{ requirementIterationLabel\(row\) \}\}/)
 assert.match(iterationsTemplate, /:data="pagedProjectIterations"/)
 assert.match(

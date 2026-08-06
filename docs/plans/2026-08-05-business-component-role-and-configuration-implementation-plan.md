@@ -49,3 +49,16 @@
 1. 运行后端组件测试和全部前端测试、构建。
 2. 更新 N-017、N-018 为已解决并写入验证结果。
 3. 逐项提交，合并或直接提交至 `main`，执行 `git diff --check` 后推送 `origin/main`。
+
+### Task 5: 清理旧组件职责并提示角色分配条件
+
+**Files:**
+- Create: `backend/alembic/versions/20260806_001_remove_legacy_component_roles.py`
+- Modify: `frontend/src/views/ProjectComponentsView.vue`
+- Test: `frontend/src/views/projectComponentsView.test.mjs`
+
+1. 编写前端失败测试，断言创建入口仅显示“创建组件”，且保存会对用户未拥有的后台角色给出“请先在后台角色管理中分配该角色”的提示。
+2. 运行前端测试，确认旧页面尚不满足新文案和前置校验。
+3. 新增数据迁移，删除 `business_component_members` 中没有对应启用后台 `roles.role_key` 的历史成员职责，不做自动映射。
+4. 仅以角色列表中启用角色作为选择项；保存前读取用户的已分配角色，阻止未分配角色的成员行并显示可操作中文提示。
+5. 运行组件前端测试、完整前端测试、后端组件 API 回归与生产构建；检查迁移脚本及 `git diff --check`。

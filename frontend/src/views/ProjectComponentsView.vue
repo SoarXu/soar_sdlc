@@ -5,9 +5,9 @@
         <el-button link type="primary" @click="$router.push({ name: 'project-detail', params: { id: projectId } })">返回项目</el-button>
         <h1>{{ project.name || '项目' }}业务组件</h1>
       </div>
-      <el-button v-if="!projectClosed" type="primary" @click="dialogVisible = true">从已关闭项目创建组件</el-button>
+      <el-button v-if="!projectClosed" type="primary" @click="dialogVisible = true">创建组件</el-button>
     </div>
-    <el-button v-else-if="!projectClosed" type="primary" @click="dialogVisible = true">从已关闭项目创建组件</el-button>
+    <el-button v-else-if="!projectClosed" type="primary" @click="dialogVisible = true">创建组件</el-button>
 
     <el-table :data="components" stripe>
       <el-table-column prop="name" label="组件" min-width="180" />
@@ -22,7 +22,7 @@
 
     <el-empty v-if="!loading && !components.length" description="暂无业务组件" />
 
-    <el-dialog v-model="dialogVisible" title="从已关闭项目创建组件" width="520px" @closed="resetForm">
+    <el-dialog v-model="dialogVisible" title="创建组件" width="520px" @closed="resetForm">
       <el-form label-width="100px">
         <el-form-item label="来源项目" required>
           <el-select v-model="form.source_project_id" filterable class="form-select" @change="syncName">
@@ -159,6 +159,13 @@ function backendRoleLabel(roleKey) {
   return backendRoles.value.find((role) => role.role_key === roleKey)?.role_name || roleKey
 }
 
+function membersMissingAssignedRole() {
+  return editForm.members.filter((member) => {
+    const user = users.value.find((item) => item.id === member.user_id)
+    return !user?.roles?.some((role) => role.enabled !== false && role.role_key === member.component_role)
+  })
+}
+
 async function loadData() {
   loading.value = true
   try {
@@ -187,6 +194,7 @@ async function saveComponent() {
   if (!editForm.name.trim()) return ElMessage.warning('请填写组件名称')
   if (editForm.members.some((member) => !member.user_id || !member.component_role)) return ElMessage.warning('请选择组件成员和后台角色')
   if (new Set(editForm.members.map((member) => member.user_id)).size !== editForm.members.length) return ElMessage.warning('组件成员不可重复')
+  if (membersMissingAssignedRole().length) return ElMessage.warning('请先在后台角色管理中为该用户分配所选角色')
   saving.value = true
   try {
     await updateBusinessComponent(projectId.value, editForm.id, {

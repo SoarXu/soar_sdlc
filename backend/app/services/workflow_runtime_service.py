@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 
 from app.models.audit_log import AuditLog
 from app.services.business_component_service import (
+    active_primary_component_members,
     active_primary_component_member_roles,
     replace_work_item_components,
     resolve_component_transition_route,
@@ -845,6 +846,12 @@ def _eligible_transition_assignee_ids(
     )
     if component_route is not None:
         return component_route["eligible_manual_owner_ids"]
+    component_members = active_primary_component_members(db, _object_type_for_item(item), item)
+    if component_members is not None:
+        roles = _manual_owner_roles(rule)
+        if not roles or "project_member" in roles:
+            return sorted({member.user_id for member in component_members})
+        return sorted({member.user_id for member in component_members if member.component_role in roles})
     return _eligible_manual_assignee_ids(
         db, project_id=_project_id_for_item(db, _object_type_for_item(item), item), rule=rule
     )

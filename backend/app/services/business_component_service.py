@@ -368,6 +368,23 @@ def active_primary_component_member_roles(db: Session, object_type: str, item, u
     }
 
 
+def active_primary_component_members(
+    db: Session, object_type: str, item
+) -> list[BusinessComponentMember] | None:
+    primary_component_id, _ = work_item_component_ids(db, object_type, item.id)
+    if primary_component_id is None:
+        return None
+    return (
+        db.query(BusinessComponentMember)
+        .filter(
+            BusinessComponentMember.component_id == primary_component_id,
+            BusinessComponentMember.enabled.is_(True),
+        )
+        .order_by(BusinessComponentMember.id.asc())
+        .all()
+    )
+
+
 def resolve_component_transition_route(db: Session, object_type: str, item, transition: WorkflowTransition) -> dict | None:
     """Resolve an enabled component-specific route for one work-item transition."""
     primary_component_id, _ = work_item_component_ids(db, object_type, item.id)

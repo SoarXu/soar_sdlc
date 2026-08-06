@@ -5,10 +5,12 @@ from fastapi.testclient import TestClient
 from app.core.security import create_access_token, get_password_hash
 from app.db.session import SessionLocal
 from app.models.project_member import ProjectMember
+from app.models.requirement import Requirement
 from app.models.role import Role, UserRole
 from app.models.user import User
 from app.models.workflow_definition import WorkflowDefinition, WorkflowTransition
 from app.models.business_component import WorkflowMigrationLog
+from app.services.workflow_runtime_service import _eligible_transition_assignee_ids
 
 
 def _create_project(client: TestClient, name: str, workflow_scheme_id: int | None = None) -> dict:
@@ -408,6 +410,54 @@ def test_component_transition_route_limits_action_to_configured_member(client: T
         f"/api/v1/workflow-runtime/requirement/{requirement['id']}/transitions",
         headers={"Authorization": f"Bearer {outsider_token}"},
     ).json() == []
+
+
+def test_component_bound_manual_assignment_excludes_non_component_project_members(client: TestClient):
+    operations_project = _create_project(client, "InnovateX Platform Operations")
+    source_project = _create_project(client, "QA Archive Management")
+    component_member_id = _add_source_member(source_project["id"], role="developer")
+    non_component_member_id = _add_source_member(source_project["id"], role="developer")
+    _close_project(client, source_project["id"])
+    component = client.post(
+        f"/api/v1/projects/{operations_project['id']}/business-components/from-project",
+        json={"source_project_id": source_project["id"], "name": "QA Archive Management"},
+    ).json()
+    members = client.put(
+        f"/api/v1/projects/{operations_project['id']}/business-components/{component['id']}/members",
+        json=[{"user_id": component_member_id, "component_role": "developer"}],
+    )
+    assert members.status_code == 200, members.text
+    requirement_payload = client.post(
+        "/api/v1/requirements",
+        json={
+            "project_id": operations_project["id"],
+            "title": "QA archive production issue",
+            "primary_component_id": component["id"],
+        },
+    )
+    assert requirement_payload.status_code == 200, requirement_payload.text
+
+    db = SessionLocal()
+    try:
+        requirement = db.query(Requirement).filter(Requirement.id == requirement_payload.json()["id"]).first()
+        transition = (
+            db.query(WorkflowTransition)
+            .filter(WorkflowTransition.definition_id == requirement.workflow_definition_id)
+            .order_by(WorkflowTransition.id.asc())
+            .first()
+        )
+        assert transition
+        candidate_ids = _eligible_transition_assignee_ids(
+            db,
+            requirement,
+            transition,
+            {"allow_manual_owner": True, "manual_owner_roles": "developer"},
+        )
+    finally:
+        db.close()
+
+    assert candidate_ids == [component_member_id]
+    assert non_component_member_id not in candidate_ids
 
 
 def test_workflow_migration_is_scoped_to_component_scheme_and_audited(client: TestClient):

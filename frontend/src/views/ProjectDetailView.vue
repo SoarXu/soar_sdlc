@@ -94,7 +94,7 @@
           <el-table-column prop="actual_start_date" label="实际开始" width="130" />
           <el-table-column prop="actual_end_date" label="实际结束" width="130" />
           <el-table-column label="状态" width="120"><template #default="{ row }">{{ row.status_name || '-' }}</template></el-table-column>
-          <el-table-column label="操作" width="250" fixed="right">
+          <el-table-column label="操作" :width="projectIterationOperationWidth" fixed="right">
             <template #default="{ row }">
               <div class="table-actions">
                 <WorkflowActionButtons v-if="canManageIterationDelivery(row) && !row.is_requirement_pool" object-type="iteration" :object-id="row.id" mode="list" :transitions="projectWorkflowTransitionsFor('iteration', row.id)" :auto-load="false" :users="users" @executed="refreshAfterMutation" />
@@ -700,6 +700,7 @@ import { createTestRun, deleteTestRun, updateTestRun } from '../api/testRuns'
 import { fetchUsers } from '../api/users'
 import { fetchAssigneeRuleConfigs } from '../api/assigneeRuleConfigs'
 import { fetchWorkflowTransitionsBatch } from '../api/workflowRuntime'
+import { workflowActionColumnWidth } from '../utils/workflowActionColumn'
 import RequirementPriorityBadge from '../components/RequirementPriorityBadge.vue'
 import RichTextPasteEditor from '../components/RichTextPasteEditor.vue'
 import WorkflowActionButtons from '../components/WorkflowActionButtons.vue'
@@ -899,6 +900,10 @@ const pagedProjectIterations = computed(() => (
   projectRequirementPoolRow.value
     ? [projectRequirementPoolRow.value, ...projectIterations.value]
     : projectIterations.value
+))
+const projectIterationOperationWidth = computed(() => workflowActionColumnWidth(
+  pagedProjectIterations.value.map((row) => projectWorkflowTransitionsFor('iteration', row.id)),
+  { minWidth: 320, extraWidth: 184 }
 ))
 const pagedProjectRequirements = computed(() => projectRequirements.value)
 const pagedProjectTasks = computed(() => projectTasks.value)

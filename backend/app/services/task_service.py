@@ -29,6 +29,7 @@ from app.services.project_permission_service import (
     is_project_member,
 )
 from app.services.lifecycle_service import project_lifecycle_phase, requirement_lifecycle_phase
+from app.services.requirement_pool_service import resolve_project_work_item_iteration_id
 from app.services.status_operation_service import list_status_operations
 from app.services.workflow_state_service import initial_workflow_values
 from app.services.workflow_state_query_service import is_terminal_state
@@ -76,6 +77,10 @@ def create_task(db: Session, payload: TaskCreate, actor_id: int | None = None) -
         ).first()
         if requirement:
             data["iteration_id"] = requirement.iteration_id
+    if not requirement:
+        data["iteration_id"] = resolve_project_work_item_iteration_id(
+            db, data["project_id"], data.get("iteration_id")
+        )
     if primary_component_id is None and requirement:
         primary_component_id, inherited_related_component_ids = work_item_component_ids(
             db, "requirement", requirement.id
@@ -119,7 +124,12 @@ def create_linked_task(db: Session, payload: LinkedTaskCreate, actor: User | Non
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Linked source project not found")
     if is_terminal_state(project):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Project is closed")
-    inherited_iteration_id = getattr(source, "iteration_id", None)
+    inherited_iteration_id = resolve_project_work_item_iteration_id(
+        db,
+        project_id,
+        None,
+        source_iteration_id=getattr(source, "iteration_id", None),
+    )
     ensure_iteration_assignment_mutable(db, None, inherited_iteration_id)
     _ensure_task_iteration_scope(db, project_id, inherited_iteration_id)
 
@@ -232,6 +242,20 @@ def update_task(db: Session, task_id: int, payload: TaskUpdate, actor_id: int | 
     data = payload.model_dump(exclude_unset=True)
     data.pop("status", None)
     target_project_id = data.get("project_id", task.project_id)
+    if "iteration_id" in data:
+        target_requirement_id = data.get("requirement_id", task.requirement_id)
+        source_iteration_id = None
+        if target_requirement_id:
+            requirement = db.query(Requirement).filter(
+                Requirement.id == target_requirement_id, Requirement.deleted == 0
+            ).first()
+            source_iteration_id = requirement.iteration_id if requirement else None
+        data["iteration_id"] = resolve_project_work_item_iteration_id(
+            db,
+            target_project_id,
+            data.get("iteration_id"),
+            source_iteration_id=source_iteration_id,
+        )
     target_iteration_id = data.get("iteration_id", task.iteration_id)
     ensure_iteration_assignment_mutable(db, task.iteration_id, target_iteration_id)
     _ensure_task_iteration_scope(db, target_project_id, target_iteration_id)

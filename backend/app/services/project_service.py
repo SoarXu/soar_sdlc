@@ -20,7 +20,11 @@ from app.models.user import User
 from app.models.workflow_definition import WorkflowTransition
 from app.services.assignee_rule_config_service import default_project_workflow_scheme
 from app.services.status_operation_service import create_status_operation, list_status_operations
-from app.services.requirement_pool_service import create_project_requirement_pool, requirement_pool_for_project
+from app.services.requirement_pool_service import (
+    create_project_requirement_pool,
+    project_work_pool_counts,
+    requirement_pool_for_project,
+)
 from app.services.workflow_runtime_service import execute_transition
 from app.services.workflow_state_service import initial_system_workflow_values, initial_workflow_values
 from app.views.project_view import ProjectCreate, ProjectMemberCreate, ProjectUpdate
@@ -62,7 +66,10 @@ def list_project_iterations_page(
         query = query.filter(Iteration.owner_id == owner_id)
     page_data = _paginate(query.order_by(Iteration.id.desc()), page, page_size)
     page_data["items"] = [_iteration_to_dict(db, item) for item in page_data["items"]]
-    page_data["requirement_pool"] = _iteration_to_dict(db, requirement_pool_for_project(db, project.id))
+    page_data["requirement_pool"] = {
+        **_iteration_to_dict(db, requirement_pool_for_project(db, project.id)),
+        **project_work_pool_counts(db, project.id),
+    }
     return page_data
 
 
@@ -98,6 +105,7 @@ def list_project_tasks_page(
     current_state_id: int | None = None,
     owner_id: int | None = None,
     requirement_id: int | None = None,
+    iteration_id: int | None = None,
 ) -> dict:
     _get_active_project(db, project_id)
     query = db.query(Task).filter(Task.deleted == 0, Task.project_id == project_id)
@@ -109,6 +117,8 @@ def list_project_tasks_page(
         query = query.filter(Task.owner_id == owner_id)
     if requirement_id:
         query = query.filter(Task.requirement_id == requirement_id)
+    if iteration_id:
+        query = query.filter(Task.iteration_id == iteration_id)
     return _paginate(query.order_by(Task.id.desc()), page, page_size)
 
 

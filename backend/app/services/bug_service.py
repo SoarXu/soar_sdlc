@@ -7,6 +7,7 @@ from app.models.bug import Bug
 from app.models.iteration import Iteration, IterationProject
 from app.models.project import Project
 from app.models.requirement import Requirement
+from app.models.task import Task
 from app.models.test_case import TestCase
 from app.models.test_run import TestRun, TestRunCase
 from app.services.current_handler_service import ensure_work_item_action
@@ -23,6 +24,7 @@ from app.services.lifecycle_service import (
     requirement_lifecycle_phase,
     test_case_lifecycle_phase,
 )
+from app.services.requirement_pool_service import resolve_project_work_item_iteration_id
 from app.services.status_operation_service import list_status_operations
 from app.services.task_service import linked_task_summaries
 from app.services.work_item_iteration_history_service import list_iteration_history, move_work_item_to_iteration
@@ -58,6 +60,13 @@ def create_bug(db: Session, payload: BugCreate, actor_id: int | None = None) -> 
         )
         if not related_component_ids:
             related_component_ids = inherited_related_component_ids
+    source_iteration_id = _bug_source_iteration_id(db, data.get("task_id"), data.get("requirement_id"))
+    data["iteration_id"] = resolve_project_work_item_iteration_id(
+        db,
+        data["project_id"],
+        data.get("iteration_id"),
+        source_iteration_id=source_iteration_id,
+    )
     data["creator_id"] = actor_id
     ensure_iteration_assignment_mutable(db, None, data.get("iteration_id"))
     if data.get("iteration_id"):
@@ -140,6 +149,18 @@ def update_bug(db: Session, bug_id: int, payload: BugUpdate, actor_id: int | Non
     data.pop("verify_result", None)
     data.pop("close_reason", None)
     target_project_id = data.get("project_id", bug.project_id)
+    if "iteration_id" in data:
+        source_iteration_id = _bug_source_iteration_id(
+            db,
+            data.get("task_id", bug.task_id),
+            data.get("requirement_id", bug.requirement_id),
+        )
+        data["iteration_id"] = resolve_project_work_item_iteration_id(
+            db,
+            target_project_id,
+            data.get("iteration_id"),
+            source_iteration_id=source_iteration_id,
+        )
     target_iteration_id = data.get("iteration_id", bug.iteration_id)
     ensure_iteration_assignment_mutable(db, bug.iteration_id, target_iteration_id)
     if target_iteration_id:
@@ -177,6 +198,22 @@ def _get_active_bug(db: Session, bug_id: int) -> Bug:
     if not bug:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Bug not found")
     return bug
+
+
+def _bug_source_iteration_id(
+    db: Session, task_id: int | None, requirement_id: int | None
+) -> int | None:
+    if task_id:
+        task = db.query(Task).filter(Task.id == task_id, Task.deleted == 0).first()
+        if task:
+            return task.iteration_id
+    if requirement_id:
+        requirement = db.query(Requirement).filter(
+            Requirement.id == requirement_id, Requirement.deleted == 0
+        ).first()
+        if requirement:
+            return requirement.iteration_id
+    return None
 
 
 def _ensure_iteration_can_accept_bug(db: Session, iteration_id: int, bug_project_id: int | None) -> None:

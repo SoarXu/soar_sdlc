@@ -27,6 +27,12 @@
     <el-card v-loading="loading" shadow="never" class="project-detail-card">
       <template v-if="activeTab === 'overview'">
         <div class="project-overview">
+        <ProjectWorkPoolBand
+          :summary="projectRequirementPool"
+          :can-plan="canManageCurrentProject && !projectClosed"
+          @view="openWorkPoolItems"
+          @plan="openWorkPoolPlanning"
+        />
         <div class="metrics project-detail-metrics">
           <el-card v-for="item in metrics" :key="item.key" shadow="never">
             <span>{{ item.label }}</span>
@@ -77,6 +83,12 @@
       </template>
 
       <template v-else-if="activeTab === 'iterations'">
+        <ProjectWorkPoolBand
+          :summary="projectRequirementPool"
+          :can-plan="canManageCurrentProject && !projectClosed"
+          @view="openWorkPoolItems"
+          @plan="openWorkPoolPlanning"
+        />
         <div class="project-tab-toolbar">
           <el-input v-model="projectListFilters.iterations.keyword" clearable placeholder="搜索迭代名称" class="project-tab-search" @keyup.enter="resetProjectListSearch('iterations')" @clear="resetProjectListSearch('iterations')" />
           <el-button v-if="canManageCurrentProject && !projectClosed" type="primary" @click="openIterationCreate">新增迭代</el-button>
@@ -121,6 +133,9 @@
       <template v-else-if="activeTab === 'requirements'">
         <div class="project-tab-toolbar">
           <el-input v-model="projectListFilters.requirements.keyword" clearable placeholder="搜索需求标题" class="project-tab-search" @keyup.enter="resetProjectListSearch('requirements')" @clear="resetProjectListSearch('requirements')" />
+          <el-select v-model="projectListFilters.requirements.iteration_id" clearable placeholder="全部迭代" class="project-tab-filter" @change="resetProjectListSearch('requirements')">
+            <el-option v-for="iteration in projectWorkItemIterationOptions" :key="iteration.id" :label="requirementIterationLabel(iteration)" :value="iteration.id" />
+          </el-select>
           <el-button v-if="canCreateCurrentWorkItem && !projectClosed" @click="openImportDialog">导入需求</el-button>
           <el-button v-if="canCreateCurrentWorkItem && !projectClosed" type="primary" @click="openRequirementCreate">新增需求</el-button>
         </div>
@@ -162,6 +177,11 @@
           </el-table-column>
         </el-table>
         <div class="table-pagination batch-assignment-pagination">
+          <el-button
+            v-if="isWorkPoolFiltered('requirements') && selectedProjectRequirements.length"
+            type="primary"
+            @click="openSelectedWorkPoolPlanning('requirement')"
+          >纳入迭代</el-button>
           <BatchAssignmentBar
             object-type="requirement"
             :project-id="projectId"
@@ -185,6 +205,9 @@
       <template v-else-if="activeTab === 'tasks'">
         <div class="project-tab-toolbar">
           <el-input v-model="projectListFilters.tasks.keyword" clearable placeholder="搜索任务标题" class="project-tab-search" @keyup.enter="resetProjectListSearch('tasks')" @clear="resetProjectListSearch('tasks')" />
+          <el-select v-model="projectListFilters.tasks.iteration_id" clearable placeholder="全部迭代" class="project-tab-filter" @change="resetProjectListSearch('tasks')">
+            <el-option v-for="iteration in projectWorkItemIterationOptions" :key="iteration.id" :label="requirementIterationLabel(iteration)" :value="iteration.id" />
+          </el-select>
           <el-button v-if="canCreateCurrentWorkItem && !projectClosed" type="primary" @click="openTaskCreate">新增任务</el-button>
         </div>
         <el-table ref="projectTaskTable" :data="pagedProjectTasks" stripe width="100%" @selection-change="(rows) => onProjectWorkItemSelectionChange('task', rows)">
@@ -210,6 +233,11 @@
           </el-table-column>
         </el-table>
         <div class="table-pagination batch-assignment-pagination">
+          <el-button
+            v-if="isWorkPoolFiltered('tasks') && selectedProjectTasks.length"
+            type="primary"
+            @click="openSelectedWorkPoolPlanning('task')"
+          >纳入迭代</el-button>
           <BatchAssignmentBar
             object-type="task"
             :project-id="projectId"
@@ -289,6 +317,9 @@
       <template v-else-if="activeTab === 'bugs'">
         <div class="project-tab-toolbar">
           <el-input v-model="projectListFilters.bugs.keyword" clearable placeholder="搜索 Bug 标题/类型" class="project-tab-search" @keyup.enter="resetProjectListSearch('bugs')" @clear="resetProjectListSearch('bugs')" />
+          <el-select v-model="projectListFilters.bugs.iteration_id" clearable placeholder="全部迭代" class="project-tab-filter" @change="resetProjectListSearch('bugs')">
+            <el-option v-for="iteration in projectWorkItemIterationOptions" :key="iteration.id" :label="requirementIterationLabel(iteration)" :value="iteration.id" />
+          </el-select>
           <el-button v-if="canCreateCurrentWorkItem" type="primary" @click="openBugCreate">新增 Bug</el-button>
         </div>
         <el-table ref="projectBugTable" :data="pagedProjectBugs" stripe width="100%" @selection-change="(rows) => onProjectWorkItemSelectionChange('bug', rows)">
@@ -321,6 +352,11 @@
           </el-table-column>
         </el-table>
         <div class="table-pagination batch-assignment-pagination">
+          <el-button
+            v-if="isWorkPoolFiltered('bugs') && selectedProjectBugs.length"
+            type="primary"
+            @click="openSelectedWorkPoolPlanning('bug')"
+          >纳入迭代</el-button>
           <BatchAssignmentBar
             object-type="bug"
             :project-id="projectId"
@@ -447,6 +483,26 @@
         </div>
       </template>
     </el-card>
+
+    <el-dialog v-model="workPoolPlanningVisible" title="纳入正式迭代" width="520px">
+      <el-form label-position="top">
+        <el-form-item label="事项类型">
+          <el-input :model-value="workPoolPlanningTypeLabel" disabled />
+        </el-form-item>
+        <el-form-item label="已选择">
+          <el-input :model-value="`${selectedWorkPoolItems.length} 项`" disabled />
+        </el-form-item>
+        <el-form-item label="目标迭代" required>
+          <el-select v-model="workPoolPlanningForm.target_iteration_id" filterable placeholder="请选择正式执行迭代">
+            <el-option v-for="iteration in workPoolTargetIterations" :key="iteration.id" :label="iteration.name" :value="iteration.id" />
+          </el-select>
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="workPoolPlanningVisible = false">取消</el-button>
+        <el-button type="primary" :loading="saving" @click="submitWorkPoolPlanning">确认纳入</el-button>
+      </template>
+    </el-dialog>
 
     <el-dialog v-model="iterationDialogVisible" :title="editingIterationId ? '编辑迭代' : '新增迭代'" width="560px">
       <el-form label-position="top">
@@ -667,7 +723,16 @@ import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 
 import { createBug, deleteBug, updateBug } from '../api/bugs'
-import { createIteration, deferIterationWorkItems, deleteIteration, fetchIterations, updateIteration } from '../api/iterations'
+import {
+  createIteration,
+  deferIterationWorkItems,
+  deleteIteration,
+  fetchIterations,
+  linkIterationBugs,
+  linkIterationRequirements,
+  linkIterationTasks,
+  updateIteration
+} from '../api/iterations'
 import { fetchPrograms } from '../api/programs'
 import {
   fetchProject,
@@ -706,6 +771,7 @@ import RichTextPasteEditor from '../components/RichTextPasteEditor.vue'
 import WorkflowActionButtons from '../components/WorkflowActionButtons.vue'
 import BatchAssignmentBar from '../components/BatchAssignmentBar.vue'
 import BusinessComponentSelect from '../components/work-items/BusinessComponentSelect.vue'
+import ProjectWorkPoolBand from '../components/ProjectWorkPoolBand.vue'
 import ProjectComponentsView from './ProjectComponentsView.vue'
 import { currentUserId } from '../utils/currentUser'
 import { loadCloseReasonMap } from '../utils/closeReasonTooltip'
@@ -769,11 +835,11 @@ const projectListTotals = reactive({
 })
 const projectListFilters = reactive({
   iterations: { keyword: '' },
-  requirements: { keyword: '' },
-  tasks: { keyword: '' },
+  requirements: { keyword: '', iteration_id: null },
+  tasks: { keyword: '', iteration_id: null },
   testCases: { keyword: '' },
   testRuns: { keyword: '' },
-  bugs: { keyword: '' }
+  bugs: { keyword: '', iteration_id: null }
 })
 const projectListPagination = reactive({
   iterations: { currentPage: 1, pageSize: 10 },
@@ -785,6 +851,7 @@ const projectListPagination = reactive({
 })
 
 const iterationDialogVisible = ref(false)
+const workPoolPlanningVisible = ref(false)
 const editingIterationCanAdminister = ref(false)
 const deferWorkItemsVisible = ref(false)
 const requirementDialogVisible = ref(false)
@@ -802,6 +869,7 @@ const selectedCase = ref(null)
 const bugSourceCase = ref(null)
 const caseExecutionHistory = ref([])
 const deferWorkItemsForm = reactive({ target_iteration_id: null, remark: '' })
+const workPoolPlanningForm = reactive({ object_type: 'requirement', target_iteration_id: null })
 const settingsForm = reactive({ assignee_rule_config_id: null })
 
 const tabs = [
@@ -896,11 +964,7 @@ const selectedWorkflowSchemeDescription = computed(() => selectedWorkflowScheme.
 const projectTestCases = computed(() => projectTestCaseRows.value)
 const projectTestRuns = computed(() => projectTestRunRows.value)
 const projectBugs = computed(() => projectBugRows.value)
-const pagedProjectIterations = computed(() => (
-  projectRequirementPoolRow.value
-    ? [projectRequirementPoolRow.value, ...projectIterations.value]
-    : projectIterations.value
-))
+const pagedProjectIterations = computed(() => projectIterations.value)
 const projectIterationOperationWidth = computed(() => workflowActionColumnWidth(
   pagedProjectIterations.value.map((row) => projectWorkflowTransitionsFor('iteration', row.id)),
   { minWidth: 320, extraWidth: 184 }
@@ -912,6 +976,13 @@ const pagedProjectTestRuns = computed(() => projectTestRuns.value)
 const pagedProjectBugs = computed(() => projectBugs.value)
 const projectIterationOptions = computed(() => deliveryIterations(iterations.value).filter((item) => (item.project_ids || []).includes(projectId.value)))
 const projectRequirementPool = computed(() => projectRequirementPoolRow.value || requirementPoolForProject(project.value, iterations.value))
+const projectWorkItemIterationOptions = computed(() => [
+  ...(projectRequirementPool.value ? [projectRequirementPool.value] : []),
+  ...projectIterationOptions.value
+])
+const workPoolTargetIterations = computed(() => projectIterationOptions.value.filter((item) => item.state_category !== 'terminal'))
+const selectedWorkPoolItems = computed(() => projectWorkItemSelectionRef(workPoolPlanningForm.object_type)?.value || [])
+const workPoolPlanningTypeLabel = computed(() => ({ requirement: '需求', task: '任务', bug: 'Bug' }[workPoolPlanningForm.object_type]))
 const requirementIterationDisplayOptions = computed(() => requirementIterationOptions(project.value, projects.value, iterations.value))
 const requirementSelectableIterations = computed(() => requirementIterationDisplayOptions.value.filter((item) => (
   item.is_requirement_pool || item.state_category !== 'terminal' || item.id === requirementForm.iteration_id
@@ -1013,11 +1084,13 @@ function setSettingsTab(key) {
 }
 function projectListParams(key) {
   const pager = projectListPagination[key]
-  const keyword = projectListFilters[key]?.keyword?.trim()
+  const filters = projectListFilters[key]
+  const keyword = filters?.keyword?.trim()
   return {
     page: pager.currentPage,
     page_size: pager.pageSize,
-    keyword: keyword || undefined
+    keyword: keyword || undefined,
+    iteration_id: filters?.iteration_id || undefined
   }
 }
 function applyProjectPage(key, response, targetRef) {
@@ -1109,6 +1182,10 @@ function projectWorkItemBatchRow(objectType, row) {
   return { ...row, transitions: projectWorkflowTransitionsFor(objectType, row.id) }
 }
 function canSelectProjectWorkItemForBatchAssignment(objectType, row) {
+  const listKey = { requirement: 'requirements', task: 'tasks', bug: 'bugs' }[objectType]
+  if (isWorkPoolFiltered(listKey) && row.iteration_id === projectRequirementPool.value?.id) {
+    return objectType !== 'task' || !row.requirement_id
+  }
   return canSelectForBatchAssignment(projectWorkItemBatchRow(objectType, row), projectWorkItemSelectionRef(objectType).value)
 }
 function onProjectWorkItemSelectionChange(objectType, rows) {
@@ -1126,6 +1203,52 @@ async function onProjectWorkItemBatchAssignmentCompleted(objectType) {
   await loadProjectListPage({ requirement: 'requirements', task: 'tasks', bug: 'bugs' }[objectType])
 }
 function onProjectWorkItemBatchAssignmentError(error) { showActionError(error, '批量指派失败') }
+function isWorkPoolFiltered(listKey) {
+  return Boolean(projectRequirementPool.value?.id && projectListFilters[listKey]?.iteration_id === projectRequirementPool.value.id)
+}
+async function openWorkPoolItems(objectType = 'requirement') {
+  const listKey = { requirement: 'requirements', task: 'tasks', bug: 'bugs' }[objectType]
+  if (!listKey || !projectRequirementPool.value?.id) return
+  setActiveTab(listKey)
+  projectListFilters[listKey].iteration_id = projectRequirementPool.value.id
+  projectListPagination[listKey].currentPage = 1
+  await loadProjectListPage(listKey)
+}
+function openWorkPoolPlanning() {
+  openWorkPoolItems('requirement')
+}
+function openSelectedWorkPoolPlanning(objectType) {
+  workPoolPlanningForm.object_type = objectType
+  workPoolPlanningForm.target_iteration_id = null
+  workPoolPlanningVisible.value = true
+}
+async function submitWorkPoolPlanning() {
+  if (!workPoolPlanningForm.target_iteration_id) return ElMessage.warning('请选择正式执行迭代')
+  const ids = selectedWorkPoolItems.value.map((item) => item.id)
+  if (!ids.length) return ElMessage.warning('请选择待规划事项')
+  saving.value = true
+  try {
+    const targetIterationId = workPoolPlanningForm.target_iteration_id
+    if (workPoolPlanningForm.object_type === 'requirement') {
+      await linkIterationRequirements(targetIterationId, ids)
+    } else if (workPoolPlanningForm.object_type === 'task') {
+      await linkIterationTasks(targetIterationId, ids)
+    } else {
+      await linkIterationBugs(targetIterationId, ids)
+    }
+    workPoolPlanningVisible.value = false
+    clearProjectWorkItemSelection(workPoolPlanningForm.object_type)
+    await Promise.all([
+      loadProjectIterationsPage(),
+      loadProjectListPage({ requirement: 'requirements', task: 'tasks', bug: 'bugs' }[workPoolPlanningForm.object_type])
+    ])
+    ElMessage.success(`已纳入迭代 ${ids.length} 项`)
+  } catch (error) {
+    showActionError(error, '纳入迭代失败')
+  } finally {
+    saving.value = false
+  }
+}
 function iterationCanDefer(row) { return row.state_category === 'normal' && projectWorkflowTransitionsFor('iteration', row.id).length > 0 }
 async function loadProjectWorkflowTransitions(objectType, rows) {
   const items = (rows || []).map((row) => ({ object_type: objectType, id: row.id }))
@@ -1720,6 +1843,10 @@ function buildActualText(execution) {
 
 .defer-work-form {
   margin-top: 16px;
+}
+
+.project-tab-filter {
+  width: 200px;
 }
 
 .defer-work-lists {

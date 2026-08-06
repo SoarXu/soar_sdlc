@@ -292,7 +292,7 @@ def unlink_requirement(
     if requirement and requirement.iteration_id == iteration_id:
         pool = requirement_pool_for_project(db, requirement.project_id)
         move_work_item_to_iteration(db, requirement, pool.id, actor_id=actor_id, reason="unlinked")
-        _sync_requirement_tasks_iteration(db, requirement.id, None, actor_id=actor_id, reason="unlinked")
+        _sync_requirement_tasks_iteration(db, requirement.id, pool.id, actor_id=actor_id, reason="unlinked")
         db.commit()
 
 
@@ -301,10 +301,11 @@ def available_tasks(db: Session, iteration_id: int) -> list[Task]:
     scoped_project_ids = _iteration_scoped_project_ids(db, iteration_id)
     return (
         db.query(Task)
+        .join(Project, Project.id == Task.project_id)
         .filter(
             Task.deleted == 0,
             Task.project_id.in_(scoped_project_ids),
-            Task.iteration_id.is_(None),
+            Task.iteration_id == Project.requirement_pool_iteration_id,
             Task.requirement_id.is_(None),
         )
         .order_by(Task.id.desc())
@@ -328,7 +329,10 @@ def link_tasks(
     for task in tasks:
         if task.project_id not in scoped_project_ids:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="任务不在迭代项目范围内")
-        if task.iteration_id and task.iteration_id != iteration_id:
+        if (
+            task.iteration_id != iteration_id
+            and not is_project_requirement_pool(db, task.project_id, task.iteration_id)
+        ):
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="任务已关联其他迭代")
         move_work_item_to_iteration(db, task, iteration_id, actor_id=actor_id, reason="linked")
     db.commit()
@@ -346,8 +350,46 @@ def unlink_task(
     ensure_iteration_mutable(iteration)
     task = db.query(Task).filter(Task.id == task_id, Task.deleted == 0).first()
     if task and task.iteration_id == iteration_id:
-        move_work_item_to_iteration(db, task, None, actor_id=actor_id, reason="unlinked")
+        pool = requirement_pool_for_project(db, task.project_id)
+        move_work_item_to_iteration(db, task, pool.id, actor_id=actor_id, reason="unlinked")
         db.commit()
+
+
+def link_bugs(
+    db: Session,
+    iteration_id: int,
+    bug_ids: list[int],
+    actor_id: int | None = None,
+) -> list[Bug]:
+    iteration = _get_active_iteration(db, iteration_id, for_update=True)
+    ensure_delivery_iteration(iteration)
+    ensure_iteration_mutable(iteration)
+    scoped_project_ids = _iteration_scoped_project_ids(db, iteration_id)
+    bugs = (
+        db.query(Bug)
+        .filter(Bug.deleted == 0, Bug.id.in_(bug_ids))
+        .order_by(Bug.id.asc())
+        .with_for_update()
+        .all()
+    )
+    if len(bugs) != len(set(bug_ids)):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Bug 不存在")
+    for bug in bugs:
+        if bug.project_id not in scoped_project_ids:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Bug 不在迭代项目范围内")
+        if (
+            bug.iteration_id != iteration_id
+            and not is_project_requirement_pool(db, bug.project_id, bug.iteration_id)
+        ):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Bug 已关联其他迭代")
+        move_work_item_to_iteration(db, bug, iteration_id, actor_id=actor_id, reason="linked")
+    db.commit()
+    return (
+        db.query(Bug)
+        .filter(Bug.deleted == 0, Bug.iteration_id == iteration_id)
+        .order_by(Bug.id.desc())
+        .all()
+    )
 
 
 def _unlink_out_of_scope_iteration_items(
@@ -374,20 +416,12 @@ def _unlink_out_of_scope_model_items(
         if item.project_id not in scoped_project_ids:
             if model is TestCase:
                 item.iteration_id = None
-            elif model is Requirement:
+            elif model in {Requirement, Task, Bug}:
                 pool = requirement_pool_for_project(db, item.project_id)
                 move_work_item_to_iteration(
                     db,
                     item,
                     pool.id,
-                    actor_id=actor_id,
-                    reason="iteration_project_scope_removed",
-                )
-            else:
-                move_work_item_to_iteration(
-                    db,
-                    item,
-                    None,
                     actor_id=actor_id,
                     reason="iteration_project_scope_removed",
                 )

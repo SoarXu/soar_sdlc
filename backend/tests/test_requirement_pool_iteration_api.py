@@ -6,9 +6,13 @@ from fastapi.testclient import TestClient
 
 from app.db.session import SessionLocal
 from app.models.audit_log import AuditLog
+from app.models.bug import Bug
 from app.models.iteration import Iteration, IterationProject
 from app.models.project import Project
-from app.models.workflow_definition import WorkflowDefinition
+from app.models.project_member import ProjectMember
+from app.models.requirement import Requirement
+from app.models.task import Task
+from app.models.workflow_definition import WorkflowDefinition, WorkflowState, WorkflowTransition
 from app.services import project_service
 from app.services.requirement_pool_service import requirement_pool_for_project
 
@@ -167,6 +171,73 @@ def test_requirement_creation_keeps_explicit_delivery_iteration(client: TestClie
 
     assert created.status_code == 200, created.text
     assert created.json()["iteration_id"] == delivery["id"]
+
+
+def test_direct_task_and_bug_creation_without_iteration_use_project_pool(client: TestClient):
+    project = _create_project(client, "Direct work into pool")
+
+    task = client.post(
+        "/api/v1/tasks",
+        json={"project_id": project["id"], "title": "Direct unplanned task"},
+    )
+    bug = client.post(
+        "/api/v1/bugs",
+        json={"project_id": project["id"], "title": "Direct unplanned bug"},
+    )
+
+    assert task.status_code == 200, task.text
+    assert bug.status_code == 200, bug.text
+    assert task.json()["iteration_id"] == project["requirement_pool_iteration_id"]
+    assert bug.json()["iteration_id"] == project["requirement_pool_iteration_id"]
+
+
+def test_bug_creation_inherits_linked_requirement_delivery_iteration(client: TestClient):
+    project = _create_project(client, "Bug source iteration")
+    delivery = _create_delivery_iteration(client, project["id"])
+    requirement = client.post(
+        "/api/v1/requirements",
+        json={
+            "project_id": project["id"],
+            "iteration_id": delivery["id"],
+            "title": "Delivery requirement with bug",
+        },
+    )
+    assert requirement.status_code == 200, requirement.text
+
+    bug = client.post(
+        "/api/v1/bugs",
+        json={
+            "project_id": project["id"],
+            "requirement_id": requirement.json()["id"],
+            "title": "Inherited delivery bug",
+        },
+    )
+
+    assert bug.status_code == 200, bug.text
+    assert bug.json()["iteration_id"] == delivery["id"]
+
+
+def test_clearing_task_or_bug_iteration_moves_item_back_to_project_pool(client: TestClient):
+    project = _create_project(client, "Clear iteration into pool")
+    delivery = _create_delivery_iteration(client, project["id"])
+    task = client.post(
+        "/api/v1/tasks",
+        json={"project_id": project["id"], "iteration_id": delivery["id"], "title": "Delivery task"},
+    )
+    bug = client.post(
+        "/api/v1/bugs",
+        json={"project_id": project["id"], "iteration_id": delivery["id"], "title": "Delivery bug"},
+    )
+    assert task.status_code == 200, task.text
+    assert bug.status_code == 200, bug.text
+
+    cleared_task = client.patch(f"/api/v1/tasks/{task.json()['id']}", json={"iteration_id": None})
+    cleared_bug = client.patch(f"/api/v1/bugs/{bug.json()['id']}", json={"iteration_id": None})
+
+    assert cleared_task.status_code == 200, cleared_task.text
+    assert cleared_bug.status_code == 200, cleared_bug.text
+    assert cleared_task.json()["iteration_id"] == project["requirement_pool_iteration_id"]
+    assert cleared_bug.json()["iteration_id"] == project["requirement_pool_iteration_id"]
 
 
 def test_requirement_creation_rejects_foreign_or_noncanonical_pool(client: TestClient):
@@ -337,3 +408,282 @@ def test_project_iteration_page_includes_canonical_pool_while_global_lists_remai
     assert all(item["is_requirement_pool"] is False for item in project_page_items)
     assert project_page["requirement_pool"]["id"] == pool_id
     assert project_page["requirement_pool"]["is_requirement_pool"] is True
+
+
+def test_project_iteration_page_reports_non_terminal_work_pool_counts(client: TestClient):
+    project = _create_project(client, "Work pool summary")
+    pool_id = project["requirement_pool_iteration_id"]
+    requirement = client.post(
+        "/api/v1/requirements",
+        json={"project_id": project["id"], "title": "Unplanned requirement"},
+    )
+    task = client.post(
+        "/api/v1/tasks",
+        json={"project_id": project["id"], "iteration_id": pool_id, "title": "Unplanned task"},
+    )
+    terminal_task = client.post(
+        "/api/v1/tasks",
+        json={"project_id": project["id"], "iteration_id": pool_id, "title": "Legacy terminal pool task"},
+    )
+    bug = client.post(
+        "/api/v1/bugs",
+        json={"project_id": project["id"], "iteration_id": pool_id, "title": "Unplanned bug"},
+    )
+    for response in (requirement, task, terminal_task, bug):
+        assert response.status_code == 200, response.text
+
+    db = SessionLocal()
+    try:
+        terminal_state_id = (
+            db.query(WorkflowState.id)
+            .filter(
+                WorkflowState.definition_id == terminal_task.json()["workflow_definition_id"],
+                WorkflowState.category == "terminal",
+            )
+            .first()
+        )[0]
+        db.query(Task).filter(Task.id == terminal_task.json()["id"]).update(
+            {"current_state_id": terminal_state_id}
+        )
+        db.commit()
+    finally:
+        db.close()
+
+    page = client.get(f"/api/v1/projects/{project['id']}/iterations").json()
+
+    assert page["requirement_pool"] == {
+        **{key: value for key, value in page["requirement_pool"].items() if key not in {
+            "requirement_count", "task_count", "bug_count", "total_count"
+        }},
+        "requirement_count": 1,
+        "task_count": 1,
+        "bug_count": 1,
+        "total_count": 3,
+    }
+
+
+@pytest.mark.parametrize(
+    "object_type,create_path,model",
+    [
+        ("requirement", "/api/v1/requirements", Requirement),
+        ("task", "/api/v1/tasks", Task),
+        ("bug", "/api/v1/bugs", Bug),
+    ],
+)
+def test_pool_work_item_requires_delivery_iteration_before_execution(
+    client: TestClient,
+    object_type: str,
+    create_path: str,
+    model,
+):
+    project = _create_project(client, f"Pool execution guard {object_type}")
+    pool_id = project["requirement_pool_iteration_id"]
+    delivery = _create_delivery_iteration(client, project["id"], "Execution target")
+    created = client.post(
+        create_path,
+        json={"project_id": project["id"], "title": f"Unplanned {object_type}"},
+    )
+    assert created.status_code == 200, created.text
+    item = created.json()
+
+    db = SessionLocal()
+    try:
+        db.add(
+            ProjectMember(
+                project_id=project["id"],
+                user_id=item["creator_id"],
+                project_role="project_owner",
+                is_workbench_participant=True,
+            )
+        )
+        db.commit()
+    finally:
+        db.close()
+    linked_task_id = None
+    if object_type == "requirement":
+        linked_task = client.post(
+            "/api/v1/tasks",
+            json={
+                "project_id": project["id"],
+                "requirement_id": item["id"],
+                "title": "Task synchronized with requirement",
+            },
+        )
+        assert linked_task.status_code == 200, linked_task.text
+        linked_task_id = linked_task.json()["id"]
+
+    if object_type == "bug":
+        db = SessionLocal()
+        try:
+            db.query(Bug).filter(Bug.id == item["id"]).update({"owner_id": item["creator_id"]})
+            db.commit()
+        finally:
+            db.close()
+
+    actions = client.get(
+        f"/api/v1/workflow-runtime/{object_type}/{item['id']}/transitions"
+    )
+    assert actions.status_code == 200, actions.text
+    db = SessionLocal()
+    try:
+        execution_action = next(
+            action
+            for action in actions.json()
+            if db.query(WorkflowState.category)
+            .join(WorkflowTransition, WorkflowTransition.to_state_id == WorkflowState.id)
+            .filter(
+                WorkflowTransition.id == action["transition_id"],
+                WorkflowState.category.in_(("normal", "terminal")),
+            )
+            .scalar()
+            in {"normal", "terminal"}
+        )
+    finally:
+        db.close()
+    target_field = next(
+        field
+        for field in execution_action["form_config"]["fields"]
+        if field["field"] == "target_iteration_id"
+    )
+    assert target_field["required"] is True
+    assert {option["value"] for option in target_field["options"]} == {delivery["id"]}
+
+    action_payload = {}
+    bug_type_field = next(
+        (
+            field
+            for field in execution_action["form_config"]["fields"]
+            if field["field"] == "bug_type"
+        ),
+        None,
+    )
+    if bug_type_field:
+        action_payload["bug_type"] = bug_type_field["options"][0]["value"]
+    next_owner_payload = (
+        {"next_owner_id": item["creator_id"]}
+        if execution_action["action_key"] == "assign"
+        else {}
+    )
+
+    missing_target = client.post(
+        f"/api/v1/workflow-runtime/{object_type}/{item['id']}/transition",
+        json={
+            "transition_id": execution_action["transition_id"],
+            "payload": action_payload,
+            **next_owner_payload,
+        },
+        headers={"X-Test-Raw-Transition-Request": "1"},
+    )
+    assert missing_target.status_code == 422, missing_target.text
+    assert missing_target.json()["detail"] == {
+        "code": "TARGET_ITERATION_REQUIRED",
+        "message": "请选择正式执行迭代",
+    }
+
+    pool_target = client.post(
+        f"/api/v1/workflow-runtime/{object_type}/{item['id']}/transition",
+        json={
+            "transition_id": execution_action["transition_id"],
+            "payload": {**action_payload, "target_iteration_id": pool_id},
+            **next_owner_payload,
+        },
+        headers={"X-Test-Raw-Transition-Request": "1"},
+    )
+    assert pool_target.status_code == 422, pool_target.text
+    assert pool_target.json()["detail"]["code"] == "INVALID_TARGET_ITERATION"
+
+    executed = client.post(
+        f"/api/v1/workflow-runtime/{object_type}/{item['id']}/transition",
+        json={
+            "transition_id": execution_action["transition_id"],
+            "payload": {**action_payload, "target_iteration_id": delivery["id"]},
+            **next_owner_payload,
+        },
+        headers={"X-Test-Raw-Transition-Request": "1"},
+    )
+    assert executed.status_code == 200, executed.text
+
+    db = SessionLocal()
+    try:
+        assert db.query(model.iteration_id).filter(model.id == item["id"]).scalar() == delivery["id"]
+        if linked_task_id:
+            assert db.query(Task.iteration_id).filter(Task.id == linked_task_id).scalar() == delivery["id"]
+    finally:
+        db.close()
+
+
+def test_project_pool_filter_and_iteration_link_support_tasks_and_bugs(client: TestClient):
+    project = _create_project(client, "Plan task and bug")
+    pool_id = project["requirement_pool_iteration_id"]
+    delivery = _create_delivery_iteration(client, project["id"], "Planned delivery")
+    task = client.post(
+        "/api/v1/tasks",
+        json={"project_id": project["id"], "title": "Pool task to plan"},
+    )
+    delivery_task = client.post(
+        "/api/v1/tasks",
+        json={
+            "project_id": project["id"],
+            "iteration_id": delivery["id"],
+            "title": "Already planned task",
+        },
+    )
+    bug = client.post(
+        "/api/v1/bugs",
+        json={"project_id": project["id"], "title": "Pool bug to plan"},
+    )
+    assert task.status_code == 200, task.text
+    assert delivery_task.status_code == 200, delivery_task.text
+    assert bug.status_code == 200, bug.text
+
+    task_page = client.get(
+        f"/api/v1/projects/{project['id']}/tasks",
+        params={"iteration_id": pool_id},
+    )
+    assert task_page.status_code == 200, task_page.text
+    assert [item["id"] for item in task_page.json()["items"]] == [task.json()["id"]]
+
+    linked_tasks = client.post(
+        f"/api/v1/iterations/{delivery['id']}/tasks",
+        json={"task_ids": [task.json()["id"]]},
+    )
+    linked_bugs = client.post(
+        f"/api/v1/iterations/{delivery['id']}/bugs",
+        json={"bug_ids": [bug.json()["id"]]},
+    )
+    assert linked_tasks.status_code == 200, linked_tasks.text
+    assert linked_bugs.status_code == 200, linked_bugs.text
+    assert client.get(f"/api/v1/tasks/{task.json()['id']}").json()["iteration_id"] == delivery["id"]
+    assert client.get(f"/api/v1/bugs/{bug.json()['id']}").json()["iteration_id"] == delivery["id"]
+
+
+def test_failed_pool_transition_rolls_back_item_and_linked_task_migration(client: TestClient):
+    project = _create_project(client, "Atomic pool transition")
+    pool_id = project["requirement_pool_iteration_id"]
+    delivery = _create_delivery_iteration(client, project["id"], "Rejected execution target")
+    requirement = client.post(
+        "/api/v1/requirements",
+        json={"project_id": project["id"], "title": "Requirement blocked by open task"},
+    )
+    assert requirement.status_code == 200, requirement.text
+    task = client.post(
+        "/api/v1/tasks",
+        json={
+            "project_id": project["id"],
+            "requirement_id": requirement.json()["id"],
+            "title": "Open task blocks terminal transition",
+        },
+    )
+    assert task.status_code == 200, task.text
+
+    canceled = client.post(
+        f"/api/v1/workflow-runtime/requirement/{requirement.json()['id']}/transition",
+        json={
+            "action_key": "cancel",
+            "payload": {"target_iteration_id": delivery["id"]},
+        },
+    )
+
+    assert canceled.status_code == 400, canceled.text
+    assert client.get(f"/api/v1/requirements/{requirement.json()['id']}").json()["iteration_id"] == pool_id
+    assert client.get(f"/api/v1/tasks/{task.json()['id']}").json()["iteration_id"] == pool_id

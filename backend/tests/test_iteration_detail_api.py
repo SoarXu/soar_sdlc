@@ -726,7 +726,8 @@ def test_linking_and_unlinking_requirement_syncs_linked_tasks_iteration(client: 
     unlinked = client.delete(f"/api/v1/iterations/{iteration_id}/requirements/{requirement_id}")
 
     assert unlinked.status_code == 204
-    assert client.get(f"/api/v1/tasks/{task_id}").json()["iteration_id"] is None
+    pool_id = client.get(f"/api/v1/projects/{project_id}").json()["requirement_pool_iteration_id"]
+    assert client.get(f"/api/v1/tasks/{task_id}").json()["iteration_id"] == pool_id
 
 
 def test_iteration_detail_collects_scoped_projects_and_linked_objects(client: TestClient):
@@ -1019,8 +1020,8 @@ def test_iteration_project_scope_removal_closes_work_item_history_with_actor_and
     db = SessionLocal()
     try:
         assert db.query(Requirement).filter(Requirement.id == requirement_id).one().iteration_id == removed_pool_id
-        assert db.query(Task).filter(Task.id == task_id).one().iteration_id is None
-        assert db.query(Bug).filter(Bug.id == bug_id).one().iteration_id is None
+        assert db.query(Task).filter(Task.id == task_id).one().iteration_id == removed_pool_id
+        assert db.query(Bug).filter(Bug.id == bug_id).one().iteration_id == removed_pool_id
         histories = db.query(WorkItemIterationHistory).filter(
             WorkItemIterationHistory.iteration_id == iteration_id,
             WorkItemIterationHistory.object_id.in_([requirement_id, task_id, bug_id]),

@@ -28,6 +28,10 @@ export function linkIterationTasks(id, taskIds) {
   return http.post(`/iterations/${id}/tasks`, { task_ids: taskIds })
 }
 
+export function linkIterationBugs(id, bugIds) {
+  return http.post(`/iterations/${id}/bugs`, { bug_ids: bugIds })
+}
+
 export function unlinkIterationTask(id, taskId) {
   return http.delete(`/iterations/${id}/tasks/${taskId}`)
 }

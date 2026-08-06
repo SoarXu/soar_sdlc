@@ -3,6 +3,7 @@
     <div class="project-detail-head">
       <div>
         <el-button link type="primary" @click="$router.push('/iterations')">返回迭代列表</el-button>
+        <el-button v-if="sourceProjectId" link type="primary" @click="backToSourceProject">回到项目</el-button>
         <h1>{{ iteration.name || '迭代详情' }}</h1>
         <p>{{ projectNames }} · {{ userLabel(users, iteration.owner_id) }} · {{ iteration.start_date || '-' }} 至 {{ iteration.end_date || '-' }}</p>
       </div>
@@ -420,6 +421,11 @@ import { useBugTypes } from '../utils/useBugTypes'
 const route = useRoute()
 const router = useRouter()
 const iterationId = computed(() => Number(route.params.id))
+const sourceProjectId = computed(() => {
+  if (route.query.from !== 'project') return null
+  const projectId = Number(route.query.projectId)
+  return Number.isInteger(projectId) && projectId > 0 ? projectId : null
+})
 const loading = ref(false)
 const saving = ref(false)
 const activeTab = ref(normalizeIterationTab(route.query.tab))
@@ -565,6 +571,14 @@ function normalizeIterationTab(value) { return ['overview', 'requirements', 'tas
 function setActiveTab(key) {
   activeTab.value = key
   router.replace({ name: 'iteration-detail', params: { id: iterationId.value }, query: { ...route.query, tab: key } })
+}
+function backToSourceProject() {
+  if (!sourceProjectId.value) return
+  router.push({
+    name: 'project-detail',
+    params: { id: sourceProjectId.value },
+    query: { tab: 'iterations' }
+  })
 }
 function apiErrorMessage(error) { return actionErrorMessage(error) }
 function showActionError(error, fallback) { ElMessageBox.alert(apiErrorMessage(error, fallback), '提示', { type: 'warning' }) }

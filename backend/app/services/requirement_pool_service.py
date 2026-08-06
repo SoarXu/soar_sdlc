@@ -1,9 +1,14 @@
 from fastapi import HTTPException, status
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
+from app.models.bug import Bug
 from app.models.iteration import Iteration, IterationProject
 from app.models.project import Project
+from app.models.requirement import Requirement
+from app.models.task import Task
 from app.services.lifecycle_service import project_lifecycle_phase
+from app.services.workflow_state_query_service import non_terminal_state_clause
 from app.services.workflow_state_service import initial_system_workflow_values
 
 
@@ -77,8 +82,46 @@ def resolve_requirement_iteration_id(
     return requested_iteration_id
 
 
+def resolve_project_work_item_iteration_id(
+    db: Session,
+    project_id: int,
+    requested_iteration_id: int | None,
+    *,
+    source_iteration_id: int | None = None,
+) -> int:
+    if requested_iteration_id is not None:
+        return requested_iteration_id
+    if source_iteration_id is not None:
+        return source_iteration_id
+    return requirement_pool_for_project(db, project_id).id
+
+
 def is_project_requirement_pool(db: Session, project_id: int, iteration_id: int | None) -> bool:
     return iteration_id is not None and requirement_pool_for_project(db, project_id).id == iteration_id
+
+
+def project_work_pool_counts(db: Session, project_id: int) -> dict[str, int]:
+    pool_id = requirement_pool_for_project(db, project_id).id
+    counts = {
+        "requirement_count": _open_pool_item_count(db, Requirement, pool_id),
+        "task_count": _open_pool_item_count(db, Task, pool_id),
+        "bug_count": _open_pool_item_count(db, Bug, pool_id),
+    }
+    counts["total_count"] = sum(counts.values())
+    return counts
+
+
+def _open_pool_item_count(db: Session, model, pool_id: int) -> int:
+    return int(
+        db.query(func.count(model.id))
+        .filter(
+            model.deleted == 0,
+            model.iteration_id == pool_id,
+            non_terminal_state_clause(model),
+        )
+        .scalar()
+        or 0
+    )
 
 
 def _iteration_scoped_project_ids(db: Session, iteration_id: int) -> set[int]:

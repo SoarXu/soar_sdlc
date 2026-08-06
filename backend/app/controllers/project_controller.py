@@ -121,10 +121,11 @@ def get_project_tasks(
     current_state_id: int | None = None,
     owner_id: int | None = None,
     requirement_id: int | None = None,
+    iteration_id: int | None = None,
     db: Session = Depends(get_db),
 ):
     return list_project_tasks_page(
-        db, project_id, page, page_size, keyword, current_state_id, owner_id, requirement_id
+        db, project_id, page, page_size, keyword, current_state_id, owner_id, requirement_id, iteration_id
     )
 
 

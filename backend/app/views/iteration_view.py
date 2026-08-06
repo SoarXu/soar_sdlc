@@ -67,6 +67,10 @@ class LinkTasksRequest(BaseModel):
     task_ids: list[int]
 
 
+class LinkBugsRequest(BaseModel):
+    bug_ids: list[int]
+
+
 class DeferIterationWorkItemsRequest(BaseModel):
     target_iteration_id: int
     requirement_ids: list[int] | None = None

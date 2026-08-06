@@ -22,6 +22,7 @@ from app.services.iteration_service import (
     defer_work_items,
     ensure_delivery_iteration,
     get_iteration_detail,
+    link_bugs,
     link_requirements,
     link_tasks,
     list_iteration_status_operations,
@@ -37,6 +38,7 @@ from app.views.iteration_view import (
     IterationCreate,
     IterationRead,
     IterationUpdate,
+    LinkBugsRequest,
     LinkRequirementsRequest,
     LinkTasksRequest,
 )
@@ -80,6 +82,14 @@ def patch_iteration(
         ensure_iteration_owner_assignment_permission(db, iteration_id, current_user)
     else:
         ensure_iteration_management_permission(db, iteration_id, current_user)
+    iteration = db.query(Iteration).filter(Iteration.id == iteration_id, Iteration.deleted == 0).first()
+    if iteration and iteration.is_requirement_pool:
+        return update_iteration(
+            db,
+            iteration_id,
+            payload,
+            actor_id=current_user.id if current_user else None,
+        )
     if target_project_ids and changed_fields & {"project_id", "project_ids"}:
         _ensure_can_manage_projects(db, target_project_ids, current_user)
     if "owner_id" in changed_fields:
@@ -179,6 +189,18 @@ def post_iteration_tasks(
     _ensure_delivery_iteration_operation(db, iteration_id)
     _ensure_can_manage_iteration(db, iteration_id, current_user)
     return link_tasks(db, iteration_id, payload.task_ids, actor_id=current_user.id if current_user else None)
+
+
+@router.post("/{iteration_id}/bugs")
+def post_iteration_bugs(
+    iteration_id: int,
+    payload: LinkBugsRequest,
+    db: Session = Depends(get_db),
+    current_user: User | None = Depends(get_optional_current_user),
+):
+    _ensure_delivery_iteration_operation(db, iteration_id)
+    _ensure_can_manage_iteration(db, iteration_id, current_user)
+    return link_bugs(db, iteration_id, payload.bug_ids, actor_id=current_user.id if current_user else None)
 
 
 @router.delete("/{iteration_id}/tasks/{task_id}", status_code=status.HTTP_204_NO_CONTENT)

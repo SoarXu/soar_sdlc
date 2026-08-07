@@ -19,6 +19,7 @@ from app.models.test_run import TestRun, TestRunCase
 from app.models.user import User
 from app.models.workflow_definition import WorkflowTransition
 from app.services.assignee_rule_config_service import default_project_workflow_scheme
+from app.services.project_permission_service import visible_project_ids
 from app.services.status_operation_service import create_status_operation, list_status_operations
 from app.services.requirement_pool_service import (
     create_project_requirement_pool,
@@ -32,8 +33,9 @@ from app.views.status_operation_view import StatusOperationCreate
 from app.views.workflow_runtime_view import WorkflowTransitionExecuteRequest
 
 
-def list_projects(db: Session, assignee_rule_config_id: int | None = None) -> list[Project]:
+def list_projects(db: Session, actor, assignee_rule_config_id: int | None = None) -> list[Project]:
     query = db.query(Project).filter(Project.deleted == 0)
+    query = query.filter(Project.id.in_(visible_project_ids(db, actor)))
     if assignee_rule_config_id is not None:
         query = query.filter(Project.assignee_rule_config_id == assignee_rule_config_id)
     return query.order_by(Project.id.asc()).all()

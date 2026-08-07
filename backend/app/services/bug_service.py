@@ -18,7 +18,7 @@ from app.services.business_component_service import (
     work_item_component_ids,
 )
 from app.services.iteration_service import ensure_iteration_assignment_mutable
-from app.services.project_permission_service import ensure_workflow_fields_not_updated
+from app.services.project_permission_service import ensure_workflow_fields_not_updated, visible_project_ids
 from app.services.lifecycle_service import (
     project_lifecycle_phase,
     requirement_lifecycle_phase,
@@ -33,8 +33,10 @@ from app.services.workflow_state_query_service import is_terminal_state
 from app.views.bug_view import BugCreate, BugFromTestRunCaseRequest, BugUpdate
 
 
-def list_bugs(db: Session) -> list[Bug]:
-    bugs = db.query(Bug).filter(Bug.deleted == 0).order_by(Bug.id.desc()).all()
+def list_bugs(db: Session, actor) -> list[Bug]:
+    bugs = db.query(Bug).filter(
+        Bug.deleted == 0, Bug.project_id.in_(visible_project_ids(db, actor))
+    ).order_by(Bug.id.desc()).all()
     for bug in bugs:
         bug.linked_tasks = linked_task_summaries(db, "bug", bug.id)
         bug.iteration_history = list_iteration_history(db, "bug", bug.id)

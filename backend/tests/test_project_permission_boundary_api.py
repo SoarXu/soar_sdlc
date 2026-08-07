@@ -172,6 +172,49 @@ def test_work_item_create_requires_project_member_and_login(client: TestClient):
     assert allowed.status_code == 200
 
 
+def test_non_member_cannot_discover_or_open_project_work_items(client: TestClient):
+    owner_id, _ = _create_user("Visibility Project Owner")
+    _, outsider_token = _create_user("Visibility Project Outsider")
+    project = client.post(
+        "/api/v1/projects", json={"name": f"Private Project {uuid4().hex[:8]}", "owner_id": owner_id}
+    ).json()
+    requirement = client.post(
+        "/api/v1/requirements",
+        json={"project_id": project["id"], "title": f"Private Requirement {uuid4().hex[:8]}"},
+    ).json()
+    task = client.post(
+        "/api/v1/tasks",
+        json={"project_id": project["id"], "title": f"Private Task {uuid4().hex[:8]}", "task_type": "standalone_operation"},
+    ).json()
+    bug = client.post(
+        "/api/v1/bugs",
+        json={"project_id": project["id"], "title": f"Private Bug {uuid4().hex[:8]}"},
+    ).json()
+    test_case = client.post(
+        "/api/v1/test-cases",
+        json={"project_id": project["id"], "title": f"Private Test Case {uuid4().hex[:8]}"},
+    ).json()
+    test_run = client.post(
+        "/api/v1/test-runs",
+        json={"project_id": project["id"], "name": f"Private Test Run {uuid4().hex[:8]}"},
+    ).json()
+
+    headers = _auth(outsider_token)
+    assert project["id"] not in {item["id"] for item in client.get("/api/v1/projects", headers=headers).json()}
+    assert requirement["id"] not in {item["id"] for item in client.get("/api/v1/requirements", headers=headers).json()}
+    assert task["id"] not in {item["id"] for item in client.get("/api/v1/tasks", headers=headers).json()}
+    assert bug["id"] not in {item["id"] for item in client.get("/api/v1/bugs", headers=headers).json()}
+    assert test_case["id"] not in {item["id"] for item in client.get("/api/v1/test-cases", headers=headers).json()}
+    assert test_run["id"] not in {item["id"] for item in client.get("/api/v1/test-runs", headers=headers).json()}
+
+    assert client.get(f"/api/v1/projects/{project['id']}", headers=headers).status_code == 403
+    assert client.get(f"/api/v1/requirements/{requirement['id']}", headers=headers).status_code == 403
+    assert client.get(f"/api/v1/tasks/{task['id']}", headers=headers).status_code == 403
+    assert client.get(f"/api/v1/bugs/{bug['id']}", headers=headers).status_code == 403
+    assert client.get(f"/api/v1/test-cases/{test_case['id']}", headers=headers).status_code == 403
+    assert client.get(f"/api/v1/projects/{project['id']}/business-components", headers=headers).status_code == 403
+
+
 def test_only_project_owner_can_delete_work_item(client: TestClient):
     owner_id, owner_token = _create_user("Permission Delete Work Owner")
     member_id, member_token = _create_user("Permission Delete Work Member")

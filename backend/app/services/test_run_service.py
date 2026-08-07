@@ -12,6 +12,7 @@ from app.services.iteration_service import (
     lock_iterations_for_mutation,
 )
 from app.services.project_team_service import default_test_run_owner_id
+from app.services.project_permission_service import visible_project_ids
 from app.services.task_service import linked_task_summaries
 from app.views.test_run_view import SelectTestCasesRequest, TestRunCaseUpdate, TestRunCreate, TestRunUpdate
 
@@ -19,8 +20,10 @@ from app.views.test_run_view import SelectTestCasesRequest, TestRunCaseUpdate, T
 TEST_RUN_LOCK_RETRY_LIMIT = 3
 
 
-def list_test_runs(db: Session) -> list[TestRun]:
-    test_runs = db.query(TestRun).filter(TestRun.deleted == 0).order_by(TestRun.id.desc()).all()
+def list_test_runs(db: Session, actor) -> list[TestRun]:
+    test_runs = db.query(TestRun).filter(
+        TestRun.deleted == 0, TestRun.project_id.in_(visible_project_ids(db, actor))
+    ).order_by(TestRun.id.desc()).all()
     for test_run in test_runs:
         test_run.linked_tasks = linked_task_summaries(db, "test_run", test_run.id)
     return test_runs

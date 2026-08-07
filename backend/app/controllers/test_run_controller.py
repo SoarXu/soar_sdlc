@@ -8,6 +8,7 @@ from app.models.user import User
 from app.services.project_permission_service import (
     ensure_test_case_execute_permission,
     ensure_test_case_manage_permission,
+    ensure_project_view_permission,
 )
 from app.services.bug_service import create_bug_from_test_run_case
 from app.services.test_run_service import (
@@ -34,8 +35,8 @@ router = APIRouter()
 
 
 @router.get("/test-runs", response_model=list[TestRunRead])
-def get_test_runs(db: Session = Depends(get_db)):
-    return list_test_runs(db)
+def get_test_runs(db: Session = Depends(get_db), current_user: User | None = Depends(get_optional_current_user)):
+    return list_test_runs(db, current_user)
 
 
 @router.post("/test-runs", response_model=TestRunRead)

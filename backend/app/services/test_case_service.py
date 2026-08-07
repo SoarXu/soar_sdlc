@@ -14,11 +14,14 @@ from app.services.project_team_service import default_tester_id
 from app.services.task_service import linked_task_summaries
 from app.services.work_item_iteration_history_service import move_work_item_to_iteration
 from app.services.workflow_state_service import initial_workflow_values
+from app.services.project_permission_service import visible_project_ids
 from app.views.test_case_view import BugFromTestCaseRequest, TestCaseCreate, TestCaseExecutionCreate, TestCaseUpdate
 
 
-def list_test_cases(db: Session) -> list[TestCase]:
-    test_cases = db.query(TestCase).filter(TestCase.deleted == 0).order_by(TestCase.id.desc()).all()
+def list_test_cases(db: Session, actor) -> list[TestCase]:
+    test_cases = db.query(TestCase).filter(
+        TestCase.deleted == 0, TestCase.project_id.in_(visible_project_ids(db, actor))
+    ).order_by(TestCase.id.desc()).all()
     for test_case in test_cases:
         test_case.linked_tasks = linked_task_summaries(db, "test_case", test_case.id)
     return test_cases

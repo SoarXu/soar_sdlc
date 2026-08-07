@@ -16,7 +16,7 @@ from app.services.business_component_service import (
     resolve_primary_component,
 )
 from app.services.iteration_service import ensure_iteration_assignment_mutable
-from app.services.project_permission_service import ensure_workflow_fields_not_updated
+from app.services.project_permission_service import ensure_workflow_fields_not_updated, visible_project_ids
 from app.services.lifecycle_service import project_lifecycle_phase
 from app.services.status_operation_service import list_status_operations
 from app.services.task_service import linked_task_summaries
@@ -30,8 +30,10 @@ from app.services.requirement_pool_service import (
 from app.views.requirement_view import RequirementCreate, RequirementUpdate
 
 
-def list_requirements(db: Session) -> list[Requirement]:
-    requirements = db.query(Requirement).filter(Requirement.deleted == 0).order_by(Requirement.id.desc()).all()
+def list_requirements(db: Session, actor) -> list[Requirement]:
+    requirements = db.query(Requirement).filter(
+        Requirement.deleted == 0, Requirement.project_id.in_(visible_project_ids(db, actor))
+    ).order_by(Requirement.id.desc()).all()
     for requirement in requirements:
         requirement.linked_tasks = linked_task_summaries(db, "requirement", requirement.id)
         attach_work_item_components(db, "requirement", requirement)

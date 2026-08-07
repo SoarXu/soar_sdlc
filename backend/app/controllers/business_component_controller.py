@@ -13,7 +13,7 @@ from app.services.business_component_service import (
     replace_business_component_routes,
     update_business_component,
 )
-from app.services.project_permission_service import ensure_project_manage_permission
+from app.services.project_permission_service import ensure_project_manage_permission, ensure_project_view_permission
 from app.views.business_component_view import (
     BusinessComponentCreateFromProject,
     BusinessComponentMemberWrite,
@@ -28,7 +28,8 @@ router = APIRouter()
 
 
 @router.get("/{project_id}/business-components", response_model=list[BusinessComponentRead])
-def get_business_components(project_id: int, db: Session = Depends(get_db)):
+def get_business_components(project_id: int, db: Session = Depends(get_db), current_user: User | None = Depends(get_optional_current_user)):
+    ensure_project_view_permission(db, project_id, current_user)
     return list_business_components(db, project_id)
 
 
@@ -76,7 +77,9 @@ def get_business_component_routes(
     project_id: int,
     component_id: int,
     db: Session = Depends(get_db),
+    current_user: User | None = Depends(get_optional_current_user),
 ):
+    ensure_project_view_permission(db, project_id, current_user)
     return list_business_component_routes(db, project_id, component_id)
 
 

@@ -8,6 +8,7 @@ from app.services.project_permission_service import (
     ensure_audit_view_permission,
     ensure_work_item_create_permission,
     ensure_work_item_delete_permission,
+    ensure_project_view_permission,
 )
 from app.services.bug_service import (
     create_bug,
@@ -27,8 +28,8 @@ router = APIRouter()
 
 
 @router.get("", response_model=list[BugRead])
-def get_bugs(db: Session = Depends(get_db)):
-    return list_bugs(db)
+def get_bugs(db: Session = Depends(get_db), current_user: User | None = Depends(get_optional_current_user)):
+    return list_bugs(db, current_user)
 
 
 @router.post("", response_model=BugRead)
@@ -42,8 +43,10 @@ def post_bug(
 
 
 @router.get("/{bug_id}", response_model=BugRead)
-def get_bug_detail(bug_id: int, db: Session = Depends(get_db)):
-    return get_bug(db, bug_id)
+def get_bug_detail(bug_id: int, db: Session = Depends(get_db), current_user: User | None = Depends(get_optional_current_user)):
+    bug = get_bug(db, bug_id)
+    ensure_project_view_permission(db, bug.project_id, current_user)
+    return bug
 
 
 @router.get("/{bug_id}/validation-context", response_model=BugValidationContextRead)

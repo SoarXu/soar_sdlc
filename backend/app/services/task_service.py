@@ -27,6 +27,7 @@ from app.services.project_permission_service import (
     ensure_authenticated,
     ensure_workflow_fields_not_updated,
     is_project_member,
+    visible_project_ids,
 )
 from app.services.lifecycle_service import project_lifecycle_phase, requirement_lifecycle_phase
 from app.services.requirement_pool_service import resolve_project_work_item_iteration_id
@@ -51,8 +52,10 @@ LINKED_TASK_TYPES = {
 }
 
 
-def list_tasks(db: Session) -> list[Task]:
-    tasks = db.query(Task).filter(Task.deleted == 0).order_by(Task.id.desc()).all()
+def list_tasks(db: Session, actor) -> list[Task]:
+    tasks = db.query(Task).filter(
+        Task.deleted == 0, Task.project_id.in_(visible_project_ids(db, actor))
+    ).order_by(Task.id.desc()).all()
     for task in tasks:
         _attach_task_sources(db, task)
         attach_work_item_components(db, "task", task)

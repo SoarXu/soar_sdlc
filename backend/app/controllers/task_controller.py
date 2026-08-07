@@ -8,6 +8,7 @@ from app.services.project_permission_service import (
     ensure_audit_view_permission,
     ensure_work_item_create_permission,
     ensure_work_item_delete_permission,
+    ensure_project_view_permission,
 )
 from app.services.task_service import (
     create_linked_task,
@@ -28,8 +29,8 @@ router = APIRouter()
 
 
 @router.get("", response_model=list[TaskRead])
-def get_tasks(db: Session = Depends(get_db)):
-    return list_tasks(db)
+def get_tasks(db: Session = Depends(get_db), current_user: User | None = Depends(get_optional_current_user)):
+    return list_tasks(db, current_user)
 
 
 @router.post("/linked", response_model=TaskRead, status_code=status.HTTP_201_CREATED)
@@ -42,8 +43,10 @@ def post_linked_task(
 
 
 @router.get("/{task_id}", response_model=TaskRead)
-def get_task_detail(task_id: int, db: Session = Depends(get_db)):
-    return get_task(db, task_id)
+def get_task_detail(task_id: int, db: Session = Depends(get_db), current_user: User | None = Depends(get_optional_current_user)):
+    task = get_task(db, task_id)
+    ensure_project_view_permission(db, task.project_id, current_user)
+    return task
 
 
 @router.post("", response_model=TaskRead)

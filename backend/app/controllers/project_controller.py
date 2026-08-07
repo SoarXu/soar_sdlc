@@ -10,6 +10,7 @@ from app.services.project_permission_service import (
     ensure_project_delete_permission,
     ensure_project_governance_audit_view_permission,
     ensure_project_governance_permission,
+    ensure_project_view_permission,
 )
 from app.services.project_service import (
     activate_project,
@@ -58,17 +59,21 @@ router = APIRouter()
 def get_projects(
     assignee_rule_config_id: int | None = None,
     db: Session = Depends(get_db),
+    current_user: User | None = Depends(get_optional_current_user),
 ):
-    return list_projects(db, assignee_rule_config_id=assignee_rule_config_id)
+    return list_projects(db, current_user, assignee_rule_config_id=assignee_rule_config_id)
 
 
 @router.get("/{project_id}", response_model=ProjectRead)
-def get_project_detail(project_id: int, db: Session = Depends(get_db)):
-    return get_project(db, project_id)
+def get_project_detail(project_id: int, db: Session = Depends(get_db), current_user: User | None = Depends(get_optional_current_user)):
+    project = get_project(db, project_id)
+    ensure_project_view_permission(db, project.id, current_user)
+    return project
 
 
 @router.get("/{project_id}/members", response_model=list[ProjectMemberRead])
-def get_project_members(project_id: int, db: Session = Depends(get_db)):
+def get_project_members(project_id: int, db: Session = Depends(get_db), current_user: User | None = Depends(get_optional_current_user)):
+    ensure_project_view_permission(db, project_id, current_user)
     return list_project_members(db, project_id)
 
 
@@ -92,7 +97,9 @@ def get_project_iterations(
     current_state_id: int | None = None,
     owner_id: int | None = None,
     db: Session = Depends(get_db),
+    current_user: User | None = Depends(get_optional_current_user),
 ):
+    ensure_project_view_permission(db, project_id, current_user)
     return list_project_iterations_page(db, project_id, page, page_size, keyword, current_state_id, owner_id)
 
 
@@ -106,7 +113,9 @@ def get_project_requirements(
     owner_id: int | None = None,
     iteration_id: int | None = None,
     db: Session = Depends(get_db),
+    current_user: User | None = Depends(get_optional_current_user),
 ):
+    ensure_project_view_permission(db, project_id, current_user)
     return list_project_requirements_page(
         db, project_id, page, page_size, keyword, current_state_id, owner_id, iteration_id
     )
@@ -123,7 +132,9 @@ def get_project_tasks(
     requirement_id: int | None = None,
     iteration_id: int | None = None,
     db: Session = Depends(get_db),
+    current_user: User | None = Depends(get_optional_current_user),
 ):
+    ensure_project_view_permission(db, project_id, current_user)
     return list_project_tasks_page(
         db, project_id, page, page_size, keyword, current_state_id, owner_id, requirement_id, iteration_id
     )
@@ -138,7 +149,9 @@ def get_project_test_cases(
     result: str | None = None,
     requirement_id: int | None = None,
     db: Session = Depends(get_db),
+    current_user: User | None = Depends(get_optional_current_user),
 ):
+    ensure_project_view_permission(db, project_id, current_user)
     return list_project_test_cases_page(db, project_id, page, page_size, keyword, result, requirement_id)
 
 
@@ -152,7 +165,9 @@ def get_project_test_runs(
     owner_id: int | None = None,
     iteration_id: int | None = None,
     db: Session = Depends(get_db),
+    current_user: User | None = Depends(get_optional_current_user),
 ):
+    ensure_project_view_permission(db, project_id, current_user)
     return list_project_test_runs_page(db, project_id, page, page_size, keyword, status, owner_id, iteration_id)
 
 
@@ -166,7 +181,9 @@ def get_project_bugs(
     owner_id: int | None = None,
     iteration_id: int | None = None,
     db: Session = Depends(get_db),
+    current_user: User | None = Depends(get_optional_current_user),
 ):
+    ensure_project_view_permission(db, project_id, current_user)
     return list_project_bugs_page(
         db, project_id, page, page_size, keyword, current_state_id, owner_id, iteration_id
     )

@@ -77,41 +77,6 @@ def create_business_component_from_source_project(
             f"{component.name}-运维组件方案-{component.id}",
         )
         component.workflow_scheme_id = cloned_scheme.id
-    source_members = (
-        db.query(ProjectMember)
-        .filter(ProjectMember.project_id == source_project.id)
-        .order_by(ProjectMember.sort_order.asc(), ProjectMember.id.asc())
-        .all()
-    )
-    role_keys_by_user = _enabled_user_role_keys(db, {member.user_id for member in source_members})
-    for source_member in source_members:
-        target_member = (
-            db.query(ProjectMember)
-            .filter(ProjectMember.project_id == target_project.id, ProjectMember.user_id == source_member.user_id)
-            .first()
-        )
-        if not target_member:
-            db.add(
-                ProjectMember(
-                    project_id=target_project.id,
-                    user_id=source_member.user_id,
-                    project_role=source_member.project_role,
-                    is_workbench_participant=source_member.is_workbench_participant,
-                    sort_order=source_member.sort_order,
-                )
-            )
-        role_key = _matching_enabled_user_role_key(
-            source_member.project_role,
-            role_keys_by_user.get(source_member.user_id, set()),
-        )
-        if role_key:
-            db.add(
-                BusinessComponentMember(
-                    component_id=component.id,
-                    user_id=source_member.user_id,
-                    component_role=role_key,
-                )
-            )
     db.commit()
     db.refresh(component)
     return component

@@ -154,6 +154,21 @@ def can_view_project_work_items(db: Session, project_id: int | None, actor: User
     return can_view_audit(db, project_id, actor)
 
 
+def can_view_project(db: Session, project_id: int | None, actor: User | None) -> bool:
+    return can_view_audit(db, project_id, actor) or can_govern_project(db, project_id, actor)
+
+
+def visible_project_ids(db: Session, actor: User | None) -> set[int]:
+    ensure_authenticated(actor)
+    if is_system_admin(db, actor.id):
+        return {row.id for row in db.query(Project.id).filter(Project.deleted == 0).all()}
+    return {
+        project.id
+        for project in db.query(Project).filter(Project.deleted == 0).all()
+        if can_view_project(db, project.id, actor)
+    }
+
+
 def can_admin_action(db: Session, project_id: int | None, actor_id: int | None) -> bool:
     if actor_id is None:
         return True
@@ -348,6 +363,12 @@ def ensure_project_governance_audit_view_permission(
     ensure_authenticated(actor)
     if not can_view_project_governance_audit(db, project_id, actor):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="无权查看项目审计历史")
+
+
+def ensure_project_view_permission(db: Session, project_id: int | None, actor: User | None) -> None:
+    ensure_authenticated(actor)
+    if not can_view_project(db, project_id, actor):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="无权查看项目数据")
 
 
 def _has_role(db: Session, user_id: int, role_keys: set[str]) -> bool:

@@ -9,6 +9,7 @@ from app.services.project_permission_service import (
     ensure_authenticated,
     ensure_work_item_create_permission,
     ensure_work_item_delete_permission,
+    ensure_project_view_permission,
 )
 from app.services.requirement_import_service import (
     build_requirement_import_template,
@@ -42,8 +43,8 @@ router = APIRouter()
 
 
 @router.get("", response_model=list[RequirementRead])
-def get_requirements(db: Session = Depends(get_db)):
-    return list_requirements(db)
+def get_requirements(db: Session = Depends(get_db), current_user: User | None = Depends(get_optional_current_user)):
+    return list_requirements(db, current_user)
 
 
 @router.get("/import/template")
@@ -86,8 +87,10 @@ async def commit_requirement_import_file(
 
 
 @router.get("/{requirement_id}", response_model=RequirementRead)
-def get_requirement_detail(requirement_id: int, db: Session = Depends(get_db)):
-    return get_requirement(db, requirement_id)
+def get_requirement_detail(requirement_id: int, db: Session = Depends(get_db), current_user: User | None = Depends(get_optional_current_user)):
+    requirement = get_requirement(db, requirement_id)
+    ensure_project_view_permission(db, requirement.project_id, current_user)
+    return requirement
 
 
 @router.get("/{requirement_id}/validation-cases", response_model=RequirementValidationCasesRead)

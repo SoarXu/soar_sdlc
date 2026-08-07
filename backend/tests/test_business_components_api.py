@@ -54,6 +54,15 @@ def _add_source_member(project_id: int, role: str = "developer") -> int:
         db.close()
 
 
+def _add_existing_user_to_project(project_id: int, user_id: int, role: str = "developer") -> None:
+    db = SessionLocal()
+    try:
+        db.add(ProjectMember(project_id=project_id, user_id=user_id, project_role=role))
+        db.commit()
+    finally:
+        db.close()
+
+
 def _add_project_user_with_token(project_id: int, role: str = "developer") -> tuple[int, str]:
     db = SessionLocal()
     try:
@@ -166,7 +175,7 @@ def test_business_component_rejects_active_or_duplicate_source_project(client: T
     assert duplicate.status_code == 409
 
 
-def test_component_creation_copies_source_members_into_independent_component_team(client: TestClient):
+def test_component_creation_does_not_copy_source_members_into_target_project_or_component(client: TestClient):
     operations_project = _create_project(client, "InnovateX Platform Operations")
     source_project = _create_project(client, "QA Archive Management")
     source_member_id = _add_source_member(source_project["id"], role="tester")
@@ -178,11 +187,9 @@ def test_component_creation_copies_source_members_into_independent_component_tea
     )
 
     assert created.status_code == 201, created.text
-    assert created.json()["members"] == [
-        {"user_id": source_member_id, "component_role": "tester", "enabled": True}
-    ]
+    assert created.json()["members"] == []
     target_members = client.get(f"/api/v1/projects/{operations_project['id']}/members")
-    assert source_member_id in {member["user_id"] for member in target_members.json()}
+    assert source_member_id not in {member["user_id"] for member in target_members.json()}
 
 
 def test_component_creation_clones_source_project_workflow_scheme(client: TestClient):
@@ -339,6 +346,12 @@ def test_primary_component_membership_restricts_available_workflow_actions(clien
         f"/api/v1/projects/{operations_project['id']}/business-components/from-project",
         json={"source_project_id": source_project["id"], "name": "QA Archive Management"},
     ).json()
+    _add_existing_user_to_project(operations_project["id"], source_member_id)
+    configured = client.put(
+        f"/api/v1/projects/{operations_project['id']}/business-components/{component['id']}/members",
+        json=[{"user_id": source_member_id, "component_role": "developer"}],
+    )
+    assert configured.status_code == 200, configured.text
     requirement = client.post(
         "/api/v1/requirements",
         json={
@@ -361,7 +374,7 @@ def test_primary_component_membership_restricts_available_workflow_actions(clien
     assert member_actions.json()
     assert outsider_actions.status_code == 200
     assert outsider_actions.json() == []
-    assert source_member_id in {member["user_id"] for member in component["members"]}
+    assert source_member_id in {member["user_id"] for member in configured.json()["members"]}
 
 
 def test_component_transition_route_limits_action_to_configured_member(client: TestClient):
@@ -374,6 +387,12 @@ def test_component_transition_route_limits_action_to_configured_member(client: T
         f"/api/v1/projects/{operations_project['id']}/business-components/from-project",
         json={"source_project_id": source_project["id"], "name": "QA Archive Management"},
     ).json()
+    _add_existing_user_to_project(operations_project["id"], source_member_id)
+    configured = client.put(
+        f"/api/v1/projects/{operations_project['id']}/business-components/{component['id']}/members",
+        json=[{"user_id": source_member_id, "component_role": "developer"}],
+    )
+    assert configured.status_code == 200, configured.text
     requirement = client.post(
         "/api/v1/requirements",
         json={
@@ -422,6 +441,7 @@ def test_component_bound_manual_assignment_excludes_non_component_project_member
         f"/api/v1/projects/{operations_project['id']}/business-components/from-project",
         json={"source_project_id": source_project["id"], "name": "QA Archive Management"},
     ).json()
+    _add_existing_user_to_project(operations_project["id"], component_member_id)
     members = client.put(
         f"/api/v1/projects/{operations_project['id']}/business-components/{component['id']}/members",
         json=[{"user_id": component_member_id, "component_role": "developer"}],

@@ -540,22 +540,7 @@ async function applyTemplate() {
   loading.value = true
   try {
     const graph = await fetchWorkflowDefinitionTemplatePreview(definition.value.id)
-    let organized
-    try {
-      organized = await layoutWorkflowWithElk(
-        graph.data.states || [],
-        graph.data.transitions || [],
-        graph.data.definition?.initial_state_id ?? null
-      )
-    } catch {
-      ElMessage.error('模板布局失败，当前流程图未更改')
-      return
-    }
-    applyGraph({
-      ...graph.data,
-      states: organized.states,
-      transitions: organized.transitions
-    })
+    applyGraph(graph.data)
     replaceExistingTransitionsOnSave.value = true
     ElMessage.success('模板已套用')
   } finally {

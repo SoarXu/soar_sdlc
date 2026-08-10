@@ -33,4 +33,11 @@ assert.match(iterationsApi, /export function linkIterationBugs/)
 
 assert.doesNotMatch(dashboard, /ProjectWorkPoolBand|workPoolPlanning|待规划工作池/)
 
+assert.match(
+  workPoolBand,
+  /\.work-pool-band\s*\{[\s\S]*?box-sizing:\s*border-box;/,
+  'the full-width work-pool banner must include its borders and padding in its width'
+)
+assert.match(workPoolBand, /\.work-pool-band\s*\{[\s\S]*?width:\s*100%;/)
+
 console.log('project planning work-pool contracts passed')

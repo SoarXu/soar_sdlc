@@ -38,6 +38,7 @@ const totalCount = computed(() => props.summary?.total_count || 0)
 
 <style scoped>
 .work-pool-band {
+  box-sizing: border-box;
   display: grid;
   grid-template-columns: minmax(180px, 1fr) minmax(280px, auto) auto;
   align-items: center;

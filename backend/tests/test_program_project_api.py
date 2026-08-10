@@ -1502,10 +1502,12 @@ def test_project_iteration_list_exposes_workflow_state_identity(client: TestClie
 
 def test_project_delete_cascades_project_tree_work_items_and_iterations(client: TestClient):
     parent = client.post("/api/v1/projects", json={"name": f"级联删除父项目-{uuid4().hex[:8]}"}).json()
+    parent_pool_iteration_id = parent["requirement_pool_iteration_id"]
     child = client.post(
         "/api/v1/projects",
         json={"name": f"级联删除子项目-{uuid4().hex[:8]}", "parent_id": parent["id"]},
     ).json()
+    child_pool_iteration_id = child["requirement_pool_iteration_id"]
     iteration = client.post(
         "/api/v1/iterations",
         json={"project_ids": [parent["id"], child["id"]], "name": f"级联删除迭代-{uuid4().hex[:8]}"},
@@ -1526,14 +1528,14 @@ def test_project_delete_cascades_project_tree_work_items_and_iterations(client: 
         "/api/v1/test-cases",
         json={"project_id": child["id"], "requirement_id": child_requirement["id"], "title": "子项目用例随项目删除"},
     ).json()
-    client.post(
+    execution = client.post(
         f"/api/v1/test-cases/{case['id']}/executions",
         json={
             "steps_result_json": [
                 {"step": "open page", "expected": "page shown", "result": "passed", "actual": "page shown"}
             ]
         },
-    )
+    ).json()
     test_run = client.post(
         "/api/v1/test-runs",
         json={"project_id": child["id"], "iteration_id": iteration["id"], "name": "子项目测试单随项目删除"},
@@ -1570,11 +1572,59 @@ def test_project_delete_cascades_project_tree_work_items_and_iterations(client: 
     assert selected[0]["id"] not in {item["id"] for item in client.get("/api/v1/test-run-cases").json()}
     assert client.get(f"/api/v1/test-cases/{case['id']}/executions").status_code == 404
 
+    db = SessionLocal()
+    try:
+        project_rows = {
+            row["id"]: row
+            for row in db.execute(
+                text(
+                    "SELECT id, deleted, requirement_pool_iteration_id "
+                    "FROM projects WHERE id IN (:parent_id, :child_id)"
+                ),
+                {"parent_id": parent["id"], "child_id": child["id"]},
+            ).mappings()
+        }
+        assert set(project_rows) == {parent["id"], child["id"]}
+        assert project_rows[parent["id"]]["deleted"] == 1
+        assert project_rows[parent["id"]]["requirement_pool_iteration_id"] is None
+        assert project_rows[child["id"]]["deleted"] == 1
+        assert project_rows[child["id"]]["requirement_pool_iteration_id"] is None
+
+        assert db.execute(
+            text("SELECT id FROM requirements WHERE id IN (:parent_id, :child_id)"),
+            {"parent_id": parent_requirement["id"], "child_id": child_requirement["id"]},
+        ).all() == []
+        assert db.execute(text("SELECT id FROM tasks WHERE id = :id"), {"id": task["id"]}).all() == []
+        assert db.execute(text("SELECT id FROM bugs WHERE id = :id"), {"id": bug["id"]}).all() == []
+        assert db.execute(text("SELECT id FROM test_cases WHERE id = :id"), {"id": case["id"]}).all() == []
+        assert db.execute(text("SELECT id FROM test_runs WHERE id = :id"), {"id": test_run["id"]}).all() == []
+        assert db.execute(
+            text("SELECT id FROM test_case_execution_log WHERE id = :id"), {"id": execution["id"]}
+        ).all() == []
+        assert db.execute(
+            text("SELECT id FROM test_run_cases WHERE id = :id"), {"id": selected[0]["id"]}
+        ).all() == []
+        assert db.execute(
+            text(
+                "SELECT id FROM iterations "
+                "WHERE id IN (:iteration_id, :parent_pool_id, :child_pool_id)"
+            ),
+            {
+                "iteration_id": iteration["id"],
+                "parent_pool_id": parent_pool_iteration_id,
+                "child_pool_id": child_pool_iteration_id,
+            },
+        ).all() == []
+    finally:
+        db.close()
+
 
 
 def test_project_delete_keeps_shared_iteration_and_removes_deleted_project_scope(client: TestClient):
     deleted_project = client.post("/api/v1/projects", json={"name": f"Shared Delete Project-{uuid4().hex[:8]}"}).json()
+    deleted_pool_iteration_id = deleted_project["requirement_pool_iteration_id"]
     kept_project = client.post("/api/v1/projects", json={"name": f"Shared Keep Project-{uuid4().hex[:8]}"}).json()
+    kept_pool_iteration_id = kept_project["requirement_pool_iteration_id"]
     iteration = client.post(
         "/api/v1/iterations",
         json={"project_ids": [deleted_project["id"], kept_project["id"]], "name": f"Shared Iteration-{uuid4().hex[:8]}"},
@@ -1596,6 +1646,55 @@ def test_project_delete_keeps_shared_iteration_and_removes_deleted_project_scope
     assert kept_iteration["project_ids"] == [kept_project["id"]]
     assert client.get(f"/api/v1/requirements/{deleted_requirement['id']}").status_code == 404
     assert client.get(f"/api/v1/requirements/{kept_requirement['id']}").status_code == 200
+
+    db = SessionLocal()
+    try:
+        assert db.execute(
+            text("SELECT id FROM requirements WHERE id = :id"),
+            {"id": deleted_requirement["id"]},
+        ).all() == []
+        assert db.execute(
+            text("SELECT id FROM iterations WHERE id = :id"),
+            {"id": deleted_pool_iteration_id},
+        ).all() == []
+
+        kept_requirement_row = db.execute(
+            text("SELECT id, deleted FROM requirements WHERE id = :id"),
+            {"id": kept_requirement["id"]},
+        ).mappings().one()
+        assert kept_requirement_row["deleted"] == 0
+
+        kept_project_row = db.execute(
+            text("SELECT id, deleted, requirement_pool_iteration_id FROM projects WHERE id = :id"),
+            {"id": kept_project["id"]},
+        ).mappings().one()
+        assert kept_project_row["deleted"] == 0
+        assert kept_project_row["requirement_pool_iteration_id"] == kept_pool_iteration_id
+
+        kept_pool_row = db.execute(
+            text("SELECT id, deleted FROM iterations WHERE id = :id"),
+            {"id": kept_pool_iteration_id},
+        ).mappings().one()
+        assert kept_pool_row["deleted"] == 0
+
+        shared_iteration_row = db.execute(
+            text("SELECT id, deleted FROM iterations WHERE id = :id"),
+            {"id": iteration["id"]},
+        ).mappings().one()
+        assert shared_iteration_row["deleted"] == 0
+        assert db.execute(
+            text("SELECT project_id FROM iteration_projects WHERE iteration_id = :iteration_id"),
+            {"iteration_id": iteration["id"]},
+        ).scalars().all() == [kept_project["id"]]
+
+        deleted_project_row = db.execute(
+            text("SELECT id, deleted, requirement_pool_iteration_id FROM projects WHERE id = :id"),
+            {"id": deleted_project["id"]},
+        ).mappings().one()
+        assert deleted_project_row["deleted"] == 1
+        assert deleted_project_row["requirement_pool_iteration_id"] is None
+    finally:
+        db.close()
 
 def test_open_project_move_only_changes_parent(client: TestClient):
     parent = client.post("/api/v1/projects", json={"name": f"父项目-{uuid4().hex[:8]}"}).json()

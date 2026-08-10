@@ -14,11 +14,11 @@ from app.models.project_member import ProjectMember
 from app.models.requirement import Requirement
 from app.models.task import Task
 from app.models.test_case import TestCase
-from app.models.test_case_execution import TestCaseExecutionLog
-from app.models.test_run import TestRun, TestRunCase
+from app.models.test_run import TestRun
 from app.models.user import User
 from app.models.workflow_definition import WorkflowTransition
 from app.services.assignee_rule_config_service import default_project_workflow_scheme
+from app.services.project_data_purge_service import purge_project_data
 from app.services.project_permission_service import visible_project_ids
 from app.services.status_operation_service import create_status_operation, list_status_operations
 from app.services.requirement_pool_service import (
@@ -366,24 +366,20 @@ def list_project_audit_logs(db: Session, project_id: int) -> list[dict]:
 
 def delete_project(db: Session, project_id: int) -> None:
     project = _get_active_project(db, project_id)
-    now = datetime.now()
-
     project_ids = {project_id}
     project_ids.update(_collect_descendant_project_ids(db, project_id))
-    _cascade_delete_project_work_items(db, project_ids, now)
-
-    descendant_ids = project_ids - {project_id}
     projects_to_delete = (
         db.query(Project)
-        .filter(Project.id.in_(descendant_ids), Project.deleted == 0)
+        .filter(Project.id.in_(project_ids), Project.deleted == 0)
         .all()
     )
-    for p in projects_to_delete:
-        p.deleted = 1
-        p.delete_time = now
 
-    project.deleted = 1
-    project.delete_time = now
+    purge_project_data(db, project_ids)
+
+    now = datetime.now()
+    for item in projects_to_delete:
+        item.deleted = 1
+        item.delete_time = now
     db.commit()
 
 
@@ -653,54 +649,3 @@ def _collect_descendant_project_ids(db: Session, project_id: int) -> set[int]:
         result.add(child.id)
         result.update(_collect_descendant_project_ids(db, child.id))
     return result
-
-
-def _cascade_delete_project_work_items(db: Session, project_ids: set[int], deleted_at: datetime) -> None:
-    test_case_ids = {
-        row.id for row in db.query(TestCase.id).filter(TestCase.project_id.in_(project_ids), TestCase.deleted == 0).all()
-    }
-    test_run_ids = {
-        row.id for row in db.query(TestRun.id).filter(TestRun.project_id.in_(project_ids), TestRun.deleted == 0).all()
-    }
-    if test_case_ids:
-        db.query(TestCaseExecutionLog).filter(TestCaseExecutionLog.test_case_id.in_(test_case_ids)).delete(
-            synchronize_session=False
-        )
-        db.query(TestRunCase).filter(TestRunCase.test_case_id.in_(test_case_ids)).delete(synchronize_session=False)
-    if test_run_ids:
-        db.query(TestRunCase).filter(TestRunCase.test_run_id.in_(test_run_ids)).delete(synchronize_session=False)
-    _soft_delete_by_project_ids(db, Requirement, project_ids, deleted_at)
-    _soft_delete_by_project_ids(db, Task, project_ids, deleted_at)
-    _soft_delete_by_project_ids(db, TestCase, project_ids, deleted_at)
-    _soft_delete_by_project_ids(db, Bug, project_ids, deleted_at)
-    _soft_delete_by_project_ids(db, TestRun, project_ids, deleted_at)
-    _delete_iteration_project_scope(db, project_ids, deleted_at)
-
-
-def _soft_delete_by_project_ids(db: Session, model, project_ids: set[int], deleted_at: datetime) -> None:
-    items = db.query(model).filter(model.project_id.in_(project_ids), model.deleted == 0).all()
-    for item in items:
-        item.deleted = 1
-        item.delete_time = deleted_at
-
-
-def _delete_iteration_project_scope(db: Session, project_ids: set[int], deleted_at: datetime) -> None:
-    affected_iteration_ids = {
-        row.iteration_id
-        for row in db.query(IterationProject).filter(IterationProject.project_id.in_(project_ids)).all()
-    }
-    if not affected_iteration_ids:
-        return
-    db.query(IterationProject).filter(IterationProject.project_id.in_(project_ids)).delete(synchronize_session=False)
-    for iteration_id in affected_iteration_ids:
-        remaining_scope_exists = (
-            db.query(IterationProject)
-            .filter(IterationProject.iteration_id == iteration_id)
-            .first()
-            is not None
-        )
-        if not remaining_scope_exists:
-            iteration = db.query(Iteration).filter(Iteration.id == iteration_id, Iteration.deleted == 0).first()
-            if iteration:
-                iteration.deleted = 1
-                iteration.delete_time = deleted_at

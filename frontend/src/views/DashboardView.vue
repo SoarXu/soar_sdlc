@@ -6,13 +6,35 @@
         <p>今日工作与项目进度</p>
       </div>
       <div class="page-actions">
-        <div class="workbench-action-filters">
+        <div class="workbench-filter-toolbar">
           <el-input
             v-model="keywordFilter"
             clearable
             placeholder="搜索标题 / 项目"
             class="workbench-search"
           />
+          <el-select
+            v-model="projectFilter"
+            multiple
+            collapse-tags
+            collapse-tags-tooltip
+            clearable
+            placeholder="项目"
+            class="workbench-filter"
+          >
+            <el-option v-for="option in filterOptions.projects" :key="option.value" :label="option.label" :value="option.value" />
+          </el-select>
+          <el-select
+            v-model="iterationFilter"
+            multiple
+            collapse-tags
+            collapse-tags-tooltip
+            clearable
+            placeholder="迭代"
+            class="workbench-filter"
+          >
+            <el-option v-for="option in filterOptions.iterations" :key="option.value" :label="option.label" :value="option.value" />
+          </el-select>
           <el-select
             v-model="typeFilter"
             multiple
@@ -24,6 +46,18 @@
           >
             <el-option v-for="type in itemTypes" :key="type.value" :label="type.label" :value="type.value" />
           </el-select>
+          <el-select v-model="stateFilter" multiple collapse-tags collapse-tags-tooltip clearable placeholder="状态" class="workbench-filter">
+            <el-option v-for="option in filterOptions.statuses" :key="option.value" :label="option.label" :value="option.value" />
+          </el-select>
+          <el-select v-model="priorityFilter" multiple collapse-tags collapse-tags-tooltip clearable placeholder="优先级" class="workbench-filter">
+            <el-option v-for="option in filterOptions.priorities" :key="option.value" :label="option.label" :value="option.value" />
+          </el-select>
+          <el-select v-model="ownerFilter" multiple collapse-tags collapse-tags-tooltip clearable placeholder="负责人" class="workbench-filter">
+            <el-option v-for="option in filterOptions.owners" :key="option.value" :label="option.label" :value="option.value" />
+          </el-select>
+          <el-select v-model="handlerFilter" multiple collapse-tags collapse-tags-tooltip clearable placeholder="当前处理人" class="workbench-filter">
+            <el-option v-for="option in filterOptions.handlers" :key="option.value" :label="option.label" :value="option.value" />
+          </el-select>
         </div>
         <div class="workbench-action-refresh">
           <el-button :loading="loading" @click="loadWorkbench">刷新</el-button>
@@ -31,64 +65,17 @@
       </div>
     </div>
 
-    <div class="workbench-summary">
-      <el-card v-for="card in viewModel.summaryCards" :key="card.key" shadow="never">
-        <span>{{ card.label }}</span>
-        <strong>{{ card.value }}</strong>
-      </el-card>
-    </div>
-
-    <el-radio-group v-model="activeView" class="workbench-entry-switch" size="large">
-      <el-radio-button v-for="entry in viewModel.entryTabs" :key="entry.key" :label="entry.key">
-        {{ entry.label }}
-      </el-radio-button>
-    </el-radio-group>
-
-    <div v-if="activeView === 'following'" class="workbench-follow-tabs">
-      <el-tabs v-model="activeTrackingTab">
-        <el-tab-pane
-          v-for="tab in viewModel.trackingTabs"
-          :key="tab.key"
-          :label="`${tab.label} (${tab.total})`"
-          :name="tab.key"
-        />
-      </el-tabs>
-    </div>
-
-    <div v-if="activeView === 'exception_center'" class="exception-filter-toolbar">
-      <el-select v-model="exceptionProjectFilter" multiple collapse-tags clearable placeholder="项目">
-        <el-option v-for="option in exceptionProjectOptions" :key="option.value" :label="option.label" :value="option.value" />
-      </el-select>
-      <el-select v-model="typeFilter" multiple collapse-tags clearable placeholder="对象类型">
-        <el-option v-for="type in itemTypes" :key="type.value" :label="type.label" :value="type.value" />
-      </el-select>
-      <el-select v-model="exceptionPriorityFilter" multiple collapse-tags clearable placeholder="优先级">
-        <el-option v-for="option in exceptionPriorityOptions" :key="option.value" :label="option.label" :value="option.value" />
-      </el-select>
-      <el-select v-model="exceptionStatusFilter" multiple collapse-tags clearable placeholder="状态">
-        <el-option v-for="option in exceptionStatusOptions" :key="option.value" :label="option.label" :value="option.value" />
-      </el-select>
-      <el-select v-model="exceptionOwnerFilter" multiple collapse-tags clearable placeholder="负责人">
-        <el-option v-for="option in ownerOptions" :key="option.value" :label="option.label" :value="option.value" />
-      </el-select>
-      <el-select v-model="exceptionHandlerFilter" multiple collapse-tags clearable placeholder="当前处理人">
-        <el-option v-for="option in ownerOptions" :key="option.value" :label="option.label" :value="option.value" />
-      </el-select>
-      <el-input-number v-model="exceptionMinOverdueHours" :min="0" :step="1" controls-position="right" />
-      <span class="exception-filter-unit">最少逾期小时</span>
-    </div>
-
     <div v-loading="loading" class="workbench-list">
       <section class="workbench-list-section">
         <header class="workbench-list-section-head">
           <div>
-            <h2>{{ activeListSection.label }}</h2>
-            <p>{{ activeListSection.description }}</p>
+            <h2>进行中迭代工作项</h2>
+            <p>当前用户可见项目中的需求、任务和 Bug。</p>
           </div>
           <el-tag>{{ filteredListItems.length }} 项</el-tag>
         </header>
 
-        <el-empty v-if="!filteredListItems.length" class="workbench-section-empty" :description="`${activeListSection.label}暂无工作项`" />
+        <el-empty v-if="!filteredListItems.length" class="workbench-section-empty" description="暂无符合筛选条件的工作项" />
 
         <div v-else class="workbench-list-table">
           <el-table ref="workbenchTable" :data="filteredListItems" border stripe :row-class-name="workbenchRowClassName" @selection-change="onWorkbenchSelectionChange">
@@ -112,21 +99,15 @@
                 </el-button>
               </template>
             </el-table-column>
-            <el-table-column v-if="activeListSection.key === 'mentioned_me'" label="评论内容" min-width="300" show-overflow-tooltip>
-              <template #default="{ row }">{{ row.mentioned_comment_body || '-' }}</template>
-            </el-table-column>
-            <el-table-column v-if="activeListSection.key === 'mentioned_me'" label="评论人" width="130" show-overflow-tooltip>
-              <template #default="{ row }">{{ ownerName(row.mentioned_comment_author_id) }}</template>
-            </el-table-column>
-            <el-table-column v-if="activeListSection.key === 'mentioned_me'" label="评论时间" width="180">
-              <template #default="{ row }">{{ formatWorkbenchDateTime(row.mentioned_comment_create_time) }}</template>
-            </el-table-column>
             <el-table-column prop="project_name" label="项目" min-width="140" show-overflow-tooltip />
             <el-table-column label="迭代" min-width="140" show-overflow-tooltip>
               <template #default="{ row }">{{ iterationLabel(row.iteration_id, row.iteration_name) }}</template>
             </el-table-column>
-            <el-table-column :label="handlerColumnLabel" width="130">
+            <el-table-column label="负责人" width="130">
               <template #default="{ row }">{{ ownerName(row.owner_id) }}</template>
+            </el-table-column>
+            <el-table-column label="当前处理人" width="130">
+              <template #default="{ row }">{{ ownerName(row.handler_id) }}</template>
             </el-table-column>
             <el-table-column label="状态" width="120">
               <template #default="{ row }">
@@ -135,14 +116,17 @@
                 </el-tag>
               </template>
             </el-table-column>
-            <el-table-column label="优先级 / 结果" width="130">
+            <el-table-column label="优先级" width="110">
               <template #default="{ row }">
                 <RequirementPriorityBadge v-if="row.priority || row.severity" :value="row.severity || row.priority" />
-                <span v-else>{{ executionResultLabel(row.last_execute_result) }}</span>
+                <span v-else>-</span>
               </template>
             </el-table-column>
-            <el-table-column :label="extraInfoLabel" min-width="170" show-overflow-tooltip>
-              <template #default="{ row }">{{ extraInfo(row) }}</template>
+            <el-table-column label="截止日期" width="120">
+              <template #default="{ row }">{{ row.due_date || '-' }}</template>
+            </el-table-column>
+            <el-table-column label="最近更新" width="180">
+              <template #default="{ row }">{{ formatWorkbenchDateTime(row.update_time) }}</template>
             </el-table-column>
             <el-table-column label="操作" :width="workflowOperationWidth" fixed="right">
               <template #default="{ row }">
@@ -277,7 +261,7 @@ import RequirementEditDialog from '../components/work-items/RequirementEditDialo
 import TaskEditDialog from '../components/work-items/TaskEditDialog.vue'
 import { showActionError } from '../utils/actionFeedback'
 import {
-  buildWorkbenchViewModel,
+  buildWorkbenchFilterOptions,
   executionResultLabel,
   filterWorkbenchItems,
   formatWorkbenchDateTime,
@@ -285,10 +269,10 @@ import {
   itemStatusLabel,
   itemStatusTag,
   shouldShowWorkbenchWorkflowActions,
+  sortWorkbenchItems,
   typeLabel,
   typeTag,
-  workbenchInlineActions,
-  workbenchMetaText
+  workbenchInlineActions
 } from '../utils/workbenchViewModel'
 import { DEFAULT_BUG_TYPE_KEY } from '../utils/bugTypeOptions'
 import { useBugTypes } from '../utils/useBugTypes'
@@ -302,16 +286,14 @@ const users = ref([])
 const workflowTransitions = ref({})
 const workbenchTable = ref(null)
 const selectedWorkbenchItems = ref([])
-const activeView = ref('pending_handling')
-const activeTrackingTab = ref('created_by_me')
 const keywordFilter = ref('')
+const projectFilter = ref([])
+const iterationFilter = ref([])
 const typeFilter = ref([])
-const exceptionProjectFilter = ref([])
-const exceptionPriorityFilter = ref([])
-const exceptionStatusFilter = ref([])
-const exceptionOwnerFilter = ref([])
-const exceptionHandlerFilter = ref([])
-const exceptionMinOverdueHours = ref(0)
+const stateFilter = ref([])
+const priorityFilter = ref([])
+const ownerFilter = ref([])
+const handlerFilter = ref([])
 const selectedCase = ref(null)
 const caseExecutionVisible = ref(false)
 const caseBugVisible = ref(false)
@@ -343,13 +325,9 @@ const priorityLevelOptions = [
   { label: '5级', value: '5' }
 ]
 
-const viewModel = computed(() => buildWorkbenchViewModel(workbenchData.value))
-const activeListSection = computed(() => (
-  activeView.value === 'following'
-    ? viewModel.value.trackingTabsByKey[activeTrackingTab.value]
-    : viewModel.value.queueSectionsByKey[activeView.value]
-))
-const filteredListItems = computed(() => filterWorkbenchItems(activeListSection.value?.items || [], activeFilters.value))
+const activeIterationItems = computed(() => workbenchData.value.active_iteration_items || [])
+const filterOptions = computed(() => buildWorkbenchFilterOptions(activeIterationItems.value, users.value))
+const filteredListItems = computed(() => sortWorkbenchItems(filterWorkbenchItems(activeIterationItems.value, activeFilters.value)))
 const workflowOperationWidth = computed(() => workflowActionColumnWidth(
   filteredListItems.value.map((row) => workflowTransitionsFor(row)),
   { minWidth: 180, extraWidth: 90 }
@@ -358,39 +336,14 @@ const selectedWorkbenchObjectType = computed(() => selectedWorkbenchItems.value[
 const selectedWorkbenchProjectId = computed(() => selectedWorkbenchItems.value[0]?.project_id || null)
 const activeFilters = computed(() => ({
   keyword: keywordFilter.value,
+  projectIds: projectFilter.value,
+  iterationIds: iterationFilter.value,
   types: typeFilter.value,
-  ...(activeView.value === 'exception_center' ? {
-    projectIds: exceptionProjectFilter.value,
-    priorities: exceptionPriorityFilter.value,
-    stateIds: exceptionStatusFilter.value,
-    ownerIds: exceptionOwnerFilter.value,
-    handlerIds: exceptionHandlerFilter.value,
-    minOverdueHours: exceptionMinOverdueHours.value
-  } : {})
+  stateIds: stateFilter.value,
+  priorities: priorityFilter.value,
+  ownerIds: ownerFilter.value,
+  handlerIds: handlerFilter.value
 }))
-const ownerOptions = computed(() => viewModel.value.owners.map((item) => ({ label: item.full_name, value: item.id })))
-const exceptionItems = computed(() => viewModel.value.queueSectionsByKey.exception_center?.items || [])
-const exceptionProjectOptions = computed(() => uniqueOptions(exceptionItems.value, 'project_id', 'project_name'))
-const exceptionPriorityOptions = computed(() => uniqueOptions(
-  exceptionItems.value.map((item) => ({ ...item, normalized_priority: item.priority || item.severity })),
-  'normalized_priority',
-  'normalized_priority'
-))
-const exceptionStatusOptions = computed(() => {
-  const seen = new Map()
-  for (const item of exceptionItems.value) {
-    if (item.current_state_id && !seen.has(item.current_state_id)) {
-      seen.set(item.current_state_id, itemStatusLabel(item))
-    }
-  }
-  return [...seen].map(([value, label]) => ({ value, label }))
-})
-const extraInfoLabel = computed(() => {
-  if (activeListSection.value?.key === 'exception_center') return '异常说明'
-  if (['watched_by_me', 'mentioned_me'].includes(activeListSection.value?.key)) return '来源'
-  return '附加信息'
-})
-const handlerColumnLabel = computed(() => (['completed', 'terminated'].includes(activeListSection.value?.key) ? '最后处理人' : '当前处理人'))
 
 function ownerName(id) {
   return users.value.find((item) => item.id === id)?.full_name || '未分配'
@@ -402,19 +355,12 @@ function iterationLabel(id, name) {
   return '-'
 }
 
-function extraInfo(item) {
-  const meta = workbenchMetaText(activeListSection.value?.key, item)
-  if (meta) return meta
-  if (item.object_type === 'test_case' && item.last_execute_time) return formatWorkbenchDateTime(item.last_execute_time)
-  return '-'
-}
-
 function inlineActionsFor(item) {
-  return workbenchInlineActions(activeListSection.value?.key, item)
+  return workbenchInlineActions('active_iteration', item)
 }
 
-function shouldShowWorkflowActions(item, sectionKey = activeListSection.value?.key) {
-  return shouldShowWorkbenchWorkflowActions(sectionKey, item)
+function shouldShowWorkflowActions(item) {
+  return shouldShowWorkbenchWorkflowActions('active_iteration', item)
 }
 
 function workflowTransitionsFor(item) {
@@ -475,16 +421,6 @@ function detailLink(item) {
   if (item.object_type === 'test_case') return { name: 'test-case-detail', params: { id: item.id }, query: { from: 'dashboard' } }
   if (item.object_type === 'test_run') return { name: 'tests', query: { run_id: item.id, from: 'dashboard' } }
   return { name: 'bug-detail', params: { id: item.id }, query: { from: 'dashboard' } }
-}
-
-function uniqueOptions(items, valueKey, labelKey, fallbackLabel) {
-  const seen = new Map()
-  for (const item of items) {
-    const value = item[valueKey]
-    if (value === null || value === undefined || value === '') continue
-    if (!seen.has(value)) seen.set(value, item[labelKey] || fallbackLabel || String(value))
-  }
-  return [...seen].map(([value, label]) => ({ value, label }))
 }
 
 function defaultExecutionTime() {
@@ -595,19 +531,7 @@ function buildCaseReproduceText(item) {
 }
 
 async function loadWorkflowTransitions(data) {
-  const sections = [
-    ['pending_handling', data.pending_handling?.items || []],
-    ['unassigned', data.unassigned?.items || []],
-    ['completed', data.completed?.items || []],
-    ['terminated', data.terminated?.items || []],
-    ['created_by_me', data.created_by_me?.items || []],
-    ['watched_by_me', data.watched_by_me?.items || []],
-    ['mentioned_me', data.mentioned_me?.items || []],
-    ['exception_center', data.exception_center?.items || []]
-  ]
-  const runtimeItems = sections.flatMap(([sectionKey, items]) => (
-    items.filter((item) => shouldShowWorkflowActions(item, sectionKey))
-  ))
+  const runtimeItems = (data.active_iteration_items || []).filter((item) => shouldShowWorkflowActions(item))
   const uniqueItems = [...new Map(runtimeItems.map((item) => [`${item.object_type}:${item.id}`, item])).values()]
   if (!uniqueItems.length) {
     workflowTransitions.value = {}
@@ -645,31 +569,35 @@ async function loadWorkbench() {
 
 onMounted(loadWorkbench)
 watch([
-  activeView,
-  activeTrackingTab,
   keywordFilter,
+  projectFilter,
+  iterationFilter,
   typeFilter,
-  exceptionProjectFilter,
-  exceptionPriorityFilter,
-  exceptionStatusFilter,
-  exceptionOwnerFilter,
-  exceptionHandlerFilter,
-  exceptionMinOverdueHours
+  stateFilter,
+  priorityFilter,
+  ownerFilter,
+  handlerFilter
 ], clearWorkbenchSelection, { deep: true })
 </script>
 
 <style scoped>
-.exception-filter-toolbar {
+.workbench-filter-toolbar {
   display: grid;
-  grid-template-columns: repeat(6, minmax(140px, 1fr)) 150px auto;
+  grid-template-columns: repeat(4, minmax(150px, 1fr));
   align-items: center;
   gap: 10px;
-  margin-bottom: 14px;
 }
 
-.exception-filter-unit {
-  color: #5f6b7a;
-  white-space: nowrap;
+@media (max-width: 1200px) {
+  .workbench-filter-toolbar {
+    grid-template-columns: repeat(2, minmax(180px, 1fr));
+  }
+}
+
+@media (max-width: 720px) {
+  .workbench-filter-toolbar {
+    grid-template-columns: 1fr;
+  }
 }
 
 .workbench-batch-assignment-footer {

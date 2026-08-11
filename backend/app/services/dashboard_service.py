@@ -1,3 +1,5 @@
+from datetime import datetime, time
+
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -12,7 +14,7 @@ from app.models.role import Role, UserRole
 from app.models.task import Task
 from app.models.user import User
 from app.models.work_item_comment import WorkItemComment
-from app.models.workflow_definition import WorkflowTransition
+from app.models.workflow_definition import WorkflowState, WorkflowTransition
 from app.services.exception_center_service import list_exception_refs
 from app.services.project_team_service import workbench_project_ids_for_user
 from app.services.workflow_state_query_service import (
@@ -52,6 +54,13 @@ def get_workbench(db: Session, user_id: int | None = None) -> WorkbenchResponse:
     iteration_names = {item.id: item.name for item in db.query(Iteration).filter(Iteration.deleted == 0).all()}
     active_iteration_ids = _active_iteration_ids(db)
     project_scope_ids = None if user_id and view_mode == "all" else scoped_project_ids
+    active_iteration_items = _active_iteration_items(
+        db,
+        projects,
+        iteration_names,
+        project_scope_ids,
+        _in_progress_iteration_ids(db),
+    )
     pending_items = _pending_handling_items(
         db, projects, iteration_names, user_id, project_scope_ids, active_iteration_ids
     )
@@ -77,6 +86,7 @@ def get_workbench(db: Session, user_id: int | None = None) -> WorkbenchResponse:
     owner_ids = {
         item.owner_id
         for section in [
+            active_iteration_items,
             pending_items,
             unassigned_items,
             completed_items,
@@ -96,6 +106,7 @@ def get_workbench(db: Session, user_id: int | None = None) -> WorkbenchResponse:
         for user in db.query(User).filter(User.deleted == 0, User.id.in_(owner_ids)).order_by(User.full_name.asc()).all()
     ] if owner_ids else []
     return WorkbenchResponse(
+        active_iteration_items=active_iteration_items,
         pending_handling=WorkbenchSection(label="待处理", items=pending_items, total=len(pending_items)),
         unassigned=WorkbenchSection(label="未分派", items=unassigned_items, total=len(unassigned_items)),
         completed=WorkbenchSection(label="已完成", items=completed_items, total=len(completed_items)),
@@ -109,6 +120,53 @@ def get_workbench(db: Session, user_id: int | None = None) -> WorkbenchResponse:
         role_keys=role_keys,
         view_mode=view_mode,
     )
+
+
+def _active_iteration_items(
+    db: Session,
+    projects: dict[int, Project],
+    iteration_names: dict[int, str],
+    scoped_project_ids: set[int] | None,
+    active_iteration_ids: set[int],
+) -> list[WorkbenchItem]:
+    if not active_iteration_ids or scoped_project_ids == set():
+        return []
+
+    items = [
+        _requirement_item(item, projects, iteration_names)
+        for item in db.query(Requirement)
+        .filter(Requirement.deleted == 0, Requirement.iteration_id.in_(active_iteration_ids))
+        .all()
+        if _in_project_scope(item.project_id, scoped_project_ids)
+    ]
+    effective_iteration_id = func.coalesce(Task.iteration_id, Requirement.iteration_id)
+    task_query = (
+        db.query(Task, effective_iteration_id.label("effective_iteration_id"))
+        .outerjoin(
+            Requirement,
+            (Requirement.id == Task.requirement_id) & (Requirement.deleted == 0),
+        )
+        .filter(
+            Task.deleted == 0,
+            effective_iteration_id.in_(active_iteration_ids),
+        )
+    )
+    if scoped_project_ids is not None:
+        task_query = task_query.filter(Task.project_id.in_(scoped_project_ids))
+    items.extend(
+        _task_item(item, projects, iteration_names, resolved_iteration_id)
+        for item, resolved_iteration_id in task_query.all()
+    )
+    items.extend(
+        _bug_item(item, projects, iteration_names)
+        for item in db.query(Bug)
+        .filter(Bug.deleted == 0, Bug.iteration_id.in_(active_iteration_ids))
+        .all()
+        if _in_project_scope(item.project_id, scoped_project_ids)
+    )
+    return _dedup_and_sort_workbench_items(items)
+
+
 def _pending_handling_items(
     db: Session,
     projects: dict[int, Project],
@@ -454,6 +512,39 @@ def _active_iteration_ids(db: Session) -> set[int]:
     }
 
 
+def _in_progress_iteration_ids(db: Session) -> set[int]:
+    category_ids = {
+        row.id
+        for row in db.query(Iteration.id)
+        .join(WorkflowState, WorkflowState.id == Iteration.current_state_id)
+        .filter(
+            Iteration.deleted == 0,
+            Iteration.is_requirement_pool.is_(False),
+            WorkflowState.category == "in_progress",
+        )
+        .all()
+    }
+    normal_start_reached_ids = {
+        row.id
+        for row in db.query(Iteration.id)
+        .join(WorkflowState, WorkflowState.id == Iteration.current_state_id)
+        .join(
+            WorkflowTransition,
+            (WorkflowTransition.definition_id == Iteration.workflow_definition_id)
+            & (WorkflowTransition.to_state_id == Iteration.current_state_id),
+        )
+        .filter(
+            Iteration.deleted == 0,
+            Iteration.is_requirement_pool.is_(False),
+            WorkflowState.category == "normal",
+            WorkflowTransition.action_key == "start",
+            WorkflowTransition.enabled.is_(True),
+        )
+        .all()
+    }
+    return category_ids | normal_start_reached_ids
+
+
 def _filter_active_scoped_items(
     items: list[WorkbenchItem],
     scoped_project_ids: set[int] | None,
@@ -516,6 +607,7 @@ def _requirement_item(item: Requirement, projects: dict[int, Project], iteration
         terminal_kind=getattr(item.current_state, "terminal_kind", None),
         priority=item.priority,
         create_time=_datetime_value(item.create_time),
+        update_time=_datetime_value(item.update_time),
         creator_id=item.creator_id,
         proposer_id=item.proposer_id,
         requirement_id=item.id,
@@ -548,7 +640,9 @@ def _task_item(
         terminal_kind=getattr(item.current_state, "terminal_kind", None),
         priority=item.priority,
         due_date=_date_value(item.due_date),
+        overdue_hours=_overdue_hours(item.due_date),
         create_time=_datetime_value(item.create_time),
+        update_time=_datetime_value(item.update_time),
         creator_id=item.creator_id,
         requirement_id=item.requirement_id,
     )
@@ -585,6 +679,7 @@ def _bug_item(item: Bug, projects: dict[int, Project], iteration_names: dict[int
         terminal_kind=getattr(item.current_state, "terminal_kind", None),
         priority=item.priority,
         create_time=_datetime_value(item.create_time),
+        update_time=_datetime_value(item.update_time),
         creator_id=item.creator_id,
         reporter_id=item.reporter_id,
         requirement_id=item.requirement_id,
@@ -605,6 +700,13 @@ def _iteration_name(iteration_names: dict[int, str], iteration_id: int | None) -
 
 def _date_value(value) -> str | None:
     return value.isoformat() if value else None
+
+
+def _overdue_hours(due_date) -> float | None:
+    if not due_date:
+        return None
+    due_at = datetime.combine(due_date, time.max)
+    return round(max(0.0, (datetime.now() - due_at).total_seconds() / 3600), 2)
 
 
 def _datetime_value(value) -> str | None:

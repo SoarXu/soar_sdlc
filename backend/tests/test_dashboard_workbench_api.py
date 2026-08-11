@@ -14,7 +14,7 @@ from app.models.requirement import Requirement
 from app.models.role import Role, UserRole
 from app.models.task import Task
 from app.models.user import User
-from app.models.workflow_definition import WorkflowState, WorkflowTransition
+from app.models.workflow_definition import WorkflowDefinition, WorkflowState, WorkflowTransition
 from app.models.work_item_comment import WorkItemComment
 from app.services.dashboard_service import _terminal_iteration_open_item_refs
 
@@ -157,6 +157,303 @@ def test_workbench_returns_default_queue_sections_for_pending_and_unassigned(cli
     assert unassigned_bug["id"] in {item["id"] for item in data["unassigned"]["items"]}
     assert "project_board" not in data
     assert "iterations" not in data
+
+
+def test_workbench_returns_each_visible_in_progress_iteration_item_once(client: TestClient):
+    user_id, token = _create_user_with_role(f"canonical_workbench_{uuid4().hex[:6]}", "developer")
+    collaborator_id, _ = _create_user_with_role(f"canonical_collaborator_{uuid4().hex[:6]}", "developer")
+    visible_project_id = _create_project(client, f"Canonical visible project {uuid4().hex[:6]}")
+    invisible_project_id = _create_project(client, f"Canonical invisible project {uuid4().hex[:6]}")
+    active_iteration_id = _create_iteration(client, visible_project_id, "Canonical active iteration")
+    planning_iteration_id = _create_iteration(client, visible_project_id, "Canonical planning iteration")
+    custom_in_progress_iteration_id = _create_iteration(client, visible_project_id, "Canonical custom in-progress iteration")
+    custom_normal_iteration_id = _create_iteration(client, visible_project_id, "Canonical custom normal iteration")
+    paused_iteration_id = _create_iteration(client, visible_project_id, "Canonical paused iteration")
+    invisible_iteration_id = _create_iteration(client, invisible_project_id, "Canonical invisible iteration")
+    _start_iteration(client, active_iteration_id)
+    _start_iteration(client, invisible_iteration_id)
+    _add_project_member(visible_project_id, user_id, "developer")
+    _add_project_member(visible_project_id, collaborator_id, "developer")
+
+    active_requirement = client.post(
+        "/api/v1/requirements",
+        json={
+            "project_id": visible_project_id,
+            "iteration_id": active_iteration_id,
+            "title": "Visible active requirement",
+            "owner_id": collaborator_id,
+        },
+    ).json()
+    active_completed_task = client.post(
+        "/api/v1/tasks",
+        json={
+            "project_id": visible_project_id,
+            "iteration_id": active_iteration_id,
+            "title": "Visible completed task",
+            "owner_id": collaborator_id,
+        },
+    ).json()
+    active_cancelled_bug = client.post(
+        "/api/v1/bugs",
+        json={
+            "project_id": visible_project_id,
+            "iteration_id": active_iteration_id,
+            "title": "Visible cancelled bug",
+            "owner_id": collaborator_id,
+        },
+    ).json()
+    planning_requirement = client.post(
+        "/api/v1/requirements",
+        json={"project_id": visible_project_id, "iteration_id": planning_iteration_id, "title": "Planning requirement"},
+    ).json()
+    planning_task = client.post(
+        "/api/v1/tasks",
+        json={"project_id": visible_project_id, "iteration_id": planning_iteration_id, "title": "Planning task"},
+    ).json()
+    planning_bug = client.post(
+        "/api/v1/bugs",
+        json={"project_id": visible_project_id, "iteration_id": planning_iteration_id, "title": "Planning bug"},
+    ).json()
+    custom_in_progress_requirement = client.post(
+        "/api/v1/requirements",
+        json={
+            "project_id": visible_project_id,
+            "iteration_id": custom_in_progress_iteration_id,
+            "title": "Custom in-progress requirement",
+        },
+    ).json()
+    custom_normal_requirement = client.post(
+        "/api/v1/requirements",
+        json={
+            "project_id": visible_project_id,
+            "iteration_id": custom_normal_iteration_id,
+            "title": "Custom normal requirement",
+        },
+    ).json()
+    paused_task = client.post(
+        "/api/v1/tasks",
+        json={
+            "project_id": visible_project_id,
+            "iteration_id": paused_iteration_id,
+            "title": "Paused task with terminal transitions",
+        },
+    ).json()
+    invisible_requirement = client.post(
+        "/api/v1/requirements",
+        json={"project_id": invisible_project_id, "iteration_id": invisible_iteration_id, "title": "Invisible requirement"},
+    ).json()
+    invisible_task = client.post(
+        "/api/v1/tasks",
+        json={"project_id": invisible_project_id, "iteration_id": invisible_iteration_id, "title": "Invisible task"},
+    ).json()
+    invisible_bug = client.post(
+        "/api/v1/bugs",
+        json={"project_id": invisible_project_id, "iteration_id": invisible_iteration_id, "title": "Invisible bug"},
+    ).json()
+
+    db = SessionLocal()
+    try:
+        def terminal_state(definition_id: int, status_name: str, terminal_kind: str) -> int:
+            state = WorkflowState(
+                definition_id=definition_id,
+                status_name=status_name,
+                category="terminal",
+                terminal_kind=terminal_kind,
+                enabled=True,
+            )
+            db.add(state)
+            db.flush()
+            return state.id
+
+        completed_state_id = terminal_state(
+            active_completed_task["workflow_definition_id"], "Completed canonical task", "completed"
+        )
+        cancelled_state_id = terminal_state(
+            active_cancelled_bug["workflow_definition_id"], "Cancelled canonical bug", "terminated"
+        )
+        custom_in_progress_iteration = db.query(Iteration).filter(
+            Iteration.id == custom_in_progress_iteration_id
+        ).one()
+        custom_normal_iteration = db.query(Iteration).filter(Iteration.id == custom_normal_iteration_id).one()
+        paused_iteration = db.query(Iteration).filter(Iteration.id == paused_iteration_id).one()
+        original_custom_in_progress_state_id = custom_in_progress_iteration.current_state_id
+        original_custom_normal_definition_id = custom_normal_iteration.workflow_definition_id
+        original_custom_normal_state_id = custom_normal_iteration.current_state_id
+        original_paused_state_id = paused_iteration.current_state_id
+        custom_in_progress_state = WorkflowState(
+            definition_id=custom_in_progress_iteration.workflow_definition_id,
+            status_name="Custom in-progress iteration state",
+            category="in_progress",
+            enabled=True,
+        )
+        db.add(custom_in_progress_state)
+        custom_normal_definition = WorkflowDefinition(
+            name="Custom normal iteration workflow",
+            object_type="iteration",
+            scope_type="project",
+            scope_id=visible_project_id,
+            template_key=f"custom.iteration.{uuid4().hex[:6]}",
+            is_default_template=False,
+            enabled=True,
+        )
+        db.add(custom_normal_definition)
+        db.flush()
+        custom_normal_start_state = WorkflowState(
+            definition_id=custom_normal_definition.id,
+            status_name="Custom planning",
+            category="start",
+            enabled=True,
+        )
+        custom_normal_active_state = WorkflowState(
+            definition_id=custom_normal_definition.id,
+            status_name="Custom active",
+            category="normal",
+            enabled=True,
+        )
+        db.add_all([custom_normal_start_state, custom_normal_active_state])
+        db.flush()
+        custom_normal_start_transition = WorkflowTransition(
+            definition_id=custom_normal_definition.id,
+            action_key="start",
+            action_name="Start",
+            from_state_id=custom_normal_start_state.id,
+            to_state_id=custom_normal_active_state.id,
+            enabled=True,
+        )
+        db.add(custom_normal_start_transition)
+        paused_state = WorkflowState(
+            definition_id=paused_iteration.workflow_definition_id,
+            status_name="Paused iteration state",
+            category="normal",
+            enabled=True,
+        )
+        db.add(paused_state)
+        db.flush()
+        custom_in_progress_state_id = custom_in_progress_state.id
+        custom_normal_definition_id = custom_normal_definition.id
+        custom_normal_state_ids = [custom_normal_start_state.id, custom_normal_active_state.id]
+        custom_normal_start_transition_id = custom_normal_start_transition.id
+        paused_state_id = paused_state.id
+        terminal_state_ids = {
+            transition.action_key: transition.to_state_id
+            for transition in db.query(WorkflowTransition)
+            .filter(
+                WorkflowTransition.definition_id == paused_iteration.workflow_definition_id,
+                WorkflowTransition.action_key.in_(("complete", "cancel")),
+                WorkflowTransition.enabled.is_(True),
+            )
+            .all()
+        }
+        paused_transitions = [
+            WorkflowTransition(
+                definition_id=paused_iteration.workflow_definition_id,
+                action_key=action_key,
+                action_name=f"Paused {action_key}",
+                from_state_id=paused_state_id,
+                to_state_id=terminal_state_ids[action_key],
+                enabled=True,
+            )
+            for action_key in ("complete", "cancel")
+        ]
+        db.add_all(paused_transitions)
+        db.flush()
+        paused_transition_ids = [transition.id for transition in paused_transitions]
+        db.query(Task).filter(Task.id == active_completed_task["id"]).update({"current_state_id": completed_state_id})
+        db.query(Bug).filter(Bug.id == active_cancelled_bug["id"]).update({"current_state_id": cancelled_state_id})
+        db.query(Iteration).filter(Iteration.id == custom_in_progress_iteration_id).update(
+            {"current_state_id": custom_in_progress_state.id}
+        )
+        db.query(Iteration).filter(Iteration.id == custom_normal_iteration_id).update(
+            {
+                "workflow_definition_id": custom_normal_definition_id,
+                "current_state_id": custom_normal_active_state.id,
+            }
+        )
+        db.query(Iteration).filter(Iteration.id == paused_iteration_id).update({"current_state_id": paused_state_id})
+        db.commit()
+    finally:
+        db.close()
+
+    response = client.get("/api/v1/dashboard/workbench", headers={"Authorization": f"Bearer {token}"})
+
+    db = SessionLocal()
+    try:
+        db.query(Iteration).filter(Iteration.id == custom_in_progress_iteration_id).update(
+            {"current_state_id": original_custom_in_progress_state_id}
+        )
+        db.query(Iteration).filter(Iteration.id == custom_normal_iteration_id).update(
+            {
+                "workflow_definition_id": original_custom_normal_definition_id,
+                "current_state_id": original_custom_normal_state_id,
+            }
+        )
+        db.query(Iteration).filter(Iteration.id == paused_iteration_id).update(
+            {"current_state_id": original_paused_state_id}
+        )
+        db.query(WorkflowTransition).filter(WorkflowTransition.id.in_(paused_transition_ids)).delete(
+            synchronize_session=False
+        )
+        db.query(WorkflowTransition).filter(WorkflowTransition.id == custom_normal_start_transition_id).delete()
+        db.query(WorkflowState).filter(WorkflowState.id == custom_in_progress_state_id).delete()
+        db.query(WorkflowState).filter(WorkflowState.id.in_(custom_normal_state_ids)).delete(
+            synchronize_session=False
+        )
+        db.query(WorkflowState).filter(WorkflowState.id == paused_state_id).delete()
+        db.query(WorkflowDefinition).filter(WorkflowDefinition.id == custom_normal_definition_id).delete()
+        db.commit()
+    finally:
+        db.close()
+
+    assert response.status_code == 200
+    item_refs = [(item["object_type"], item["id"]) for item in response.json()["active_iteration_items"]]
+    expected_refs = {
+        ("requirement", active_requirement["id"]),
+        ("task", active_completed_task["id"]),
+        ("bug", active_cancelled_bug["id"]),
+        ("requirement", custom_in_progress_requirement["id"]),
+        ("requirement", custom_normal_requirement["id"]),
+    }
+    excluded_refs = {
+        ("requirement", planning_requirement["id"]),
+        ("task", planning_task["id"]),
+        ("bug", planning_bug["id"]),
+        ("task", paused_task["id"]),
+        ("requirement", invisible_requirement["id"]),
+        ("task", invisible_task["id"]),
+        ("bug", invisible_bug["id"]),
+    }
+    assert set(item_refs) == expected_refs
+    assert len(item_refs) == len(expected_refs)
+    assert excluded_refs.isdisjoint(item_refs)
+    assert all(item["update_time"] for item in response.json()["active_iteration_items"])
+
+
+def test_active_iteration_items_include_due_date_overdue_hours(client: TestClient):
+    user_id, token = _create_user_with_role(f"overdue_active_{uuid4().hex[:6]}", "developer")
+    project_id = _create_project(client, "Overdue active iteration project")
+    iteration_id = _create_iteration(client, project_id, "Overdue active iteration")
+    _start_iteration(client, iteration_id)
+    task = client.post(
+        "/api/v1/tasks",
+        json={"project_id": project_id, "iteration_id": iteration_id, "title": "Overdue task"},
+    ).json()
+    _add_project_member(project_id, user_id, "developer")
+
+    db = SessionLocal()
+    try:
+        db.query(Task).filter(Task.id == task["id"]).update(
+            {Task.due_date: (datetime.now() - timedelta(days=2)).date()}
+        )
+        db.commit()
+    finally:
+        db.close()
+
+    response = client.get("/api/v1/dashboard/workbench", headers={"Authorization": f"Bearer {token}"})
+
+    assert response.status_code == 200
+    items = response.json()["active_iteration_items"]
+    overdue_task = next(item for item in items if item["object_type"] == "task" and item["id"] == task["id"])
+    assert overdue_task["overdue_hours"] >= 24
 
 
 def test_workbench_partitions_active_iteration_terminal_items_by_terminal_kind(client: TestClient):
@@ -819,8 +1116,10 @@ def test_workbench_uses_requirement_iteration_for_legacy_linked_task(client: Tes
 
     workbench = client.get("/api/v1/dashboard/workbench", headers={"Authorization": f"Bearer {token}"}).json()
     pending_refs = {(item["object_type"], item["id"]) for item in workbench["pending_handling"]["items"]}
+    active_items = {(item["object_type"], item["id"]): item for item in workbench["active_iteration_items"]}
 
     assert ("task", task["id"]) in pending_refs
+    assert active_items[("task", task["id"])]["iteration_id"] == iteration_id
 
 
 def test_workbench_excludes_requirement_pool_items_even_when_pool_state_looks_active(client: TestClient):

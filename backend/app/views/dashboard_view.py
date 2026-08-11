@@ -37,6 +37,7 @@ class WorkbenchItem(BaseModel):
     bug_type: str | None = None
     severity: str | None = None
     create_time: str | None = None
+    update_time: str | None = None
     creator_id: int | None = None
     proposer_id: int | None = None
     reporter_id: int | None = None
@@ -63,6 +64,7 @@ class WorkbenchSection(BaseModel):
 
 
 class WorkbenchResponse(BaseModel):
+    active_iteration_items: list[WorkbenchItem] = Field(default_factory=list)
     pending_handling: WorkbenchSection = Field(default_factory=lambda: WorkbenchSection(label="待处理"))
     unassigned: WorkbenchSection = Field(default_factory=lambda: WorkbenchSection(label="未分派"))
     completed: WorkbenchSection = Field(default_factory=lambda: WorkbenchSection(label="已完成"))

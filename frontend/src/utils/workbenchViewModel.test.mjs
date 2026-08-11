@@ -7,6 +7,7 @@ import {
   isTerminalWorkItem,
   itemStatusLabel,
   itemStatusTag,
+  sortWorkbenchItems,
   shouldShowWorkbenchWorkflowActions,
   workbenchInlineActions,
   workbenchItemActionGroup,
@@ -57,6 +58,88 @@ import {
     minOverdueHours: 6
   }).map((item) => item.id), [1])
   assert.deepEqual(filterWorkbenchItems(items, { minOverdueHours: 7 }), [])
+}
+
+{
+  const items = [
+    {
+      id: 1,
+      object_type: 'bug',
+      title: 'Alpha regression',
+      project_id: 10,
+      iteration_id: 100,
+      priority: '1',
+      current_state_id: 101,
+      owner_id: 7,
+      handler_id: 8
+    },
+    {
+      id: 2,
+      object_type: 'task',
+      title: 'Beta delivery',
+      project_id: 11,
+      iteration_id: 101,
+      priority: '2',
+      current_state_id: 202,
+      owner_id: 9,
+      handler_id: 10
+    },
+    {
+      id: 3,
+      object_type: 'requirement',
+      title: 'Gamma capability',
+      project_id: 12,
+      iteration_id: 102,
+      priority: '3',
+      current_state_id: 303,
+      owner_id: 11,
+      handler_id: 12
+    }
+  ]
+
+  assert.deepEqual(filterWorkbenchItems(items, { keyword: 'alpha' }).map((item) => item.id), [1])
+  assert.deepEqual(filterWorkbenchItems(items, { projectIds: [10] }).map((item) => item.id), [1])
+  assert.deepEqual(filterWorkbenchItems(items, { iterationIds: [100] }).map((item) => item.id), [1])
+  assert.deepEqual(filterWorkbenchItems(items, { types: ['bug'] }).map((item) => item.id), [1])
+  assert.deepEqual(filterWorkbenchItems(items, { stateIds: [101] }).map((item) => item.id), [1])
+  assert.deepEqual(filterWorkbenchItems(items, { priorities: ['1'] }).map((item) => item.id), [1])
+  assert.deepEqual(filterWorkbenchItems(items, { ownerIds: [7] }).map((item) => item.id), [1])
+  assert.deepEqual(filterWorkbenchItems(items, { handlerIds: [8] }).map((item) => item.id), [1])
+  assert.deepEqual(
+    filterWorkbenchItems(items, { projectIds: [10], stateIds: [101], handlerIds: [8] }).map((item) => item.id),
+    [1]
+  )
+}
+
+{
+  const items = [
+    { id: 1, object_type: 'task', state_category: 'active', overdue_hours: 0, priority: 'high', due_date: '2026-08-30', update_time: '2026-08-11T08:00:00' },
+    { id: 2, object_type: 'task', state_category: 'active', overdue_hours: 0, priority: 'medium', due_date: '2026-08-01', update_time: '2026-08-11T10:00:00' },
+    { id: 3, object_type: 'task', state_category: 'active', overdue_hours: 0, priority: 'low', due_date: '2026-08-01', update_time: '2026-08-11T12:00:00' },
+    { id: 4, object_type: 'requirement', state_category: 'active', overdue_hours: 0, priority: '1', due_date: '2026-08-31', update_time: '2026-08-11T09:00:00' },
+    { id: 5, object_type: 'bug', state_category: 'active', overdue_hours: 0, severity: '2', due_date: '2026-08-01', update_time: '2026-08-11T11:00:00' }
+  ]
+
+  assert.deepEqual(sortWorkbenchItems(items).map((item) => item.id), [1, 4, 5, 2, 3])
+}
+
+{
+  const items = [
+    { id: 1, object_type: 'requirement', state_category: 'active', overdue_hours: 4, priority: '1', due_date: '2026-08-12', update_time: '2026-08-11T12:00:00' },
+    { id: 2, object_type: 'task', state_category: 'active', overdue_hours: 1, priority: '1', due_date: '2026-08-11', update_time: '2026-08-11T11:00:00' },
+    { id: 3, object_type: 'bug', state_category: 'active', overdue_hours: 2, priority: '3', due_date: '2026-08-10', update_time: '2026-08-11T10:00:00' },
+    { id: 4, object_type: 'task', state_category: 'active', overdue_hours: 0, priority: '1', due_date: '2026-08-01', update_time: '2026-08-11T09:00:00' },
+    { id: 5, object_type: 'bug', state_category: 'active', overdue_hours: 0, priority: '1', due_date: '2026-08-20', update_time: '2026-08-11T20:00:00' },
+    { id: 6, object_type: 'requirement', state_category: 'active', overdue_hours: 0, priority: '1', due_date: '2026-08-20', update_time: '2026-08-11T18:00:00' },
+    { id: 7, object_type: 'task', state_category: 'terminal', terminal_kind: 'completed', overdue_hours: 8, priority: '1', due_date: '2026-08-01', update_time: '2026-08-11T22:00:00' },
+    { id: 8, object_type: 'bug', state_category: 'terminal', terminal_kind: 'cancelled', overdue_hours: 0, priority: '1', due_date: '2026-08-30', update_time: '2026-08-11T23:00:00' },
+    { id: 9, object_type: 'requirement', state_category: 'active', overdue_hours: 0, priority: '1', due_date: null, update_time: '2026-08-11T23:30:00' }
+  ]
+
+  assert.deepEqual(
+    sortWorkbenchItems(items).map((item) => item.id),
+    [2, 1, 3, 4, 5, 6, 9, 7, 8]
+  )
 }
 
 {
@@ -127,10 +210,14 @@ import {
 {
   const dashboardSource = readFileSync(new URL('../views/DashboardView.vue', import.meta.url), 'utf8')
 
-  assert.match(dashboardSource, /v-if="activeListSection\.key === 'mentioned_me'"/)
-  assert.match(dashboardSource, /label="评论内容"/)
-  assert.match(dashboardSource, /label="评论人"/)
-  assert.match(dashboardSource, /label="评论时间"/)
+  assert.match(dashboardSource, /active_iteration_items/)
+  assert.match(dashboardSource, /v-model="projectFilter"/)
+  assert.match(dashboardSource, /v-model="iterationFilter"/)
+  assert.match(dashboardSource, /v-model="stateFilter"/)
+  assert.match(dashboardSource, /v-model="priorityFilter"/)
+  assert.match(dashboardSource, /v-model="ownerFilter"/)
+  assert.match(dashboardSource, /v-model="handlerFilter"/)
+  assert.doesNotMatch(dashboardSource, /activeListSection|workbench-entry-switch|workbench-follow-tabs|exception-filter-toolbar/)
 }
 
 {
@@ -142,11 +229,8 @@ import {
 {
   const dashboardSource = readFileSync(new URL('../views/DashboardView.vue', import.meta.url), 'utf8')
 
-  assert.match(dashboardSource, /<el-table-column :label="handlerColumnLabel" width="130">/)
-  assert.match(
-    dashboardSource,
-    /const handlerColumnLabel = computed\(\(\) => \(\['completed', 'terminated'\]\.includes\(activeListSection\.value\?\.key\) \? '最后处理人' : '当前处理人'\)\)/
-  )
+  assert.match(dashboardSource, /<el-table-column label="负责人" width="130">/)
+  assert.match(dashboardSource, /<el-table-column label="当前处理人" width="130">/)
 }
 
 {

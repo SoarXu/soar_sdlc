@@ -55,6 +55,7 @@ function filterMatch(item, filters = {}) {
   }
   const scalarFilters = [
     ['projectIds', item.project_id],
+    ['iterationIds', item.iteration_id],
     ['iterationKeys', item.iteration_group_key || (item.iteration_id ? String(item.iteration_id) : 'uniterated')],
     ['priorities', item.priority || item.severity],
     ['stateIds', item.current_state_id],
@@ -119,6 +120,75 @@ export function buildWorkbenchViewModel(payload = {}) {
 
 export function filterWorkbenchItems(items = [], filters = {}) {
   return items.filter((item) => filterMatch(item, filters))
+}
+
+function normalizedPriority(item = {}) {
+  const priorityRanks = { high: 1, medium: 3, low: 5 }
+  const rawValue = String(item.priority || item.severity || '').toLowerCase()
+  if (rawValue in priorityRanks) return priorityRanks[rawValue]
+  const value = Number(rawValue)
+  return Number.isFinite(value) && value > 0 ? value : Number.MAX_SAFE_INTEGER
+}
+
+function timestampValue(value) {
+  const timestamp = Date.parse(value || '')
+  return Number.isFinite(timestamp) ? timestamp : 0
+}
+
+function dueDateValue(value) {
+  if (!value) return Number.MAX_SAFE_INTEGER
+  const timestamp = Date.parse(`${value}T00:00:00`)
+  return Number.isFinite(timestamp) ? timestamp : Number.MAX_SAFE_INTEGER
+}
+
+export function sortWorkbenchItems(items = []) {
+  return [...items].sort((left, right) => {
+    const terminalDifference = Number(isTerminalWorkItem(left)) - Number(isTerminalWorkItem(right))
+    if (terminalDifference) return terminalDifference
+
+    const overdueDifference = Number(Number(right.overdue_hours || 0) > 0) - Number(Number(left.overdue_hours || 0) > 0)
+    if (overdueDifference) return overdueDifference
+
+    const priorityDifference = normalizedPriority(left) - normalizedPriority(right)
+    if (priorityDifference) return priorityDifference
+
+    const dueDateDifference = dueDateValue(left.due_date) - dueDateValue(right.due_date)
+    if (dueDateDifference) return dueDateDifference
+
+    const updateTimeDifference = timestampValue(right.update_time) - timestampValue(left.update_time)
+    if (updateTimeDifference) return updateTimeDifference
+
+    return String(left.object_type || '').localeCompare(String(right.object_type || ''))
+      || Number(left.id || 0) - Number(right.id || 0)
+  })
+}
+
+function uniqueOptions(items, valueKey, labelForItem) {
+  const options = new Map()
+  for (const item of items) {
+    const value = item[valueKey]
+    if (value === null || value === undefined || value === '') continue
+    if (!options.has(value)) options.set(value, labelForItem(item))
+  }
+  return [...options].map(([value, label]) => ({ value, label }))
+}
+
+export function buildWorkbenchFilterOptions(items = [], users = []) {
+  const userNames = new Map(users.map((user) => [user.id, user.full_name]))
+  const userOptions = (key) => uniqueOptions(items, key, (item) => userNames.get(item[key]) || String(item[key]))
+  const priorities = new Map()
+  for (const item of items) {
+    const value = item.priority || item.severity
+    if (value !== null && value !== undefined && value !== '') priorities.set(value, String(value))
+  }
+  return {
+    projects: uniqueOptions(items, 'project_id', (item) => item.project_name || `项目 #${item.project_id}`),
+    iterations: uniqueOptions(items, 'iteration_id', (item) => item.iteration_name || `迭代 #${item.iteration_id}`),
+    statuses: uniqueOptions(items, 'current_state_id', (item) => itemStatusLabel(item)),
+    priorities: [...priorities].map(([value, label]) => ({ value, label })),
+    owners: userOptions('owner_id'),
+    handlers: userOptions('handler_id')
+  }
 }
 
 export function isTerminalWorkItem(item = {}) {

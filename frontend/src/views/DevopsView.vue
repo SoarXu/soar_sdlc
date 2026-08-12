@@ -75,6 +75,15 @@
         </el-table>
       </el-tab-pane>
 
+      <el-tab-pane label="工作项评审" name="work-item-reviews">
+        <el-table :data="workItemReviews" stripe>
+          <el-table-column label="工作项" min-width="180"><template #default="{ row }"><el-tag size="small">{{ row.object_type }}</el-tag> #{{ row.object_id }}</template></el-table-column>
+          <el-table-column label="最新提交" min-width="180"><template #default="{ row }"><el-button link type="primary" @click="openWorkItemReviewDiff(row)">{{ row.latest_commit_id }}</el-button></template></el-table-column>
+          <el-table-column label="操作" width="180" fixed="right"><template #default="{ row }"><el-button link type="success" @click="decideReview(row, 'approve')">通过</el-button><el-button link type="danger" @click="decideReview(row, 'reject')">驳回</el-button></template></el-table-column>
+        </el-table>
+        <el-empty v-if="!workItemReviews.length" description="暂无待处理工作项评审" />
+      </el-tab-pane>
+
       <el-tab-pane label="GitLab 仓库" name="repositories">
         <div class="project-tab-toolbar"><el-button type="primary" @click="openRepositoryDialog">新增仓库</el-button></div>
         <el-table :data="repositories" stripe>
@@ -196,6 +205,7 @@
 
 <script setup>
 import { onMounted, reactive, ref } from 'vue'
+import { useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Connection, Delete, Edit } from '@element-plus/icons-vue'
 
@@ -209,6 +219,7 @@ import {
   deleteGitPlatform,
   deleteJenkinsJob,
   fetchCodeReviewTasks,
+  fetchWorkItemReviews,
   fetchGitPlatforms,
   fetchDevopsCommit,
   fetchDevopsCommits,
@@ -217,19 +228,22 @@ import {
   fetchJenkinsJobs,
   ingestDevopsCommit,
   markDevopsCommitReviewed,
+  decideWorkItemReview,
   testGitPlatformConnection,
   updateGitPlatform,
   updateDevopsRepository,
   updateJenkinsJob
 } from '../api/devops'
 
-const activeTab = ref('platforms')
+const route = useRoute()
+const activeTab = ref(route.query.tab || 'platforms')
 const gitPlatforms = ref([])
 const repositories = ref([])
 const jenkinsJobs = ref([])
 const jenkinsBuilds = ref([])
 const commits = ref([])
 const reviewTasks = ref([])
+const workItemReviews = ref([])
 const selectedCommit = ref(null)
 const saving = ref(false)
 const commitDialogVisible = ref(false)
@@ -417,6 +431,24 @@ async function openDiff(row) {
   diffDialogVisible.value = true
 }
 
+async function openWorkItemReviewDiff(row) {
+  await openDiff({ id: row.latest_commit_id })
+}
+
+async function decideReview(row, decision) {
+  let remark = null
+  if (decision === 'reject') {
+    const result = await ElMessageBox.prompt('请填写驳回原因', '驳回评审', {
+      inputPattern: /\S+/,
+      inputErrorMessage: '请填写驳回原因'
+    })
+    remark = result.value
+  }
+  await decideWorkItemReview(row.id, { decision, remark })
+  ElMessage.success(decision === 'approve' ? '评审已通过' : '评审已驳回')
+  await loadData()
+}
+
 async function reviewCommit(row) {
   if (!row?.id) return
   await markDevopsCommitReviewed(row.id, {})
@@ -426,13 +458,14 @@ async function reviewCommit(row) {
 }
 
 async function loadData() {
-  const [platformRes, repoRes, jobRes, buildRes, commitRes, reviewRes] = await Promise.all([
+  const [platformRes, repoRes, jobRes, buildRes, commitRes, reviewRes, workItemReviewRes] = await Promise.all([
     fetchGitPlatforms(),
     fetchDevopsRepositories(),
     fetchJenkinsJobs(),
     fetchJenkinsBuilds(),
     fetchDevopsCommits(),
-    fetchCodeReviewTasks()
+    fetchCodeReviewTasks(),
+    fetchWorkItemReviews()
   ])
   gitPlatforms.value = platformRes.data
   repositories.value = repoRes.data
@@ -440,6 +473,8 @@ async function loadData() {
   jenkinsBuilds.value = buildRes.data
   commits.value = commitRes.data
   reviewTasks.value = reviewRes.data
+  workItemReviews.value = workItemReviewRes.data
+  if (route.query.commitId) await openDiff({ id: Number(route.query.commitId) })
 }
 
 onMounted(loadData)

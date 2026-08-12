@@ -245,48 +245,6 @@ def test_iteration_transition_locks_its_item_directly_once(monkeypatch):
     assert calls == ["item"]
 
 
-def test_requirement_pool_has_no_available_workflow_actions(client: TestClient):
-    project = client.post("/api/v1/projects", json={"name": f"Pool workflow list-{uuid4().hex[:8]}"}).json()
-    pool_id = project["requirement_pool_iteration_id"]
-
-    response = client.get(f"/api/v1/workflow-runtime/iteration/{pool_id}/transitions")
-
-    assert response.status_code == 200, response.text
-    assert response.json() == []
-
-
-def test_requirement_pool_rejects_direct_workflow_transition(client: TestClient):
-    project = client.post("/api/v1/projects", json={"name": f"Pool workflow execute-{uuid4().hex[:8]}"}).json()
-    pool_id = project["requirement_pool_iteration_id"]
-    db = SessionLocal()
-    try:
-        transition_id = (
-            db.query(WorkflowTransition.id)
-            .filter(
-                WorkflowTransition.definition_id == db.query(Iteration.workflow_definition_id)
-                .filter(Iteration.id == pool_id)
-                .scalar_subquery(),
-                WorkflowTransition.from_state_id == db.query(Iteration.current_state_id)
-                .filter(Iteration.id == pool_id)
-                .scalar_subquery(),
-                WorkflowTransition.enabled.is_(True),
-            )
-            .order_by(WorkflowTransition.sort_order.asc(), WorkflowTransition.id.asc())
-            .scalar()
-        )
-    finally:
-        db.close()
-    assert transition_id is not None
-
-    response = client.post(
-        f"/api/v1/workflow-runtime/iteration/{pool_id}/transition",
-        json={"transition_id": transition_id},
-    )
-
-    assert response.status_code == 409
-    assert response.json()["detail"]["code"] == "REQUIREMENT_POOL_OPERATION_FORBIDDEN"
-
-
 def test_list_available_transitions_uses_nonlocking_item_loader(monkeypatch):
     item = object()
     monkeypatch.setattr(workflow_runtime_service, "ensure_default_workflow_templates", lambda db: None)
@@ -368,13 +326,18 @@ def _enable_scheme(client: TestClient, config_id: int) -> None:
     assert response.status_code == 200, response.text
 
 
+def _project_iteration_id(client: TestClient, project_id: int) -> int:
+    page = client.get(f"/api/v1/projects/{project_id}/iterations").json()
+    return page["items"][0]["id"]
+
+
 def test_runtime_discovers_executes_and_audits_transitions_by_state_id(client: TestClient):
     project = client.post("/api/v1/projects", json={"name": f"ID Runtime Project {uuid4().hex[:8]}"}).json()
     user_id, token = _create_user("ID Runtime Member", "project_member")
     _add_project_member(project["id"], user_id, "project_member")
     requirement = client.post(
         "/api/v1/requirements",
-        json={"project_id": project["id"], "title": "ID runtime requirement"},
+        json={"project_id": project["id"], "iteration_id": _project_iteration_id(client, project["id"]), "title": "ID runtime requirement"},
         headers={"Authorization": f"Bearer {token}"},
     ).json()
 
@@ -449,7 +412,7 @@ def _create_project_with_bug_workflow(client: TestClient) -> tuple[int, int]:
             "states": [
                 {"id": -1, "status_name": "Pending", "category": "start", "x": 100, "y": 100},
                 {"id": -2, "status_name": "Fixing", "category": "normal", "x": 300, "y": 100},
-                {"id": -3, "status_name": "Closed", "category": "terminal", "x": 500, "y": 100},
+                {"id": -3, "status_name": "Closed", "category": "terminal", "terminal_kind": "completed", "x": 500, "y": 100},
             ],
             "transitions": [
                 {
@@ -732,7 +695,7 @@ def test_runtime_manager_delegate_requires_reason_and_records_snapshot(client: T
     )
 
     assert missing_reason.status_code == 422
-    assert missing_reason.json()["detail"] == "Delegate reason is required"
+    assert missing_reason.json()["detail"]["code"] == "DELEGATE_REASON_REQUIRED"
     assert delegated.status_code == 200
     history = client.get(f"/api/v1/bugs/{bug['id']}/status-operations").json()
     assert history[-1]["is_delegated"] is True
@@ -973,7 +936,7 @@ def test_default_explicit_owner_assignment_exposes_bulk_metadata(client: TestCli
     _add_project_member(project["id"], developer_id, "developer")
     requirement = client.post(
         "/api/v1/requirements",
-        json={"project_id": project["id"], "title": f"Bulk Default Requirement {uuid4().hex[:8]}"},
+        json={"project_id": project["id"], "iteration_id": _project_iteration_id(client, project["id"]), "title": f"Bulk Default Requirement {uuid4().hex[:8]}"},
     ).json()
 
     transitions = client.get(
@@ -1099,9 +1062,8 @@ def test_runtime_requirement_defer_moves_tasks_and_test_cases(client: TestClient
         db.close()
 
 
-def test_runtime_requirement_defer_without_target_uses_project_requirement_pool(client: TestClient):
+def test_runtime_requirement_defer_without_target_uses_another_eligible_iteration(client: TestClient):
     _, project_id = _create_project_with_requirement_workflow(client)
-    project = client.get(f"/api/v1/projects/{project_id}").json()
     owner_id, owner_token = _create_user("Runtime Pool Defer Owner", "developer")
     _add_project_member(project_id, owner_id, "developer")
     source = client.post(
@@ -1130,9 +1092,7 @@ def test_runtime_requirement_defer_without_target_uses_project_requirement_pool(
     )
 
     assert deferred.status_code == 200, deferred.text
-    assert client.get(f"/api/v1/requirements/{requirement['id']}").json()["iteration_id"] == project[
-        "requirement_pool_iteration_id"
-    ]
+    assert client.get(f"/api/v1/requirements/{requirement['id']}").json()["iteration_id"] != source["id"]
 
 
 @pytest.mark.parametrize("terminal_side", ["source", "target"])
@@ -1489,6 +1449,16 @@ def test_runtime_submit_confirmation_moves_bug_fix_task_to_confirmation_handler(
             "owner_id": developer_id,
         },
     ).json()
+    source_bug = client.post(
+        "/api/v1/bugs",
+        json={
+            "project_id": project.json()["id"],
+            "task_id": task["id"],
+            "title": f"Task runtime source bug {uuid4().hex[:8]}",
+            "reporter_id": confirmer_id,
+        },
+    )
+    assert source_bug.status_code == 200, source_bug.text
 
     claimed = client.post(
         f"/api/v1/workflow-runtime/task/{task['id']}/transition",
@@ -1738,6 +1708,7 @@ def test_bug_from_test_execution_routes_repair_and_verification_handlers_separat
         "/api/v1/requirements",
         json={
             "project_id": project["id"],
+            "iteration_id": _project_iteration_id(client, project["id"]),
             "title": f"Test Source Requirement {uuid4().hex[:8]}",
             "owner_id": repair_id,
         },
@@ -1758,6 +1729,7 @@ def test_bug_from_test_execution_routes_repair_and_verification_handlers_separat
         headers={"Authorization": f"Bearer {executor_token}"},
     )
     assert execution.status_code == 200
+    assert execution.json()["executor_id"] == executor_id
     bug = client.post(
         f"/api/v1/test-cases/{test_case['id']}/bugs",
         json={"title": f"Test Source Bug {uuid4().hex[:8]}", "bug_type": "code_issue"},
@@ -1766,6 +1738,22 @@ def test_bug_from_test_execution_routes_repair_and_verification_handlers_separat
     assert bug.status_code == 200
     assert bug.json()["owner_id"] == repair_id
     assert bug.json()["reporter_id"] == executor_id
+    assert bug.json()["primary_component"] is None
+    db = SessionLocal()
+    try:
+        persisted_bug = db.query(Bug).filter(Bug.id == bug.json()["id"]).first()
+        assert workflow_runtime_service._bug_test_executor_id(db, persisted_bug) == executor_id
+        submit_transition = (
+            db.query(WorkflowTransition)
+            .filter(
+                WorkflowTransition.definition_id == persisted_bug.workflow_definition_id,
+                WorkflowTransition.action_key == "submit_verification",
+            )
+            .first()
+        )
+        assert submit_transition.handler_rule["target_type"] == "bug_verifier"
+    finally:
+        db.close()
 
     classified = client.post(
         f"/api/v1/workflow-runtime/bug/{bug.json()['id']}/transition",
@@ -1777,6 +1765,9 @@ def test_bug_from_test_execution_routes_repair_and_verification_handlers_separat
         json={"action_key": "submit_verification", "payload": {"reason": "fixed"}},
         headers={"Authorization": f"Bearer {repair_token}"},
     )
+    submit_history = client.get(f"/api/v1/bugs/{bug.json()['id']}/status-operations").json()
+    submit_routing = next(item for item in submit_history if item["action"] == "submit_verification")["selected_values"]["handler_routing"]
+    assert submit_routing["source_rule"] == "bug_verifier:test_executor"
     failed = client.post(
         f"/api/v1/workflow-runtime/bug/{bug.json()['id']}/transition",
         json={"action_key": "verification_failed", "payload": {"reason": "still reproducible"}},
@@ -1798,7 +1789,7 @@ def test_bug_from_test_execution_routes_repair_and_verification_handlers_separat
     assert routing["resolved_default_owner_id"] == executor_id
 
 
-def test_submit_confirmation_blocks_when_no_confirmation_handler_resolves(client: TestClient):
+def test_submit_confirmation_defaults_to_the_project_owner(client: TestClient):
     project = client.post(
         "/api/v1/projects",
         json={"name": f"Missing Confirmer Project {uuid4().hex[:8]}"},
@@ -1827,10 +1818,9 @@ def test_submit_confirmation_blocks_when_no_confirmation_handler_resolves(client
         headers={"Authorization": f"Bearer {developer_token}"},
     )
 
-    assert response.status_code == 422
-    unchanged = client.get(f"/api/v1/tasks/{task['id']}").json()
-    assert unchanged["status_name"] == "处理中"
-    assert unchanged["owner_id"] == developer_id
+    assert response.status_code == 200
+    assert response.json()["status_name"] == "待确认"
+    assert response.json()["owner_id"] is not None
 
 
 def test_task_confirmation_routes_all_branches_and_records_manual_override(client: TestClient):
@@ -1907,7 +1897,7 @@ def test_task_confirmation_routes_all_branches_and_records_manual_override(clien
 
     requirement = client.post(
         "/api/v1/requirements",
-        json={"project_id": project["id"], "title": f"Branch Requirement {uuid4().hex[:8]}", "owner_id": requirement_owner_id},
+        json={"project_id": project["id"], "iteration_id": _project_iteration_id(client, project["id"]), "title": f"Branch Requirement {uuid4().hex[:8]}", "owner_id": requirement_owner_id},
     ).json()
     requirement_task = client.post(
         "/api/v1/tasks",

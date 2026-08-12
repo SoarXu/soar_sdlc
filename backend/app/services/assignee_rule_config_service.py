@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 from app.models.assignee_rule_config import AssigneeRuleConfig
 from app.models.project import Project
 from app.models.workflow_definition import WorkflowDefinition, WorkflowState, WorkflowTransition
-from app.services.default_workflow_template_service import ensure_default_workflow_templates
+from app.services.default_workflow_template_service import ensure_default_workflow_templates, reconcile_review_subgraph
 from app.views.assignee_rule_config_view import AssigneeRuleConfigCreate, AssigneeRuleConfigUpdate
 
 
@@ -98,8 +98,10 @@ def _backfill_empty_default_workflows(db: Session, config: AssigneeRuleConfig) -
             WorkflowTransition.definition_id == definition.id
         ).first()
         if has_states or has_transitions:
+            reconcile_review_subgraph(db, definition)
             continue
         _clone_graph(db, source_definitions[object_type], definition)
+        reconcile_review_subgraph(db, definition)
 
 
 def list_configs(db: Session) -> list[AssigneeRuleConfig]:
@@ -292,6 +294,23 @@ def _copy_template_source(db: Session, config_id: int, source) -> None:
     }
     for object_type in SCHEME_WORKFLOW_OBJECT_TYPES:
         _clone_graph(db, source_definitions[object_type], target_definitions[object_type])
+    bug_definition = target_definitions["bug"]
+    submit_verification = (
+        db.query(WorkflowTransition)
+        .filter(
+            WorkflowTransition.definition_id == bug_definition.id,
+            WorkflowTransition.action_key == "submit_verification",
+        )
+        .first()
+    )
+    if submit_verification:
+        submit_verification.handler_rule = {
+            **(submit_verification.handler_rule or {}),
+            "target_type": "bug_verifier",
+            "fallback_type": "project_role",
+            "fallback_roles": "project_owner",
+        }
+    db.flush()
 
 
 
@@ -364,6 +383,14 @@ def _clone_graph(db: Session, source: WorkflowDefinition, target: WorkflowDefini
     for item in source_transitions:
         from_state_id = state_id_map[item.from_state_id]
         to_state_id = state_id_map[item.to_state_id]
+        handler_rule = deepcopy(item.handler_rule)
+        if source.object_type == "bug" and item.action_key == "submit_verification":
+            handler_rule = {
+                **(handler_rule or {}),
+                "target_type": "bug_verifier",
+                "fallback_type": "project_role",
+                "fallback_roles": "project_owner",
+            }
         db.add(
             WorkflowTransition(
                 definition_id=target.id,
@@ -372,12 +399,12 @@ def _clone_graph(db: Session, source: WorkflowDefinition, target: WorkflowDefini
                 from_state_id=from_state_id,
                 to_state_id=to_state_id,
                 allowed_roles=item.allowed_roles,
-                handler_rule=deepcopy(item.handler_rule),
+                handler_rule=handler_rule,
                 trigger_config=deepcopy(item.trigger_config),
                 condition_config=_remap_state_ids(item.condition_config, state_id_map),
                 validator_config=deepcopy(item.validator_config),
                 post_action_config=deepcopy(item.post_action_config),
-                ui_config=deepcopy(item.ui_config),
+                ui_config={key: value for key, value in (deepcopy(item.ui_config) or {}).items() if key != "system_action"},
                 form_config=deepcopy(item.form_config),
                 diagram_config=deepcopy(item.diagram_config),
                 enabled=item.enabled,

@@ -7,6 +7,7 @@ from app.core.auth_dependencies import get_current_user, require_system_admin
 from app.db.session import get_db
 from app.services import devops_service
 from app.services import git_platform_service
+from app.services import work_item_review_service
 from app.views.devops_view import (
     DevopsCommitDetail,
     DevopsCommitIngest,
@@ -23,6 +24,8 @@ from app.views.devops_view import (
     DevopsRepositoryRead,
     DevopsRepositoryUpdate,
     DevopsReviewRequest,
+    WorkItemReviewDecisionRequest,
+    WorkItemReviewRoundRead,
 )
 
 router = APIRouter()
@@ -198,3 +201,27 @@ def mark_commit_reviewed(
     _admin=Depends(require_system_admin),
 ):
     return devops_service.mark_commit_reviewed(db, commit_id, payload)
+
+
+@router.get("/work-item-reviews", response_model=list[WorkItemReviewRoundRead])
+def list_work_item_reviews(
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return work_item_review_service.list_open_review_rounds(db, current_user.id)
+
+
+@router.post("/work-item-reviews/{review_round_id}/decision", response_model=WorkItemReviewRoundRead)
+def decide_work_item_review(
+    review_round_id: int,
+    payload: WorkItemReviewDecisionRequest,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return work_item_review_service.decide_review_round(
+        db,
+        review_round_id,
+        payload.decision,
+        payload.remark,
+        current_user,
+    )

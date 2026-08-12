@@ -166,6 +166,27 @@ class DevopsReviewRequest(BaseModel):
     remark: str | None = None
 
 
+class WorkItemReviewDecisionRequest(BaseModel):
+    decision: Literal["approve", "reject"]
+    remark: str | None = None
+
+
+class WorkItemReviewRoundRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    object_type: str
+    object_id: int
+    latest_commit_id: int
+    reviewer_id: int | None = None
+    status: str
+    decision_by_id: int | None = None
+    decision_at: datetime | None = None
+    remark: str | None = None
+    create_time: datetime | None = None
+    update_time: datetime | None = None
+
+
 class DevopsJenkinsBuildBase(BaseModel):
     job_id: int | None = None
     job_name: str

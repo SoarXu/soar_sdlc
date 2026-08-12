@@ -184,6 +184,7 @@ TRACKED_TABLES = [
     "exception_rules",
     "bug_types",
     "devops_code_review_tasks",
+    "work_item_review_rounds",
     "devops_git_platform_connections",
     "devops_commit_links",
     "devops_commits",

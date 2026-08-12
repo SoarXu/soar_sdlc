@@ -79,3 +79,11 @@ export function markDevopsCommitReviewed(id, data) {
 export function fetchCodeReviewTasks(params = {}) {
   return http.get('/devops/review-tasks', { params })
 }
+
+export function fetchWorkItemReviews() {
+  return http.get('/devops/work-item-reviews')
+}
+
+export function decideWorkItemReview(id, data) {
+  return http.post(`/devops/work-item-reviews/${id}/decision`, data)
+}

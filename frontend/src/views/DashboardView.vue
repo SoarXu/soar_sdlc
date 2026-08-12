@@ -66,6 +66,35 @@
     </div>
 
     <div v-loading="loading" class="workbench-list">
+      <section v-if="workItemReviews.length" class="workbench-list-section workbench-review-section">
+        <header class="workbench-list-section-head">
+          <div>
+            <h2>待我评审</h2>
+            <p>关联 Git 提交后自动进入的需求、任务和 Bug 评审。</p>
+          </div>
+          <el-tag type="warning">{{ workItemReviews.length }} 项</el-tag>
+        </header>
+        <el-table :data="workItemReviews" border stripe>
+          <el-table-column label="工作项" min-width="180">
+            <template #default="{ row }">
+              <el-button link type="primary" @click="openWorkItemReview(row)">{{ typeLabel(row.object_type) }}-{{ row.object_id }}</el-button>
+            </template>
+          </el-table-column>
+          <el-table-column label="最新提交" min-width="180">
+            <template #default="{ row }">
+              <el-button link type="primary" @click="openWorkItemReviewDiff(row)">{{ row.short_sha || row.commit_sha || `Commit #${row.latest_commit_id}` }}</el-button>
+            </template>
+          </el-table-column>
+          <el-table-column label="更新时间" width="180"><template #default="{ row }">{{ formatWorkbenchDateTime(row.update_time) }}</template></el-table-column>
+          <el-table-column label="操作" width="180" fixed="right">
+            <template #default="{ row }">
+              <el-button link type="success" @click="decideWorkbenchReview(row, 'approve')">通过</el-button>
+              <el-button link type="danger" @click="decideWorkbenchReview(row, 'reject')">驳回</el-button>
+            </template>
+          </el-table-column>
+        </el-table>
+      </section>
+
       <section class="workbench-list-section">
         <header class="workbench-list-section-head">
           <div>
@@ -255,9 +284,10 @@
 <script setup>
 import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 
 import { fetchWorkbench } from '../api/dashboard'
+import { decideWorkItemReview } from '../api/devops'
 import { createBugFromTestCase, executeTestCase } from '../api/testCases'
 import { fetchUsers } from '../api/users'
 import { fetchWorkflowTransitionsBatch } from '../api/workflowRuntime'
@@ -341,6 +371,7 @@ const priorityLevelOptions = [
 ]
 
 const activeIterationItems = computed(() => workbenchData.value.active_iteration_items || [])
+const workItemReviews = computed(() => workbenchData.value.work_item_reviews || [])
 const filterOptions = computed(() => buildWorkbenchFilterOptions(activeIterationItems.value, users.value))
 const filteredListItems = computed(() => sortWorkbenchItems(filterWorkbenchItems(activeIterationItems.value, activeFilters.value)))
 const pagedListPage = computed(() => paginateWorkbenchItems(filteredListItems.value, currentPage.value, pageSize.value))
@@ -446,6 +477,28 @@ function workbenchRowClassName({ row }) {
 
 function openWorkItemDetail(item) {
   router.push(detailLink(item))
+}
+
+function openWorkItemReview(review) {
+  openWorkItemDetail({ object_type: review.object_type, id: review.object_id })
+}
+
+function openWorkItemReviewDiff(review) {
+  router.push({ name: 'devops', query: { tab: 'work-item-reviews', commitId: review.latest_commit_id } })
+}
+
+async function decideWorkbenchReview(review, decision) {
+  let remark = null
+  if (decision === 'reject') {
+    const result = await ElMessageBox.prompt('请填写驳回原因', '驳回评审', {
+      inputPattern: /\S+/,
+      inputErrorMessage: '请填写驳回原因'
+    })
+    remark = result.value
+  }
+  await decideWorkItemReview(review.id, { decision, remark })
+  ElMessage.success(decision === 'approve' ? '评审已通过' : '评审已驳回')
+  await loadWorkbench()
 }
 
 function detailLink(item) {

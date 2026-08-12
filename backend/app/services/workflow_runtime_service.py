@@ -78,7 +78,7 @@ MODEL_BY_TYPE = {
 SUPPORTED_VALIDATOR_TYPES = {
     "bug_close_gate", "requirement_terminal_gate", "iteration_terminal_gate", "project_close_gate",
 }
-SUPPORTED_AUTOMATION_TYPES = {"notification"}
+SUPPORTED_AUTOMATION_TYPES = {"notification", "system_action"}
 TRANSITION_LOCK_RETRY_LIMIT = 3
 def list_available_transitions(
     db: Session,
@@ -100,6 +100,8 @@ def list_available_transitions(
     transitions = query.order_by(WorkflowTransition.sort_order.asc(), WorkflowTransition.id.asc()).all()
     result = []
     for transition in transitions:
+        if _is_system_action(transition):
+            continue
         if not _matches_transition_condition(item, transition):
             continue
         if not _can_see_transition(db, object_type, item, transition, actor):
@@ -203,12 +205,13 @@ def _execute_transition(
     actor: User | None,
     *,
     commit: bool,
+    allow_system_action: bool = False,
 ):
     transition_context = _get_executable_transition(db, object_type, item, request.transition_id)
     transition, current_state = transition_context
     _ensure_supported_runtime_configuration(transition)
     from_status = current_state.status_name
-    _ensure_can_execute(db, object_type, item, transition, actor, request)
+    _ensure_can_execute(db, object_type, item, transition, actor, request, allow_system_action=allow_system_action)
     if (transition.ui_config or {}).get("command_type"):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Non-status command must use its dedicated endpoint")
 
@@ -946,7 +949,7 @@ def current_core_transitions(db: Session, item) -> list[WorkflowTransition]:
     return [
         transition for transition in transitions
         if not (transition.ui_config or {}).get("hidden")
-        and not (transition.ui_config or {}).get("system_action")
+        and not _is_system_action(transition)
         and (transition.ui_config or {}).get("action_category", "process") == "process"
         and _matches_transition_condition(item, transition)
     ]
@@ -959,7 +962,11 @@ def _ensure_can_execute(
     transition: WorkflowTransition,
     actor: User | None,
     request: WorkflowTransitionExecuteRequest,
+    *,
+    allow_system_action: bool = False,
 ) -> None:
+    if _is_system_action(transition) and not allow_system_action:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="System workflow transition cannot be executed manually")
     delegated = object_type != "project" and _is_delegated(db, item, actor)
     if not _matches_ownerless_visibility(object_type, item, transition):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Workflow transition not available for current handler state")
@@ -1658,6 +1665,8 @@ def _run_transition_automations(
     for entry in entries:
         if not entry:
             continue
+        if entry.get("type") == "system_action":
+            continue
         receiver_id = _automation_receiver_id(
             db,
             entry.get("receiver"),
@@ -1693,6 +1702,12 @@ def _run_transition_automations(
         result.update({"status": "created", "notification_id": notification.id})
         results.append(result)
     return results
+
+
+def _is_system_action(transition: WorkflowTransition) -> bool:
+    config = transition.trigger_config
+    entries = config if isinstance(config, list) else [config]
+    return any(isinstance(entry, dict) and entry.get("type") == "system_action" for entry in entries)
 
 
 def _automation_receiver_id(

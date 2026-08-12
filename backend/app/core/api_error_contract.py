@@ -50,6 +50,8 @@ _LEGACY_PHRASES = {
     "Scope id is required": "范围编号为必填项",
     "Next handler is required": "请选择下一处理人",
     "Delegate reason is required": "请填写代处理原因",
+    "Unsupported workflow trigger configuration": "不支持的工作流触发器配置",
+    "System workflow transition cannot be executed manually": "系统工作流动作不能手动执行",
     "Reclassification reason is required": "请填写重新分类原因",
     "Confirmation handler is required": "请选择确认处理人",
     "Selected target state is required": "请选择目标状态",

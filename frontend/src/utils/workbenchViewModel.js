@@ -122,6 +122,29 @@ export function filterWorkbenchItems(items = [], filters = {}) {
   return items.filter((item) => filterMatch(item, filters))
 }
 
+function normalizePositiveInteger(value, fallback) {
+  if (typeof value === 'boolean') return fallback
+  const integerValue = Math.floor(Number(value))
+  return Number.isFinite(integerValue) && integerValue > 0 ? integerValue : fallback
+}
+
+export function paginateWorkbenchItems(items = [], page = 1, pageSize = 20) {
+  const normalizedPageSize = normalizePositiveInteger(pageSize, 20)
+  const total = items.length
+  const pageCount = Math.max(1, Math.ceil(total / normalizedPageSize))
+  const requestedPage = normalizePositiveInteger(page, 1)
+  const normalizedPage = Math.min(requestedPage, pageCount)
+  const start = (normalizedPage - 1) * normalizedPageSize
+
+  return {
+    items: items.slice(start, start + normalizedPageSize),
+    page: normalizedPage,
+    pageSize: normalizedPageSize,
+    total,
+    pageCount
+  }
+}
+
 function normalizedPriority(item = {}) {
   const priorityRanks = { high: 1, medium: 3, low: 5 }
   const rawValue = String(item.priority || item.severity || '').toLowerCase()

@@ -1,6 +1,7 @@
 from datetime import datetime
 
 from sqlalchemy import BigInteger, DateTime, Integer, JSON, String, Text, text
+from sqlalchemy.dialects.mysql import MEDIUMTEXT
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.session import Base
@@ -18,9 +19,10 @@ class TestCase(Base):
     test_scope: Mapped[str | None] = mapped_column(String(64), nullable=True)
     priority: Mapped[str] = mapped_column(String(32), default="medium")
     default_tester_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
-    precondition: Mapped[str | None] = mapped_column(Text, nullable=True)
+    precondition: Mapped[str | None] = mapped_column(Text().with_variant(MEDIUMTEXT, "mysql"), nullable=True)
     steps_json: Mapped[dict | list | None] = mapped_column(JSON, nullable=True)
-    expected_result: Mapped[str | None] = mapped_column(Text, nullable=True)
+    steps_content: Mapped[str | None] = mapped_column(Text().with_variant(MEDIUMTEXT, "mysql"), nullable=True)
+    expected_result: Mapped[str | None] = mapped_column(Text().with_variant(MEDIUMTEXT, "mysql"), nullable=True)
     last_execute_time: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     last_execute_result: Mapped[str | None] = mapped_column(String(32), nullable=True)
     status: Mapped[str] = mapped_column(String(32), default="active")

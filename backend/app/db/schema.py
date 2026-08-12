@@ -45,6 +45,21 @@ def _is_mysql_family(engine: Engine) -> bool:
     return engine.dialect.name in {"mysql", "mariadb"}
 
 
+def _ensure_test_case_rich_text_capacity(engine: Engine) -> None:
+    if not _is_mysql_family(engine) or "test_cases" not in inspect(engine).get_table_names():
+        return
+    columns = {column["name"]: column for column in inspect(engine).get_columns("test_cases")}
+    statements = [
+        f"ALTER TABLE test_cases MODIFY COLUMN {name} MEDIUMTEXT NULL"
+        for name in ("precondition", "steps_content", "expected_result")
+        if name in columns and columns[name]["type"].__class__.__name__.upper() != "MEDIUMTEXT"
+    ]
+    if statements:
+        with engine.begin() as connection:
+            for statement in statements:
+                connection.execute(text(statement))
+
+
 def _format_program_name_duplicates(rows) -> str:
     groups: list[str] = []
     for row in rows:
@@ -168,23 +183,6 @@ def _ensure_column(engine: Engine, table: str, col: str, ddl: str, index_ddl: st
                 conn.execute(text(index_ddl))
 
 
-def _ensure_requirement_pool_identity_columns(engine: Engine) -> None:
-    _ensure_column(
-        engine,
-        "iterations",
-        "is_requirement_pool",
-        "ALTER TABLE iterations ADD COLUMN is_requirement_pool "
-        "TINYINT(1) NOT NULL DEFAULT 0 COMMENT 'system requirement pool flag'",
-    )
-    _ensure_column(
-        engine,
-        "projects",
-        "requirement_pool_iteration_id",
-        "ALTER TABLE projects ADD COLUMN requirement_pool_iteration_id "
-        "BIGINT NULL COMMENT 'canonical requirement pool iteration ID'",
-    )
-
-
 def _ensure_varchar_length(engine: Engine, table: str, col: str, minimum_length: int, ddl: str) -> None:
     inspector = inspect(engine)
     if table not in inspector.get_table_names():
@@ -289,7 +287,6 @@ def _history_open_lookup_index_exists(indexes: list[dict], canonical_name: str =
 
 def ensure_runtime_schema(engine: Engine) -> None:
     _validate_final_workflow_schema(engine)
-    _ensure_requirement_pool_identity_columns(engine)
     _ensure_program_name_uniqueness_schema(engine)
     inspector0 = inspect(engine)
     if "status_operation_log" in inspector0.get_table_names():
@@ -694,6 +691,9 @@ def ensure_runtime_schema(engine: Engine) -> None:
                    "CREATE INDEX idx_test_cases_iteration ON test_cases (iteration_id)")
     _ensure_column(engine, "test_cases", "test_scope",
                    "ALTER TABLE test_cases ADD COLUMN test_scope VARCHAR(64) NULL COMMENT '适用范围/测试环境' AFTER case_type")
+    _ensure_column(engine, "test_cases", "steps_content",
+                   "ALTER TABLE test_cases ADD COLUMN steps_content MEDIUMTEXT NULL COMMENT '整块富文本用例步骤' AFTER steps_json")
+    _ensure_test_case_rich_text_capacity(engine)
     _ensure_column(engine, "test_cases", "last_execute_time",
                    "ALTER TABLE test_cases ADD COLUMN last_execute_time DATETIME NULL COMMENT '最近执行时间' AFTER expected_result")
     _ensure_column(engine, "test_cases", "last_execute_result",

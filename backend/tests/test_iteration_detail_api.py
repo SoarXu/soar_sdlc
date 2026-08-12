@@ -52,16 +52,18 @@ def test_iteration_loader_can_request_a_database_row_lock():
 
 
 @pytest.mark.parametrize(
-    ("locked_project_id", "locked_iteration_id"),
+    ("locked_project_id", "locked_iteration_id", "expected_status", "expected_moved"),
     [
-        (2, 501),
-        (1, 502),
+        (2, 501, 400, []),
+        (1, 502, None, [101]),
     ],
 )
 def test_link_requirements_validates_the_locked_requirement_state(
     monkeypatch,
     locked_project_id: int,
     locked_iteration_id: int,
+    expected_status: int | None,
+    expected_moved: list[int],
 ):
     stale_requirement = SimpleNamespace(id=101, project_id=1, iteration_id=501)
     locked_requirement = SimpleNamespace(
@@ -108,22 +110,29 @@ def test_link_requirements_validates_the_locked_requirement_state(
     monkeypatch.setattr(iteration_service, "_iteration_scoped_project_ids", lambda *args: {1})
     monkeypatch.setattr(
         iteration_service,
-        "is_project_requirement_pool",
-        lambda db, project_id, iteration_id: iteration_id == 501,
+        "_ensure_eligible_source_iteration",
+        lambda *args, **kwargs: None,
     )
     monkeypatch.setattr(
         iteration_service,
         "move_work_item_to_iteration",
         lambda *args, **kwargs: moved.append(args[1].id),
     )
+    monkeypatch.setattr(
+        iteration_service,
+        "move_requirement_dependents_to_iteration",
+        lambda *args, **kwargs: None,
+    )
     monkeypatch.setattr(iteration_service, "_linked_requirements", lambda *args: [])
 
-    with pytest.raises(HTTPException) as exc_info:
+    if expected_status is None:
         iteration_service.link_requirements(db, 88, [101])
-
-    assert exc_info.value.status_code == 400
+    else:
+        with pytest.raises(HTTPException) as exc_info:
+            iteration_service.link_requirements(db, 88, [101])
+        assert exc_info.value.status_code == expected_status
     assert db.query_spy.locked is True
-    assert moved == []
+    assert moved == expected_moved
 
 
 def test_unlink_requirement_checks_locked_membership_before_moving(monkeypatch):
@@ -164,7 +173,6 @@ def test_unlink_requirement_checks_locked_membership_before_moving(monkeypatch):
     db = SessionSpy()
     monkeypatch.setattr(iteration_service, "_get_active_iteration", lambda *args, **kwargs: object())
     monkeypatch.setattr(iteration_service, "ensure_iteration_mutable", lambda iteration: None)
-    monkeypatch.setattr(iteration_service, "requirement_pool_for_project", lambda *args: SimpleNamespace(id=999))
     monkeypatch.setattr(
         iteration_service,
         "move_work_item_to_iteration",
@@ -427,9 +435,17 @@ def test_iteration_start_rejects_terminal_hierarchy_without_partial_changes(
 
 
 def _create_requirement(client: TestClient, project_id: int, title: str | None = None, owner_id: int | None = None) -> int:
+    iteration_id = min(
+        item["id"] for item in client.get("/api/v1/iterations", params={"project_id": project_id}).json()
+    )
     response = client.post(
         "/api/v1/requirements",
-        json={"project_id": project_id, "title": title or f"Requirement-{uuid4().hex[:8]}", "owner_id": owner_id},
+        json={
+            "project_id": project_id,
+            "iteration_id": iteration_id,
+            "title": title or f"Requirement-{uuid4().hex[:8]}",
+            "owner_id": owner_id,
+        },
     )
     assert response.status_code == 200
     return response.json()["id"]
@@ -514,7 +530,19 @@ def _state_id_for_status(db, item, status: str) -> int:
         "completed": "complete",
         "canceled": "cancel",
     }
-    if status == "pending_assignment":
+    terminal_kind_by_status = {"completed": "completed", "canceled": "terminated"}
+    terminal_name_by_status = {"completed": "已完成", "canceled": "已取消"}
+    if status in terminal_kind_by_status:
+        state_ids = {
+            value
+            for value, in db.query(WorkflowState.id).filter(
+                WorkflowState.definition_id == item.workflow_definition_id,
+                WorkflowState.category == "terminal",
+                WorkflowState.terminal_kind == terminal_kind_by_status[status],
+                WorkflowState.status_name == terminal_name_by_status[status],
+            ).all()
+        }
+    elif status == "pending_assignment":
         state_ids = {
             value
             for value, in db.query(WorkflowState.id).filter(
@@ -638,7 +666,7 @@ def test_auto_start_due_iteration_skips_closed_project(client: TestClient):
     assert client.get(f"/api/v1/iterations/{iteration_id}/detail").json()["iteration"]["state_category"] == "start"
 
 
-def test_iteration_crud_serializes_requirement_pool_identity(client: TestClient):
+def test_iteration_crud_omits_removed_requirement_pool_identity(client: TestClient):
     project_id = _create_project(client)
 
     created = client.post(
@@ -647,22 +675,22 @@ def test_iteration_crud_serializes_requirement_pool_identity(client: TestClient)
     )
     assert created.status_code == 200
     iteration_id = created.json()["id"]
-    assert created.json()["is_requirement_pool"] is False
+    assert "is_requirement_pool" not in created.json()
 
     listed = client.get(f"/api/v1/iterations?project_id={project_id}")
     assert listed.status_code == 200
     listed_iteration = next(item for item in listed.json() if item["id"] == iteration_id)
-    assert listed_iteration["is_requirement_pool"] is False
+    assert "is_requirement_pool" not in listed_iteration
 
     updated = client.patch(
         f"/api/v1/iterations/{iteration_id}",
         json={"name": "Updated pool identity serialization"},
     )
     assert updated.status_code == 200
-    assert updated.json()["is_requirement_pool"] is False
+    assert "is_requirement_pool" not in updated.json()
 
 
-def test_available_requirements_lists_only_scoped_project_pool_requirements(client: TestClient):
+def test_available_requirements_lists_only_scoped_project_eligible_requirements(client: TestClient):
     scoped_project_id = _create_project(client, "Scoped pool project")
     outside_project_id = _create_project(client, "Outside pool project")
     iteration_id = _create_iteration(client, [scoped_project_id], "Pool compatible iteration")
@@ -676,14 +704,12 @@ def test_available_requirements_lists_only_scoped_project_pool_requirements(clie
     assert outside_requirement_id not in {item["id"] for item in available.json()}
 
 
-def test_link_requirements_moves_pool_items_but_rejects_other_delivery_items(client: TestClient):
-    project_id = _create_project(client, "Link pool project")
+def test_link_requirements_moves_items_between_eligible_delivery_iterations(client: TestClient):
+    project_id = _create_project(client, "Link delivery project")
     target_iteration_id = _create_iteration(client, [project_id], "Target delivery iteration")
     other_iteration_id = _create_iteration(client, [project_id], "Other delivery iteration")
-    pool_requirement_id = _create_requirement(client, project_id, "Pool requirement")
-    pool_target_requirement_id = _create_requirement(client, project_id, "Pool target requirement")
+    source_requirement_id = _create_requirement(client, project_id, "Source requirement")
     other_delivery_requirement_id = _create_requirement(client, project_id, "Other delivery requirement")
-    pool_id = client.get(f"/api/v1/projects/{project_id}").json()["requirement_pool_iteration_id"]
     assert client.post(
         f"/api/v1/iterations/{other_iteration_id}/requirements",
         json={"requirement_ids": [other_delivery_requirement_id]},
@@ -691,28 +717,24 @@ def test_link_requirements_moves_pool_items_but_rejects_other_delivery_items(cli
 
     linked = client.post(
         f"/api/v1/iterations/{target_iteration_id}/requirements",
-        json={"requirement_ids": [pool_requirement_id]},
+        json={"requirement_ids": [source_requirement_id]},
     )
-    rejected = client.post(
+    moved_from_other_delivery = client.post(
         f"/api/v1/iterations/{target_iteration_id}/requirements",
         json={"requirement_ids": [other_delivery_requirement_id]},
     )
-    pool_rejected = client.post(
-        f"/api/v1/iterations/{pool_id}/requirements",
-        json={"requirement_ids": [pool_target_requirement_id]},
-    )
 
     assert linked.status_code == 200, linked.text
-    assert client.get(f"/api/v1/requirements/{pool_requirement_id}").json()["iteration_id"] == target_iteration_id
-    assert rejected.status_code == 400
-    assert pool_rejected.status_code == 409
-    assert pool_rejected.json()["detail"]["code"] == "REQUIREMENT_POOL_OPERATION_FORBIDDEN"
+    assert moved_from_other_delivery.status_code == 200, moved_from_other_delivery.text
+    assert client.get(f"/api/v1/requirements/{source_requirement_id}").json()["iteration_id"] == target_iteration_id
+    assert client.get(f"/api/v1/requirements/{other_delivery_requirement_id}").json()["iteration_id"] == target_iteration_id
 
 
 def test_linking_and_unlinking_requirement_syncs_linked_tasks_iteration(client: TestClient):
     project_id = _create_project(client, "Requirement task sync project")
     iteration_id = _create_iteration(client, [project_id], "Requirement task sync iteration")
     requirement_id = _create_requirement(client, project_id, "Requirement with task")
+    source_iteration_id = client.get(f"/api/v1/requirements/{requirement_id}").json()["iteration_id"]
     task_id = _create_task(client, project_id, "Task under requirement", requirement_id=requirement_id)
 
     linked = client.post(
@@ -726,8 +748,7 @@ def test_linking_and_unlinking_requirement_syncs_linked_tasks_iteration(client: 
     unlinked = client.delete(f"/api/v1/iterations/{iteration_id}/requirements/{requirement_id}")
 
     assert unlinked.status_code == 204
-    pool_id = client.get(f"/api/v1/projects/{project_id}").json()["requirement_pool_iteration_id"]
-    assert client.get(f"/api/v1/tasks/{task_id}").json()["iteration_id"] == pool_id
+    assert client.get(f"/api/v1/tasks/{task_id}").json()["iteration_id"] == source_iteration_id
 
 
 def test_iteration_detail_collects_scoped_projects_and_linked_objects(client: TestClient):
@@ -1016,12 +1037,16 @@ def test_iteration_project_scope_removal_closes_work_item_history_with_actor_and
     )
 
     assert updated.status_code == 200, updated.text
-    removed_pool_id = client.get(f"/api/v1/projects/{removed_project_id}").json()["requirement_pool_iteration_id"]
+    removed_project_iterations = client.get(
+        "/api/v1/iterations", params={"project_id": removed_project_id}
+    ).json()
+    assert len(removed_project_iterations) == 1
+    fallback_iteration_id = removed_project_iterations[0]["id"]
     db = SessionLocal()
     try:
-        assert db.query(Requirement).filter(Requirement.id == requirement_id).one().iteration_id == removed_pool_id
-        assert db.query(Task).filter(Task.id == task_id).one().iteration_id == removed_pool_id
-        assert db.query(Bug).filter(Bug.id == bug_id).one().iteration_id == removed_pool_id
+        assert db.query(Requirement).filter(Requirement.id == requirement_id).one().iteration_id == fallback_iteration_id
+        assert db.query(Task).filter(Task.id == task_id).one().iteration_id == fallback_iteration_id
+        assert db.query(Bug).filter(Bug.id == bug_id).one().iteration_id == fallback_iteration_id
         histories = db.query(WorkItemIterationHistory).filter(
             WorkItemIterationHistory.iteration_id == iteration_id,
             WorkItemIterationHistory.object_id.in_([requirement_id, task_id, bug_id]),
@@ -1116,10 +1141,16 @@ def test_terminal_iteration_detail_uses_persisted_completion_snapshot(client: Te
     }]
     assert detail["metrics"]["requirement_total"] == 1
 
-    pool_id = client.get(f"/api/v1/projects/{project_id}").json()["requirement_pool_iteration_id"]
+    fallback_iteration_id = next(
+        item["id"]
+        for item in client.get("/api/v1/iterations", params={"project_id": project_id}).json()
+        if item["id"] != iteration_id
+    )
     db = SessionLocal()
     try:
-        db.query(Requirement).filter(Requirement.id == requirement_id).update({Requirement.iteration_id: pool_id})
+        db.query(Requirement).filter(Requirement.id == requirement_id).update(
+            {Requirement.iteration_id: fallback_iteration_id}
+        )
         db.commit()
     finally:
         db.close()

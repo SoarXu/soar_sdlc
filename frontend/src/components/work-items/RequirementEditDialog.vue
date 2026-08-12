@@ -13,7 +13,7 @@
             <el-option v-for="project in projects" :key="project.id" :label="project.name" :value="project.id" />
           </el-select>
         </el-form-item>
-        <el-form-item label="迭代">
+        <el-form-item label="迭代" required>
           <el-select v-model="form.iteration_id" filterable placeholder="请选择迭代">
             <el-option v-for="iteration in requirementSelectableIterations" :key="iteration.id" :label="requirementIterationLabel(iteration)" :value="iteration.id" />
           </el-select>
@@ -58,7 +58,7 @@ import { fetchProjects } from '../../api/projects'
 import { fetchRequirement, updateRequirement } from '../../api/requirements'
 import { fetchUsers } from '../../api/users'
 import { showActionError } from '../../utils/actionFeedback'
-import { requirementIterationLabel, requirementIterationOptions, requirementPoolForProject } from '../../utils/requirementPoolIterations'
+import { requirementIterationLabel, requirementIterationOptions } from '../../utils/requirementIterations'
 import RequirementPriorityBadge from '../RequirementPriorityBadge.vue'
 
 const props = defineProps({
@@ -85,9 +85,7 @@ const requirementSelectableIterations = computed(() => requirementIterationOptio
   selectedProject.value,
   projects.value,
   iterations.value
-).filter((iteration) => (
-  iteration.is_requirement_pool || iteration.state_category !== 'terminal' || iteration.id === form.iteration_id
-)))
+))
 
 async function load() {
   if (!props.modelValue || !props.itemId) return
@@ -96,7 +94,7 @@ async function load() {
     const [itemResponse, projectResponse, iterationResponse, userResponse] = await Promise.all([
       fetchRequirement(props.itemId),
       fetchProjects(),
-      fetchIterations({ include_requirement_pool: true }),
+      fetchIterations(),
       fetchUsers()
     ])
     projects.value = projectResponse.data || []
@@ -125,20 +123,21 @@ async function load() {
 
 watch(() => form.project_id, (projectId) => {
   if (loading.value || !projectId) return
-  const selectedProject = projects.value.find((project) => project.id === projectId)
-  form.iteration_id = requirementPoolForProject(selectedProject, iterations.value)?.id ?? null
+  if (!requirementSelectableIterations.value.some((iteration) => iteration.id === form.iteration_id)) {
+    form.iteration_id = null
+  }
 })
 
 async function save() {
-  if (!form.project_id || !form.title?.trim()) {
-    ElMessage.warning('请选择项目并填写需求标题')
+  if (!form.project_id || !form.iteration_id || !form.title?.trim()) {
+    ElMessage.warning('请选择项目、迭代并填写需求标题')
     return
   }
   saving.value = true
   try {
     await updateRequirement(props.itemId, {
       ...form,
-      iteration_id: form.iteration_id || null,
+      iteration_id: form.iteration_id,
       proposer_id: form.proposer_id || null
     })
     visible.value = false

@@ -7,18 +7,21 @@ from openpyxl.worksheet.datavalidation import DataValidation
 from sqlalchemy.orm import Session
 
 from app.models.project import Project
+from app.models.iteration import Iteration
 from app.models.requirement import Requirement
+from app.models.task import Task
 from app.models.user import User
 from app.services.lifecycle_service import project_lifecycle_phase
 from app.services.workflow_state_service import initial_workflow_values
 from app.services.project_permission_service import ensure_work_item_create_permission
 from app.services.iteration_service import ensure_iteration_mutable, lock_iterations_for_mutation
 from app.services.work_item_iteration_history_service import move_work_item_to_iteration
-from app.services.requirement_pool_service import resolve_requirement_iteration_id
+from app.services.iteration_assignment_service import validate_requirement_iteration
 
 
 REQUIREMENT_IMPORT_COLUMNS = [
     "项目名称",
+    "迭代名称",
     "需求标题",
     "类型",
     "优先级",
@@ -26,7 +29,7 @@ REQUIREMENT_IMPORT_COLUMNS = [
     "需求描述",
     "验收标准",
 ]
-REQUIRED_COLUMNS = ["项目名称", "需求标题"]
+REQUIRED_COLUMNS = ["项目名称", "迭代名称", "需求标题"]
 REQUIREMENT_TYPE_VALUES = ["功能", "接口", "性能", "安全", "体验", "改进", "其他"]
 PRIORITY_VALUES = {"1", "2", "3", "4", "5"}
 
@@ -36,6 +39,7 @@ class ParsedRequirementRow:
     row_number: int
     project_id: int
     project_name: str
+    iteration_id: int
     title: str
     requirement_type: str | None
     priority: str
@@ -52,9 +56,9 @@ def build_requirement_import_template(db: Session, project_id: int | None = None
     sheet.title = "需求导入"
     sheet.append(REQUIREMENT_IMPORT_COLUMNS)
     project_name = _template_project_name(db, project_id)
-    sheet.append([project_name, "示例需求", "功能", "3", "", "需求描述", "验收标准"])
-    _add_list_validation(sheet, "C", REQUIREMENT_TYPE_VALUES)
-    _add_list_validation(sheet, "D", sorted(PRIORITY_VALUES))
+    sheet.append([project_name, "请填写迭代名称", "示例需求", "功能", "3", "", "需求描述", "验收标准"])
+    _add_list_validation(sheet, "D", REQUIREMENT_TYPE_VALUES)
+    _add_list_validation(sheet, "E", sorted(PRIORITY_VALUES))
     for column in sheet.columns:
         sheet.column_dimensions[column[0].column_letter].width = 18
     buffer = BytesIO()
@@ -109,11 +113,12 @@ def commit_requirement_import(
         if requirement is not None and requirement.iteration_id is not None
     }
     new_requirement_iteration_ids = {
-        resolve_requirement_iteration_id(db, row.project_id, None)
+        row.iteration_id
         for row, existing in zip(parsed_rows, existing_requirements)
         if existing is None or duplicate_strategy == "create_duplicate"
     }
     iteration_ids.update(new_requirement_iteration_ids)
+    iteration_ids.update(row.iteration_id for row in parsed_rows)
     prelocked_iterations = lock_iterations_for_mutation(db, iteration_ids) if iteration_ids else {}
     created_count = 0
     updated_count = 0
@@ -129,7 +134,7 @@ def commit_requirement_import(
             updated_count += 1
             continue
         workflow_values = initial_workflow_values(db, "requirement", row.project_id)
-        iteration_id = resolve_requirement_iteration_id(db, row.project_id, None)
+        iteration_id = row.iteration_id
         ensure_iteration_mutable(prelocked_iterations[iteration_id])
         requirement = Requirement(
             project_id=row.project_id,
@@ -171,7 +176,7 @@ def _parse_requirement_rows(
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Excel 文件无法解析") from exc
     sheet = workbook.active
     headers = {str(cell.value).strip(): index for index, cell in enumerate(sheet[1]) if cell.value}
-    required_columns = REQUIRED_COLUMNS if project_id is None else [REQUIRED_COLUMNS[1]]
+    required_columns = REQUIRED_COLUMNS if project_id is None else REQUIRED_COLUMNS[1:]
     missing_columns = [column for column in required_columns if column not in headers]
     if missing_columns:
         return [], [{"row_number": 1, "messages": [f"缺少列：{column}" for column in missing_columns]}]
@@ -198,12 +203,16 @@ def _parse_requirement_row(
     messages = []
     project_name = values.get("项目名称", "")
     title = values.get("需求标题", "")
+    iteration_name = values.get("迭代名称", "")
     if scoped_project is None and not project_name:
         messages.append("项目名称不能为空")
     if not title:
         messages.append("需求标题不能为空")
+    if not iteration_name:
+        messages.append("迭代名称不能为空")
 
     project = scoped_project or (_resolve_project(db, project_name, "项目名称", messages) if project_name else None)
+    iteration = _resolve_iteration(db, project, iteration_name, messages) if project and iteration_name else None
     proposer = _resolve_user(db, values.get("提出人", ""), "提出人", messages)
     requirement_type = values.get("类型") or None
     if requirement_type and requirement_type not in REQUIREMENT_TYPE_VALUES:
@@ -218,6 +227,7 @@ def _parse_requirement_row(
             row_number=row_number,
             project_id=project.id,
             project_name=project.name,
+            iteration_id=iteration.id,
             title=title,
             requirement_type=requirement_type,
             priority=priority,
@@ -242,6 +252,29 @@ def _resolve_project(db: Session, name: str, field: str, messages: list[str]) ->
         messages.append(f"{field}不唯一：{name}")
         return None
     return matches[0]
+
+
+def _resolve_iteration(
+    db: Session,
+    project: Project,
+    name: str,
+    messages: list[str],
+) -> Iteration | None:
+    matches = db.query(Iteration).filter(Iteration.name == name, Iteration.deleted == 0).all()
+    eligible = []
+    for iteration in matches:
+        try:
+            validate_requirement_iteration(db, project.id, iteration.id)
+            eligible.append(iteration)
+        except HTTPException:
+            continue
+    if not eligible:
+        messages.append(f"迭代不存在、已关闭或不属于项目：{name}")
+        return None
+    if len(eligible) > 1:
+        messages.append(f"迭代名称不唯一：{name}")
+        return None
+    return eligible[0]
 
 
 def _resolve_project_id(db: Session, project_id: int) -> Project:
@@ -308,6 +341,26 @@ def _apply_row_to_requirement(
     requirement = _lock_requirement_for_import_update(db, requirement.id, prelocked_iterations or {})
     if requirement.iteration_id is not None:
         ensure_iteration_mutable(prelocked_iterations[requirement.iteration_id])
+    ensure_iteration_mutable(prelocked_iterations[row.iteration_id])
+    if requirement.iteration_id != row.iteration_id:
+        move_work_item_to_iteration(
+            db,
+            requirement,
+            row.iteration_id,
+            actor_id=actor_id,
+            reason="import_updated",
+        )
+        for task in db.query(Task).filter(
+            Task.requirement_id == requirement.id,
+            Task.deleted == 0,
+        ):
+            move_work_item_to_iteration(
+                db,
+                task,
+                row.iteration_id,
+                actor_id=actor_id,
+                reason="requirement_import_updated",
+            )
     requirement.source_project_id = None
     requirement.requirement_type = row.requirement_type
     requirement.priority = row.priority

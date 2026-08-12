@@ -15,6 +15,11 @@ class AuthenticatedTestClient(TestClient):
     def __init__(self, *args, default_token: str, **kwargs):
         super().__init__(*args, **kwargs)
         self.default_token = default_token
+        self._real_iteration_defaults_enabled = False
+        self._real_iteration_defaults: dict[int, int] = {}
+
+    def enable_real_iteration_defaults(self) -> None:
+        self._real_iteration_defaults_enabled = True
 
     def request(self, method: str, url, **kwargs):
         headers = dict(kwargs.pop("headers", {}) or {})
@@ -26,6 +31,28 @@ class AuthenticatedTestClient(TestClient):
             kwargs, legacy_graph_keys = _adapt_legacy_graph_request(method, str(url), kwargs)
         if not skip_default_auth and "Authorization" not in headers:
             headers["Authorization"] = f"Bearer {self.default_token}"
+        if (
+            self._real_iteration_defaults_enabled
+            and method.upper() == "POST"
+            and str(url).rstrip("/").endswith("/api/v1/requirements")
+            and isinstance(kwargs.get("json"), dict)
+            and "iteration_id" not in kwargs["json"]
+        ):
+            project_id = kwargs["json"].get("project_id")
+            if project_id and project_id not in self._real_iteration_defaults:
+                iteration_response = super().request(
+                    "POST",
+                    "/api/v1/iterations",
+                    json={"name": f"Test iteration {project_id}", "project_ids": [project_id]},
+                    headers=headers,
+                )
+                assert iteration_response.status_code == 200, iteration_response.text
+                self._real_iteration_defaults[project_id] = iteration_response.json()["id"]
+            if project_id in self._real_iteration_defaults:
+                kwargs["json"] = {
+                    **kwargs["json"],
+                    "iteration_id": self._real_iteration_defaults[project_id],
+                }
         kwargs["headers"] = headers
         response = super().request(method, url, **kwargs)
         if not skip_transition_adapter:
@@ -222,16 +249,6 @@ def _cleanup_created_rows(before: dict[str, set[int]]) -> None:
         for table in TRACKED_TABLES:
             if table not in before or not _table_exists(db, table):
                 continue
-            if table == "iterations":
-                created_iteration_ids = _created_ids(db, before, table)
-                if created_iteration_ids:
-                    db.execute(
-                        text(
-                            "update projects set requirement_pool_iteration_id = null "
-                            "where requirement_pool_iteration_id in :ids"
-                        ),
-                        {"ids": tuple(created_iteration_ids)},
-                    )
             rows = db.execute(text(f"select id from {table}")).all()
             created_ids = [row.id for row in rows if row.id not in before[table]]
             if created_ids:

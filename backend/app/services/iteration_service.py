@@ -16,10 +16,16 @@ from app.models.work_item_iteration_history import WorkItemIterationHistory
 from app.services.lifecycle_service import project_lifecycle_phase
 from app.services.status_operation_service import create_status_operation, list_status_operations
 from app.services.iteration_completion_snapshot_service import get_completion_snapshot
-from app.services.requirement_pool_service import is_project_requirement_pool, requirement_pool_for_project
+from app.services.iteration_assignment_service import (
+    ELIGIBLE_ITERATION_CATEGORIES,
+    fallback_iteration_for_project,
+)
 from app.services.workflow_state_query_service import is_terminal_state, non_terminal_state_clause
 from app.services.workflow_state_service import initial_system_workflow_values
-from app.services.work_item_iteration_history_service import move_work_item_to_iteration
+from app.services.work_item_iteration_history_service import (
+    move_requirement_dependents_to_iteration,
+    move_work_item_to_iteration,
+)
 from app.views.iteration_view import DeferIterationWorkItemsRequest, IterationCreate, IterationUpdate
 from app.views.status_operation_view import StatusOperationCreate
 
@@ -27,12 +33,8 @@ from app.views.status_operation_view import StatusOperationCreate
 def list_iterations(
     db: Session,
     project_id: int | None = None,
-    *,
-    include_requirement_pool: bool = False,
 ) -> list[dict]:
     query = db.query(Iteration).filter(Iteration.deleted == 0)
-    if not include_requirement_pool:
-        query = query.filter(Iteration.is_requirement_pool.is_(False))
     if project_id:
         subquery = db.query(IterationProject.iteration_id).filter(IterationProject.project_id == project_id)
         query = query.filter(Iteration.id.in_(subquery))
@@ -76,9 +78,6 @@ def update_iteration(
 ) -> dict:
     iteration = _get_active_iteration(db, iteration_id, for_update=True)
     data = payload.model_dump(exclude_unset=True)
-    if iteration.is_requirement_pool:
-        return _rename_requirement_pool(db, iteration, data, actor_id)
-
     ensure_iteration_mutable(iteration)
     project_id = data.pop("project_id", None)
     project_ids = data.pop("project_ids", None)
@@ -108,6 +107,31 @@ def delete_iteration(db: Session, iteration_id: int) -> None:
     iteration = _get_active_iteration(db, iteration_id, for_update=True)
     ensure_delivery_iteration(iteration)
     ensure_iteration_mutable(iteration)
+    targets_by_project: dict[int, int] = {}
+    for model in (Requirement, Task, Bug):
+        items = (
+            db.query(model)
+            .filter(model.deleted == 0, model.iteration_id == iteration_id)
+            .order_by(model.id.asc())
+            .with_for_update()
+            .all()
+        )
+        for item in items:
+            target_id = targets_by_project.get(item.project_id)
+            if target_id is None:
+                target_id = fallback_iteration_for_project(
+                    db,
+                    item.project_id,
+                    exclude_iteration_id=iteration_id,
+                ).id
+                targets_by_project[item.project_id] = target_id
+            move_work_item_to_iteration(
+                db,
+                item,
+                target_id,
+                actor_id=None,
+                reason="iteration_deleted",
+            )
     iteration.deleted = 1
     iteration.delete_time = datetime.now()
     db.commit()
@@ -141,8 +165,16 @@ def defer_work_items(
     for requirement in requirements:
         if requirement.project_id not in target_project_ids:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="存在需求不在目标迭代项目范围内")
+        source_iteration_id = requirement.iteration_id
         move_work_item_to_iteration(db, requirement, target_iteration.id, actor_id=actor_id, reason="deferred")
-        _sync_requirement_tasks_iteration(db, requirement.id, target_iteration.id, actor_id=actor_id, reason="deferred")
+        move_requirement_dependents_to_iteration(
+            db,
+            requirement.id,
+            source_iteration_id,
+            target_iteration.id,
+            actor_id=actor_id,
+            reason="deferred",
+        )
         moved_requirement_ids.append(requirement.id)
 
     for task in direct_tasks:
@@ -225,15 +257,19 @@ def get_iteration_detail(db: Session, iteration_id: int) -> dict:
 
 
 def available_requirements(db: Session, iteration_id: int) -> list[Requirement]:
-    ensure_delivery_iteration(_get_active_iteration(db, iteration_id))
+    target = _get_active_iteration(db, iteration_id)
+    ensure_delivery_iteration(target)
+    ensure_iteration_mutable(target)
     scoped_project_ids = _iteration_scoped_project_ids(db, iteration_id)
+    source_iteration_ids = _eligible_source_iteration_ids(db, iteration_id)
+    if not source_iteration_ids:
+        return []
     return (
         db.query(Requirement)
-        .join(Project, Project.id == Requirement.project_id)
         .filter(
             Requirement.deleted == 0,
             Requirement.project_id.in_(scoped_project_ids),
-            Requirement.iteration_id == Project.requirement_pool_iteration_id,
+            Requirement.iteration_id.in_(source_iteration_ids),
         )
         .order_by(Requirement.id.desc())
         .all()
@@ -262,13 +298,17 @@ def link_requirements(
     for requirement in requirements:
         if requirement.project_id not in scoped_project_ids:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="需求不在迭代项目范围内")
-        if (
-            requirement.iteration_id != iteration_id
-            and not is_project_requirement_pool(db, requirement.project_id, requirement.iteration_id)
-        ):
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="需求已关联其他迭代")
+        source_iteration_id = requirement.iteration_id
+        _ensure_eligible_source_iteration(db, source_iteration_id, iteration_id)
         move_work_item_to_iteration(db, requirement, iteration_id, actor_id=actor_id, reason="linked")
-        _sync_requirement_tasks_iteration(db, requirement.id, iteration_id, actor_id=actor_id, reason="linked")
+        move_requirement_dependents_to_iteration(
+            db,
+            requirement.id,
+            source_iteration_id,
+            iteration_id,
+            actor_id=actor_id,
+            reason="linked",
+        )
     db.commit()
     return _linked_requirements(db, iteration_id)
 
@@ -290,22 +330,36 @@ def unlink_requirement(
         .first()
     )
     if requirement and requirement.iteration_id == iteration_id:
-        pool = requirement_pool_for_project(db, requirement.project_id)
-        move_work_item_to_iteration(db, requirement, pool.id, actor_id=actor_id, reason="unlinked")
-        _sync_requirement_tasks_iteration(db, requirement.id, pool.id, actor_id=actor_id, reason="unlinked")
+        target = fallback_iteration_for_project(
+            db, requirement.project_id, exclude_iteration_id=iteration_id
+        )
+        source_iteration_id = requirement.iteration_id
+        move_work_item_to_iteration(db, requirement, target.id, actor_id=actor_id, reason="unlinked")
+        move_requirement_dependents_to_iteration(
+            db,
+            requirement.id,
+            source_iteration_id,
+            target.id,
+            actor_id=actor_id,
+            reason="unlinked",
+        )
         db.commit()
 
 
 def available_tasks(db: Session, iteration_id: int) -> list[Task]:
-    ensure_delivery_iteration(_get_active_iteration(db, iteration_id))
+    target = _get_active_iteration(db, iteration_id)
+    ensure_delivery_iteration(target)
+    ensure_iteration_mutable(target)
     scoped_project_ids = _iteration_scoped_project_ids(db, iteration_id)
+    source_iteration_ids = _eligible_source_iteration_ids(db, iteration_id)
+    if not source_iteration_ids:
+        return []
     return (
         db.query(Task)
-        .join(Project, Project.id == Task.project_id)
         .filter(
             Task.deleted == 0,
             Task.project_id.in_(scoped_project_ids),
-            Task.iteration_id == Project.requirement_pool_iteration_id,
+            Task.iteration_id.in_(source_iteration_ids),
             Task.requirement_id.is_(None),
         )
         .order_by(Task.id.desc())
@@ -329,11 +383,9 @@ def link_tasks(
     for task in tasks:
         if task.project_id not in scoped_project_ids:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="任务不在迭代项目范围内")
-        if (
-            task.iteration_id != iteration_id
-            and not is_project_requirement_pool(db, task.project_id, task.iteration_id)
-        ):
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="任务已关联其他迭代")
+        if task.requirement_id is not None:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="关联需求的任务必须随需求移动")
+        _ensure_eligible_source_iteration(db, task.iteration_id, iteration_id)
         move_work_item_to_iteration(db, task, iteration_id, actor_id=actor_id, reason="linked")
     db.commit()
     return db.query(Task).filter(Task.deleted == 0, Task.iteration_id == iteration_id).order_by(Task.id.desc()).all()
@@ -350,8 +402,8 @@ def unlink_task(
     ensure_iteration_mutable(iteration)
     task = db.query(Task).filter(Task.id == task_id, Task.deleted == 0).first()
     if task and task.iteration_id == iteration_id:
-        pool = requirement_pool_for_project(db, task.project_id)
-        move_work_item_to_iteration(db, task, pool.id, actor_id=actor_id, reason="unlinked")
+        target = fallback_iteration_for_project(db, task.project_id, exclude_iteration_id=iteration_id)
+        move_work_item_to_iteration(db, task, target.id, actor_id=actor_id, reason="unlinked")
         db.commit()
 
 
@@ -377,11 +429,7 @@ def link_bugs(
     for bug in bugs:
         if bug.project_id not in scoped_project_ids:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Bug 不在迭代项目范围内")
-        if (
-            bug.iteration_id != iteration_id
-            and not is_project_requirement_pool(db, bug.project_id, bug.iteration_id)
-        ):
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Bug 已关联其他迭代")
+        _ensure_eligible_source_iteration(db, bug.iteration_id, iteration_id)
         move_work_item_to_iteration(db, bug, iteration_id, actor_id=actor_id, reason="linked")
     db.commit()
     return (
@@ -417,11 +465,13 @@ def _unlink_out_of_scope_model_items(
             if model is TestCase:
                 item.iteration_id = None
             elif model in {Requirement, Task, Bug}:
-                pool = requirement_pool_for_project(db, item.project_id)
+                target = fallback_iteration_for_project(
+                    db, item.project_id, exclude_iteration_id=iteration_id
+                )
                 move_work_item_to_iteration(
                     db,
                     item,
-                    pool.id,
+                    target.id,
                     actor_id=actor_id,
                     reason="iteration_project_scope_removed",
                 )
@@ -450,45 +500,7 @@ def ensure_iteration_mutable(iteration: Iteration) -> None:
 
 
 def ensure_delivery_iteration(iteration: Iteration) -> None:
-    if getattr(iteration, "is_requirement_pool", False):
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail={
-                "code": "REQUIREMENT_POOL_OPERATION_FORBIDDEN",
-                "message": "Requirement pool does not support this iteration operation",
-            },
-        )
-
-
-def _rename_requirement_pool(
-    db: Session,
-    iteration: Iteration,
-    data: dict,
-    actor_id: int | None,
-) -> dict:
-    if (
-        set(data) != {"name"}
-        or not isinstance(data["name"], str)
-        or not data["name"].strip()
-        or data["name"].strip() == iteration.name
-    ):
-        ensure_delivery_iteration(iteration)
-
-    old_name = iteration.name
-    iteration.name = data["name"].strip()
-    db.add(
-        AuditLog(
-            actor_id=actor_id,
-            action="update",
-            object_type="iteration",
-            object_id=iteration.id,
-            before_data={"name": old_name},
-            after_data={"name": iteration.name},
-        )
-    )
-    db.commit()
-    db.refresh(iteration)
-    return _iteration_to_dict(iteration, _iteration_project_ids(db, iteration.id))
+    return None
 
 
 def ensure_iteration_assignment_mutable(
@@ -535,7 +547,6 @@ def _iteration_to_dict(iteration: Iteration, project_ids: list[int]) -> dict:
         "current_state_id": iteration.current_state_id,
         "status_name": iteration.status_name,
         "state_category": iteration.state_category,
-        "is_requirement_pool": iteration.is_requirement_pool,
         "project_id": project_ids[0] if project_ids else None,
         "project_ids": project_ids,
         "name": iteration.name,
@@ -565,7 +576,6 @@ def auto_start_due_iterations(db: Session, iteration_id: int | None = None) -> i
     today = date.today()
     query = db.query(Iteration).filter(
         Iteration.deleted == 0,
-        Iteration.is_requirement_pool.is_(False),
         Iteration.current_state_id == WorkflowState.id,
         WorkflowState.definition_id == Iteration.workflow_definition_id,
         WorkflowState.category == "start",
@@ -660,22 +670,40 @@ def _linked_tasks(db: Session, iteration_id: int, requirement_ids: list[int]) ->
     return list(tasks_by_id.values())
 
 
-def _sync_requirement_tasks_iteration(
-    db: Session,
-    requirement_id: int,
-    target_iteration_id: int | None,
-    *,
-    actor_id: int | None,
-    reason: str,
+def _eligible_source_iteration_ids(db: Session, target_iteration_id: int) -> list[int]:
+    return [
+        row.id
+        for row in (
+            db.query(Iteration.id)
+            .join(WorkflowState, WorkflowState.id == Iteration.current_state_id)
+            .filter(
+                Iteration.deleted == 0,
+                Iteration.id != target_iteration_id,
+                WorkflowState.category.in_(ELIGIBLE_ITERATION_CATEGORIES),
+            )
+            .all()
+        )
+    ]
+
+
+def _ensure_eligible_source_iteration(
+    db: Session, source_iteration_id: int | None, target_iteration_id: int
 ) -> None:
-    tasks = (
-        db.query(Task)
-        .filter(Task.deleted == 0, Task.requirement_id == requirement_id)
-        .with_for_update()
-        .all()
-    )
-    for task in tasks:
-        move_work_item_to_iteration(db, task, target_iteration_id, actor_id=actor_id, reason=reason)
+    if source_iteration_id == target_iteration_id:
+        return
+    if source_iteration_id is None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="工作项未关联来源迭代")
+    source = _get_active_iteration(db, source_iteration_id, for_update=True)
+    ensure_iteration_mutable(source)
+    if source.state_category not in ELIGIBLE_ITERATION_CATEGORIES:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": "ITERATION_NOT_MUTABLE",
+                "message": "来源迭代不允许移动工作项",
+                "iteration_id": source.id,
+            },
+        )
 
 
 def _unfinished_requirements_for_defer(

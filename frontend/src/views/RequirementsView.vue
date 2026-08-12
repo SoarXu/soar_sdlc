@@ -73,7 +73,7 @@
               <el-option v-for="project in projects" :key="project.id" :label="project.name" :value="project.id" />
             </el-select>
           </el-form-item>
-          <el-form-item label="迭代">
+          <el-form-item label="迭代" required>
             <el-select v-model="form.iteration_id" filterable placeholder="请选择迭代">
               <el-option v-for="iteration in requirementSelectableIterations" :key="iteration.id" :label="requirementIterationLabel(iteration)" :value="iteration.id" />
             </el-select>
@@ -213,7 +213,7 @@ import { usePagination } from '../utils/usePagination'
 import { workflowActionColumnWidth } from '../utils/workflowActionColumn'
 import { canSelectForBatchAssignment } from '../utils/batchAssignmentSelection'
 import { TASK_BRANCH_OPTIONS } from '../utils/taskBranchRules'
-import { requirementIterationLabel, requirementIterationOptions, requirementPoolForProject } from '../utils/requirementPoolIterations'
+import { requirementIterationLabel, requirementIterationOptions } from '../utils/requirementIterations'
 
 const router = useRouter()
 const loading = ref(false)
@@ -267,9 +267,7 @@ const requirementSelectableIterations = computed(() => requirementIterationOptio
   selectedProject.value,
   projects.value,
   iterations.value
-).filter((iteration) => (
-  iteration.is_requirement_pool || iteration.state_category !== 'terminal' || iteration.id === form.iteration_id
-)))
+))
 
 function normalizeRequirementPriority(value) { return legacyRequirementPriorityValues[value] || value || '3' }
 function isRequirementProjectClosed(row) { return projects.value.find((item) => item.id === row.project_id)?.state_category === 'terminal' }
@@ -346,7 +344,7 @@ async function loadData() {
   loading.value = true
   try {
     clearRequirementSelection()
-    const [reqRes, projectRes, iterationRes, userRes] = await Promise.all([fetchRequirements(), fetchProjects(), fetchIterations({ include_requirement_pool: true }), fetchUsers()])
+    const [reqRes, projectRes, iterationRes, userRes] = await Promise.all([fetchRequirements(), fetchProjects(), fetchIterations(), fetchUsers()])
     requirements.value = reqRes.data
     projects.value = projectRes.data
     iterations.value = iterationRes.data
@@ -364,8 +362,9 @@ async function loadData() {
 watch([requirementPage, requirementPageSize], clearRequirementSelection)
 watch(() => form.project_id, (projectId) => {
   if (editingId.value) return
-  const selectedProject = projects.value.find((project) => project.id === projectId)
-  form.iteration_id = requirementPoolForProject(selectedProject, iterations.value)?.id ?? null
+  if (!requirementSelectableIterations.value.some((iteration) => iteration.id === form.iteration_id)) {
+    form.iteration_id = null
+  }
 })
 
 async function loadProjectMembers() {
@@ -390,11 +389,11 @@ async function loadWorkflowTransitions() {
 }
 
 async function submitRequirement() {
-  if (!form.project_id || !form.title.trim()) return ElMessage.warning('????????????')
+  if (!form.project_id || !form.iteration_id || !form.title.trim()) return ElMessage.warning('请选择项目、迭代并填写需求标题')
   saving.value = true
   try {
     const { status: _status, ...formData } = form
-    const payload = { ...formData, iteration_id: form.iteration_id || null, owner_id: form.owner_id || null, proposer_id: form.proposer_id || null }
+    const payload = { ...formData, iteration_id: form.iteration_id, owner_id: form.owner_id || null, proposer_id: form.proposer_id || null }
     if (editingId.value) await updateRequirement(editingId.value, payload); else await createRequirement(payload)
     dialogVisible.value = false
     await loadData()

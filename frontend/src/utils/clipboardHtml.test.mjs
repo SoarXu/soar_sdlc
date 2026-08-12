@@ -1,10 +1,14 @@
 import assert from 'node:assert/strict'
-import {
+import { JSDOM } from 'jsdom'
+
+globalThis.window = new JSDOM('<!doctype html><html><body></body></html>').window
+
+const {
   clipboardHtmlFromDataTransfer,
   getClipboardImageFiles,
   imageDataUrlToHtml,
   sanitizeHtml
-} from './clipboardHtml.js'
+} = await import('./clipboardHtml.js')
 
 function run(name, fn) {
   try {

@@ -198,19 +198,10 @@ def purge_project_data(db: Session, project_ids: set[int]) -> dict[str, int]:
         target_project_ids,
     )
     candidate_iteration_ids = _matching_values(
-        db,
-        Project.requirement_pool_iteration_id,
-        Project.id,
-        target_project_ids,
-        Project.requirement_pool_iteration_id.is_not(None),
-    )
-    candidate_iteration_ids.update(
-        _matching_values(
             db,
             IterationProject.iteration_id,
             IterationProject.project_id,
             target_project_ids,
-        )
     )
     for object_type, model in _WORK_ITEM_MODELS:
         object_ids = owned_ids[object_type]
@@ -241,15 +232,6 @@ def purge_project_data(db: Session, project_ids: set[int]) -> dict[str, int]:
         else set()
     )
     if active_project_ids:
-        protected_iteration_ids.update(
-            _matching_values(
-                db,
-                Project.requirement_pool_iteration_id,
-                Project.id,
-                active_project_ids,
-                Project.requirement_pool_iteration_id.is_not(None),
-            )
-        )
         for _, model in _WORK_ITEM_MODELS:
             protected_iteration_ids.update(
                 _matching_values(
@@ -446,14 +428,6 @@ def purge_project_data(db: Session, project_ids: set[int]) -> dict[str, int]:
         IterationCompletionSnapshot.iteration_id,
         deleted_iteration_ids,
     )
-    project_pool_pointer_ids = _matching_ids(
-        db,
-        Project,
-        Project.id,
-        target_project_ids,
-        Project.requirement_pool_iteration_id.is_not(None),
-    )
-
     report[Task.__tablename__] += _null_references(
         db,
         Task,
@@ -515,17 +489,6 @@ def purge_project_data(db: Session, project_ids: set[int]) -> dict[str, int]:
         ("requirement", Requirement),
     ):
         report[model.__tablename__] += _delete_ids(db, model, owned_ids[object_type])
-
-    for batch in _chunks(project_pool_pointer_ids, _BATCH_SIZE - 1):
-        report[Project.__tablename__] += int(
-            db.query(Project)
-            .filter(Project.id.in_(batch))
-            .update(
-                {Project.requirement_pool_iteration_id: None},
-                synchronize_session="fetch",
-            )
-        )
-    db.flush()
 
     report[IterationCompletionSnapshot.__tablename__] += _delete_ids(
         db,

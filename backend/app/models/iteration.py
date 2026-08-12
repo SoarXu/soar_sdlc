@@ -1,6 +1,6 @@
 from datetime import date, datetime
 
-from sqlalchemy import BigInteger, Boolean, Date, DateTime, ForeignKey, Integer, String, Text, text
+from sqlalchemy import BigInteger, Date, DateTime, ForeignKey, Integer, String, Text, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.session import Base
@@ -16,7 +16,6 @@ class Iteration(Base):
     end_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     actual_start_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     actual_end_date: Mapped[date | None] = mapped_column(Date, nullable=True)
-    is_requirement_pool: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     workflow_definition_id: Mapped[int] = mapped_column(
         BigInteger,
         ForeignKey("workflow_definitions.id", ondelete="RESTRICT"),

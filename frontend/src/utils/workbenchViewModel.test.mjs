@@ -7,12 +7,148 @@ import {
   isTerminalWorkItem,
   itemStatusLabel,
   itemStatusTag,
+  paginateWorkbenchItems,
   sortWorkbenchItems,
   shouldShowWorkbenchWorkflowActions,
   workbenchInlineActions,
   workbenchItemActionGroup,
   workbenchMetaText
 } from './workbenchViewModel.js'
+
+{
+  const items = Array.from({ length: 45 }, (_, index) => ({ id: index + 1 }))
+  const originalItems = [...items]
+
+  assert.deepEqual(paginateWorkbenchItems(items, 1, 20), {
+    items: items.slice(0, 20),
+    page: 1,
+    pageSize: 20,
+    total: 45,
+    pageCount: 3
+  })
+  assert.deepEqual(paginateWorkbenchItems(items, 2, 20), {
+    items: items.slice(20, 40),
+    page: 2,
+    pageSize: 20,
+    total: 45,
+    pageCount: 3
+  })
+  assert.deepEqual(items, originalItems)
+}
+
+{
+  assert.deepEqual(paginateWorkbenchItems([], 8, 20), {
+    items: [],
+    page: 1,
+    pageSize: 20,
+    total: 0,
+    pageCount: 1
+  })
+}
+
+{
+  const items = Array.from({ length: 25 }, (_, index) => ({ id: index + 1 }))
+
+  assert.equal(paginateWorkbenchItems(items, 0, 10).page, 1)
+  assert.equal(paginateWorkbenchItems(items, 99, 10).page, 3)
+  assert.deepEqual(paginateWorkbenchItems(items, 99, 10).items, items.slice(20))
+}
+
+{
+  const items = Array.from({ length: 25 }, (_, index) => ({ id: index + 1 }))
+  const result = paginateWorkbenchItems(items, 1, 0)
+
+  assert.equal(result.pageSize, 20)
+  assert.equal(result.pageCount, 2)
+  assert.deepEqual(result.items, items.slice(0, 20))
+}
+
+{
+  const items = Array.from({ length: 25 }, (_, index) => ({ id: index + 1 }))
+
+  for (const invalidPageSize of [Infinity, -Infinity, Number.NaN, Number.MIN_VALUE, 0.5, true, false, 'not-a-number']) {
+    const result = paginateWorkbenchItems(items, 1, invalidPageSize)
+    assert.equal(result.pageSize, 20)
+    assert.equal(result.pageCount, 2)
+    assert.deepEqual(result.items, items.slice(0, 20))
+  }
+  assert.equal(paginateWorkbenchItems(items, 1, '10').pageSize, 10)
+}
+
+{
+  const items = Array.from({ length: 25 }, (_, index) => ({ id: index + 1 }))
+
+  for (const invalidPage of [Infinity, -Infinity, Number.NaN, Number.MIN_VALUE, 0.5, true, false, 'not-a-number']) {
+    assert.equal(paginateWorkbenchItems(items, invalidPage, 10).page, 1)
+  }
+  assert.equal(paginateWorkbenchItems(items, '2', 10).page, 2)
+}
+
+{
+  const dashboardSource = readFileSync(new URL('../views/DashboardView.vue', import.meta.url), 'utf8')
+
+  assert.match(dashboardSource, /const currentPage = ref\(1\)/)
+  assert.match(dashboardSource, /const pageSize = ref\(20\)/)
+  assert.match(dashboardSource, /const pagedListPage = computed\(\(\) => paginateWorkbenchItems\(/)
+  assert.match(dashboardSource, /const pagedListItems = computed\(\(\) => pagedListPage\.value\.items\)/)
+  assert.match(dashboardSource, /<el-table[^>]*:data="pagedListItems"/)
+  assert.match(dashboardSource, /<el-pagination[\s\S]*?v-model:current-page="currentPage"/)
+  assert.match(dashboardSource, /<el-pagination[\s\S]*?v-model:page-size="pageSize"/)
+  assert.match(dashboardSource, /:page-sizes="\[10, 20, 50, 100\]"/)
+  assert.match(dashboardSource, /function resetWorkbenchPagination\(\)[\s\S]*?clearWorkbenchSelection\(\)[\s\S]*?currentPage\.value = 1/)
+  assert.match(dashboardSource, /watch\(\[[\s\S]*?handlerFilter[\s\S]*?\], resetWorkbenchPagination, \{ deep: true \}\)/)
+  assert.match(dashboardSource, /watch\(\(\) => pagedListPage\.value\.page, \(correctedPage\) =>[\s\S]*?currentPage\.value = correctedPage/)
+  assert.match(dashboardSource, /class="workbench-list-table"[\s\S]*?<\/div>\s*<footer class="workbench-pagination-footer"/)
+  const emptyStateIndex = dashboardSource.indexOf('<el-empty v-if="!filteredListItems.length"')
+  const paginationFooterIndex = dashboardSource.indexOf('<footer class="workbench-pagination-footer">')
+  assert.ok(emptyStateIndex >= 0)
+  assert.ok(paginationFooterIndex > emptyStateIndex)
+  assert.doesNotMatch(dashboardSource.slice(paginationFooterIndex, dashboardSource.indexOf('>', paginationFooterIndex) + 1), /v-if/)
+
+  const batchAssignmentFooterRule = dashboardSource.match(/\.workbench-batch-assignment-footer\s*\{[^}]*\}/)
+  assert.ok(batchAssignmentFooterRule)
+  assert.match(batchAssignmentFooterRule[0], /position\s*:\s*static/)
+  assert.match(batchAssignmentFooterRule[0], /flex\s*:\s*0\s+0\s+auto/)
+  assert.doesNotMatch(batchAssignmentFooterRule[0], /position\s*:\s*(?:absolute|sticky)/)
+}
+
+{
+  const styles = readFileSync(new URL('../styles.css', import.meta.url), 'utf8')
+  const workbenchPageRule = styles.match(/\.workbench-page\s*\{[^}]*\}/)
+  const workbenchListRule = styles.match(/\.workbench-list\s*\{[^}]*\}/)
+  const listSectionRule = styles.match(/\.workbench-list-section\s*\{[^}]*\}/)
+  const listTableRule = styles.match(/\.workbench-list-table\s*\{[^}]*\}/)
+  const elementTableRule = styles.match(/\.workbench-list-table \.el-table\s*\{[^}]*\}/)
+  const paginationFooterRule = styles.match(/\.workbench-pagination-footer\s*\{[^}]*\}/)
+
+  assert.ok(workbenchPageRule)
+  assert.match(workbenchPageRule[0], /display\s*:\s*(?:flex|grid)/)
+  assert.match(workbenchPageRule[0], /flex\s*:\s*1/)
+  assert.match(workbenchPageRule[0], /min-height\s*:\s*0/)
+  for (const rule of [workbenchListRule, listSectionRule, listTableRule]) {
+    assert.ok(rule)
+    assert.match(rule[0], /flex\s*:\s*1/)
+    assert.match(rule[0], /min-height\s*:\s*0/)
+  }
+  assert.doesNotMatch(listTableRule[0], /max-height/)
+  assert.match(listTableRule[0], /overflow\s*:\s*hidden/)
+  assert.match(listTableRule[0], /display\s*:\s*flex/)
+  assert.match(listTableRule[0], /flex-direction\s*:\s*column/)
+  assert.ok(elementTableRule)
+  assert.match(elementTableRule[0], /flex\s*:\s*1\s+1\s+auto/)
+  assert.match(elementTableRule[0], /min-height\s*:\s*0/)
+  assert.ok(paginationFooterRule)
+  assert.match(paginationFooterRule[0], /flex\s*:\s*0\s+0\s+auto/)
+
+  const mobileWorkbenchRules = styles.match(
+    /@media\s*\(max-width:\s*720px\)\s*\{\s*\.workbench-page\s*\{([^}]*)\}\s*\.workbench-list\s*\{([^}]*)\}/
+  )
+  assert.ok(mobileWorkbenchRules)
+  assert.match(mobileWorkbenchRules[1], /overflow-x\s*:\s*hidden/)
+  assert.match(mobileWorkbenchRules[1], /overflow-y\s*:\s*auto/)
+  assert.match(mobileWorkbenchRules[2], /flex\s*:\s*0\s+0\s+auto/)
+  assert.match(mobileWorkbenchRules[2], /min-height\s*:\s*(?:clamp\(|420px)/)
+}
 
 {
   const styles = readFileSync(new URL('../styles.css', import.meta.url), 'utf8')

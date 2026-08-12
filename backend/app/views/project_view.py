@@ -52,7 +52,6 @@ class ProjectRead(ProjectBase):
     current_state_id: int
     status_name: str
     state_category: str
-    requirement_pool_iteration_id: int | None = None
     workflow_config_id: int | None = None
     assignee_rule_config_id: int | None = None
     creator_id: int | None = None
@@ -84,7 +83,8 @@ class ProjectMemberRead(ProjectMemberBase):
     update_time: datetime | None = None
 
 
-class ProjectWorkPoolSummary(IterationRead):
+class ProjectWorkPoolSummary(BaseModel):
+    iteration_ids: list[int] = []
     requirement_count: int = 0
     task_count: int = 0
     bug_count: int = 0
@@ -93,7 +93,7 @@ class ProjectWorkPoolSummary(IterationRead):
 
 class ProjectIterationPage(BaseModel):
     items: list[IterationRead]
-    requirement_pool: ProjectWorkPoolSummary | None = None
+    planning_pool: ProjectWorkPoolSummary
     total: int
     page: int
     page_size: int

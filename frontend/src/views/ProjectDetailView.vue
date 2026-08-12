@@ -28,10 +28,8 @@
       <template v-if="activeTab === 'overview'">
         <div class="project-overview">
         <ProjectWorkPoolBand
-          :summary="projectRequirementPool"
-          :can-plan="canManageCurrentProject && !projectClosed"
+          :summary="projectPlanningPool"
           @view="openWorkPoolItems"
-          @plan="openWorkPoolPlanning"
         />
         <div class="metrics project-detail-metrics">
           <el-card v-for="item in metrics" :key="item.key" shadow="never">
@@ -84,10 +82,8 @@
 
       <template v-else-if="activeTab === 'iterations'">
         <ProjectWorkPoolBand
-          :summary="projectRequirementPool"
-          :can-plan="canManageCurrentProject && !projectClosed"
+          :summary="projectPlanningPool"
           @view="openWorkPoolItems"
-          @plan="openWorkPoolPlanning"
         />
         <div class="project-tab-toolbar">
           <el-input v-model="projectListFilters.iterations.keyword" clearable placeholder="搜索迭代名称" class="project-tab-search" @keyup.enter="resetProjectListSearch('iterations')" @clear="resetProjectListSearch('iterations')" />
@@ -96,8 +92,7 @@
         <el-table :data="pagedProjectIterations" stripe width="100%">
           <el-table-column label="迭代名称" min-width="180" show-overflow-tooltip>
             <template #default="{ row }">
-              <el-tag v-if="row.is_requirement_pool" type="info">{{ requirementIterationLabel(row) }}</el-tag>
-              <router-link v-else class="table-link" :to="{ name: 'iteration-detail', params: { id: row.id }, query: { from: 'project', projectId, tab: 'iterations' } }">{{ row.name }}</router-link>
+              <router-link class="table-link" :to="{ name: 'iteration-detail', params: { id: row.id }, query: { from: 'project', projectId, tab: 'iterations' } }">{{ row.name }}</router-link>
             </template>
           </el-table-column>
           <el-table-column label="负责人" width="150"><template #default="{ row }">{{ userLabel(users, row.owner_id) }}</template></el-table-column>
@@ -109,10 +104,10 @@
           <el-table-column label="操作" :width="projectIterationOperationWidth" fixed="right">
             <template #default="{ row }">
               <div class="table-actions">
-                <WorkflowActionButtons v-if="canManageIterationDelivery(row) && !row.is_requirement_pool" object-type="iteration" :object-id="row.id" mode="list" :transitions="projectWorkflowTransitionsFor('iteration', row.id)" :auto-load="false" :users="users" @executed="refreshAfterMutation" />
-                <el-button v-if="canManageIterationDelivery(row) && !row.is_requirement_pool && iterationCanDefer(row)" link type="warning" @click="openDeferWorkItems(row)">延期工作项</el-button>
+                <WorkflowActionButtons v-if="canManageIterationDelivery(row)" object-type="iteration" :object-id="row.id" mode="list" :transitions="projectWorkflowTransitionsFor('iteration', row.id)" :auto-load="false" :users="users" @executed="refreshAfterMutation" />
+                <el-button v-if="canManageIterationDelivery(row) && iterationCanDefer(row)" link type="warning" @click="openDeferWorkItems(row)">延期工作项</el-button>
                 <el-button v-if="canManageCurrentProject || canManageIterationDelivery(row)" link type="primary" @click="openIterationEdit(row)">编辑</el-button>
-                <el-popconfirm v-if="canManageCurrentProject && !row.is_requirement_pool" title="确认删除该迭代？" @confirm="removeIteration(row.id)"><template #reference><el-button link type="danger">删除</el-button></template></el-popconfirm>
+                <el-popconfirm v-if="canManageCurrentProject" title="确认删除该迭代？" @confirm="removeIteration(row.id)"><template #reference><el-button link type="danger">删除</el-button></template></el-popconfirm>
               </div>
             </template>
           </el-table-column>
@@ -177,11 +172,6 @@
           </el-table-column>
         </el-table>
         <div class="table-pagination batch-assignment-pagination">
-          <el-button
-            v-if="isWorkPoolFiltered('requirements') && selectedProjectRequirements.length"
-            type="primary"
-            @click="openSelectedWorkPoolPlanning('requirement')"
-          >纳入迭代</el-button>
           <BatchAssignmentBar
             object-type="requirement"
             :project-id="projectId"
@@ -233,11 +223,6 @@
           </el-table-column>
         </el-table>
         <div class="table-pagination batch-assignment-pagination">
-          <el-button
-            v-if="isWorkPoolFiltered('tasks') && selectedProjectTasks.length"
-            type="primary"
-            @click="openSelectedWorkPoolPlanning('task')"
-          >纳入迭代</el-button>
           <BatchAssignmentBar
             object-type="task"
             :project-id="projectId"
@@ -352,11 +337,6 @@
           </el-table-column>
         </el-table>
         <div class="table-pagination batch-assignment-pagination">
-          <el-button
-            v-if="isWorkPoolFiltered('bugs') && selectedProjectBugs.length"
-            type="primary"
-            @click="openSelectedWorkPoolPlanning('bug')"
-          >纳入迭代</el-button>
           <BatchAssignmentBar
             object-type="bug"
             :project-id="projectId"
@@ -484,31 +464,11 @@
       </template>
     </el-card>
 
-    <el-dialog v-model="workPoolPlanningVisible" title="纳入正式迭代" width="520px">
-      <el-form label-position="top">
-        <el-form-item label="事项类型">
-          <el-input :model-value="workPoolPlanningTypeLabel" disabled />
-        </el-form-item>
-        <el-form-item label="已选择">
-          <el-input :model-value="`${selectedWorkPoolItems.length} 项`" disabled />
-        </el-form-item>
-        <el-form-item label="目标迭代" required>
-          <el-select v-model="workPoolPlanningForm.target_iteration_id" filterable placeholder="请选择正式执行迭代">
-            <el-option v-for="iteration in workPoolTargetIterations" :key="iteration.id" :label="iteration.name" :value="iteration.id" />
-          </el-select>
-        </el-form-item>
-      </el-form>
-      <template #footer>
-        <el-button @click="workPoolPlanningVisible = false">取消</el-button>
-        <el-button type="primary" :loading="saving" @click="submitWorkPoolPlanning">确认纳入</el-button>
-      </template>
-    </el-dialog>
-
     <el-dialog v-model="iterationDialogVisible" :title="editingIterationId ? '编辑迭代' : '新增迭代'" width="560px">
       <el-form label-position="top">
         <el-form-item label="迭代名称" required><el-input v-model="iterationForm.name" /></el-form-item>
-        <div class="form-grid"><el-form-item label="负责人"><el-select v-model="iterationForm.owner_id" clearable filterable :disabled="editingRequirementPool || !editingIterationCanAdminister"><el-option v-for="user in users" :key="user.id" :label="user.full_name" :value="user.id" /></el-select></el-form-item><el-form-item label="开始日期"><el-date-picker v-model="iterationForm.start_date" value-format="YYYY-MM-DD" type="date" :disabled="editingRequirementPool" /></el-form-item><el-form-item label="结束日期"><el-date-picker v-model="iterationForm.end_date" value-format="YYYY-MM-DD" type="date" :disabled="editingRequirementPool" /></el-form-item></div>
-        <el-form-item label="目标"><el-input v-model="iterationForm.goal" type="textarea" :rows="3" :disabled="editingRequirementPool" /></el-form-item>
+        <div class="form-grid"><el-form-item label="负责人"><el-select v-model="iterationForm.owner_id" clearable filterable :disabled="!editingIterationCanAdminister"><el-option v-for="user in users" :key="user.id" :label="user.full_name" :value="user.id" /></el-select></el-form-item><el-form-item label="开始日期"><el-date-picker v-model="iterationForm.start_date" value-format="YYYY-MM-DD" type="date" /></el-form-item><el-form-item label="结束日期"><el-date-picker v-model="iterationForm.end_date" value-format="YYYY-MM-DD" type="date" /></el-form-item></div>
+        <el-form-item label="目标"><el-input v-model="iterationForm.goal" type="textarea" :rows="3" /></el-form-item>
       </el-form>
       <template #footer><el-button @click="iterationDialogVisible = false">取消</el-button><el-button type="primary" :loading="saving" @click="submitIteration">保存</el-button></template>
     </el-dialog>
@@ -563,7 +523,7 @@
     <el-dialog v-model="requirementDialogVisible" :title="editingRequirementId ? '编辑需求' : '新增需求'" width="640px">
       <el-form label-position="top">
         <el-form-item label="需求标题" required><el-input v-model="requirementForm.title" /></el-form-item>
-        <div class="form-grid"><el-form-item v-if="!editingRequirementId" label="业务组件"><BusinessComponentSelect v-model="requirementForm.primary_component_id" :project-id="projectId" /></el-form-item><el-form-item label="迭代"><el-select v-model="requirementForm.iteration_id" filterable><el-option v-for="iteration in requirementSelectableIterations" :key="iteration.id" :label="requirementIterationLabel(iteration)" :value="iteration.id" /></el-select></el-form-item><el-form-item v-if="!editingRequirementId" label="当前处理人"><el-select v-model="requirementForm.owner_id" clearable filterable><el-option v-for="user in users" :key="user.id" :label="user.full_name" :value="user.id" /></el-select></el-form-item><el-form-item label="提出人"><el-select v-model="requirementForm.proposer_id" clearable filterable><el-option v-for="user in users" :key="user.id" :label="user.full_name" :value="user.id" /></el-select></el-form-item><el-form-item label="类型"><el-select v-model="requirementForm.requirement_type"><el-option v-for="option in requirementTypeOptions" :key="option" :label="option" :value="option" /></el-select></el-form-item><el-form-item label="优先级"><el-select v-model="requirementForm.priority" class="priority-select"><template #prefix><RequirementPriorityBadge :value="requirementForm.priority" /></template><el-option v-for="option in requirementPriorityOptions" :key="option.value" :label="option.label" :value="option.value"><RequirementPriorityBadge :value="option.value" /></el-option></el-select></el-form-item></div>
+        <div class="form-grid"><el-form-item v-if="!editingRequirementId" label="业务组件"><BusinessComponentSelect v-model="requirementForm.primary_component_id" :project-id="projectId" /></el-form-item><el-form-item label="迭代" required><el-select v-model="requirementForm.iteration_id" filterable><el-option v-for="iteration in requirementSelectableIterations" :key="iteration.id" :label="requirementIterationLabel(iteration)" :value="iteration.id" /></el-select></el-form-item><el-form-item v-if="!editingRequirementId" label="当前处理人"><el-select v-model="requirementForm.owner_id" clearable filterable><el-option v-for="user in users" :key="user.id" :label="user.full_name" :value="user.id" /></el-select></el-form-item><el-form-item label="提出人"><el-select v-model="requirementForm.proposer_id" clearable filterable><el-option v-for="user in users" :key="user.id" :label="user.full_name" :value="user.id" /></el-select></el-form-item><el-form-item label="类型"><el-select v-model="requirementForm.requirement_type"><el-option v-for="option in requirementTypeOptions" :key="option" :label="option" :value="option" /></el-select></el-form-item><el-form-item label="优先级"><el-select v-model="requirementForm.priority" class="priority-select"><template #prefix><RequirementPriorityBadge :value="requirementForm.priority" /></template><el-option v-for="option in requirementPriorityOptions" :key="option.value" :label="option.label" :value="option.value"><RequirementPriorityBadge :value="option.value" /></el-option></el-select></el-form-item></div>
         <el-form-item label="需求描述"><el-input v-model="requirementForm.description" type="textarea" :rows="3" /></el-form-item>
         <el-form-item label="验收标准"><el-input v-model="requirementForm.acceptance_criteria" type="textarea" :rows="3" /></el-form-item>
       </el-form>
@@ -590,18 +550,9 @@
           <el-form-item label="用例类型"><el-select v-model="caseForm.case_type"><el-option v-for="option in caseTypeOptions" :key="option.value" :label="option.label" :value="option.value" /></el-select></el-form-item>
           <el-form-item label="适用范围"><el-select v-model="caseForm.test_scope"><el-option v-for="option in testScopeOptions" :key="option.value" :label="option.label" :value="option.value" /></el-select></el-form-item>
         </div>
-        <el-form-item label="前置条件"><el-input v-model="caseForm.precondition" type="textarea" :rows="2" /></el-form-item>
-        <el-form-item label="用例步骤">
-          <div class="case-steps-editor">
-            <el-table :data="caseForm.steps_json" border>
-              <el-table-column label="步骤" min-width="260"><template #default="{ row, $index }"><el-input v-model="row.step" :placeholder="`步骤 ${$index + 1}`" /></template></el-table-column>
-              <el-table-column label="预期" min-width="260"><template #default="{ row }"><el-input v-model="row.expected" placeholder="预期结果" /></template></el-table-column>
-              <el-table-column label="操作" width="90"><template #default="{ $index }"><el-button link type="danger" :disabled="caseForm.steps_json.length === 1" @click="removeCaseStep($index)">删除</el-button></template></el-table-column>
-            </el-table>
-            <el-button class="case-step-add" @click="addCaseStep">增加步骤</el-button>
-          </div>
-        </el-form-item>
-        <el-form-item label="预期结果"><el-input v-model="caseForm.expected_result" type="textarea" :rows="2" /></el-form-item>
+        <el-form-item label="前置条件"><RichTextPasteEditor v-model="caseForm.precondition" /></el-form-item>
+        <el-form-item label="用例步骤"><RichTextPasteEditor v-model="caseForm.steps_content" /></el-form-item>
+        <el-form-item label="预期结果"><RichTextPasteEditor v-model="caseForm.expected_result" /></el-form-item>
       </el-form>
       <template #footer><el-button @click="caseDialogVisible = false">取消</el-button><el-button type="primary" :loading="saving" @click="submitCase">保存</el-button></template>
     </el-dialog>
@@ -610,8 +561,8 @@
       <el-form label-position="top">
         <el-form-item label="执行时间"><el-date-picker v-model="caseExecutionForm.execute_time" type="datetime" value-format="YYYY-MM-DDTHH:mm:ss" /></el-form-item>
         <el-table :data="caseExecutionForm.steps_result_json" border>
-          <el-table-column prop="step" label="步骤" min-width="220" />
-          <el-table-column prop="expected" label="预期" min-width="220" />
+          <el-table-column label="步骤" min-width="220"><template #default="{ row }"><div class="rich-text" v-html="safeExecutionCellHtml(row.step, row.rich_content)"></div></template></el-table-column>
+          <el-table-column label="预期" min-width="220"><template #default="{ row }"><div class="rich-text" v-html="safeExecutionCellHtml(row.expected, row.rich_content)"></div></template></el-table-column>
           <el-table-column label="测试结果" width="140"><template #default="{ row }"><el-select v-model="row.result"><el-option v-for="option in executionResultOptions" :key="option.value" :label="option.label" :value="option.value" /></el-select></template></el-table-column>
           <el-table-column label="实际情况" min-width="220"><template #default="{ row }"><el-input v-model="row.actual" type="textarea" :rows="1" /></template></el-table-column>
         </el-table>
@@ -622,8 +573,8 @@
         <el-collapse>
           <el-collapse-item v-for="item in caseExecutionHistory" :key="item.id" :title="executionHistoryTitle(item)" :name="item.id">
             <el-table :data="item.steps_result_json || []" border>
-              <el-table-column prop="step" label="步骤" min-width="220" />
-              <el-table-column prop="expected" label="预期" min-width="220" />
+              <el-table-column label="步骤" min-width="220"><template #default="{ row }"><div class="rich-text" v-html="safeExecutionCellHtml(row.step, row.rich_content)"></div></template></el-table-column>
+              <el-table-column label="预期" min-width="220"><template #default="{ row }"><div class="rich-text" v-html="safeExecutionCellHtml(row.expected, row.rich_content)"></div></template></el-table-column>
               <el-table-column label="测试结果" width="120"><template #default="{ row }">{{ executionResultLabel(row.result) }}</template></el-table-column>
               <el-table-column prop="actual" label="实际情况" min-width="220" />
             </el-table>
@@ -728,9 +679,6 @@ import {
   deferIterationWorkItems,
   deleteIteration,
   fetchIterations,
-  linkIterationBugs,
-  linkIterationRequirements,
-  linkIterationTasks,
   updateIteration
 } from '../api/iterations'
 import { fetchPrograms } from '../api/programs'
@@ -768,6 +716,7 @@ import { fetchWorkflowTransitionsBatch } from '../api/workflowRuntime'
 import { workflowActionColumnWidth } from '../utils/workflowActionColumn'
 import RequirementPriorityBadge from '../components/RequirementPriorityBadge.vue'
 import RichTextPasteEditor from '../components/RichTextPasteEditor.vue'
+import { displayedTestCaseSteps, safeExecutionCellHtml, testCaseAuthoringPayload, testCaseExecutionRows } from '../utils/testCaseRichText'
 import WorkflowActionButtons from '../components/WorkflowActionButtons.vue'
 import BatchAssignmentBar from '../components/BatchAssignmentBar.vue'
 import BusinessComponentSelect from '../components/work-items/BusinessComponentSelect.vue'
@@ -783,7 +732,7 @@ import { deriveTaskBranch, TASK_BRANCH_OPTIONS, taskBranchLabel } from '../utils
 import { DEFAULT_BUG_TYPE_KEY } from '../utils/bugTypeOptions'
 import { useBugTypes } from '../utils/useBugTypes'
 import { canSelectForBatchAssignment } from '../utils/batchAssignmentSelection'
-import { deliveryIterations, requirementIterationLabel, requirementIterationOptions, requirementPoolForProject } from '../utils/requirementPoolIterations'
+import { deliveryIterations, requirementIterationLabel, requirementIterationOptions } from '../utils/requirementIterations'
 
 const route = useRoute()
 const router = useRouter()
@@ -805,7 +754,7 @@ const testCases = ref([])
 const testRuns = ref([])
 const bugs = ref([])
 const projectIterationRows = ref([])
-const projectRequirementPoolRow = ref(null)
+const projectPlanningPoolRow = ref({ iteration_ids: [], requirement_count: 0, task_count: 0, bug_count: 0, total_count: 0 })
 const projectRequirementRows = ref([])
 const projectTaskRows = ref([])
 const projectTestCaseRows = ref([])
@@ -835,11 +784,11 @@ const projectListTotals = reactive({
 })
 const projectListFilters = reactive({
   iterations: { keyword: '' },
-  requirements: { keyword: '', iteration_id: null },
-  tasks: { keyword: '', iteration_id: null },
+  requirements: { keyword: '', iteration_id: null, planning_pool: false },
+  tasks: { keyword: '', iteration_id: null, planning_pool: false },
   testCases: { keyword: '' },
   testRuns: { keyword: '' },
-  bugs: { keyword: '', iteration_id: null }
+  bugs: { keyword: '', iteration_id: null, planning_pool: false }
 })
 const projectListPagination = reactive({
   iterations: { currentPage: 1, pageSize: 10 },
@@ -851,7 +800,6 @@ const projectListPagination = reactive({
 })
 
 const iterationDialogVisible = ref(false)
-const workPoolPlanningVisible = ref(false)
 const editingIterationCanAdminister = ref(false)
 const deferWorkItemsVisible = ref(false)
 const requirementDialogVisible = ref(false)
@@ -863,13 +811,11 @@ const runDialogVisible = ref(false)
 const bugDialogVisible = ref(false)
 const importVisible = ref(false)
 const editingIterationId = ref(null), startingIterationId = ref(null), editingRequirementId = ref(null), editingTaskId = ref(null)
-const editingRequirementPool = ref(false)
 const editingCaseId = ref(null), editingRunId = ref(null), editingBugId = ref(null)
 const selectedCase = ref(null)
 const bugSourceCase = ref(null)
 const caseExecutionHistory = ref([])
 const deferWorkItemsForm = reactive({ target_iteration_id: null, remark: '' })
-const workPoolPlanningForm = reactive({ object_type: 'requirement', target_iteration_id: null })
 const settingsForm = reactive({ assignee_rule_config_id: null })
 
 const tabs = [
@@ -975,18 +921,11 @@ const pagedProjectTestCases = computed(() => projectTestCases.value)
 const pagedProjectTestRuns = computed(() => projectTestRuns.value)
 const pagedProjectBugs = computed(() => projectBugs.value)
 const projectIterationOptions = computed(() => deliveryIterations(iterations.value).filter((item) => (item.project_ids || []).includes(projectId.value)))
-const projectRequirementPool = computed(() => projectRequirementPoolRow.value || requirementPoolForProject(project.value, iterations.value))
-const projectWorkItemIterationOptions = computed(() => [
-  ...(projectRequirementPool.value ? [projectRequirementPool.value] : []),
-  ...projectIterationOptions.value
-])
-const workPoolTargetIterations = computed(() => projectIterationOptions.value.filter((item) => item.state_category !== 'terminal'))
-const selectedWorkPoolItems = computed(() => projectWorkItemSelectionRef(workPoolPlanningForm.object_type)?.value || [])
-const workPoolPlanningTypeLabel = computed(() => ({ requirement: '需求', task: '任务', bug: 'Bug' }[workPoolPlanningForm.object_type]))
+const projectPlanningPool = computed(() => projectPlanningPoolRow.value)
+const planningPoolIterationIds = computed(() => new Set(projectPlanningPool.value?.iteration_ids || []))
+const projectWorkItemIterationOptions = computed(() => projectIterationOptions.value)
 const requirementIterationDisplayOptions = computed(() => requirementIterationOptions(project.value, projects.value, iterations.value))
-const requirementSelectableIterations = computed(() => requirementIterationDisplayOptions.value.filter((item) => (
-  item.is_requirement_pool || item.state_category !== 'terminal' || item.id === requirementForm.iteration_id
-)))
+const requirementSelectableIterations = computed(() => requirementIterationDisplayOptions.value)
 const projectRequirementOptions = computed(() => requirements.value.filter((item) => item.project_id === projectId.value))
 const projectTaskOptions = computed(() => tasks.value.filter((item) => item.project_id === projectId.value))
 const projectTestCaseOptions = computed(() => projectTestCaseRows.value)
@@ -1044,7 +983,7 @@ const importFile = ref(null)
 const importPreview = ref(null)
 const duplicateStrategy = ref('')
 const taskForm = reactive({ project_id: null, primary_component_id: null, requirement_id: null, title: '', task_type: 'standalone_operation', priority: 'medium', owner_id: null, due_date: null, description: '' })
-const caseForm = reactive({ project_id: null, requirement_id: null, title: '', case_type: 'functional', test_scope: 'functional_test', default_tester_id: null, precondition: '', steps_json: [{ step: '', expected: '' }], expected_result: '' })
+const caseForm = reactive({ project_id: null, requirement_id: null, title: '', case_type: 'functional', test_scope: 'functional_test', default_tester_id: null, precondition: '', steps_content: '', expected_result: '' })
 const caseExecutionForm = reactive({ execute_time: '', steps_result_json: [] })
 const runForm = reactive({ project_id: null, iteration_id: null, name: '', test_owner_id: null, status: 'planning', remark: '' })
 const bugForm = reactive({ project_id: null, primary_component_id: null, iteration_id: null, requirement_id: null, task_id: null, test_case_id: null, test_run_id: null, title: '', bug_type: DEFAULT_BUG_TYPE_KEY, severity: '3', priority: '3', owner_id: null, reporter_id: null, reproduce_steps: '', expected_result: '', actual_result: '' })
@@ -1090,13 +1029,14 @@ function projectListParams(key) {
     page: pager.currentPage,
     page_size: pager.pageSize,
     keyword: keyword || undefined,
-    iteration_id: filters?.iteration_id || undefined
+    iteration_id: filters?.iteration_id || undefined,
+    planning_pool: filters?.planning_pool || undefined
   }
 }
 function applyProjectPage(key, response, targetRef) {
   const data = response.data
   targetRef.value = data.items || []
-  if (key === 'iterations') projectRequirementPoolRow.value = data.requirement_pool || null
+  if (key === 'iterations') projectPlanningPoolRow.value = data.planning_pool || projectPlanningPoolRow.value
   projectListTotals[key] = data.total || 0
   const pager = projectListPagination[key]
   const maxPage = Math.max(1, Math.ceil(projectListTotals[key] / pager.pageSize))
@@ -1183,7 +1123,7 @@ function projectWorkItemBatchRow(objectType, row) {
 }
 function canSelectProjectWorkItemForBatchAssignment(objectType, row) {
   const listKey = { requirement: 'requirements', task: 'tasks', bug: 'bugs' }[objectType]
-  if (isWorkPoolFiltered(listKey) && row.iteration_id === projectRequirementPool.value?.id) {
+  if (isWorkPoolFiltered(listKey) && planningPoolIterationIds.value.has(row.iteration_id)) {
     return objectType !== 'task' || !row.requirement_id
   }
   return canSelectForBatchAssignment(projectWorkItemBatchRow(objectType, row), projectWorkItemSelectionRef(objectType).value)
@@ -1204,50 +1144,16 @@ async function onProjectWorkItemBatchAssignmentCompleted(objectType) {
 }
 function onProjectWorkItemBatchAssignmentError(error) { showActionError(error, '批量指派失败') }
 function isWorkPoolFiltered(listKey) {
-  return Boolean(projectRequirementPool.value?.id && projectListFilters[listKey]?.iteration_id === projectRequirementPool.value.id)
+  return Boolean(projectListFilters[listKey]?.planning_pool)
 }
 async function openWorkPoolItems(objectType = 'requirement') {
   const listKey = { requirement: 'requirements', task: 'tasks', bug: 'bugs' }[objectType]
-  if (!listKey || !projectRequirementPool.value?.id) return
+  if (!listKey || !planningPoolIterationIds.value.size) return
   setActiveTab(listKey)
-  projectListFilters[listKey].iteration_id = projectRequirementPool.value.id
+  projectListFilters[listKey].iteration_id = null
+  projectListFilters[listKey].planning_pool = true
   projectListPagination[listKey].currentPage = 1
   await loadProjectListPage(listKey)
-}
-function openWorkPoolPlanning() {
-  openWorkPoolItems('requirement')
-}
-function openSelectedWorkPoolPlanning(objectType) {
-  workPoolPlanningForm.object_type = objectType
-  workPoolPlanningForm.target_iteration_id = null
-  workPoolPlanningVisible.value = true
-}
-async function submitWorkPoolPlanning() {
-  if (!workPoolPlanningForm.target_iteration_id) return ElMessage.warning('请选择正式执行迭代')
-  const ids = selectedWorkPoolItems.value.map((item) => item.id)
-  if (!ids.length) return ElMessage.warning('请选择待规划事项')
-  saving.value = true
-  try {
-    const targetIterationId = workPoolPlanningForm.target_iteration_id
-    if (workPoolPlanningForm.object_type === 'requirement') {
-      await linkIterationRequirements(targetIterationId, ids)
-    } else if (workPoolPlanningForm.object_type === 'task') {
-      await linkIterationTasks(targetIterationId, ids)
-    } else {
-      await linkIterationBugs(targetIterationId, ids)
-    }
-    workPoolPlanningVisible.value = false
-    clearProjectWorkItemSelection(workPoolPlanningForm.object_type)
-    await Promise.all([
-      loadProjectIterationsPage(),
-      loadProjectListPage({ requirement: 'requirements', task: 'tasks', bug: 'bugs' }[workPoolPlanningForm.object_type])
-    ])
-    ElMessage.success(`已纳入迭代 ${ids.length} 项`)
-  } catch (error) {
-    showActionError(error, '纳入迭代失败')
-  } finally {
-    saving.value = false
-  }
 }
 function iterationCanDefer(row) { return row.state_category === 'normal' && projectWorkflowTransitionsFor('iteration', row.id).length > 0 }
 async function loadProjectWorkflowTransitions(objectType, rows) {
@@ -1398,14 +1304,14 @@ async function submitProjectMembers() {
   }
 }
 function resetIterationForm() { Object.assign(iterationForm, { project_ids: [projectId.value], name: '', owner_id: null, start_date: null, end_date: null, goal: '' }) }
-function resetRequirementForm() { Object.assign(requirementForm, { project_id: projectId.value, primary_component_id: null, iteration_id: projectRequirementPool.value?.id ?? null, title: '', requirement_type: '功能', priority: '3', owner_id: null, proposer_id: currentUserId(users.value), description: '', acceptance_criteria: '' }) }
+function resetRequirementForm() { Object.assign(requirementForm, { project_id: projectId.value, primary_component_id: null, iteration_id: null, title: '', requirement_type: '功能', priority: '3', owner_id: null, proposer_id: currentUserId(users.value), description: '', acceptance_criteria: '' }) }
 function resetTaskForm() { Object.assign(taskForm, { project_id: projectId.value, primary_component_id: null, requirement_id: null, title: '', task_type: 'standalone_operation', priority: 'medium', owner_id: null, due_date: null, description: '' }) }
-function resetCaseForm() { Object.assign(caseForm, { project_id: projectId.value, requirement_id: null, title: '', case_type: 'functional', test_scope: 'functional_test', default_tester_id: defaultTesterByRule('test_case_tester_roles', ['tester', 'test_lead']), precondition: '', steps_json: [{ step: '', expected: '' }], expected_result: '' }) }
+function resetCaseForm() { Object.assign(caseForm, { project_id: projectId.value, requirement_id: null, title: '', case_type: 'functional', test_scope: 'functional_test', default_tester_id: defaultTesterByRule('test_case_tester_roles', ['tester', 'test_lead']), precondition: '', steps_content: '', expected_result: '' }) }
 function resetRunForm() { Object.assign(runForm, { project_id: projectId.value, iteration_id: null, name: '', test_owner_id: defaultTesterByRule('test_run_owner_roles', ['tester', 'test_lead']), status: 'planning', remark: '' }) }
 function resetBugForm() { Object.assign(bugForm, { project_id: projectId.value, primary_component_id: null, iteration_id: null, requirement_id: null, task_id: null, test_case_id: null, test_run_id: null, title: '', bug_type: DEFAULT_BUG_TYPE_KEY, severity: '3', priority: '3', owner_id: null, reporter_id: null, reproduce_steps: '', expected_result: '', actual_result: '' }) }
 
-function openIterationCreate() { editingIterationId.value = null; editingRequirementPool.value = false; editingIterationCanAdminister.value = true; resetIterationForm(); iterationDialogVisible.value = true }
-function openIterationEdit(row) { editingIterationId.value = row.id; editingRequirementPool.value = Boolean(row.is_requirement_pool); editingIterationCanAdminister.value = canManageCurrentProject.value; Object.assign(iterationForm, { ...row, project_ids: row.project_ids || [], goal: row.goal || '' }); iterationDialogVisible.value = true }
+function openIterationCreate() { editingIterationId.value = null; editingIterationCanAdminister.value = true; resetIterationForm(); iterationDialogVisible.value = true }
+function openIterationEdit(row) { editingIterationId.value = row.id; editingIterationCanAdminister.value = canManageCurrentProject.value; Object.assign(iterationForm, { ...row, project_ids: row.project_ids || [], goal: row.goal || '' }); iterationDialogVisible.value = true }
 function openDeferWorkItems(row) {
   startingIterationId.value = row.id
   Object.assign(deferWorkItemsForm, { target_iteration_id: null, remark: '' })
@@ -1466,12 +1372,12 @@ function onTaskRequirementChange(requirementId) {
 }
 function openCaseCreate() { editingCaseId.value = null; resetCaseForm(); caseDialogVisible.value = true }
 function openCaseCreateForRequirement(row) { editingCaseId.value = null; resetCaseForm(); Object.assign(caseForm, { requirement_id: row.id, title: row.title }); caseDialogVisible.value = true }
-function openCaseEdit(row) { editingCaseId.value = row.id; Object.assign(caseForm, { ...row, case_type: row.case_type || 'functional', test_scope: row.test_scope || 'functional_test', precondition: row.precondition || '', steps_json: normalizeCaseSteps(row.steps_json), expected_result: row.expected_result || '' }); caseDialogVisible.value = true }
+function openCaseEdit(row) { editingCaseId.value = row.id; Object.assign(caseForm, { project_id: row.project_id || projectId.value, requirement_id: row.requirement_id || null, title: row.title || '', case_type: row.case_type || 'functional', test_scope: row.test_scope || 'functional_test', default_tester_id: row.default_tester_id || null, precondition: row.precondition || '', steps_content: displayedTestCaseSteps(row), expected_result: row.expected_result || '' }); caseDialogVisible.value = true }
 async function openCaseExecution(row) {
   selectedCase.value = row
   Object.assign(caseExecutionForm, {
     execute_time: defaultExecutionTime(),
-    steps_result_json: normalizeCaseSteps(row.steps_json).map((item) => ({ ...item, result: 'passed', actual: '' }))
+    steps_result_json: testCaseExecutionRows(row)
   })
   caseExecutionHistory.value = (await fetchTestCaseExecutions(row.id)).data
   caseExecutionVisible.value = true
@@ -1491,10 +1397,6 @@ async function openCaseBug(row) {
   })
   caseBugVisible.value = true
 }
-function normalizeCaseSteps(value) { return Array.isArray(value) && value.length ? value.map((item) => ({ step: item.step || '', expected: item.expected || '' })) : [{ step: '', expected: '' }] }
-function addCaseStep() { caseForm.steps_json.push({ step: '', expected: '' }) }
-function removeCaseStep(index) { if (caseForm.steps_json.length > 1) caseForm.steps_json.splice(index, 1) }
-function cleanCaseSteps() { return caseForm.steps_json.filter((item) => item.step.trim() || item.expected.trim()) }
 function openRunCreate() { editingRunId.value = null; resetRunForm(); runDialogVisible.value = true }
 function openRunEdit(row) { editingRunId.value = row.id; Object.assign(runForm, { ...row, remark: row.remark || '' }); runDialogVisible.value = true }
 function openBugCreate() { editingBugId.value = null; resetBugForm(); bugDialogVisible.value = true }
@@ -1538,7 +1440,7 @@ async function loadData() {
       fetchPrograms(),
       fetchUsers(),
       fetchAssigneeRuleConfigs(),
-      fetchIterations({ include_requirement_pool: true }),
+      fetchIterations(),
       fetchRequirements(),
       fetchTasks(),
       safeFetchProjectMembers(projectId.value),
@@ -1581,7 +1483,7 @@ async function loadData() {
 
 async function refreshProjectReferences() {
   const [iterationRefRes, requirementRefRes, taskRefRes] = await Promise.all([
-    fetchIterations({ include_requirement_pool: true }),
+    fetchIterations(),
     fetchRequirements(),
     fetchTasks()
   ])
@@ -1599,9 +1501,7 @@ async function submitIteration() {
   if (!iterationForm.name.trim()) return ElMessage.warning('请填写迭代名称')
   saving.value = true
   try {
-    const payload = editingRequirementPool.value
-      ? { name: iterationForm.name.trim() }
-      : editingIterationId.value && !editingIterationCanAdminister.value
+    const payload = editingIterationId.value && !editingIterationCanAdminister.value
         ? { name: iterationForm.name.trim(), start_date: iterationForm.start_date, end_date: iterationForm.end_date, goal: iterationForm.goal || null }
         : { ...iterationForm, project_ids: iterationForm.project_ids.length ? iterationForm.project_ids : [projectId.value], owner_id: iterationForm.owner_id || null }
     if (editingIterationId.value) await updateIteration(editingIterationId.value, payload)
@@ -1634,11 +1534,11 @@ async function submitDeferWorkItems() {
   }
 }
 async function submitRequirement() {
-  if (!requirementForm.title.trim()) return ElMessage.warning('请填写需求标题')
+  if (!requirementForm.iteration_id || !requirementForm.title.trim()) return ElMessage.warning('请选择迭代并填写需求标题')
   saving.value = true
   try {
     const { status: _status, primary_component_id, ...formData } = requirementForm
-    const payload = { ...formData, project_id: projectId.value, iteration_id: requirementForm.iteration_id || null, owner_id: requirementForm.owner_id || null, proposer_id: requirementForm.proposer_id || null }
+    const payload = { ...formData, project_id: projectId.value, iteration_id: requirementForm.iteration_id, owner_id: requirementForm.owner_id || null, proposer_id: requirementForm.proposer_id || null }
     if (!editingRequirementId.value) payload.primary_component_id = primary_component_id || null
     if (editingRequirementId.value) await updateRequirement(editingRequirementId.value, payload)
     else await createRequirement(payload)
@@ -1700,7 +1600,7 @@ async function submitCase() {
   if (!caseForm.title.trim()) return ElMessage.warning('请填写用例标题')
   saving.value = true
   try {
-    const payload = { ...caseForm, project_id: projectId.value, requirement_id: caseForm.requirement_id || null, default_tester_id: caseForm.default_tester_id || null, steps_json: cleanCaseSteps() }
+    const payload = { ...testCaseAuthoringPayload(caseForm), project_id: projectId.value, requirement_id: caseForm.requirement_id || null, default_tester_id: caseForm.default_tester_id || null }
     if (editingCaseId.value) await updateTestCase(editingCaseId.value, payload)
     else await createTestCase(payload)
     caseDialogVisible.value = false

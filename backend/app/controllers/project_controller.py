@@ -112,12 +112,13 @@ def get_project_requirements(
     current_state_id: int | None = None,
     owner_id: int | None = None,
     iteration_id: int | None = None,
+    planning_pool: bool = False,
     db: Session = Depends(get_db),
     current_user: User | None = Depends(get_optional_current_user),
 ):
     ensure_project_view_permission(db, project_id, current_user)
     return list_project_requirements_page(
-        db, project_id, page, page_size, keyword, current_state_id, owner_id, iteration_id
+        db, project_id, page, page_size, keyword, current_state_id, owner_id, iteration_id, planning_pool
     )
 
 
@@ -131,12 +132,13 @@ def get_project_tasks(
     owner_id: int | None = None,
     requirement_id: int | None = None,
     iteration_id: int | None = None,
+    planning_pool: bool = False,
     db: Session = Depends(get_db),
     current_user: User | None = Depends(get_optional_current_user),
 ):
     ensure_project_view_permission(db, project_id, current_user)
     return list_project_tasks_page(
-        db, project_id, page, page_size, keyword, current_state_id, owner_id, requirement_id, iteration_id
+        db, project_id, page, page_size, keyword, current_state_id, owner_id, requirement_id, iteration_id, planning_pool
     )
 
 
@@ -180,12 +182,13 @@ def get_project_bugs(
     current_state_id: int | None = None,
     owner_id: int | None = None,
     iteration_id: int | None = None,
+    planning_pool: bool = False,
     db: Session = Depends(get_db),
     current_user: User | None = Depends(get_optional_current_user),
 ):
     ensure_project_view_permission(db, project_id, current_user)
     return list_project_bugs_page(
-        db, project_id, page, page_size, keyword, current_state_id, owner_id, iteration_id
+        db, project_id, page, page_size, keyword, current_state_id, owner_id, iteration_id, planning_pool
     )
 
 

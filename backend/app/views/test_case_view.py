@@ -15,6 +15,7 @@ class TestCaseBase(BaseModel):
     default_tester_id: int | None = None
     precondition: str | None = None
     steps_json: dict | list | None = None
+    steps_content: str | None = None
     expected_result: str | None = None
     lifecycle_phase: str | None = None
 
@@ -33,6 +34,7 @@ class TestCaseUpdate(BaseModel):
     default_tester_id: int | None = None
     precondition: str | None = None
     steps_json: dict | list | None = None
+    steps_content: str | None = None
     expected_result: str | None = None
     lifecycle_phase: str | None = None
     updater_id: int | None = None

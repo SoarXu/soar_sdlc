@@ -16,17 +16,21 @@ from app.services.business_component_service import (
     resolve_primary_component,
 )
 from app.services.iteration_service import ensure_iteration_assignment_mutable
-from app.services.project_permission_service import ensure_workflow_fields_not_updated, visible_project_ids
+from app.services.project_permission_service import (
+    ensure_work_item_create_permission,
+    ensure_workflow_fields_not_updated,
+    visible_project_ids,
+)
 from app.services.lifecycle_service import project_lifecycle_phase
 from app.services.status_operation_service import list_status_operations
 from app.services.task_service import linked_task_summaries
-from app.services.work_item_iteration_history_service import move_work_item_to_iteration
+from app.services.work_item_iteration_history_service import (
+    move_requirement_dependents_to_iteration,
+    move_work_item_to_iteration,
+)
 from app.services.workflow_state_service import initial_workflow_values
 from app.services.workflow_state_query_service import is_terminal_state
-from app.services.requirement_pool_service import (
-    is_project_requirement_pool,
-    resolve_requirement_iteration_id,
-)
+from app.services.iteration_assignment_service import validate_requirement_iteration
 from app.views.requirement_view import RequirementCreate, RequirementUpdate
 
 
@@ -52,7 +56,7 @@ def create_requirement(db: Session, payload: RequirementCreate, actor_id: int | 
     primary_component_id = data.pop("primary_component_id", None)
     related_component_ids = data.pop("related_component_ids", [])
     data["creator_id"] = actor_id
-    data["iteration_id"] = resolve_requirement_iteration_id(
+    data["iteration_id"] = validate_requirement_iteration(
         db, data["project_id"], data.get("iteration_id")
     )
     ensure_iteration_assignment_mutable(db, None, data.get("iteration_id"))
@@ -90,24 +94,35 @@ def update_requirement(db: Session, requirement_id: int, payload: RequirementUpd
     target_project_id = data.get("project_id", requirement.project_id)
     iteration_was_supplied = "iteration_id" in data
     requested_iteration_id = data.get("iteration_id") if iteration_was_supplied else requirement.iteration_id
-    if (
-        target_project_id != requirement.project_id
-        and not iteration_was_supplied
-        and is_project_requirement_pool(db, requirement.project_id, requirement.iteration_id)
-    ):
-        requested_iteration_id = None
-    target_iteration_id = resolve_requirement_iteration_id(db, target_project_id, requested_iteration_id)
+    if target_project_id != requirement.project_id:
+        actor = db.query(User).filter(User.id == actor_id, User.is_active.is_(True)).first()
+        ensure_work_item_create_permission(db, target_project_id, actor)
+        if not iteration_was_supplied:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="变更项目时必须同时选择迭代",
+            )
+    target_iteration_id = validate_requirement_iteration(db, target_project_id, requested_iteration_id)
     ensure_iteration_assignment_mutable(db, requirement.iteration_id, target_iteration_id)
     if target_iteration_id != requirement.iteration_id:
         data["iteration_id"] = target_iteration_id
     before_data, after_data = _requirement_change_data(requirement, data)
     if target_iteration_id != requirement.iteration_id:
+        source_iteration_id = requirement.iteration_id
         move_work_item_to_iteration(
             db,
             requirement,
             target_iteration_id,
             actor_id=actor_id,
             reason="updated",
+        )
+        move_requirement_dependents_to_iteration(
+            db,
+            requirement.id,
+            source_iteration_id,
+            target_iteration_id,
+            actor_id=actor_id,
+            reason="requirement_updated",
         )
     data.pop("iteration_id", None)
     for field, value in data.items():

@@ -13,9 +13,10 @@ def _create_project(client: TestClient) -> int:
 
 
 def _create_requirement(client: TestClient, project_id: int, owner_id: int = 1) -> int:
+    iteration_id = client.get("/api/v1/iterations", params={"project_id": project_id}).json()[0]["id"]
     response = client.post(
         "/api/v1/requirements",
-        json={"project_id": project_id, "title": f"Testing Requirement {uuid4().hex[:8]}", "owner_id": owner_id},
+        json={"project_id": project_id, "iteration_id": iteration_id, "title": f"Testing Requirement {uuid4().hex[:8]}", "owner_id": owner_id},
     )
     assert response.status_code == 200
     return response.json()["id"]
@@ -35,6 +36,7 @@ def test_test_case_crud_uses_prd_fields(client: TestClient):
             "test_scope": "functional_test",
             "priority": "high",
             "steps_json": [{"step": "input wrong password", "expected": "show login failure"}],
+            "steps_content": "<p><strong>输入错误密码</strong></p>",
             "expected_result": "show login failure",
         },
     )
@@ -43,13 +45,35 @@ def test_test_case_crud_uses_prd_fields(client: TestClient):
     assert created.json()["requirement_id"] == requirement_id
     assert created.json()["test_scope"] == "functional_test"
     assert created.json()["steps_json"] == [{"step": "input wrong password", "expected": "show login failure"}]
+    assert created.json()["steps_content"] == "<p><strong>输入错误密码</strong></p>"
     assert "status" not in created.json()
 
     updated = client.patch(f"/api/v1/test-cases/{case_id}", json={"expected_result": "show login failure and retry"})
     assert updated.status_code == 200
     assert updated.json()["expected_result"] == "show login failure and retry"
+    assert updated.json()["steps_json"] == [{"step": "input wrong password", "expected": "show login failure"}]
+    assert updated.json()["steps_content"] == "<p><strong>输入错误密码</strong></p>"
     assert "status" not in updated.json()
     assert client.delete(f"/api/v1/test-cases/{case_id}").status_code == 204
+
+
+def test_test_case_rich_text_fields_accept_content_larger_than_mysql_text(client: TestClient):
+    project_id = _create_project(client)
+    large_html = f'<p><img src="data:image/png;base64,{"A" * 70000}"></p>'
+    created = client.post(
+        "/api/v1/test-cases",
+        json={
+            "project_id": project_id,
+            "title": "Large pasted screenshots",
+            "precondition": large_html,
+            "steps_content": large_html,
+            "expected_result": large_html,
+        },
+    )
+    assert created.status_code == 200, created.text
+    assert created.json()["precondition"] == large_html
+    assert created.json()["steps_content"] == large_html
+    assert created.json()["expected_result"] == large_html
 
 
 def test_test_run_selects_cases_and_records_execution_result(client: TestClient):
@@ -143,5 +167,6 @@ def test_failed_test_result_can_create_bug_with_requirement_owner(client: TestCl
     assert data["requirement_id"] == requirement_id
     assert data["test_case_id"] == case.json()["id"]
     assert data["test_run_id"] == run.json()["id"]
+    assert data["iteration_id"] is not None
     assert data["owner_id"] == 1
     assert data["status_name"] == "待处理"

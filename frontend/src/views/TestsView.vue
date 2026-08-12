@@ -106,8 +106,8 @@
       <el-form label-position="top">
         <el-form-item label="执行时间"><el-date-picker v-model="caseExecutionForm.execute_time" type="datetime" value-format="YYYY-MM-DDTHH:mm:ss" /></el-form-item>
         <el-table :data="caseExecutionForm.steps_result_json" border>
-          <el-table-column prop="step" label="步骤" min-width="220" />
-          <el-table-column prop="expected" label="预期" min-width="220" />
+          <el-table-column label="步骤" min-width="220"><template #default="{ row }"><div class="rich-text" v-html="safeExecutionCellHtml(row.step, row.rich_content)"></div></template></el-table-column>
+          <el-table-column label="预期" min-width="220"><template #default="{ row }"><div class="rich-text" v-html="safeExecutionCellHtml(row.expected, row.rich_content)"></div></template></el-table-column>
           <el-table-column label="测试结果" width="140"><template #default="{ row }"><el-select v-model="row.result"><el-option v-for="option in executionResultOptions" :key="option.value" :label="option.label" :value="option.value" /></el-select></template></el-table-column>
           <el-table-column label="实际情况" min-width="220"><template #default="{ row }"><el-input v-model="row.actual" type="textarea" :rows="1" /></template></el-table-column>
         </el-table>
@@ -118,8 +118,8 @@
         <el-collapse>
           <el-collapse-item v-for="item in caseExecutionHistory" :key="item.id" :title="executionHistoryTitle(item)" :name="item.id">
             <el-table :data="item.steps_result_json || []" border>
-              <el-table-column prop="step" label="步骤" min-width="220" />
-              <el-table-column prop="expected" label="预期" min-width="220" />
+              <el-table-column label="步骤" min-width="220"><template #default="{ row }"><div class="rich-text" v-html="safeExecutionCellHtml(row.step, row.rich_content)"></div></template></el-table-column>
+              <el-table-column label="预期" min-width="220"><template #default="{ row }"><div class="rich-text" v-html="safeExecutionCellHtml(row.expected, row.rich_content)"></div></template></el-table-column>
               <el-table-column label="测试结果" width="120"><template #default="{ row }">{{ executionResultLabel(row.result) }}</template></el-table-column>
               <el-table-column prop="actual" label="实际情况" min-width="220" />
             </el-table>
@@ -196,6 +196,7 @@ import { labelById, userLabel } from '../utils/referenceLabels'
 import { usePagination } from '../utils/usePagination'
 import { DEFAULT_BUG_TYPE_KEY } from '../utils/bugTypeOptions'
 import { useBugTypes } from '../utils/useBugTypes'
+import { safeExecutionCellHtml, testCaseExecutionRows } from '../utils/testCaseRichText'
 
 const activeTab = ref('cases'), saving = ref(false), loading = ref(false)
 const testCases = ref([]), testRuns = ref([]), testRunCases = ref([]), projects = ref([]), requirements = ref([]), iterations = ref([]), users = ref([])
@@ -306,7 +307,7 @@ async function openCaseExecution(row) {
   selectedCase.value = row
   Object.assign(caseExecutionForm, {
     execute_time: defaultExecutionTime(),
-    steps_result_json: normalizeCaseSteps(row.steps_json).map((item) => ({ ...item, result: 'passed', actual: '' }))
+    steps_result_json: testCaseExecutionRows(row)
   })
   caseExecutionHistory.value = (await fetchTestCaseExecutions(row.id)).data
   caseExecutionVisible.value = true

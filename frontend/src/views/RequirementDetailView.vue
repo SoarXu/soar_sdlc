@@ -25,7 +25,7 @@
       <el-form v-if="editing" label-position="top">
         <el-form-item label="需求标题" required><el-input v-model="requirementForm.title" /></el-form-item>
         <div class="form-grid">
-          <el-form-item label="迭代"><el-select v-model="requirementForm.iteration_id" filterable><el-option v-for="iteration in requirementSelectableIterations" :key="iteration.id" :label="requirementIterationLabel(iteration)" :value="iteration.id" /></el-select></el-form-item>
+          <el-form-item label="迭代" required><el-select v-model="requirementForm.iteration_id" filterable><el-option v-for="iteration in requirementSelectableIterations" :key="iteration.id" :label="requirementIterationLabel(iteration)" :value="iteration.id" /></el-select></el-form-item>
           <el-form-item label="提出人"><el-select v-model="requirementForm.proposer_id" clearable filterable><el-option v-for="user in users" :key="user.id" :label="user.full_name" :value="user.id" /></el-select></el-form-item>
           <el-form-item label="类型"><el-select v-model="requirementForm.requirement_type"><el-option v-for="option in requirementTypeOptions" :key="option" :label="option" :value="option" /></el-select></el-form-item>
           <el-form-item label="优先级"><el-select v-model="requirementForm.priority"><el-option v-for="option in requirementPriorityOptions" :key="option.value" :label="option.label" :value="option.value"><RequirementPriorityBadge :value="option.value" /></el-option></el-select></el-form-item>
@@ -156,8 +156,8 @@
       <el-form label-position="top">
         <el-form-item label="执行时间"><el-date-picker v-model="caseExecutionForm.execute_time" type="datetime" value-format="YYYY-MM-DDTHH:mm:ss" /></el-form-item>
         <el-table :data="caseExecutionForm.steps_result_json" border>
-          <el-table-column prop="step" label="步骤" min-width="220" />
-          <el-table-column prop="expected" label="预期" min-width="220" />
+          <el-table-column label="步骤" min-width="220"><template #default="{ row }"><div class="rich-text" v-html="safeExecutionCellHtml(row.step, row.rich_content)"></div></template></el-table-column>
+          <el-table-column label="预期" min-width="220"><template #default="{ row }"><div class="rich-text" v-html="safeExecutionCellHtml(row.expected, row.rich_content)"></div></template></el-table-column>
           <el-table-column label="测试结果" width="140"><template #default="{ row }"><el-select v-model="row.result"><el-option v-for="option in executionResultOptions" :key="option.value" :label="option.label" :value="option.value" /></el-select></template></el-table-column>
           <el-table-column label="实际情况" min-width="220"><template #default="{ row }"><el-input v-model="row.actual" type="textarea" :rows="1" /></template></el-table-column>
         </el-table>
@@ -248,7 +248,8 @@ import { formatAuditValue } from '../utils/auditHistoryLabels'
 import { taskBranchLabel } from '../utils/taskBranchRules'
 import { DEFAULT_BUG_TYPE_KEY } from '../utils/bugTypeOptions'
 import { useBugTypes } from '../utils/useBugTypes'
-import { requirementIterationLabel, requirementIterationOptions } from '../utils/requirementPoolIterations'
+import { requirementIterationLabel, requirementIterationOptions } from '../utils/requirementIterations'
+import { safeExecutionCellHtml, testCaseExecutionRows } from '../utils/testCaseRichText'
 
 const route = useRoute()
 const router = useRouter()
@@ -280,9 +281,7 @@ const requirementSelectableIterations = computed(() => requirementIterationOptio
   requirementProject.value,
   projects.value,
   iterations.value
-).filter((iteration) => (
-  iteration.is_requirement_pool || iteration.state_category !== 'terminal' || iteration.id === requirementForm.iteration_id
-)))
+))
 const relatedTasks = computed(() => (
   requirement.value.linked_tasks?.length
     ? requirement.value.linked_tasks
@@ -471,7 +470,7 @@ async function openCaseExecution(row) {
   selectedCase.value = data
   caseExecutionForm.value = {
     execute_time: defaultExecutionTime(),
-    steps_result_json: normalizeCaseSteps(data.steps_json).map((item) => ({ ...item, result: 'passed', actual: '' }))
+    steps_result_json: testCaseExecutionRows(data)
   }
   caseExecutionVisible.value = true
 }
@@ -548,13 +547,13 @@ function cancelEdit() {
 }
 
 async function saveRequirement() {
-  if (!requirementForm.title.trim()) return ElMessage.warning('请填写需求标题')
+  if (!requirementForm.iteration_id || !requirementForm.title.trim()) return ElMessage.warning('请选择迭代并填写需求标题')
   saving.value = true
   try {
     await updateRequirement(requirementId.value, {
       ...requirementForm,
       project_id: requirement.value.project_id,
-      iteration_id: requirementForm.iteration_id || null,
+      iteration_id: requirementForm.iteration_id,
       owner_id: requirementForm.owner_id || null,
       proposer_id: requirementForm.proposer_id || null
     })
@@ -572,7 +571,7 @@ async function loadData() {
     const [requirementRes, projectRes, iterationRes, userRes, taskRes, validationRes, operationRes, auditRes] = await Promise.all([
       fetchRequirement(requirementId.value),
       fetchProjects(),
-      fetchIterations({ include_requirement_pool: true }),
+      fetchIterations(),
       fetchUsers(),
       fetchTasks(),
       fetchRequirementValidationCases(requirementId.value),

@@ -13,12 +13,12 @@ assert.match(
 )
 assert.match(
   projectDetail,
-  /WorkflowActionButtons v-if="canManageIterationDelivery\(row\) && !row\.is_requirement_pool"/,
+  /WorkflowActionButtons v-if="canManageIterationDelivery\(row\)"/,
   'iteration lifecycle actions must use the delivery permission rather than project governance only'
 )
 assert.match(
   projectDetail,
-  /el-popconfirm v-if="canManageCurrentProject && !row\.is_requirement_pool"/,
+  /el-popconfirm v-if="canManageCurrentProject"/,
   'iteration deletion must remain a project governance action'
 )
 assert.match(

@@ -41,10 +41,7 @@ from app.services.project_permission_service import (
     is_project_owner,
     is_system_admin,
 )
-from app.services.requirement_pool_service import (
-    is_project_requirement_pool,
-    requirement_pool_for_project,
-)
+from app.services.iteration_assignment_service import fallback_iteration_for_project
 from app.services.status_operation_service import create_status_operation
 from app.services.iteration_completion_snapshot_service import create_completion_snapshot
 from app.services.iteration_service import (
@@ -91,8 +88,6 @@ def list_available_transitions(
 ) -> list[WorkflowTransitionActionRead]:
     ensure_default_workflow_templates(db)
     item = _get_item(db, object_type, object_id)
-    if object_type == "iteration" and item.is_requirement_pool:
-        return []
     definition_context = _resolve_definition_context(db, object_type, item)
     if not definition_context:
         return []
@@ -246,15 +241,6 @@ def _execute_transition(
         )
     if object_type == "iteration" and transition.action_key == "start":
         _sync_iteration_start_hierarchy(db, item, request, actor)
-    _move_pool_item_before_execution(
-        db,
-        object_type,
-        item,
-        resolved_target_state,
-        request,
-        actor,
-        selected_values,
-    )
     _apply_domain_payload(db, object_type, item, transition, request, actor, selected_values)
     _run_transition_validator(db, object_type, item, transition, resolved_target_state)
     automation_results = _run_transition_automations(
@@ -611,7 +597,9 @@ def _activation_target_iteration_id(
     if target_iteration_id is not None:
         return target_iteration_id
     if object_type == "requirement":
-        return requirement_pool_for_project(db, item.project_id).id
+        return fallback_iteration_for_project(
+            db, item.project_id, exclude_iteration_id=getattr(item, "iteration_id", None)
+        ).id
     return None
 
 
@@ -624,21 +612,7 @@ def _transition_target_iteration_id(
     activation_target_id = _activation_target_iteration_id(db, object_type, item, request)
     if activation_target_id is not None:
         return activation_target_id
-    if object_type not in {"requirement", "task", "bug"}:
-        return None
-    project_id = getattr(item, "project_id", None)
-    if project_id is None:
-        return None
-    if not is_project_requirement_pool(db, project_id, getattr(item, "iteration_id", None)):
-        return None
-    transition = db.query(WorkflowTransition).filter(
-        WorkflowTransition.id == request.transition_id,
-        WorkflowTransition.definition_id == item.workflow_definition_id,
-        WorkflowTransition.enabled.is_(True),
-    ).first()
-    if not transition or not _transition_enters_execution(db, transition):
-        return None
-    return _request_target_iteration_id(request.payload or {})
+    return None
 
 
 def _request_target_iteration_id(payload: dict[str, Any]) -> int | None:
@@ -646,109 +620,6 @@ def _request_target_iteration_id(payload: dict[str, Any]) -> int | None:
     if value is None:
         value = payload.get("iteration_id")
     return _parse_target_iteration_id(value) if value is not None else None
-
-
-def _move_pool_item_before_execution(
-    db: Session,
-    object_type: str,
-    item,
-    target_state: WorkflowState,
-    request: WorkflowTransitionExecuteRequest,
-    actor: User | None,
-    selected_values: dict[str, Any],
-) -> None:
-    if object_type not in {"requirement", "task", "bug"}:
-        return
-    if target_state.category not in {"normal", "terminal"}:
-        return
-    if not is_project_requirement_pool(db, item.project_id, getattr(item, "iteration_id", None)):
-        return
-
-    target_iteration_id = getattr(item, "_transition_target_iteration_id", None)
-    if target_iteration_id is None:
-        target_iteration_id = _request_target_iteration_id(request.payload or {})
-    if target_iteration_id is None:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail={
-                "code": "TARGET_ITERATION_REQUIRED",
-                "message": "请选择正式执行迭代",
-            },
-        )
-
-    locked_iterations = getattr(item, "_transition_locked_iterations", {})
-    target_iteration = locked_iterations.get(target_iteration_id)
-    if not target_iteration:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail={
-                "code": "ITERATION_STATE_CONFLICT",
-                "message": "目标迭代状态已变化，请刷新后重试",
-            },
-        )
-    if target_iteration.is_requirement_pool:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail={
-                "code": "INVALID_TARGET_ITERATION",
-                "message": "目标迭代必须是正式执行迭代",
-            },
-        )
-    ensure_iteration_mutable(target_iteration)
-    if item.project_id not in iteration_scoped_project_ids(db, target_iteration.id):
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail={
-                "code": "TARGET_ITERATION_OUT_OF_SCOPE",
-                "message": "目标迭代不属于当前项目",
-            },
-        )
-
-    source_iteration_id = item.iteration_id
-    actor_id = actor.id if actor else None
-    move_work_item_to_iteration(
-        db,
-        item,
-        target_iteration.id,
-        actor_id=actor_id,
-        reason="planned",
-    )
-    if object_type == "requirement":
-        linked_tasks = (
-            db.query(Task)
-            .filter(Task.requirement_id == item.id, Task.deleted == 0)
-            .order_by(Task.id.asc())
-            .with_for_update()
-            .populate_existing()
-            .all()
-        )
-        locked_iteration_ids = set(locked_iterations)
-        if any(
-            task.iteration_id is not None and task.iteration_id not in locked_iteration_ids
-            for task in linked_tasks
-        ):
-            db.rollback()
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail={
-                    "code": "ITERATION_STATE_CONFLICT",
-                    "message": "关联任务迭代已变化，请刷新后重试",
-                },
-            )
-        for task in linked_tasks:
-            move_work_item_to_iteration(
-                db,
-                task,
-                target_iteration.id,
-                actor_id=actor_id,
-                reason="planned",
-            )
-    selected_values.update(
-        {
-            "source_iteration_id": source_iteration_id,
-            "target_iteration_id": target_iteration.id,
-        }
-    )
 
 
 def _parse_target_iteration_id(value) -> int:
@@ -863,22 +734,6 @@ def _transition_read(db: Session, item, transition: WorkflowTransition, actor: U
         if field.get("field") == "bug_type" and field.get("type") == "select":
             field["options"] = bug_type_options(db)
     object_type = _object_type_for_item(item)
-    if (
-        object_type in {"requirement", "task", "bug"}
-        and is_project_requirement_pool(db, item.project_id, getattr(item, "iteration_id", None))
-        and _transition_enters_execution(db, transition)
-    ):
-        fields = [field for field in fields if field.get("field") != "target_iteration_id"]
-        fields.insert(
-            0,
-            {
-                "field": "target_iteration_id",
-                "label": "正式执行迭代",
-                "type": "select",
-                "required": True,
-                "options": _delivery_iteration_options(db, item.project_id),
-            },
-        )
     if fields:
         form_config["fields"] = fields
     handler_rule = transition.handler_rule or {}
@@ -948,7 +803,6 @@ def _delivery_iteration_options(db: Session, project_id: int) -> list[dict[str, 
         db.query(Iteration)
         .filter(
             Iteration.deleted == 0,
-            Iteration.is_requirement_pool.is_(False),
         )
         .order_by(Iteration.id.desc())
         .all()
@@ -1438,7 +1292,6 @@ def _apply_bug_activation(
     source_iteration = locked_iterations.get(bug.iteration_id)
     source_is_active = bool(
         source_iteration
-        and not source_iteration.is_requirement_pool
         and is_iteration_active(db, source_iteration)
     )
     if not source_is_active and parsed_target_iteration_id is None:
@@ -1657,7 +1510,6 @@ def _bug_activation_transition_read(
     )
     source_is_active = bool(
         source_iteration
-        and not source_iteration.is_requirement_pool
         and is_iteration_active(db, source_iteration)
     )
     options = []
@@ -1674,7 +1526,7 @@ def _bug_activation_transition_read(
     )
     for iteration in (
         db.query(Iteration)
-        .filter(Iteration.deleted == 0, Iteration.is_requirement_pool.is_(False))
+        .filter(Iteration.deleted == 0)
         .order_by(Iteration.id.desc())
         .all()
     ):
@@ -1972,7 +1824,6 @@ def _require_project_items_complete(db: Session, project_id: int) -> None:
         .filter(
             IterationProject.project_id == project_id,
             Iteration.deleted == 0,
-            Iteration.is_requirement_pool.is_(False),
         )
         .all()
     )
@@ -2442,7 +2293,9 @@ def _defer_requirement_links(db: Session, requirement: Requirement, payload: dic
     if target_iteration_id is None:
         target_iteration_id = _request_target_iteration_id(payload)
     if target_iteration_id is None:
-        target_iteration_id = requirement_pool_for_project(db, requirement.project_id).id
+        target_iteration_id = fallback_iteration_for_project(
+            db, requirement.project_id, exclude_iteration_id=requirement.iteration_id
+        ).id
     if requirement.iteration_id == target_iteration_id:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Target iteration cannot be current iteration")
     locked_iterations = getattr(requirement, "_transition_locked_iterations", {})

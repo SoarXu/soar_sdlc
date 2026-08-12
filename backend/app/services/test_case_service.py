@@ -10,6 +10,7 @@ from app.models.test_case_execution import TestCaseExecutionLog
 from app.services.lifecycle_service import project_lifecycle_phase, requirement_lifecycle_phase
 from app.services.bug_service import _ensure_iteration_can_accept_bug
 from app.services.iteration_service import ensure_iteration_assignment_mutable
+from app.services.iteration_assignment_service import resolve_work_item_iteration
 from app.services.project_team_service import default_tester_id
 from app.services.task_service import linked_task_summaries
 from app.services.work_item_iteration_history_service import move_work_item_to_iteration
@@ -119,10 +120,14 @@ def create_bug_from_test_case(
     if not project_id:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="用例未关联项目，无法提交 Bug")
 
-    inherited_iteration_id = test_case.iteration_id or (requirement.iteration_id if requirement else None)
+    inherited_iteration_id = resolve_work_item_iteration(
+        db,
+        project_id,
+        None,
+        source_iteration_id=test_case.iteration_id or (requirement.iteration_id if requirement else None),
+    )
     ensure_iteration_assignment_mutable(db, None, inherited_iteration_id)
-    if inherited_iteration_id:
-        _ensure_iteration_can_accept_bug(db, inherited_iteration_id, project_id)
+    _ensure_iteration_can_accept_bug(db, inherited_iteration_id, project_id)
 
     workflow_values = initial_workflow_values(db, "bug", project_id)
     bug = Bug(

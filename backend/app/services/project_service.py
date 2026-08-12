@@ -1,7 +1,7 @@
 from datetime import date, datetime
 
 from fastapi import HTTPException, status
-from sqlalchemy import or_
+from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
 from app.models.audit_log import AuditLog
@@ -21,10 +21,9 @@ from app.services.assignee_rule_config_service import default_project_workflow_s
 from app.services.project_data_purge_service import purge_project_data
 from app.services.project_permission_service import visible_project_ids
 from app.services.status_operation_service import create_status_operation, list_status_operations
-from app.services.requirement_pool_service import (
-    create_project_requirement_pool,
-    project_work_pool_counts,
-    requirement_pool_for_project,
+from app.services.iteration_assignment_service import (
+    create_unstarted_iteration,
+    eligible_iteration_ids_for_project,
 )
 from app.services.workflow_runtime_service import execute_transition
 from app.services.workflow_state_service import initial_system_workflow_values, initial_workflow_values
@@ -56,7 +55,6 @@ def list_project_iterations_page(
         .join(IterationProject, IterationProject.iteration_id == Iteration.id)
         .filter(
             Iteration.deleted == 0,
-            Iteration.is_requirement_pool.is_(False),
             IterationProject.project_id == project_id,
         )
     )
@@ -68,9 +66,16 @@ def list_project_iterations_page(
         query = query.filter(Iteration.owner_id == owner_id)
     page_data = _paginate(query.order_by(Iteration.id.desc()), page, page_size)
     page_data["items"] = [_iteration_to_dict(db, item) for item in page_data["items"]]
-    page_data["requirement_pool"] = {
-        **_iteration_to_dict(db, requirement_pool_for_project(db, project.id)),
-        **project_work_pool_counts(db, project.id),
+    iteration_ids = eligible_iteration_ids_for_project(db, project.id)
+    counts = {
+        "requirement_count": _project_iteration_item_count(db, Requirement, project.id, iteration_ids),
+        "task_count": _project_iteration_item_count(db, Task, project.id, iteration_ids),
+        "bug_count": _project_iteration_item_count(db, Bug, project.id, iteration_ids),
+    }
+    page_data["planning_pool"] = {
+        "iteration_ids": iteration_ids,
+        **counts,
+        "total_count": sum(counts.values()),
     }
     return page_data
 
@@ -84,6 +89,7 @@ def list_project_requirements_page(
     current_state_id: int | None = None,
     owner_id: int | None = None,
     iteration_id: int | None = None,
+    planning_pool: bool = False,
 ) -> dict:
     _get_active_project(db, project_id)
     query = db.query(Requirement).filter(Requirement.deleted == 0, Requirement.project_id == project_id)
@@ -95,6 +101,8 @@ def list_project_requirements_page(
         query = query.filter(Requirement.owner_id == owner_id)
     if iteration_id:
         query = query.filter(Requirement.iteration_id == iteration_id)
+    elif planning_pool:
+        query = query.filter(Requirement.iteration_id.in_(eligible_iteration_ids_for_project(db, project_id)))
     return _paginate(query.order_by(Requirement.id.desc()), page, page_size)
 
 
@@ -108,6 +116,7 @@ def list_project_tasks_page(
     owner_id: int | None = None,
     requirement_id: int | None = None,
     iteration_id: int | None = None,
+    planning_pool: bool = False,
 ) -> dict:
     _get_active_project(db, project_id)
     query = db.query(Task).filter(Task.deleted == 0, Task.project_id == project_id)
@@ -121,6 +130,8 @@ def list_project_tasks_page(
         query = query.filter(Task.requirement_id == requirement_id)
     if iteration_id:
         query = query.filter(Task.iteration_id == iteration_id)
+    elif planning_pool:
+        query = query.filter(Task.iteration_id.in_(eligible_iteration_ids_for_project(db, project_id)))
     return _paginate(query.order_by(Task.id.desc()), page, page_size)
 
 
@@ -176,6 +187,7 @@ def list_project_bugs_page(
     current_state_id: int | None = None,
     owner_id: int | None = None,
     iteration_id: int | None = None,
+    planning_pool: bool = False,
 ) -> dict:
     _get_active_project(db, project_id)
     query = db.query(Bug).filter(Bug.deleted == 0, Bug.project_id == project_id)
@@ -188,6 +200,8 @@ def list_project_bugs_page(
         query = query.filter(Bug.owner_id == owner_id)
     if iteration_id:
         query = query.filter(Bug.iteration_id == iteration_id)
+    elif planning_pool:
+        query = query.filter(Bug.iteration_id.in_(eligible_iteration_ids_for_project(db, project_id)))
     return _paginate(query.order_by(Bug.id.desc()), page, page_size)
 
 
@@ -258,7 +272,6 @@ def create_project(db: Session, payload: ProjectCreate) -> Project:
     if data.get("is_long_term"):
         data["end_date"] = None
     data.update(initial_system_workflow_values(db, "project"))
-    iteration_workflow_values = initial_system_workflow_values(db, "iteration")
     project = Project(**data)
     try:
         db.add(project)
@@ -266,7 +279,7 @@ def create_project(db: Session, payload: ProjectCreate) -> Project:
         project_workflow_values = initial_workflow_values(db, "project", project.id)
         project.workflow_definition_id = project_workflow_values["workflow_definition_id"]
         project.current_state_id = project_workflow_values["current_state_id"]
-        create_project_requirement_pool(db, project, workflow_values=iteration_workflow_values)
+        create_unstarted_iteration(db, project.id)
         db.commit()
         db.refresh(project)
         return project
@@ -599,6 +612,23 @@ def _audit_logs_with_actor_names(db: Session, logs: list[AuditLog]) -> list[dict
     ]
 
 
+def _project_iteration_item_count(
+    db: Session, model, project_id: int, iteration_ids: list[int]
+) -> int:
+    if not iteration_ids:
+        return 0
+    return int(
+        db.query(func.count(model.id))
+        .filter(
+            model.deleted == 0,
+            model.project_id == project_id,
+            model.iteration_id.in_(iteration_ids),
+        )
+        .scalar()
+        or 0
+    )
+
+
 def _paginate(query, page: int, page_size: int) -> dict:
     normalized_page = max(page or 1, 1)
     normalized_page_size = min(max(page_size or 10, 1), 100)
@@ -631,7 +661,6 @@ def _iteration_to_dict(db: Session, iteration: Iteration) -> dict:
         "current_state_id": iteration.current_state_id,
         "status_name": iteration.status_name,
         "state_category": iteration.state_category,
-        "is_requirement_pool": iteration.is_requirement_pool,
         "lifecycle_phase": iteration.lifecycle_phase,
         "goal": iteration.goal,
         "creator_id": iteration.creator_id,

@@ -9,7 +9,7 @@ from app.models.requirement import Requirement
 from app.models.role import Role, UserRole
 from app.models.task import Task
 from app.models.user import User
-from app.models.workflow_definition import WorkflowState, WorkflowTransition
+from app.models.workflow_definition import WorkflowState
 
 
 def _create_user(full_name: str, role_key: str | None = None) -> tuple[int, str]:
@@ -54,6 +54,14 @@ def _create_iteration(client: TestClient, project_id: int) -> int:
     return response.json()["id"]
 
 
+def _project_iteration_id(client: TestClient, project_id: int) -> int:
+    response = client.get("/api/v1/iterations", params={"project_id": project_id})
+    assert response.status_code == 200, response.text
+    iterations = response.json()
+    assert iterations
+    return iterations[0]["id"]
+
+
 def _start_iteration(client: TestClient, iteration_id: int) -> None:
     response = client.post(
         f"/api/v1/workflow-runtime/iteration/{iteration_id}/transition",
@@ -75,7 +83,11 @@ def _set_requirement_status(requirement_id: int, status: str) -> None:
     db = SessionLocal()
     try:
         requirement = db.query(Requirement).filter(Requirement.id == requirement_id).one()
-        requirement.current_state_id = _state_id(db, requirement.workflow_definition_id, status)
+        requirement.current_state_id = _state_id(
+            db,
+            requirement.workflow_definition_id,
+            status,
+        )
         db.commit()
     finally:
         db.close()
@@ -92,12 +104,15 @@ def _set_task_status(task_id: int, status: str) -> None:
 
 
 def _state_id(db, definition_id: int, status: str) -> int:
-    action_key = {"completed": "complete", "canceled": "cancel"}[status]
+    terminal_kind = {"completed": "completed", "canceled": "terminated"}[status]
+    terminal_name = {"completed": "已完成", "canceled": "已取消"}[status]
     state_ids = {
         value
-        for value, in db.query(WorkflowTransition.to_state_id).filter(
-            WorkflowTransition.definition_id == definition_id,
-            WorkflowTransition.action_key == action_key,
+        for value, in db.query(WorkflowState.id).filter(
+            WorkflowState.definition_id == definition_id,
+            WorkflowState.category == "terminal",
+            WorkflowState.terminal_kind == terminal_kind,
+            WorkflowState.status_name == terminal_name,
         ).all()
     }
     assert len(state_ids) == 1
@@ -139,11 +154,16 @@ def test_create_work_items_do_not_use_default_owner_roles(client: TestClient):
         "/api/v1/projects",
         json={"name": f"Ownerless Project-{uuid4().hex[:8]}", "assignee_rule_config_id": config.json()["id"]},
     ).json()
+    iteration_id = _project_iteration_id(client, project["id"])
     _add_project_member(project["id"], developer_id, "developer")
 
     requirement = client.post(
         "/api/v1/requirements",
-        json={"project_id": project["id"], "title": f"Ownerless requirement-{uuid4().hex[:8]}"},
+        json={
+            "project_id": project["id"],
+            "iteration_id": iteration_id,
+            "title": f"Ownerless requirement-{uuid4().hex[:8]}",
+        },
     )
     task = client.post(
         "/api/v1/tasks",
@@ -167,12 +187,20 @@ def test_requirement_change_handler_updates_current_handler_and_records_history(
     target_id, _ = _create_user("Target Handler", "developer")
     manager_id, manager_token = _create_user("Project Manager", "project_owner")
     project_id = _create_project(client, owner_id=manager_id)
+    iteration_id = _project_iteration_id(client, project_id)
     _add_project_member(project_id, owner_id)
     _add_project_member(project_id, target_id)
-    requirement = client.post(
+    requirement_response = client.post(
         "/api/v1/requirements",
-        json={"project_id": project_id, "title": f"Assignable requirement-{uuid4().hex[:8]}", "owner_id": owner_id},
-    ).json()
+        json={
+            "project_id": project_id,
+            "iteration_id": iteration_id,
+            "title": f"Assignable requirement-{uuid4().hex[:8]}",
+            "owner_id": owner_id,
+        },
+    )
+    assert requirement_response.status_code == 200, requirement_response.text
+    requirement = requirement_response.json()
     claimed = _runtime_transition(client, "requirement", requirement["id"], "claim", owner_token)
     assert claimed.status_code == 200, claimed.text
 
@@ -201,10 +229,17 @@ def test_requirement_change_handler_updates_current_handler_and_records_history(
 def test_project_owner_is_not_implicit_current_handler_assignee(client: TestClient):
     owner_id, owner_token = _create_user("Management Owner", "project_owner")
     project_id = _create_project(client, owner_id=owner_id)
-    requirement = client.post(
+    iteration_id = _project_iteration_id(client, project_id)
+    requirement_response = client.post(
         "/api/v1/requirements",
-        json={"project_id": project_id, "title": f"Project owner is management only-{uuid4().hex[:8]}"},
-    ).json()
+        json={
+            "project_id": project_id,
+            "iteration_id": iteration_id,
+            "title": f"Project owner is management only-{uuid4().hex[:8]}",
+        },
+    )
+    assert requirement_response.status_code == 200, requirement_response.text
+    requirement = requirement_response.json()
 
     assigned = client.post(
         f"/api/v1/workflow-runtime/requirement/{requirement['id']}/transition",
@@ -213,7 +248,7 @@ def test_project_owner_is_not_implicit_current_handler_assignee(client: TestClie
     )
 
     assert assigned.status_code == 400
-    assert "not a project member" in assigned.json()["detail"].lower()
+    assert assigned.json()["detail"]["code"] == "LEGACY_ERROR_66FE2831D2BD"
 
 
 def test_runtime_change_handler_rejects_terminal_items_independently(client: TestClient):
@@ -221,16 +256,31 @@ def test_runtime_change_handler_rejects_terminal_items_independently(client: Tes
     target_id, _ = _create_user("Batch Target", "developer")
     manager_id, manager_token = _create_user("Batch Manager", "project_owner")
     project_id = _create_project(client, owner_id=manager_id)
+    iteration_id = _project_iteration_id(client, project_id)
     _add_project_member(project_id, owner_id)
     _add_project_member(project_id, target_id)
-    active_requirement = client.post(
+    active_requirement_response = client.post(
         "/api/v1/requirements",
-        json={"project_id": project_id, "title": f"Batch active-{uuid4().hex[:8]}", "owner_id": owner_id},
-    ).json()
-    closed_requirement = client.post(
+        json={
+            "project_id": project_id,
+            "iteration_id": iteration_id,
+            "title": f"Batch active-{uuid4().hex[:8]}",
+            "owner_id": owner_id,
+        },
+    )
+    assert active_requirement_response.status_code == 200, active_requirement_response.text
+    active_requirement = active_requirement_response.json()
+    closed_requirement_response = client.post(
         "/api/v1/requirements",
-        json={"project_id": project_id, "title": f"Batch closed-{uuid4().hex[:8]}", "owner_id": owner_id},
-    ).json()
+        json={
+            "project_id": project_id,
+            "iteration_id": iteration_id,
+            "title": f"Batch closed-{uuid4().hex[:8]}",
+            "owner_id": owner_id,
+        },
+    )
+    assert closed_requirement_response.status_code == 200, closed_requirement_response.text
+    closed_requirement = closed_requirement_response.json()
     claimed = _runtime_transition(client, "requirement", active_requirement["id"], "claim", owner_token)
     assert claimed.status_code == 200, claimed.text
     _set_requirement_status(closed_requirement["id"], "canceled")

@@ -22,18 +22,9 @@
           <el-form-item label="用例类型"><el-select v-model="caseForm.case_type"><el-option v-for="option in caseTypeOptions" :key="option.value" :label="option.label" :value="option.value" /></el-select></el-form-item>
           <el-form-item label="适用范围"><el-select v-model="caseForm.test_scope"><el-option v-for="option in testScopeOptions" :key="option.value" :label="option.label" :value="option.value" /></el-select></el-form-item>
         </div>
-        <el-form-item label="前置条件"><el-input v-model="caseForm.precondition" type="textarea" :rows="3" /></el-form-item>
-        <el-form-item label="用例步骤">
-          <div class="case-steps-editor">
-            <el-table :data="caseForm.steps_json" border>
-              <el-table-column label="步骤" min-width="260"><template #default="{ row, $index }"><el-input v-model="row.step" :placeholder="`步骤 ${$index + 1}`" /></template></el-table-column>
-              <el-table-column label="预期" min-width="260"><template #default="{ row }"><el-input v-model="row.expected" placeholder="预期结果" /></template></el-table-column>
-              <el-table-column label="操作" width="90"><template #default="{ $index }"><el-button link type="danger" :disabled="caseForm.steps_json.length === 1" @click="removeCaseStep($index)">删除</el-button></template></el-table-column>
-            </el-table>
-            <el-button class="case-step-add" @click="addCaseStep">增加步骤</el-button>
-          </div>
-        </el-form-item>
-        <el-form-item label="预期结果"><el-input v-model="caseForm.expected_result" type="textarea" :rows="3" /></el-form-item>
+        <el-form-item label="前置条件"><RichTextPasteEditor v-model="caseForm.precondition" /></el-form-item>
+        <el-form-item label="用例步骤"><RichTextPasteEditor v-model="caseForm.steps_content" /></el-form-item>
+        <el-form-item label="预期结果"><RichTextPasteEditor v-model="caseForm.expected_result" /></el-form-item>
       </el-form>
 
       <template v-else>
@@ -53,18 +44,17 @@
       <div class="detail-sections">
         <section class="detail-section">
           <h2>前置条件</h2>
-          <div class="rich-text">{{ testCase.precondition || '-' }}</div>
+          <div class="rich-text" v-html="safeTestCaseHtml(testCase.precondition)"></div>
+        </section>
+        <section class="detail-section">
+          <h2>用例步骤</h2>
+          <div class="rich-text" v-html="safeTestCaseHtml(displayedStepsContent)"></div>
         </section>
         <section class="detail-section">
           <h2>预期结果</h2>
-          <div class="rich-text">{{ testCase.expected_result || '-' }}</div>
+          <div class="rich-text" v-html="safeTestCaseHtml(testCase.expected_result)"></div>
         </section>
       </div>
-
-      <el-table :data="caseSteps" border class="detail-table">
-        <el-table-column label="步骤" min-width="260"><template #default="{ row, $index }">{{ row.step || `步骤 ${$index + 1}` }}</template></el-table-column>
-        <el-table-column prop="expected" label="预期" min-width="260" />
-      </el-table>
       </template>
     </el-card>
 
@@ -104,8 +94,8 @@
             </div>
             <div class="project-history-detail">
               <el-table :data="item.steps_result_json || []" border>
-                <el-table-column prop="step" label="步骤" min-width="220" />
-                <el-table-column prop="expected" label="预期" min-width="220" />
+              <el-table-column label="步骤" min-width="220"><template #default="{ row }"><div class="rich-text" v-html="safeExecutionCellHtml(row.step, row.rich_content)"></div></template></el-table-column>
+              <el-table-column label="预期" min-width="220"><template #default="{ row }"><div class="rich-text" v-html="safeExecutionCellHtml(row.expected, row.rich_content)"></div></template></el-table-column>
                 <el-table-column label="测试结果" width="120"><template #default="{ row }">{{ executionResultLabel(row.result) }}</template></el-table-column>
                 <el-table-column prop="actual" label="实际情况" min-width="220" />
               </el-table>
@@ -127,7 +117,9 @@ import { fetchRequirements } from '../api/requirements'
 import { fetchTestCase, fetchTestCaseExecutions, updateTestCase } from '../api/testCases'
 import { fetchUsers } from '../api/users'
 import LinkedTaskCreateButton from '../components/LinkedTaskCreateButton.vue'
+import RichTextPasteEditor from '../components/RichTextPasteEditor.vue'
 import { labelById, userLabel } from '../utils/referenceLabels'
+import { displayedTestCaseSteps, safeExecutionCellHtml, safeTestCaseHtml, testCaseAuthoringPayload } from '../utils/testCaseRichText'
 
 const route = useRoute()
 const router = useRouter()
@@ -140,9 +132,9 @@ const executions = ref([])
 const projects = ref([])
 const requirements = ref([])
 const users = ref([])
-const caseSteps = computed(() => (Array.isArray(testCase.value.steps_json) && testCase.value.steps_json.length ? testCase.value.steps_json : []))
+const displayedStepsContent = computed(() => displayedTestCaseSteps(testCase.value))
 const linkedRequirement = computed(() => requirements.value.find((item) => item.id === testCase.value.requirement_id))
-const caseForm = reactive({ project_id: null, requirement_id: null, title: '', case_type: 'functional', test_scope: 'functional_test', default_tester_id: null, precondition: '', steps_json: [{ step: '', expected: '' }], expected_result: '' })
+const caseForm = reactive({ project_id: null, requirement_id: null, title: '', case_type: 'functional', test_scope: 'functional_test', default_tester_id: null, precondition: '', steps_content: '', expected_result: '' })
 
 const caseTypeOptions = [
   { label: '接口测试', value: 'api' },
@@ -189,12 +181,6 @@ function goBack() {
   router.push({ name: 'tests' })
 }
 
-function normalizeCaseSteps(value) {
-  return Array.isArray(value) && value.length ? value.map((item) => ({ step: item.step || '', expected: item.expected || '' })) : [{ step: '', expected: '' }]
-}
-function addCaseStep() { caseForm.steps_json.push({ step: '', expected: '' }) }
-function removeCaseStep(index) { if (caseForm.steps_json.length > 1) caseForm.steps_json.splice(index, 1) }
-function cleanCaseSteps() { return caseForm.steps_json.filter((item) => item.step.trim() || item.expected.trim()) }
 function fillCaseForm() {
   Object.assign(caseForm, {
     project_id: testCase.value.project_id || null,
@@ -204,7 +190,7 @@ function fillCaseForm() {
     test_scope: testCase.value.test_scope || 'functional_test',
     default_tester_id: testCase.value.default_tester_id || null,
     precondition: testCase.value.precondition || '',
-    steps_json: normalizeCaseSteps(testCase.value.steps_json),
+    steps_content: displayedTestCaseSteps(testCase.value),
     expected_result: testCase.value.expected_result || ''
   })
 }
@@ -221,11 +207,10 @@ async function saveTestCase() {
   saving.value = true
   try {
     await updateTestCase(testCaseId.value, {
-      ...caseForm,
+      ...testCaseAuthoringPayload(caseForm),
       project_id: caseForm.project_id || null,
       requirement_id: caseForm.requirement_id || null,
-      default_tester_id: caseForm.default_tester_id || null,
-      steps_json: cleanCaseSteps()
+      default_tester_id: caseForm.default_tester_id || null
     })
     editing.value = false
     await loadData()

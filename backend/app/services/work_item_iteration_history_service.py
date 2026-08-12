@@ -1,5 +1,6 @@
 from datetime import datetime
 
+from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 
 from app.models.bug import Bug
@@ -8,7 +9,7 @@ from app.models.requirement import Requirement
 from app.models.task import Task
 from app.models.status_operation import StatusOperationLog
 from app.models.work_item_iteration_history import WorkItemIterationHistory
-from app.services.workflow_state_query_service import current_state_name
+from app.services.workflow_state_query_service import current_state_name, is_terminal_state
 
 
 OBJECT_TYPE_BY_MODEL = {
@@ -70,6 +71,70 @@ def move_work_item_to_iteration(
     item.iteration_id = target_iteration_id
     if target_iteration_id:
         _open_history(db, object_type, item.id, target_iteration_id, actor_id, reason, operation_log_id)
+
+
+def move_requirement_dependents_to_iteration(
+    db: Session,
+    requirement_id: int,
+    source_iteration_id: int | None,
+    target_iteration_id: int,
+    *,
+    actor_id: int | None,
+    reason: str,
+) -> None:
+    tasks = (
+        db.query(Task)
+        .filter(Task.deleted == 0, Task.requirement_id == requirement_id)
+        .with_for_update()
+        .all()
+    )
+    following_bugs = (
+        db.query(Bug)
+        .filter(
+            Bug.deleted == 0,
+            Bug.requirement_id == requirement_id,
+            Bug.iteration_id == source_iteration_id,
+        )
+        .with_for_update()
+        .all()
+    )
+    _ensure_dependency_sources_mutable(db, [*tasks, *following_bugs], target_iteration_id)
+    for task in tasks:
+        move_work_item_to_iteration(
+            db, task, target_iteration_id, actor_id=actor_id, reason=reason
+        )
+    for bug in following_bugs:
+        move_work_item_to_iteration(
+            db, bug, target_iteration_id, actor_id=actor_id, reason=reason
+        )
+
+
+def _ensure_dependency_sources_mutable(db: Session, items: list, target_iteration_id: int) -> None:
+    source_ids = {
+        item.iteration_id
+        for item in items
+        if item.iteration_id is not None and item.iteration_id != target_iteration_id
+    }
+    if not source_ids:
+        return
+    sources = (
+        db.query(Iteration)
+        .filter(Iteration.id.in_(source_ids), Iteration.deleted == 0)
+        .with_for_update()
+        .all()
+    )
+    sources_by_id = {source.id: source for source in sources}
+    for source_id in sorted(source_ids):
+        source = sources_by_id.get(source_id)
+        if source is None or is_terminal_state(source):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={
+                    "code": "ITERATION_NOT_MUTABLE",
+                    "message": "依赖工作项所在迭代不允许移动工作项",
+                    "iteration_id": source_id,
+                },
+            )
 
 
 def list_iteration_history(db: Session, object_type: str, object_id: int) -> list[dict]:

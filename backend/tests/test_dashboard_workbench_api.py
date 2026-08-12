@@ -914,41 +914,47 @@ def test_workbench_scopes_execution_to_active_iterations_and_excludes_uniterated
         },
         headers=headers,
     ).json()
-    uniterated_requirement = client.post(
+    planning_requirement = client.post(
         "/api/v1/requirements",
         json={
             "project_id": project_id,
-            "title": "Uniterated requirement",
+            "iteration_id": planning_iteration_id,
+            "title": "Planning requirement",
             "owner_id": user_id,
         },
         headers=headers,
     ).json()
-    uniterated_task = client.post(
+    planning_unassigned_task = client.post(
         "/api/v1/tasks",
-        json={"project_id": project_id, "title": "Uniterated task"},
+        json={"project_id": project_id, "iteration_id": planning_iteration_id, "title": "Planning unassigned task"},
         headers=headers,
     ).json()
-    uniterated_bug = client.post(
+    planning_bug = client.post(
         "/api/v1/bugs",
-        json={"project_id": project_id, "title": "Uniterated bug", "owner_id": user_id},
+        json={
+            "project_id": project_id,
+            "iteration_id": planning_iteration_id,
+            "title": "Planning bug",
+            "owner_id": user_id,
+        },
         headers=headers,
     ).json()
 
     db = SessionLocal()
     try:
         db.add(
-            ObjectWatch(
-                object_type="task",
-                object_id=uniterated_task["id"],
+                ObjectWatch(
+                    object_type="task",
+                    object_id=planning_unassigned_task["id"],
                 user_id=user_id,
                 source="manual",
                 enabled=True,
             )
         )
         db.add(
-            WorkItemComment(
-                object_type="bug",
-                object_id=uniterated_bug["id"],
+                WorkItemComment(
+                    object_type="bug",
+                    object_id=planning_bug["id"],
                 author_id=user_id,
                 body="@active_scope",
                 mentioned_user_ids=[user_id],
@@ -969,10 +975,11 @@ def test_workbench_scopes_execution_to_active_iterations_and_excludes_uniterated
     assert unassigned_refs == {("task", active_unassigned_task["id"])}
     assert ("requirement", active_requirement["id"]) in created_refs
     assert ("task", planning_task["id"]) not in created_refs
-    uniterated_refs = {
-        ("requirement", uniterated_requirement["id"]),
-        ("task", uniterated_task["id"]),
-        ("bug", uniterated_bug["id"]),
+    planning_refs = {
+        ("requirement", planning_requirement["id"]),
+        ("task", planning_task["id"]),
+        ("task", planning_unassigned_task["id"]),
+        ("bug", planning_bug["id"]),
     }
     for section in (
         "pending_handling",
@@ -983,7 +990,7 @@ def test_workbench_scopes_execution_to_active_iterations_and_excludes_uniterated
         "exception_center",
     ):
         section_refs = {(item["object_type"], item["id"]) for item in data[section]["items"]}
-        assert uniterated_refs.isdisjoint(section_refs)
+        assert planning_refs.isdisjoint(section_refs)
 
 
 def test_workbench_empty_project_scope_is_not_all_projects(client: TestClient):
@@ -1122,39 +1129,41 @@ def test_workbench_uses_requirement_iteration_for_legacy_linked_task(client: Tes
     assert active_items[("task", task["id"])]["iteration_id"] == iteration_id
 
 
-def test_workbench_excludes_requirement_pool_items_even_when_pool_state_looks_active(client: TestClient):
-    user_id, token = _create_user_with_role(f"pool_scope_{uuid4().hex[:6]}", "developer")
-    project_response = client.post("/api/v1/projects", json={"name": "Pool workbench scope"})
+def test_workbench_includes_auto_created_real_iteration_items_only_after_start(client: TestClient):
+    user_id, token = _create_user_with_role(f"auto_iteration_scope_{uuid4().hex[:6]}", "developer")
+    project_response = client.post("/api/v1/projects", json={"name": "Auto iteration workbench scope"})
     assert project_response.status_code == 200
     project = project_response.json()
-    delivery_id = _create_iteration(client, project["id"], "State source")
-    _start_iteration(client, delivery_id)
+    iteration_id = client.get("/api/v1/iterations", params={"project_id": project["id"]}).json()[0]["id"]
     _add_project_member(project["id"], user_id, "developer")
     requirement = client.post(
         "/api/v1/requirements",
-        json={"project_id": project["id"], "title": "Unscheduled requirement", "owner_id": user_id},
+        json={
+            "project_id": project["id"],
+            "iteration_id": iteration_id,
+            "title": "Initially planned requirement",
+            "owner_id": user_id,
+        },
     ).json()
     task = client.post(
         "/api/v1/tasks",
-        json={"project_id": project["id"], "requirement_id": requirement["id"], "title": "Inherited pool task", "owner_id": user_id},
+        json={"project_id": project["id"], "requirement_id": requirement["id"], "title": "Inherited real iteration task", "owner_id": user_id},
+    ).json()
+    bug = client.post(
+        "/api/v1/bugs",
+        json={"project_id": project["id"], "iteration_id": iteration_id, "title": "Planned bug", "owner_id": user_id},
     ).json()
 
-    db = SessionLocal()
-    try:
-        active_state_id = db.query(Iteration.current_state_id).filter(Iteration.id == delivery_id).scalar()
-        db.query(Iteration).filter(Iteration.id == project["requirement_pool_iteration_id"]).update(
-            {"current_state_id": active_state_id}
-        )
-        db.commit()
-    finally:
-        db.close()
-
-    workbench = client.get("/api/v1/dashboard/workbench", headers={"Authorization": f"Bearer {token}"}).json()
-    visible_refs = {
+    before_start = client.get("/api/v1/dashboard/workbench", headers={"Authorization": f"Bearer {token}"}).json()
+    before_refs = {
         (item["object_type"], item["id"])
         for section in ("pending_handling", "unassigned", "created_by_me", "watched_by_me", "mentioned_me")
-        for item in workbench[section]["items"]
+        for item in before_start[section]["items"]
     }
+    expected_refs = {("requirement", requirement["id"]), ("task", task["id"]), ("bug", bug["id"])}
+    assert expected_refs.isdisjoint(before_refs)
 
-    assert ("requirement", requirement["id"]) not in visible_refs
-    assert ("task", task["id"]) not in visible_refs
+    _start_iteration(client, iteration_id)
+    after_start = client.get("/api/v1/dashboard/workbench", headers={"Authorization": f"Bearer {token}"}).json()
+    active_refs = {(item["object_type"], item["id"]) for item in after_start["active_iteration_items"]}
+    assert expected_refs <= active_refs

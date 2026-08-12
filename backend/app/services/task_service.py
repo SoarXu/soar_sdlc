@@ -30,7 +30,7 @@ from app.services.project_permission_service import (
     visible_project_ids,
 )
 from app.services.lifecycle_service import project_lifecycle_phase, requirement_lifecycle_phase
-from app.services.requirement_pool_service import resolve_project_work_item_iteration_id
+from app.services.iteration_assignment_service import resolve_work_item_iteration
 from app.services.status_operation_service import list_status_operations
 from app.services.workflow_state_service import initial_workflow_values
 from app.services.workflow_state_query_service import is_terminal_state
@@ -81,7 +81,7 @@ def create_task(db: Session, payload: TaskCreate, actor_id: int | None = None) -
         if requirement:
             data["iteration_id"] = requirement.iteration_id
     if not requirement:
-        data["iteration_id"] = resolve_project_work_item_iteration_id(
+        data["iteration_id"] = resolve_work_item_iteration(
             db, data["project_id"], data.get("iteration_id")
         )
     if primary_component_id is None and requirement:
@@ -127,7 +127,7 @@ def create_linked_task(db: Session, payload: LinkedTaskCreate, actor: User | Non
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Linked source project not found")
     if is_terminal_state(project):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Project is closed")
-    inherited_iteration_id = resolve_project_work_item_iteration_id(
+    inherited_iteration_id = resolve_work_item_iteration(
         db,
         project_id,
         None,
@@ -245,7 +245,10 @@ def update_task(db: Session, task_id: int, payload: TaskUpdate, actor_id: int | 
     data = payload.model_dump(exclude_unset=True)
     data.pop("status", None)
     target_project_id = data.get("project_id", task.project_id)
-    if "iteration_id" in data:
+    should_resolve_iteration = "iteration_id" in data or (
+        "requirement_id" in data and data.get("requirement_id") is not None
+    )
+    if should_resolve_iteration:
         target_requirement_id = data.get("requirement_id", task.requirement_id)
         source_iteration_id = None
         if target_requirement_id:
@@ -253,10 +256,10 @@ def update_task(db: Session, task_id: int, payload: TaskUpdate, actor_id: int | 
                 Requirement.id == target_requirement_id, Requirement.deleted == 0
             ).first()
             source_iteration_id = requirement.iteration_id if requirement else None
-        data["iteration_id"] = resolve_project_work_item_iteration_id(
+        data["iteration_id"] = resolve_work_item_iteration(
             db,
             target_project_id,
-            data.get("iteration_id"),
+            data.get("iteration_id") if "iteration_id" in data else None,
             source_iteration_id=source_iteration_id,
         )
     target_iteration_id = data.get("iteration_id", task.iteration_id)

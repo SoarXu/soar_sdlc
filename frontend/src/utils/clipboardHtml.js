@@ -1,15 +1,5 @@
-const unsafeTagsPattern = /<(script|style|iframe|object|embed)\b[\s\S]*?<\/\1>/gi
-const unsafeSelfClosingPattern = /<(script|style|iframe|object|embed)\b[^>]*\/?>/gi
-const eventAttributePattern = /\s+on[a-z]+\s*=\s*(".*?"|'.*?'|[^\s>]+)/gi
-const javascriptUrlPattern = /\s+(href|src)\s*=\s*(['"]?)javascript:[\s\S]*?\2/gi
-
-export function sanitizeHtml(value = '') {
-  return String(value)
-    .replace(unsafeTagsPattern, '')
-    .replace(unsafeSelfClosingPattern, '')
-    .replace(eventAttributePattern, '')
-    .replace(javascriptUrlPattern, '')
-}
+export { sanitizeHtml } from './htmlSanitizer.js'
+import { sanitizeHtml } from './htmlSanitizer.js'
 
 export function clipboardHtmlFromDataTransfer(dataTransfer) {
   if (!dataTransfer) return ''

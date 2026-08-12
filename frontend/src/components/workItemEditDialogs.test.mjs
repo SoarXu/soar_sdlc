@@ -20,12 +20,13 @@ for (const [filename, fetchName, updateName] of components) {
 }
 
 const requirementDialog = await readFile(new URL('./work-items/RequirementEditDialog.vue', import.meta.url), 'utf8')
-assert.match(requirementDialog, /fetchIterations\(\{ include_requirement_pool: true \}\)/)
+assert.match(requirementDialog, /fetchIterations\(\)/)
 assert.match(requirementDialog, /requirementIterationOptions/)
 assert.match(requirementDialog, /requirementIterationLabel/)
-assert.match(requirementDialog, /requirementPoolForProject/)
+assert.doesNotMatch(requirementDialog, /requirementPoolForProject|include_requirement_pool/)
 assert.doesNotMatch(requirementDialog, /v-model="form\.iteration_id" clearable/)
-assert.match(requirementDialog, /watch\(\(\) => form\.project_id, \(projectId\) => \{[\s\S]*?if \(loading\.value \|\| !projectId\) return[\s\S]*?form\.iteration_id = requirementPoolForProject\(selectedProject, iterations\.value\)\?\.id \?\? null/)
+assert.match(requirementDialog, /watch\(\(\) => form\.project_id, \(projectId\) => \{[\s\S]*?requirementSelectableIterations\.value\.some/)
+assert.match(requirementDialog, /!form\.iteration_id/)
 
 const viewContracts = [
   ['../views/RequirementsView.vue', 'RequirementEditDialog'],

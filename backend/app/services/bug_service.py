@@ -24,7 +24,7 @@ from app.services.lifecycle_service import (
     requirement_lifecycle_phase,
     test_case_lifecycle_phase,
 )
-from app.services.requirement_pool_service import resolve_project_work_item_iteration_id
+from app.services.iteration_assignment_service import resolve_work_item_iteration
 from app.services.status_operation_service import list_status_operations
 from app.services.task_service import linked_task_summaries
 from app.services.work_item_iteration_history_service import list_iteration_history, move_work_item_to_iteration
@@ -63,7 +63,7 @@ def create_bug(db: Session, payload: BugCreate, actor_id: int | None = None) -> 
         if not related_component_ids:
             related_component_ids = inherited_related_component_ids
     source_iteration_id = _bug_source_iteration_id(db, data.get("task_id"), data.get("requirement_id"))
-    data["iteration_id"] = resolve_project_work_item_iteration_id(
+    data["iteration_id"] = resolve_work_item_iteration(
         db,
         data["project_id"],
         data.get("iteration_id"),
@@ -116,9 +116,20 @@ def create_bug_from_test_run_case(
         if test_case.requirement_id
         else None
     )
+    iteration_id = resolve_work_item_iteration(
+        db,
+        test_run.project_id,
+        None,
+        source_iteration_id=(
+            requirement.iteration_id if requirement else (test_case.iteration_id or test_run.iteration_id)
+        ),
+    )
+    ensure_iteration_assignment_mutable(db, None, iteration_id)
+    _ensure_iteration_can_accept_bug(db, iteration_id, test_run.project_id)
     workflow_values = initial_workflow_values(db, "bug", test_run.project_id)
     bug = Bug(
         project_id=test_run.project_id,
+        iteration_id=iteration_id,
         requirement_id=test_case.requirement_id,
         test_case_id=test_case.id,
         test_run_id=test_run.id,
@@ -135,6 +146,14 @@ def create_bug_from_test_run_case(
         creator_id=actor_id,
     )
     db.add(bug)
+    db.flush()
+    move_work_item_to_iteration(
+        db,
+        bug,
+        iteration_id,
+        actor_id=actor_id,
+        reason="test_run_bug_created",
+    )
     db.commit()
     db.refresh(bug)
     return bug
@@ -151,16 +170,22 @@ def update_bug(db: Session, bug_id: int, payload: BugUpdate, actor_id: int | Non
     data.pop("verify_result", None)
     data.pop("close_reason", None)
     target_project_id = data.get("project_id", bug.project_id)
-    if "iteration_id" in data:
+    source_relation_changed = "task_id" in data or "requirement_id" in data
+    target_task_id = data.get("task_id", bug.task_id)
+    target_requirement_id = data.get("requirement_id", bug.requirement_id)
+    should_resolve_iteration = "iteration_id" in data or (
+        source_relation_changed and (target_task_id is not None or target_requirement_id is not None)
+    )
+    if should_resolve_iteration:
         source_iteration_id = _bug_source_iteration_id(
             db,
-            data.get("task_id", bug.task_id),
-            data.get("requirement_id", bug.requirement_id),
+            target_task_id,
+            target_requirement_id,
         )
-        data["iteration_id"] = resolve_project_work_item_iteration_id(
+        data["iteration_id"] = resolve_work_item_iteration(
             db,
             target_project_id,
-            data.get("iteration_id"),
+            data.get("iteration_id") if "iteration_id" in data else None,
             source_iteration_id=source_iteration_id,
         )
     target_iteration_id = data.get("iteration_id", bug.iteration_id)

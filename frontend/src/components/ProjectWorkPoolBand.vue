@@ -17,22 +17,18 @@
     </div>
     <div class="work-pool-actions">
       <el-button :icon="View" @click="emit('view', 'requirement')">查看事项</el-button>
-      <el-button v-if="canPlan && totalCount > 0" type="primary" :icon="FolderAdd" @click="emit('plan')">
-        纳入迭代
-      </el-button>
     </div>
   </section>
 </template>
 
 <script setup>
 import { computed } from 'vue'
-import { FolderAdd, View } from '@element-plus/icons-vue'
+import { View } from '@element-plus/icons-vue'
 
 const props = defineProps({
-  summary: { type: Object, default: null },
-  canPlan: { type: Boolean, default: false }
+  summary: { type: Object, default: null }
 })
-const emit = defineEmits(['view', 'plan'])
+const emit = defineEmits(['view'])
 const totalCount = computed(() => props.summary?.total_count || 0)
 </script>
 

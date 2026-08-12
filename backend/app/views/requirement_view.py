@@ -24,6 +24,7 @@ class RequirementBase(BaseModel):
 class RequirementCreate(RequirementBase):
     model_config = ConfigDict(extra="forbid")
 
+    iteration_id: int
     primary_component_id: int | None = None
     related_component_ids: list[int] = Field(default_factory=list)
 

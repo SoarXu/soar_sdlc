@@ -89,7 +89,6 @@ CREATE TABLE IF NOT EXISTS projects (
   status VARCHAR(32) NOT NULL DEFAULT 'planning' COMMENT '状态：planning、active、paused、closed',
   description TEXT NULL COMMENT '描述',
   workflow_config_id BIGINT UNSIGNED NULL COMMENT '项目级工作流配置 ID',
-  requirement_pool_iteration_id BIGINT UNSIGNED NULL COMMENT '项目唯一需求池迭代 ID',
   creator_id BIGINT UNSIGNED NULL COMMENT '创建人',
   updater_id BIGINT UNSIGNED NULL COMMENT '更新人',
   create_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
@@ -99,8 +98,7 @@ CREATE TABLE IF NOT EXISTS projects (
   KEY idx_projects_parent (parent_id),
   KEY idx_projects_program (program_id),
   KEY idx_projects_owner (owner_id),
-  KEY idx_projects_status (status),
-  UNIQUE KEY uk_projects_requirement_pool_iteration (requirement_pool_iteration_id)
+  KEY idx_projects_status (status)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='项目表';
 
 CREATE TABLE IF NOT EXISTS project_members (
@@ -123,7 +121,6 @@ CREATE TABLE IF NOT EXISTS iterations (
   id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '迭代 ID',
   project_id BIGINT UNSIGNED NOT NULL COMMENT '所属项目 ID',
   name VARCHAR(150) NOT NULL COMMENT '迭代名称',
-  is_requirement_pool TINYINT(1) NOT NULL DEFAULT 0 COMMENT '是否为项目系统需求池：1 是，0 否',
   owner_id BIGINT UNSIGNED NULL COMMENT '负责人 ID',
   start_date DATE NULL COMMENT '开始日期',
   end_date DATE NULL COMMENT '结束日期',
@@ -139,18 +136,13 @@ CREATE TABLE IF NOT EXISTS iterations (
   PRIMARY KEY (id),
   KEY idx_iterations_project (project_id),
   KEY idx_iterations_owner (owner_id),
-  KEY idx_iterations_status (status),
-  KEY idx_iterations_requirement_pool (is_requirement_pool)
+  KEY idx_iterations_status (status)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='迭代表';
-
-ALTER TABLE projects
-  ADD CONSTRAINT fk_projects_requirement_pool_iteration
-  FOREIGN KEY (requirement_pool_iteration_id) REFERENCES iterations (id) ON DELETE RESTRICT;
 
 CREATE TABLE IF NOT EXISTS requirements (
   id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '需求 ID',
   project_id BIGINT UNSIGNED NOT NULL COMMENT '所属项目 ID',
-  iteration_id BIGINT UNSIGNED NOT NULL COMMENT '所属迭代 ID；必须为项目需求池或交付迭代',
+  iteration_id BIGINT UNSIGNED NOT NULL COMMENT '所属项目未开始或进行中的真实迭代 ID',
   title VARCHAR(255) NOT NULL COMMENT '需求标题',
   requirement_type VARCHAR(64) NULL COMMENT '需求类型',
   priority VARCHAR(32) NOT NULL DEFAULT '3' COMMENT '优先级：1 最高，5 最低',

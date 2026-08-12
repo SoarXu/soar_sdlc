@@ -20,6 +20,7 @@ import {
   imageDataUrlToHtml,
   sanitizeHtml
 } from '../utils/clipboardHtml'
+import { syncRichTextEditorValue } from '../utils/richTextEditorModel'
 
 const props = defineProps({
   modelValue: { type: String, default: '' },
@@ -40,8 +41,9 @@ onMounted(() => syncEditorValue(props.modelValue))
 async function syncEditorValue(value) {
   await nextTick()
   const editor = editorRef.value
-  if (!editor || syncing || editor.innerHTML === (value || '')) return
-  editor.innerHTML = value || ''
+  if (!editor || syncing) return
+  const sanitized = syncRichTextEditorValue(editor, value)
+  if (sanitized !== (value || '')) emit('update:modelValue', sanitized)
 }
 
 function emitValue() {

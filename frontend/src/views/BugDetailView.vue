@@ -148,8 +148,8 @@
       <el-form label-position="top">
         <el-form-item label="执行时间"><el-date-picker v-model="caseExecutionForm.execute_time" type="datetime" value-format="YYYY-MM-DDTHH:mm:ss" /></el-form-item>
         <el-table :data="caseExecutionForm.steps_result_json" border>
-          <el-table-column prop="step" label="步骤" min-width="220" />
-          <el-table-column prop="expected" label="预期" min-width="220" />
+          <el-table-column label="步骤" min-width="220"><template #default="{ row }"><div class="rich-text" v-html="safeExecutionCellHtml(row.step, row.rich_content)"></div></template></el-table-column>
+          <el-table-column label="预期" min-width="220"><template #default="{ row }"><div class="rich-text" v-html="safeExecutionCellHtml(row.expected, row.rich_content)"></div></template></el-table-column>
           <el-table-column label="测试结果" width="140"><template #default="{ row }"><el-select v-model="row.result"><el-option v-for="option in executionResultOptions" :key="option.value" :label="option.label" :value="option.value" /></el-select></template></el-table-column>
           <el-table-column label="实际情况" min-width="220"><template #default="{ row }"><el-input v-model="row.actual" type="textarea" :rows="1" /></template></el-table-column>
         </el-table>
@@ -228,6 +228,7 @@ import { taskBranchLabel } from '../utils/taskBranchRules'
 import { bugIterationOptions, includeSelectedIterationOption } from '../utils/bugIterations'
 import { DEFAULT_BUG_TYPE_KEY } from '../utils/bugTypeOptions'
 import { useBugTypes } from '../utils/useBugTypes'
+import { safeExecutionCellHtml, testCaseExecutionRows } from '../utils/testCaseRichText'
 
 const route = useRoute()
 const router = useRouter()
@@ -333,14 +334,13 @@ function defaultExecutionTime() {
   const pad = (value) => String(value).padStart(2, '0')
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`
 }
-function normalizeCaseSteps(value) { return Array.isArray(value) && value.length ? value.map((item) => ({ step: item.step || '', expected: item.expected || '' })) : [{ step: '', expected: '' }] }
 function canCreateBugFromCase(row) { return ['failed', 'blocked'].includes(row.latest_result || row.last_execute_result) }
 async function openCaseExecution(row) {
   const { data } = await fetchTestCase(row.id)
   selectedCase.value = data
   caseExecutionForm.value = {
     execute_time: defaultExecutionTime(),
-    steps_result_json: normalizeCaseSteps(data.steps_json).map((item) => ({ ...item, result: 'passed', actual: '' }))
+    steps_result_json: testCaseExecutionRows(data)
   }
   caseExecutionVisible.value = true
 }

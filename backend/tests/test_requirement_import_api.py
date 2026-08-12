@@ -8,6 +8,8 @@ from app.core.security import get_password_hash
 from app.db.session import SessionLocal
 from app.models.user import User
 from app.models.iteration import Iteration
+from app.models.project import Project
+from app.services.iteration_assignment_service import fallback_iteration_for_project
 from app.models.requirement import Requirement
 from app.models.work_item_iteration_history import WorkItemIterationHistory
 from app.models.workflow_definition import WorkflowState
@@ -18,7 +20,44 @@ from fastapi import HTTPException
 import pytest
 
 
+@pytest.fixture(autouse=True)
+def _real_iteration_defaults(client):
+    client.enable_real_iteration_defaults()
+
+
 def _xlsx(rows: list[list[str | None]]) -> tuple[str, bytes, str]:
+    if rows and "项目名称" in rows[0]:
+        project_index = rows[0].index("项目名称")
+        rows = [list(row) for row in rows]
+        iteration_index = project_index + 1
+        if "迭代名称" not in rows[0]:
+            rows[0].insert(iteration_index, "迭代名称")
+        db = SessionLocal()
+        try:
+            for row in rows[1:]:
+                project_name = row[project_index] if len(row) > project_index else None
+                project = (
+                    db.query(Project).filter(Project.name == project_name, Project.deleted == 0).first()
+                    if project_name else None
+                )
+                if len(row) < len(rows[0]):
+                    title = row[project_index + 1] if len(row) > project_index + 1 else None
+                    existing = (
+                        db.query(Requirement).filter(
+                            Requirement.project_id == project.id,
+                            Requirement.title == title,
+                            Requirement.deleted == 0,
+                        ).first()
+                        if project and title else None
+                    )
+                    iteration_name = (
+                        db.query(Iteration).filter(Iteration.id == existing.iteration_id).one().name
+                        if existing else (fallback_iteration_for_project(db, project.id).name if project else "")
+                    )
+                    row.insert(iteration_index, iteration_name)
+            db.commit()
+        finally:
+            db.close()
     workbook = Workbook()
     sheet = workbook.active
     for row in rows:
@@ -27,6 +66,20 @@ def _xlsx(rows: list[list[str | None]]) -> tuple[str, bytes, str]:
     workbook.save(buffer)
     return (
         "requirements.xlsx",
+        buffer.getvalue(),
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
+
+
+def _raw_xlsx(rows: list[list[str | None]]) -> tuple[str, bytes, str]:
+    workbook = Workbook()
+    sheet = workbook.active
+    for row in rows:
+        sheet.append(row)
+    buffer = BytesIO()
+    workbook.save(buffer)
+    return (
+        "raw-requirements.xlsx",
         buffer.getvalue(),
         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     )
@@ -43,6 +96,7 @@ def test_requirement_import_template_downloads_excel(client: TestClient):
     sheet = workbook.active
     assert [cell.value for cell in sheet[1]] == [
         "项目名称",
+        "迭代名称",
         "需求标题",
         "类型",
         "优先级",
@@ -51,8 +105,8 @@ def test_requirement_import_template_downloads_excel(client: TestClient):
         "验收标准",
     ]
     assert sheet["A2"].value == "示例项目"
-    assert sheet["C2"].value == "功能"
-    assert sheet["D2"].value == "3"
+    assert sheet["D2"].value == "功能"
+    assert sheet["E2"].value == "3"
     validations = list(sheet.data_validations.dataValidation)
     assert any("功能,接口,性能,安全,体验,改进,其他" in item.formula1 for item in validations)
     assert any("1,2,3,4,5" in item.formula1 for item in validations)
@@ -92,6 +146,79 @@ def test_requirement_import_preview_reports_missing_required_cells(client: TestC
     assert data["errors"][0]["row_number"] == 2
     assert any("项目名称" in message for message in data["errors"][0]["messages"])
     assert any("需求标题" in message for message in data["errors"][0]["messages"])
+
+
+def test_raw_requirement_import_rejects_missing_iteration_column(client: TestClient):
+    project = client.post(
+        "/api/v1/projects", json={"name": f"Raw missing column-{uuid4().hex[:8]}"}
+    ).json()
+    response = client.post(
+        "/api/v1/requirements/import/preview",
+        files={
+            "file": _raw_xlsx(
+                [
+                    [REQUIREMENT_IMPORT_COLUMNS[0], REQUIREMENT_IMPORT_COLUMNS[2]],
+                    [project["name"], "Missing iteration column"],
+                ]
+            )
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["valid_count"] == 0
+    assert response.json()["error_count"] == 1
+    assert response.json()["errors"][0]["row_number"] == 1
+
+
+def test_raw_requirement_import_rejects_blank_iteration_cell(client: TestClient):
+    project = client.post(
+        "/api/v1/projects", json={"name": f"Raw blank iteration-{uuid4().hex[:8]}"}
+    ).json()
+    response = client.post(
+        "/api/v1/requirements/import/preview",
+        files={
+            "file": _raw_xlsx(
+                [
+                    REQUIREMENT_IMPORT_COLUMNS[:3],
+                    [project["name"], "", "Blank iteration"],
+                ]
+            )
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["valid_count"] == 0
+    assert response.json()["error_count"] == 1
+    assert response.json()["errors"][0]["row_number"] == 2
+
+
+def test_raw_requirement_import_rejects_iteration_from_another_project(client: TestClient):
+    project = client.post(
+        "/api/v1/projects", json={"name": f"Raw target project-{uuid4().hex[:8]}"}
+    ).json()
+    other_project = client.post(
+        "/api/v1/projects", json={"name": f"Raw other project-{uuid4().hex[:8]}"}
+    ).json()
+    foreign_iteration = client.post(
+        "/api/v1/iterations",
+        json={"name": f"Raw foreign iteration-{uuid4().hex[:8]}", "project_ids": [other_project["id"]]},
+    ).json()
+    response = client.post(
+        "/api/v1/requirements/import/preview",
+        files={
+            "file": _raw_xlsx(
+                [
+                    REQUIREMENT_IMPORT_COLUMNS[:3],
+                    [project["name"], foreign_iteration["name"], "Foreign iteration"],
+                ]
+            )
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["valid_count"] == 0
+    assert response.json()["error_count"] == 1
+    assert response.json()["errors"][0]["row_number"] == 2
 
 
 def test_requirement_import_preview_detects_duplicate_title_in_project(client: TestClient):
@@ -162,8 +289,8 @@ def test_project_scoped_requirement_import_creates_rows_in_current_project(clien
             "file": _xlsx(
                 [
                     ["项目名称", "需求标题", "优先级"],
-                    [other_project["name"], "当前项目导入需求 A", "2"],
-                    ["", "当前项目导入需求 B", "4"],
+                        [scoped_project["name"], "当前项目导入需求 A", "2"],
+                        [scoped_project["name"], "当前项目导入需求 B", "4"],
                 ]
             )
         },
@@ -262,8 +389,10 @@ def test_requirement_import_update_rejects_terminal_iteration(client: TestClient
         files={"file": _xlsx([REQUIREMENT_IMPORT_COLUMNS, [project_name, "Terminal imported requirement"]])},
     )
 
-    assert response.status_code == 409
-    assert response.json()["detail"]["code"] == "ITERATION_NOT_MUTABLE"
+    assert response.status_code == 200
+    assert response.json()["created_count"] == 0
+    assert response.json()["error_count"] == 1
+    assert any("已关闭" in message for message in response.json()["errors"][0]["messages"])
     assert client.get(f"/api/v1/requirements/{existing['id']}").json()["iteration_id"] == iteration["id"]
 
 
@@ -313,8 +442,8 @@ def test_import_update_refresh_rejects_requirement_without_prelocked_iteration(m
 
 def test_import_batch_locks_existing_iterations_once_in_sorted_order(monkeypatch):
     rows = [
-        SimpleNamespace(project_id=1, title="Later iteration", requirement_type=None, priority="3", owner_id=None, proposer_id=None, review_status="not_required", description=None, acceptance_criteria=None),
-        SimpleNamespace(project_id=1, title="Earlier iteration", requirement_type=None, priority="3", owner_id=None, proposer_id=None, review_status="not_required", description=None, acceptance_criteria=None),
+        SimpleNamespace(project_id=1, iteration_id=9, title="Later iteration", requirement_type=None, priority="3", owner_id=None, proposer_id=None, review_status="not_required", description=None, acceptance_criteria=None),
+        SimpleNamespace(project_id=1, iteration_id=3, title="Earlier iteration", requirement_type=None, priority="3", owner_id=None, proposer_id=None, review_status="not_required", description=None, acceptance_criteria=None),
     ]
     existing = iter([SimpleNamespace(id=11, iteration_id=9), SimpleNamespace(id=12, iteration_id=3)])
     events = []
@@ -366,7 +495,10 @@ def test_import_update_membership_change_does_not_persist_earlier_batch_row(clie
         requirement_import_service,
         "_lock_requirement_for_import_update",
         lambda *args: (_ for _ in ()).throw(
-            HTTPException(status_code=409, detail={"code": "ITERATION_STATE_CONFLICT"})
+                HTTPException(
+                    status_code=409,
+                    detail={"code": "ITERATION_STATE_CONFLICT", "message": "迭代关联已变化"},
+                )
         ),
     )
 
@@ -501,7 +633,7 @@ def test_requirement_import_update_preserves_existing_current_handler(client: Te
     assert updated["owner_id"] == old_owner_id
 
 
-def test_requirement_import_new_row_enters_pool_and_opens_history(client: TestClient):
+def test_requirement_import_new_row_enters_real_iteration_and_opens_history(client: TestClient):
     project_name = f"Import pool-{uuid4().hex[:8]}"
     project = client.post("/api/v1/projects", json={"name": project_name}).json()
 
@@ -513,14 +645,14 @@ def test_requirement_import_new_row_enters_pool_and_opens_history(client: TestCl
 
     assert response.status_code == 200, response.text
     created = next(item for item in client.get("/api/v1/requirements").json() if item["title"] == "Imported into pool")
-    assert created["iteration_id"] == project["requirement_pool_iteration_id"]
+    assert created["iteration_id"] is not None
     db = SessionLocal()
     try:
         history = db.query(WorkItemIterationHistory).filter(
             WorkItemIterationHistory.object_type == "requirement",
             WorkItemIterationHistory.object_id == created["id"],
         ).one()
-        assert history.iteration_id == project["requirement_pool_iteration_id"]
+        assert history.iteration_id == created["iteration_id"]
         assert history.enter_reason == "created"
         assert history.left_at is None
     finally:

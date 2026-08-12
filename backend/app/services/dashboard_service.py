@@ -388,7 +388,6 @@ def _terminal_iteration_open_item_refs(
 
     terminal_iteration_ids = select(Iteration.id).where(
         Iteration.deleted == 0,
-        Iteration.is_requirement_pool.is_(False),
         terminal_state_clause(Iteration),
     )
     refs = []
@@ -502,7 +501,6 @@ def _active_iteration_ids(db: Session) -> set[int]:
             )
             .filter(
                 Iteration.deleted == 0,
-                Iteration.is_requirement_pool.is_(False),
                 WorkflowTransition.enabled.is_(True),
                 WorkflowTransition.action_key.in_(("complete", "cancel")),
             )
@@ -519,7 +517,6 @@ def _in_progress_iteration_ids(db: Session) -> set[int]:
         .join(WorkflowState, WorkflowState.id == Iteration.current_state_id)
         .filter(
             Iteration.deleted == 0,
-            Iteration.is_requirement_pool.is_(False),
             WorkflowState.category == "in_progress",
         )
         .all()
@@ -535,7 +532,6 @@ def _in_progress_iteration_ids(db: Session) -> set[int]:
         )
         .filter(
             Iteration.deleted == 0,
-            Iteration.is_requirement_pool.is_(False),
             WorkflowState.category == "normal",
             WorkflowTransition.action_key == "start",
             WorkflowTransition.enabled.is_(True),

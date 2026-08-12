@@ -31,6 +31,8 @@ class WorkbenchItem(BaseModel):
     last_execute_time: str | None = None
     last_execute_result: str | None = None
     steps_json: dict | list | None = None
+    steps_content: str | None = None
+    expected_result: str | None = None
     requirement_id: int | None = None
     task_id: int | None = None
     test_case_id: int | None = None

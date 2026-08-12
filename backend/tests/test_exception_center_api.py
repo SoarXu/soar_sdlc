@@ -66,6 +66,14 @@ def _add_member(project_id: int, user_id: int, role: str = "developer") -> None:
         db.close()
 
 
+def _project_iteration_id(client: TestClient, project_id: int) -> int:
+    response = client.get("/api/v1/iterations", params={"project_id": project_id})
+    assert response.status_code == 200, response.text
+    iterations = response.json()
+    assert iterations
+    return iterations[0]["id"]
+
+
 def _target_state_id(db, definition_id: int, action_key: str) -> int:
     state_id = db.query(WorkflowTransition.to_state_id).filter(
         WorkflowTransition.definition_id == definition_id,
@@ -145,10 +153,13 @@ def test_exception_scan_filters_work_items_in_sql_and_query_count_is_batch_bound
 
 def test_latest_state_entry_time_matches_state_id_not_legacy_status(client: TestClient):
     project = client.post("/api/v1/projects", json={"name": f"State Time Project {uuid4().hex[:8]}"}).json()
-    requirement = client.post(
+    iteration_id = _project_iteration_id(client, project["id"])
+    requirement_response = client.post(
         "/api/v1/requirements",
-        json={"project_id": project["id"], "title": "State time requirement"},
-    ).json()
+        json={"project_id": project["id"], "iteration_id": iteration_id, "title": "State time requirement"},
+    )
+    assert requirement_response.status_code == 200, requirement_response.text
+    requirement = requirement_response.json()
     entered_at = datetime(2026, 7, 12, 9, 30, 0)
     fallback = datetime(2026, 7, 1, 8, 0, 0)
 
@@ -209,12 +220,20 @@ def test_exception_center_covers_eight_types_and_uses_latest_state_entry_time(cl
     now = datetime(2026, 7, 13, 12, 0, 0)
     user_id, _ = _create_user()
     project = client.post("/api/v1/projects", json={"name": f"Exception Project {uuid4().hex[:8]}"}).json()
+    iteration_id = _project_iteration_id(client, project["id"])
     _add_member(project["id"], user_id)
 
-    requirement = client.post(
+    requirement_response = client.post(
         "/api/v1/requirements",
-        json={"project_id": project["id"], "title": "Unassigned exception", "priority": "3"},
-    ).json()
+        json={
+            "project_id": project["id"],
+            "iteration_id": iteration_id,
+            "title": "Unassigned exception",
+            "priority": "3",
+        },
+    )
+    assert requirement_response.status_code == 200, requirement_response.text
+    requirement = requirement_response.json()
     task = client.post(
         "/api/v1/tasks",
         json={"project_id": project["id"], "title": "Processing exception", "owner_id": user_id},
@@ -317,10 +336,13 @@ def test_exception_center_covers_eight_types_and_uses_latest_state_entry_time(cl
 def test_completed_requirement_with_active_bug_is_reported_without_reopening(client: TestClient):
     now = datetime(2026, 7, 13, 12, 0, 0)
     project = client.post("/api/v1/projects", json={"name": f"Completed Requirement Project {uuid4().hex[:8]}"}).json()
-    requirement = client.post(
+    iteration_id = _project_iteration_id(client, project["id"])
+    requirement_response = client.post(
         "/api/v1/requirements",
-        json={"project_id": project["id"], "title": "Completed parent"},
-    ).json()
+        json={"project_id": project["id"], "iteration_id": iteration_id, "title": "Completed parent"},
+    )
+    assert requirement_response.status_code == 200, requirement_response.text
+    requirement = requirement_response.json()
     bug = client.post(
         "/api/v1/bugs",
         json={"project_id": project["id"], "requirement_id": requirement["id"], "title": "Active child bug"},
@@ -346,6 +368,7 @@ def test_completed_requirement_with_active_bug_is_reported_without_reopening(cli
 
 def test_exception_center_reports_integrity_and_routing_violations_without_flagging_normal_backlog(client: TestClient):
     project = client.post("/api/v1/projects", json={"name": f"Integrity Project {uuid4().hex[:8]}"}).json()
+    auto_iteration_id = _project_iteration_id(client, project["id"])
     owner_id, _ = _create_user()
     _add_member(project["id"], owner_id)
     iteration = client.post(
@@ -368,10 +391,16 @@ def test_exception_center_reports_integrity_and_routing_violations_without_flagg
         "/api/v1/bugs",
         json={"project_id": project["id"], "title": "Unaudited reopen"},
     ).json()
-    normal_backlog = client.post(
+    normal_backlog_response = client.post(
         "/api/v1/requirements",
-        json={"project_id": project["id"], "title": "Normal unplanned backlog"},
-    ).json()
+        json={
+            "project_id": project["id"],
+            "iteration_id": auto_iteration_id,
+            "title": "Normal unplanned backlog",
+        },
+    )
+    assert normal_backlog_response.status_code == 200, normal_backlog_response.text
+    normal_backlog = normal_backlog_response.json()
 
     db = SessionLocal()
     try:

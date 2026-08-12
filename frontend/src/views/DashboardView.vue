@@ -78,7 +78,7 @@
         <el-empty v-if="!filteredListItems.length" class="workbench-section-empty" description="暂无符合筛选条件的工作项" />
 
         <div v-else class="workbench-list-table">
-          <el-table ref="workbenchTable" :data="filteredListItems" border stripe :row-class-name="workbenchRowClassName" @selection-change="onWorkbenchSelectionChange">
+          <el-table ref="workbenchTable" :data="pagedListItems" height="100%" border stripe :row-class-name="workbenchRowClassName" @selection-change="onWorkbenchSelectionChange">
             <el-table-column type="selection" width="48" :selectable="canSelectWorkbenchItemForBatchAssignment" />
             <el-table-column prop="id" label="ID" width="90" />
             <el-table-column label="类型" width="100">
@@ -167,6 +167,17 @@
             />
           </div>
         </div>
+        <footer class="workbench-pagination-footer">
+          <el-pagination
+            v-model:current-page="currentPage"
+            v-model:page-size="pageSize"
+            :page-sizes="[10, 20, 50, 100]"
+            :total="pagedListPage.total"
+            layout="total, sizes, prev, pager, next, jumper"
+            @current-change="handleWorkbenchCurrentPageChange"
+            @size-change="handleWorkbenchPageSizeChange"
+          />
+        </footer>
       </section>
     </div>
 
@@ -176,8 +187,8 @@
           <el-date-picker v-model="caseExecutionForm.execute_time" type="datetime" value-format="YYYY-MM-DDTHH:mm:ss" />
         </el-form-item>
         <el-table :data="caseExecutionForm.steps_result_json" border>
-          <el-table-column prop="step" label="步骤" min-width="180" />
-          <el-table-column prop="expected" label="预期" min-width="180" />
+          <el-table-column label="步骤" min-width="180"><template #default="{ row }"><div class="rich-text" v-html="safeExecutionCellHtml(row.step, row.rich_content)"></div></template></el-table-column>
+          <el-table-column label="预期" min-width="180"><template #default="{ row }"><div class="rich-text" v-html="safeExecutionCellHtml(row.expected, row.rich_content)"></div></template></el-table-column>
           <el-table-column label="测试结果" width="140">
             <template #default="{ row }">
               <el-select v-model="row.result">
@@ -268,6 +279,7 @@ import {
   isTerminalWorkItem,
   itemStatusLabel,
   itemStatusTag,
+  paginateWorkbenchItems,
   shouldShowWorkbenchWorkflowActions,
   sortWorkbenchItems,
   typeLabel,
@@ -277,6 +289,7 @@ import {
 import { DEFAULT_BUG_TYPE_KEY } from '../utils/bugTypeOptions'
 import { useBugTypes } from '../utils/useBugTypes'
 import { canSelectForBatchAssignment } from '../utils/batchAssignmentSelection'
+import { safeExecutionCellHtml, testCaseExecutionRows } from '../utils/testCaseRichText'
 
 const router = useRouter()
 const loading = ref(false)
@@ -294,6 +307,8 @@ const stateFilter = ref([])
 const priorityFilter = ref([])
 const ownerFilter = ref([])
 const handlerFilter = ref([])
+const currentPage = ref(1)
+const pageSize = ref(20)
 const selectedCase = ref(null)
 const caseExecutionVisible = ref(false)
 const caseBugVisible = ref(false)
@@ -328,6 +343,8 @@ const priorityLevelOptions = [
 const activeIterationItems = computed(() => workbenchData.value.active_iteration_items || [])
 const filterOptions = computed(() => buildWorkbenchFilterOptions(activeIterationItems.value, users.value))
 const filteredListItems = computed(() => sortWorkbenchItems(filterWorkbenchItems(activeIterationItems.value, activeFilters.value)))
+const pagedListPage = computed(() => paginateWorkbenchItems(filteredListItems.value, currentPage.value, pageSize.value))
+const pagedListItems = computed(() => pagedListPage.value.items)
 const workflowOperationWidth = computed(() => workflowActionColumnWidth(
   filteredListItems.value.map((row) => workflowTransitionsFor(row)),
   { minWidth: 180, extraWidth: 90 }
@@ -398,6 +415,22 @@ function clearWorkbenchSelection() {
   workbenchTable.value?.clearSelection()
 }
 
+function resetWorkbenchPagination() {
+  clearWorkbenchSelection()
+  currentPage.value = 1
+}
+
+function handleWorkbenchCurrentPageChange(page) {
+  clearWorkbenchSelection()
+  currentPage.value = page
+}
+
+function handleWorkbenchPageSizeChange(size) {
+  clearWorkbenchSelection()
+  pageSize.value = size
+  currentPage.value = 1
+}
+
 async function onWorkbenchBatchAssignmentCompleted() {
   clearWorkbenchSelection()
   await loadWorkbench()
@@ -429,12 +462,6 @@ function defaultExecutionTime() {
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`
 }
 
-function normalizeCaseSteps(value) {
-  return Array.isArray(value) && value.length
-    ? value.map((item) => ({ step: item.step || '', expected: item.expected || '' }))
-    : [{ step: '', expected: '' }]
-}
-
 function runItemAction(item, action) {
   if (!action) return
   const handlers = {
@@ -459,10 +486,9 @@ async function handleEditorSaved() {
 
 function openCaseExecution(item) {
   selectedCase.value = item
-  const steps = normalizeCaseSteps(item.steps_json)
   Object.assign(caseExecutionForm, {
     execute_time: defaultExecutionTime(),
-    steps_result_json: steps.map((step) => ({ step: step.step, expected: step.expected, result: 'passed', actual: '' }))
+    steps_result_json: testCaseExecutionRows(item)
   })
   caseExecutionVisible.value = true
 }
@@ -577,7 +603,12 @@ watch([
   priorityFilter,
   ownerFilter,
   handlerFilter
-], clearWorkbenchSelection, { deep: true })
+], resetWorkbenchPagination, { deep: true })
+watch(() => pagedListPage.value.page, (correctedPage) => {
+  if (currentPage.value === correctedPage) return
+  clearWorkbenchSelection()
+  currentPage.value = correctedPage
+})
 </script>
 
 <style scoped>
@@ -601,9 +632,8 @@ watch([
 }
 
 .workbench-batch-assignment-footer {
-  position: sticky;
-  bottom: 0;
-  z-index: 3;
+  position: static;
+  flex: 0 0 auto;
   min-height: 48px;
   padding: 0 12px 8px;
   border-top: 1px solid var(--el-border-color-lighter);

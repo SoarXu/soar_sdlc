@@ -10,6 +10,7 @@ from app.models.assignee_rule_config import AssigneeRuleConfig
 from app.models.bug import Attachment, Bug, ObjectTag, Tag
 from app.models.bug_type import BugType
 from app.models.exception_rule import ExceptionRule
+from app.models.devops import WorkItemReviewRound
 from app.models.field_registry import CustomFieldValue, FormFieldRegistry, FormLayoutConfig
 from app.models.integration_mapping import ExternalIntegrationMapping
 from app.models.iteration import Iteration, IterationProject
@@ -78,4 +79,5 @@ __all__ = [
     "WorkflowState",
     "WorkflowTransition",
     "WorkItemComponent",
+    "WorkItemReviewRound",
 ]

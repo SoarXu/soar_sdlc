@@ -58,7 +58,7 @@ FORM_FIELD_KEYS = {
     "field", "label", "type", "required", "options", "dictionary", "placeholder", "min", "max",
 }
 ROUTING_MODES = {"automatic", "manual_allowed", "automatic_with_override"}
-AUTOMATION_TYPES = {"notification"}
+AUTOMATION_TYPES = {"notification", "system_action"}
 NOTIFICATION_RECEIVERS = {"actor", "current_handler", "next_handler", "creator", "project_owner"}
 DIAGRAM_SIDES = {"top", "right", "bottom", "left"}
 MAX_DIAGRAM_WAYPOINTS = 32
@@ -628,6 +628,8 @@ def _validate_automation_config(config: dict | list | None, label: str) -> None:
     for item in entries:
         if not isinstance(item, dict) or item.get("type") not in AUTOMATION_TYPES:
             raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=f"Unsupported {label} type")
+        if item.get("type") == "system_action":
+            continue
         if item.get("receiver") not in NOTIFICATION_RECEIVERS or not str(item.get("title") or "").strip():
             raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=f"Invalid {label} notification")
 

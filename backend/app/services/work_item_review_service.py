@@ -1,0 +1,200 @@
+from datetime import datetime
+
+from fastapi import HTTPException, status
+from sqlalchemy.orm import Session
+
+from app.models.bug import Bug
+from app.models.devops import DevopsCommit, WorkItemReviewRound
+from app.models.requirement import Requirement
+from app.models.role import Role, UserRole
+from app.models.task import Task
+from app.models.user import User
+from app.models.workflow_definition import WorkflowTransition
+from app.services import workflow_runtime_service
+from app.views.workflow_runtime_view import WorkflowTransitionExecuteRequest
+
+
+MODEL_BY_TYPE = {"requirement": Requirement, "task": Task, "bug": Bug}
+DEVELOPMENT_STATE_NAMES = {"处理中", "修复中"}
+
+
+def trigger_linked_work_item_reviews(
+    db: Session,
+    commit: DevopsCommit,
+    links: list[dict[str, int | str]],
+) -> list[WorkItemReviewRound]:
+    result = []
+    for link in links:
+        object_type = str(link["object_type"])
+        object_id = int(link["object_id"])
+        item = _get_item(db, object_type, object_id)
+        if not item:
+            continue
+        active_round = _active_round(db, object_type, object_id)
+        if active_round:
+            active_round.latest_commit_id = commit.id
+            result.append(active_round)
+            continue
+        transition = _submit_review_transition(db, item)
+        if not transition:
+            continue
+        reviewer_id = _development_lead_user_id(db)
+        if reviewer_id is None:
+            continue
+        actor = _transition_actor(db, item)
+        if actor is None:
+            continue
+        workflow_runtime_service._execute_transition(
+            db,
+            object_type,
+            item,
+            WorkflowTransitionExecuteRequest(transition_id=transition.id),
+            actor,
+            commit=False,
+            allow_system_action=True,
+        )
+        review_round = WorkItemReviewRound(
+            object_type=object_type,
+            object_id=object_id,
+            latest_commit_id=commit.id,
+            reviewer_id=reviewer_id,
+            status="open",
+            active_key="open",
+        )
+        db.add(review_round)
+        db.flush()
+        result.append(review_round)
+    return result
+
+
+def decide_review_round(
+    db: Session,
+    review_round_id: int,
+    decision: str,
+    remark: str | None,
+    actor: User | None,
+) -> WorkItemReviewRound:
+    review_round = db.query(WorkItemReviewRound).filter(WorkItemReviewRound.id == review_round_id).with_for_update().first()
+    if not review_round:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Work item review round not found")
+    if review_round.status != "open":
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Work item review round is already decided")
+    if not actor or actor.id != review_round.reviewer_id or not _is_development_lead(db, actor.id):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only the assigned development lead can decide this review")
+    if decision not in {"approve", "reject"}:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Unsupported review decision")
+    if decision == "reject" and not (remark or "").strip():
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Review rejection remark is required")
+
+    item = _get_item(db, review_round.object_type, review_round.object_id)
+    if not item:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Reviewed work item not found")
+    action_key = "approve_review" if decision == "approve" else "reject_review"
+    transition = (
+        db.query(WorkflowTransition)
+        .filter(
+            WorkflowTransition.definition_id == item.workflow_definition_id,
+            WorkflowTransition.from_state_id == item.current_state_id,
+            WorkflowTransition.action_key == action_key,
+            WorkflowTransition.enabled.is_(True),
+        )
+        .first()
+    )
+    if not transition:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Review workflow transition is unavailable")
+    workflow_runtime_service._execute_transition(
+        db,
+        review_round.object_type,
+        item,
+        WorkflowTransitionExecuteRequest(transition_id=transition.id, payload={"reason": remark} if remark else {}),
+        actor,
+        commit=False,
+    )
+    review_round.status = "approved" if decision == "approve" else "rejected"
+    review_round.active_key = None
+    review_round.decision_by_id = actor.id
+    review_round.decision_at = datetime.now()
+    review_round.remark = remark
+    db.commit()
+    db.refresh(review_round)
+    return review_round
+
+
+def list_open_review_rounds(db: Session, reviewer_id: int) -> list[WorkItemReviewRound]:
+    return (
+        db.query(WorkItemReviewRound)
+        .filter(
+            WorkItemReviewRound.reviewer_id == reviewer_id,
+            WorkItemReviewRound.status == "open",
+        )
+        .order_by(WorkItemReviewRound.update_time.desc(), WorkItemReviewRound.id.desc())
+        .all()
+    )
+
+
+def _get_item(db: Session, object_type: str, object_id: int):
+    model = MODEL_BY_TYPE.get(object_type)
+    if not model:
+        return None
+    return db.query(model).filter(model.id == object_id, model.deleted == 0).with_for_update().first()
+
+
+def _active_round(db: Session, object_type: str, object_id: int) -> WorkItemReviewRound | None:
+    return (
+        db.query(WorkItemReviewRound)
+        .filter(
+            WorkItemReviewRound.object_type == object_type,
+            WorkItemReviewRound.object_id == object_id,
+            WorkItemReviewRound.status == "open",
+        )
+        .with_for_update()
+        .first()
+    )
+
+
+def _submit_review_transition(db: Session, item) -> WorkflowTransition | None:
+    transition = (
+        db.query(WorkflowTransition)
+        .filter(
+            WorkflowTransition.definition_id == item.workflow_definition_id,
+            WorkflowTransition.from_state_id == item.current_state_id,
+            WorkflowTransition.action_key == "submit_review",
+            WorkflowTransition.enabled.is_(True),
+        )
+        .first()
+    )
+    return transition
+
+
+def _transition_actor(db: Session, item) -> User | None:
+    owner_id = getattr(item, "owner_id", None)
+    if not owner_id:
+        return None
+    return db.query(User).filter(User.id == owner_id, User.deleted == 0, User.is_active.is_(True)).first()
+
+
+def _development_lead_user_id(db: Session) -> int | None:
+    row = (
+        db.query(User.id)
+        .join(UserRole, UserRole.user_id == User.id)
+        .join(Role, Role.id == UserRole.role_id)
+        .filter(
+            User.deleted == 0,
+            User.is_active.is_(True),
+            Role.enabled.is_(True),
+            Role.role_key == "development_lead",
+        )
+        .order_by(User.id.asc())
+        .first()
+    )
+    return row.id if row else None
+
+
+def _is_development_lead(db: Session, user_id: int) -> bool:
+    return (
+        db.query(UserRole.id)
+        .join(Role, Role.id == UserRole.role_id)
+        .filter(UserRole.user_id == user_id, Role.role_key == "development_lead", Role.enabled.is_(True))
+        .first()
+        is not None
+    )

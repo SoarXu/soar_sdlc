@@ -28,6 +28,7 @@ def initial_workflow_values(
 def initial_system_workflow_values(db: Session, object_type: str) -> dict:
     if object_type not in SYSTEM_OBJECT_TYPES:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unsupported system workflow object type")
+    ensure_default_workflow_templates(db)
     definition_query = (
         db.query(WorkflowDefinition)
         .filter(
@@ -71,6 +72,7 @@ def resolve_effective_workflow(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unsupported workflow object type")
     if not project_id:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Project is required for workflow")
+    ensure_default_workflow_templates(db)
     project = db.query(Project).filter(Project.id == project_id, Project.deleted == 0).first()
     if not project:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")

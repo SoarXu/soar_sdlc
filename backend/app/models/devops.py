@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import BigInteger, DateTime, Integer, JSON, String, Text, UniqueConstraint, text
+from sqlalchemy import BigInteger, DateTime, Index, Integer, JSON, String, Text, UniqueConstraint, text
 from sqlalchemy.dialects.mysql import MEDIUMTEXT
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -131,6 +131,32 @@ class DevopsCodeReviewTask(Base):
         server_onupdate=text("CURRENT_TIMESTAMP"),
     )
     finish_time: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+
+class WorkItemReviewRound(Base):
+    __tablename__ = "work_item_review_rounds"
+    __table_args__ = (
+        UniqueConstraint("object_type", "object_id", "active_key", name="uk_work_item_review_round_active"),
+        Index("ix_work_item_review_round_reviewer_status", "reviewer_id", "status"),
+        Index("ix_work_item_review_round_object_status", "object_type", "object_id", "status"),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    object_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    object_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    latest_commit_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    reviewer_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    status: Mapped[str] = mapped_column(String(32), default="open", nullable=False)
+    active_key: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    decision_by_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    decision_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    remark: Mapped[str | None] = mapped_column(Text, nullable=True)
+    create_time: Mapped[datetime] = mapped_column(DateTime, server_default=text("CURRENT_TIMESTAMP"))
+    update_time: Mapped[datetime] = mapped_column(
+        DateTime,
+        server_default=text("CURRENT_TIMESTAMP"),
+        server_onupdate=text("CURRENT_TIMESTAMP"),
+    )
 
 
 class DevopsJenkinsBuild(Base):

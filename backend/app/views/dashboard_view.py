@@ -77,5 +77,6 @@ class WorkbenchResponse(BaseModel):
     exception_center: WorkbenchSection = Field(default_factory=lambda: WorkbenchSection(label="异常中心"))
     owners: list[dict] = Field(default_factory=list)
     review_tasks: list[dict] = Field(default_factory=list)
+    work_item_reviews: list[dict] = Field(default_factory=list)
     role_keys: list[str] = Field(default_factory=list)
     view_mode: str = "all"

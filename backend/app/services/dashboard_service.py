@@ -4,7 +4,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.models.bug import Bug
-from app.models.devops import DevopsCodeReviewTask, DevopsCommit, DevopsCommitLink
+from app.models.devops import DevopsCodeReviewTask, DevopsCommit, DevopsCommitLink, WorkItemReviewRound
 from app.models.iteration import Iteration
 from app.models.object_watch import ObjectWatch
 from app.models.program import Program
@@ -83,6 +83,7 @@ def get_workbench(db: Session, user_id: int | None = None) -> WorkbenchResponse:
         db, projects, iteration_names, project_scope_ids, active_iteration_ids
     )
     review_tasks = _filter_review_tasks_for_role(_review_tasks(db), user_id, view_mode)
+    work_item_reviews = _work_item_reviews(db, user_id)
     owner_ids = {
         item.owner_id
         for section in [
@@ -101,6 +102,7 @@ def get_workbench(db: Session, user_id: int | None = None) -> WorkbenchResponse:
     }
     owner_ids.update(item.mentioned_comment_author_id for item in mentioned_items if item.mentioned_comment_author_id)
     owner_ids.update(item.get("owner_id") for item in review_tasks if item.get("owner_id"))
+    owner_ids.update(item.get("reviewer_id") for item in work_item_reviews if item.get("reviewer_id"))
     owners = [
         {"id": user.id, "full_name": user.full_name}
         for user in db.query(User).filter(User.deleted == 0, User.id.in_(owner_ids)).order_by(User.full_name.asc()).all()
@@ -117,6 +119,7 @@ def get_workbench(db: Session, user_id: int | None = None) -> WorkbenchResponse:
         exception_center=WorkbenchSection(label="异常中心", items=exception_items, total=len(exception_items)),
         owners=owners,
         review_tasks=review_tasks,
+        work_item_reviews=work_item_reviews,
         role_keys=role_keys,
         view_mode=view_mode,
     )
@@ -583,6 +586,39 @@ def _review_tasks(db: Session) -> list[dict]:
             "links": links.get(task.commit_id, []),
         })
     return result
+
+
+def _work_item_reviews(db: Session, user_id: int | None) -> list[dict]:
+    if not user_id:
+        return []
+    rounds = (
+        db.query(WorkItemReviewRound)
+        .filter(WorkItemReviewRound.reviewer_id == user_id, WorkItemReviewRound.status == "open")
+        .order_by(WorkItemReviewRound.update_time.desc(), WorkItemReviewRound.id.desc())
+        .all()
+    )
+    commit_ids = [item.latest_commit_id for item in rounds]
+    commits = {
+        item.id: item
+        for item in db.query(DevopsCommit).filter(DevopsCommit.id.in_(commit_ids), DevopsCommit.deleted == 0).all()
+    } if commit_ids else {}
+    return [
+        {
+            "id": item.id,
+            "object_type": item.object_type,
+            "object_id": item.object_id,
+            "latest_commit_id": item.latest_commit_id,
+            "reviewer_id": item.reviewer_id,
+            "status": item.status,
+            "create_time": _datetime_value(item.create_time),
+            "update_time": _datetime_value(item.update_time),
+            "commit_sha": commits[item.latest_commit_id].commit_sha if item.latest_commit_id in commits else None,
+            "short_sha": commits[item.latest_commit_id].short_sha if item.latest_commit_id in commits else None,
+        }
+        for item in rounds
+    ]
+
+
 def _requirement_item(item: Requirement, projects: dict[int, Project], iteration_names: dict[int, str]) -> WorkbenchItem:
     return WorkbenchItem(
         id=item.id,

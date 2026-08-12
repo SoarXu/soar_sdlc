@@ -19,6 +19,7 @@ from app.models.role import Role, UserRole
 from app.models.task import Task
 from app.models.user import User
 from app.services.project_team_service import default_tech_lead_id
+from app.services.work_item_review_service import trigger_linked_work_item_reviews
 from app.views.devops_view import (
     DevopsCommitIngest,
     DevopsJenkinsBuildCreate,
@@ -210,6 +211,7 @@ def ingest_commit(db: Session, payload: DevopsCommitIngest) -> DevopsCommit:
     for link in links:
         _ensure_commit_link(db, commit.id, link["object_type"], link["object_id"])
     _ensure_review_task(db, commit, links)
+    trigger_linked_work_item_reviews(db, commit, links)
     db.commit()
     db.refresh(commit)
     return commit

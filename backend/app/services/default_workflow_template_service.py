@@ -35,6 +35,8 @@ def ensure_default_workflow_templates(db: Session) -> list[WorkflowDefinition]:
             db.add(definition)
             db.flush()
             _create_graph(db, definition, spec["graph"])
+        else:
+            reconcile_review_subgraph(db, definition)
         definitions.append(definition)
     db.commit()
     for definition in definitions:
@@ -97,6 +99,82 @@ def _create_graph(db: Session, definition: WorkflowDefinition, graph: WorkflowGr
     definition.initial_state_id = state_by_ref[initial.ref].id if initial else None
 
 
+def reconcile_review_subgraph(db: Session, definition: WorkflowDefinition) -> None:
+    """Append the Git review gate to a recognized default graph without replacing it."""
+    specification = {
+        "requirement": ("complete", "in_processing", "completed"),
+        "task": ("submit_confirmation", "in_processing", "pending_confirmation"),
+        "bug": ("submit_verification", "fixing", "pending_verification"),
+    }.get(definition.object_type)
+    if not specification:
+        return
+    successor_action, development_ref, successor_ref = specification
+    transitions = db.query(WorkflowTransition).filter(WorkflowTransition.definition_id == definition.id).all()
+    states = {state.id: state for state in db.query(WorkflowState).filter(WorkflowState.definition_id == definition.id).all()}
+    by_action = {transition.action_key: transition for transition in transitions}
+    existing_successor = by_action.get(successor_action)
+    if not existing_successor:
+        return
+    development_state = states.get(existing_successor.from_state_id)
+    successor_state = states.get(existing_successor.to_state_id)
+    if not development_state or not successor_state:
+        return
+    if definition.object_type == "bug" and existing_successor.handler_rule.get("target_type") != "bug_verifier":
+        existing_successor.handler_rule = {
+            **(existing_successor.handler_rule or {}),
+            "target_type": "bug_verifier",
+            "fallback_type": "project_role",
+            "fallback_roles": "project_owner",
+        }
+    review_state = next((state for state in states.values() if state.status_name == "待评审"), None)
+    if review_state is None:
+        review_state = WorkflowState(
+            definition_id=definition.id,
+            status_name="待评审",
+            category="normal",
+            color="#d97706",
+            x=development_state.x + 180,
+            y=development_state.y + 120,
+            sort_order=max((state.sort_order for state in states.values()), default=0) + 1,
+            enabled=True,
+        )
+        db.add(review_state)
+        db.flush()
+    transitions_by_key = {transition.action_key: transition for transition in transitions}
+    review_transition_specs = (
+        ("submit_review", "提交评审", development_state.id, review_state.id, "current_handler"),
+        ("approve_review", "评审通过", review_state.id, successor_state.id, "development_lead"),
+        ("reject_review", "评审驳回", review_state.id, development_state.id, "development_lead"),
+    )
+    for action_key, action_name, from_state_id, to_state_id, allowed_roles in review_transition_specs:
+        transition = transitions_by_key.get(action_key)
+        if transition:
+            if action_key == "submit_review":
+                transition.trigger_config = {"type": "system_action"}
+                transition.ui_config = {key: value for key, value in (transition.ui_config or {}).items() if key != "system_action"}
+            continue
+        db.add(
+            WorkflowTransition(
+                definition_id=definition.id,
+                action_key=action_key,
+                action_name=action_name,
+                from_state_id=from_state_id,
+                to_state_id=to_state_id,
+                allowed_roles=allowed_roles,
+                handler_rule={"target_type": "keep_current"},
+                trigger_config={"type": "system_action"} if action_key == "submit_review" else None,
+                ui_config={
+                    "action_category": "process",
+                    "list_display": "primary",
+                    "list_priority": 10,
+                    "handler_scope": "allowed_identity",
+                },
+                enabled=True,
+                sort_order=max((item.sort_order for item in transitions), default=0) + 1,
+            )
+        )
+
+
 def _template_condition_config(config: dict | list | None, state_by_ref: dict[str, WorkflowState]):
     if not config or not isinstance(config, dict):
         return config
@@ -157,6 +235,7 @@ def _requirement_graph() -> WorkflowGraphSave:
             _state("pending_assignment", "待分派", "start", "#6b7280", 80, 100),
             _state("in_processing", "处理中", "normal", "#2563eb", 280, 100),
             _state("pending_confirmation", "待确认", "normal", "#7c3aed", 480, 100),
+            _state("pending_review", "待评审", "normal", "#d97706", 400, 220),
             _state("completed", "已完成", "terminal", "#059669", 680, 100, terminal_kind="completed"),
             _state("canceled", "已取消", "terminal", "#94a3b8", 480, 240, terminal_kind="terminated"),
         ],
@@ -178,6 +257,34 @@ def _requirement_graph() -> WorkflowGraphSave:
                 "pending_assignment",
                 allowed_roles="project_member,creator",
                 command_type="add_information",
+            ),
+            _transition(
+                "submit_review",
+                "提交评审",
+                "in_processing",
+                "pending_review",
+                target_type="keep_current",
+                handler_scope="current_handler",
+                trigger_config={"type": "system_action"},
+                ui_config={"list_display": "primary", "list_priority": 5, "requires_owner": True},
+            ),
+            _transition(
+                "approve_review",
+                "评审通过",
+                "pending_review",
+                "completed",
+                allowed_roles="development_lead",
+                target_type="keep_current",
+                handler_scope="allowed_identity",
+            ),
+            _transition(
+                "reject_review",
+                "评审驳回",
+                "pending_review",
+                "in_processing",
+                allowed_roles="development_lead",
+                target_type="keep_current",
+                handler_scope="allowed_identity",
             ),
             _transition(
                 "complete",
@@ -278,6 +385,7 @@ def _task_graph() -> WorkflowGraphSave:
             _state("pending_assignment", "待分派", "start", "#6b7280", 80, 120),
             _state("in_processing", "处理中", "normal", "#2563eb", 280, 120),
             _state("pending_confirmation", "待确认", "normal", "#7c3aed", 480, 120),
+            _state("pending_review", "待评审", "normal", "#d97706", 400, 240),
             _state("completed", "已完成", "terminal", "#059669", 680, 120, terminal_kind="completed"),
             _state("canceled", "已取消", "terminal", "#94a3b8", 480, 260, terminal_kind="terminated"),
         ],
@@ -299,6 +407,34 @@ def _task_graph() -> WorkflowGraphSave:
                 "pending_assignment",
                 allowed_roles="project_member,creator",
                 command_type="add_information",
+            ),
+            _transition(
+                "submit_review",
+                "提交评审",
+                "in_processing",
+                "pending_review",
+                target_type="keep_current",
+                handler_scope="current_handler",
+                trigger_config={"type": "system_action"},
+                ui_config={"list_display": "primary", "list_priority": 5, "requires_owner": True},
+            ),
+            _transition(
+                "approve_review",
+                "评审通过",
+                "pending_review",
+                "pending_confirmation",
+                allowed_roles="development_lead",
+                target_type="keep_current",
+                handler_scope="allowed_identity",
+            ),
+            _transition(
+                "reject_review",
+                "评审驳回",
+                "pending_review",
+                "in_processing",
+                allowed_roles="development_lead",
+                target_type="keep_current",
+                handler_scope="allowed_identity",
             ),
             _transition(
                 "complete",
@@ -419,6 +555,7 @@ def _bug_graph() -> WorkflowGraphSave:
             _state("pending_handling", "待处理", "start", "#6b7280", 80, 100),
             _state("fixing", "修复中", "normal", "#2563eb", 280, 100),
             _state("pending_verification", "待验证", "normal", "#7c3aed", 480, 100),
+            _state("pending_review", "待评审", "normal", "#d97706", 400, 220),
             _state("verified", "已验证", "normal", "#0f766e", 680, 100),
             _state("closed", "已关闭", "terminal", "#059669", 880, 100, terminal_kind="completed"),
         ],
@@ -467,6 +604,34 @@ def _bug_graph() -> WorkflowGraphSave:
                 "pending_handling",
                 allowed_roles="reporter,tester",
                 command_type="add_information",
+            ),
+            _transition(
+                "submit_review",
+                "提交评审",
+                "fixing",
+                "pending_review",
+                target_type="keep_current",
+                handler_scope="current_handler",
+                trigger_config={"type": "system_action"},
+                ui_config={"list_display": "primary", "list_priority": 5, "requires_owner": True},
+            ),
+            _transition(
+                "approve_review",
+                "评审通过",
+                "pending_review",
+                "pending_verification",
+                allowed_roles="development_lead",
+                target_type="keep_current",
+                handler_scope="allowed_identity",
+            ),
+            _transition(
+                "reject_review",
+                "评审驳回",
+                "pending_review",
+                "fixing",
+                allowed_roles="development_lead",
+                target_type="keep_current",
+                handler_scope="allowed_identity",
             ),
             _transition(
                 "reclassify_bug_type",
@@ -690,6 +855,7 @@ def _transition(
     form_config: dict | None = None,
     ui_config: dict | None = None,
     handler_scope: str | None = None,
+    trigger_config: dict | None = None,
 ) -> WorkflowTransitionBase:
     resolved_allowed_roles = allowed_roles
     resolved_allow_manual_owner = allow_manual_owner
@@ -726,6 +892,7 @@ def _transition(
             "allow_unassigned": allow_unassigned,
             "manual_owner_roles": manual_owner_roles,
         },
+        trigger_config=trigger_config,
         condition_config=condition_config,
         validator_config=validator_config,
         form_config=form_config,

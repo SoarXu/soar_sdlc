@@ -1,5 +1,6 @@
 from collections.abc import Iterable, Iterator
 
+from sqlalchemy import bindparam, inspect, text
 from sqlalchemy.orm import Session
 
 from app.models.audit_log import AuditLog
@@ -172,6 +173,20 @@ def _null_references(db: Session, model, column, referenced_ids: set[int], owned
             .update({column: None}, synchronize_session=False)
         )
     return updated
+
+
+def _clear_legacy_project_pool_references(db: Session, project_ids: set[int]) -> int:
+    """Clear a legacy iteration pointer when it remains in an upgraded database."""
+    if not project_ids:
+        return 0
+    columns = {column["name"] for column in inspect(db.get_bind()).get_columns("projects")}
+    if "requirement_pool_iteration_id" not in columns:
+        return 0
+    statement = text(
+        "UPDATE projects SET requirement_pool_iteration_id = NULL "
+        "WHERE id IN :project_ids"
+    ).bindparams(bindparam("project_ids", expanding=True))
+    return int(db.execute(statement, {"project_ids": sorted(project_ids)}).rowcount or 0)
 
 
 def purge_project_data(db: Session, project_ids: set[int]) -> dict[str, int]:
@@ -490,6 +505,7 @@ def purge_project_data(db: Session, project_ids: set[int]) -> dict[str, int]:
     ):
         report[model.__tablename__] += _delete_ids(db, model, owned_ids[object_type])
 
+    _clear_legacy_project_pool_references(db, target_project_ids)
     report[IterationCompletionSnapshot.__tablename__] += _delete_ids(
         db,
         IterationCompletionSnapshot,

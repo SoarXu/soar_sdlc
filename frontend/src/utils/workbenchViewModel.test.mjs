@@ -357,6 +357,13 @@ import {
 }
 
 {
+  const stylesSource = readFileSync(new URL('../styles.css', import.meta.url), 'utf8')
+
+  assert.match(stylesSource, /\.workbench-filter\s*\{\s*flex:\s*0 0 260px;\s*min-width:\s*160px;\s*max-width:\s*260px;\s*width:\s*260px;/)
+  assert.match(stylesSource, /\.workbench-search\s*\{\s*flex:\s*0 0 260px;\s*min-width:\s*160px;\s*max-width:\s*260px;\s*width:\s*260px;/)
+}
+
+{
   assert.equal(workbenchMetaText('exception_center', { exception_label: '已验证未关闭' }), '已验证未关闭')
   assert.equal(workbenchMetaText('watched_by_me', { watch_source: 'mention' }), '评论提及自动关注')
   assert.equal(workbenchMetaText('mentioned_me', { mentioned_in_comment_id: 18 }), '评论 #18')

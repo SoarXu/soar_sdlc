@@ -1100,10 +1100,10 @@ body {
 }
 
 .workbench-filter {
-  flex: 0 0 150px;
-  min-width: 120px;
-  max-width: 180px;
-  width: 150px;
+  flex: 0 0 260px;
+  min-width: 160px;
+  max-width: 260px;
+  width: 260px;
 }
 
 .workbench-filter.wide {

@@ -188,6 +188,7 @@
       @select-transition="selectTransition"
       @move-transition="moveTransition"
       @add-transition="addTransition"
+      @remove-state="removeSelectedState"
       @remove-transition="removeSelectedTransition"
       @reset-diagram-route="resetSelectedDiagramRoute"
       @back="returnToStateActions"
@@ -702,11 +703,15 @@ function clearSelection() {
 function removeSelectedState() {
   if (!selectedState.value) return
   const stateId = selectedState.value.id
-  transitions.value = transitions.value.filter((item) => (
-    item.from_state_id !== stateId && item.to_state_id !== stateId
-  ))
+  if (initialStateId.value === stateId) {
+    ElMessage.warning('初始状态不能删除')
+    return
+  }
+  if (transitions.value.some((item) => item.from_state_id === stateId || item.to_state_id === stateId)) {
+    ElMessage.warning('请先处理与该状态关联的流转')
+    return
+  }
   states.value = states.value.filter((item) => item.id !== stateId)
-  if (initialStateId.value === stateId) initialStateId.value = null
   clearSelection()
 }
 

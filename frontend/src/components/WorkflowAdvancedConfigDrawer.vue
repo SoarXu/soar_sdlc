@@ -47,6 +47,7 @@
             <el-form-item label="启用"><el-switch v-model="state.enabled" /></el-form-item>
           </div>
         </el-form>
+        <el-button type="danger" plain @click="emit('remove-state')">删除状态</el-button>
       </div>
       <section v-for="group in actionGroups" :key="group.key" class="action-group">
         <header class="action-group-header">
@@ -397,7 +398,7 @@ const props = defineProps({
 
 const emit = defineEmits([
   'update:modelValue', 'apply', 'back', 'select-transition', 'move-transition',
-  'add-transition', 'remove-transition', 'reset-diagram-route'
+  'add-transition', 'remove-state', 'remove-transition', 'reset-diagram-route'
 ])
 
 const drawerSize = 'clamp(520px, 42vw, 640px)'

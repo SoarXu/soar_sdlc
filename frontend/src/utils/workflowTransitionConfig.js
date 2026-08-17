@@ -4,7 +4,7 @@ const VALIDATOR_TYPES = new Set([
   'iteration_terminal_gate',
   'project_close_gate'
 ])
-const AUTOMATION_TYPES = new Set(['notification'])
+const AUTOMATION_TYPES = new Set(['notification', 'system_action'])
 const FIELD_TYPES = new Set(['text', 'textarea', 'select', 'number', 'date', 'datetime'])
 
 function roleArray(value) {

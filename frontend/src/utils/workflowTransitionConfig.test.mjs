@@ -54,6 +54,12 @@ normalized.diagram_config.waypoints[0].x = 999
 assert.equal(source.diagram_config.waypoints[0].x, 120)
 
 assert.deepEqual(unsupportedWorkflowConfigSections(source), [])
+const systemAction = { ...source, trigger_config: { type: 'system_action' } }
+assert.deepEqual(unsupportedWorkflowConfigSections(systemAction), [])
+assert.deepEqual(
+  serializeWorkflowTransition(normalizeWorkflowTransition(systemAction)).trigger_config,
+  systemAction.trigger_config
+)
 const historical = { ...source, trigger_config: { type: 'legacy_script', source: 'keep me' } }
 assert.deepEqual(unsupportedWorkflowConfigSections(historical), ['trigger_config'])
 assert.deepEqual(serializeWorkflowTransition(normalizeWorkflowTransition(historical)).trigger_config, historical.trigger_config)

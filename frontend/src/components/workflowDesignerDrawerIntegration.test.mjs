@@ -43,6 +43,7 @@ assert.ok(
   saveGraphBody.indexOf('validateWorkflowStates(states.value)') < saveGraphBody.indexOf('saving.value = true'),
   'every state must be validated before the save request starts'
 )
+assert.match(saveGraphBody, /catch \(error\) \{[\s\S]*ElMessage\.error\(/)
 
 assert.match(drawer, /主操作/)
 assert.match(drawer, /更多操作/)

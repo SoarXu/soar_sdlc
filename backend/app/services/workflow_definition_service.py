@@ -47,7 +47,7 @@ FORM_FIELD_TYPES = {"text", "textarea", "select", "number", "date", "datetime"}
 UI_CONFIG_KEYS = {
     "button_type", "list_display", "confirm_required",
     "ownerless_only", "requires_owner", "handler_scope", "command_type",
-    "action_category",
+    "action_category", "system_action",
 }
 CONDITION_CONFIG_KEYS = {
     "task_types", "field", "routes", "route_dictionary", "routing_mode", "allow_override_roles",

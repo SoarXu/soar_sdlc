@@ -254,6 +254,7 @@ import {
   fitViewportToNodes,
   workflowCanvasSize
 } from '../utils/workflowViewport'
+import { actionErrorMessage } from '../utils/permissions'
 
 const props = defineProps({
   configId: { type: Number, required: true },
@@ -590,6 +591,9 @@ async function saveGraph() {
       captureSavedGraphSnapshot()
       ElMessage.success('流程图已保存')
       return true
+    } catch (error) {
+      ElMessage.error(actionErrorMessage(error) || '流程图保存失败')
+      return false
     } finally {
       saving.value = false
     }

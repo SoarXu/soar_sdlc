@@ -980,6 +980,16 @@ def test_save_graph_accepts_builtin_workflow_roles(client: TestClient):
     assert saved.status_code == 200, saved.text
 
 
+def test_save_graph_accepts_system_action_marker(client: TestClient):
+    definition = _advanced_definition(client)
+    payload = _advanced_graph({"ui_config": {"list_display": "primary", "system_action": True}})
+
+    saved = client.put(f"/api/v1/workflow-definitions/{definition['id']}/graph", json=payload)
+
+    assert saved.status_code == 200, saved.text
+    assert saved.json()["transitions"][0]["ui_config"]["system_action"] is True
+
+
 def test_save_graph_migrates_legacy_template_route_references(client: TestClient):
     definition = _advanced_definition(client)
     applied = client.post(f"/api/v1/workflow-definitions/{definition['id']}/apply-template")

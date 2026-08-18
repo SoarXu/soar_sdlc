@@ -136,18 +136,9 @@
             </el-select>
           </el-form-item>
         </div>
-        <el-form-item label="前置条件"><el-input v-model="caseForm.precondition" type="textarea" :rows="2" /></el-form-item>
-        <el-form-item label="用例步骤">
-          <div class="case-steps-editor">
-            <el-table :data="caseForm.steps_json" border>
-              <el-table-column label="步骤" min-width="260"><template #default="{ row, $index }"><el-input v-model="row.step" :placeholder="`步骤 ${$index + 1}`" /></template></el-table-column>
-              <el-table-column label="预期" min-width="260"><template #default="{ row }"><el-input v-model="row.expected" placeholder="预期结果" /></template></el-table-column>
-              <el-table-column label="操作" width="90"><template #default="{ $index }"><el-button link type="danger" :disabled="caseForm.steps_json.length === 1" @click="removeCaseStep($index)">删除</el-button></template></el-table-column>
-            </el-table>
-            <el-button class="case-step-add" @click="addCaseStep">增加步骤</el-button>
-          </div>
-        </el-form-item>
-        <el-form-item label="预期结果"><el-input v-model="caseForm.expected_result" type="textarea" :rows="2" /></el-form-item>
+        <el-form-item label="前置条件"><RichTextPasteEditor v-model="caseForm.precondition" /></el-form-item>
+        <el-form-item label="用例步骤"><RichTextPasteEditor v-model="caseForm.steps_content" /></el-form-item>
+        <el-form-item label="预期结果"><RichTextPasteEditor v-model="caseForm.expected_result" /></el-form-item>
       </el-form>
       <template #footer><el-button @click="caseDialogVisible = false">取消</el-button><el-button type="primary" :loading="saving" @click="submitCase">保存</el-button></template>
     </el-dialog>
@@ -249,7 +240,7 @@ import { taskBranchLabel } from '../utils/taskBranchRules'
 import { DEFAULT_BUG_TYPE_KEY } from '../utils/bugTypeOptions'
 import { useBugTypes } from '../utils/useBugTypes'
 import { requirementIterationLabel, requirementIterationOptions } from '../utils/requirementIterations'
-import { safeExecutionCellHtml, testCaseExecutionRows } from '../utils/testCaseRichText'
+import { safeExecutionCellHtml, testCaseAuthoringPayload, testCaseExecutionRows } from '../utils/testCaseRichText'
 
 const route = useRoute()
 const router = useRouter()
@@ -272,7 +263,7 @@ const caseBugVisible = ref(false)
 const selectedCase = ref(null)
 const bugSourceCase = ref(null)
 const caseExecutionForm = ref({ execute_time: '', steps_result_json: [] })
-const caseForm = reactive({ project_id: null, requirement_id: null, title: '', case_type: 'functional', test_scope: 'functional_test', test_scopes: ['functional_test'], default_tester_id: null, precondition: '', steps_json: [{ step: '', expected: '' }], expected_result: '' })
+const caseForm = reactive({ project_id: null, requirement_id: null, title: '', case_type: 'functional', test_scope: 'functional_test', test_scopes: ['functional_test'], default_tester_id: null, precondition: '', steps_content: '', expected_result: '' })
 const caseBugForm = reactive({ title: '', bug_type: DEFAULT_BUG_TYPE_KEY, severity: '3', priority: '3', reproduce_steps: '', actual_result: '' })
 const expandedHistory = reactive({})
 const requirementForm = reactive({ iteration_id: null, title: '', requirement_type: '功能', priority: '3', owner_id: null, proposer_id: null, description: '', acceptance_criteria: '' })
@@ -425,7 +416,6 @@ function defaultExecutionTime() {
   const pad = (value) => String(value).padStart(2, '0')
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`
 }
-function normalizeCaseSteps(value) { return Array.isArray(value) && value.length ? value.map((item) => ({ step: item.step || '', expected: item.expected || '' })) : [{ step: '', expected: '' }] }
 function resetCaseForm() {
   Object.assign(caseForm, {
     project_id: requirement.value.project_id || null,
@@ -436,7 +426,7 @@ function resetCaseForm() {
     test_scopes: ['functional_test'],
     default_tester_id: null,
     precondition: '',
-    steps_json: [{ step: '', expected: '' }],
+    steps_content: '',
     expected_result: ''
   })
 }
@@ -444,21 +434,18 @@ function openCaseCreateForRequirement() {
   resetCaseForm()
   caseDialogVisible.value = true
 }
-function addCaseStep() { caseForm.steps_json.push({ step: '', expected: '' }) }
-function removeCaseStep(index) { if (caseForm.steps_json.length > 1) caseForm.steps_json.splice(index, 1) }
-function cleanCaseSteps() { return caseForm.steps_json.filter((item) => item.step.trim() || item.expected.trim()) }
 function canCreateBugFromCase(row) { return ['failed', 'blocked'].includes(row.latest_result || row.last_execute_result) }
 async function submitCase() {
   if (!caseForm.title.trim()) return ElMessage.warning('请填写用例标题')
   saving.value = true
   try {
-    await createTestCase({
-      ...caseForm,
+    const payload = {
+      ...testCaseAuthoringPayload(caseForm),
       project_id: requirement.value.project_id,
       requirement_id: requirement.value.id || requirementId.value,
-      default_tester_id: caseForm.default_tester_id || null,
-      steps_json: cleanCaseSteps()
-    })
+      default_tester_id: caseForm.default_tester_id || null
+    }
+    await createTestCase(payload)
     caseDialogVisible.value = false
     await loadData()
     ElMessage.success('用例已创建')

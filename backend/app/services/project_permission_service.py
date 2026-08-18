@@ -228,7 +228,7 @@ def ensure_iteration_owner_membership(db: Session, owner_id: int | None, project
     if not project_ids or any(not is_project_member(db, project_id, owner_id) for project_id in project_ids):
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="Iteration owner must be an active member of every iteration project",
+            detail="请选择当前项目的成员作为迭代负责人",
         )
 
 

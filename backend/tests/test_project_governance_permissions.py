@@ -1,5 +1,8 @@
 from types import SimpleNamespace
 
+import pytest
+from fastapi import HTTPException
+
 from app.controllers import project_controller
 from app.services import project_permission_service
 from app.views.project_view import ProjectCreate
@@ -72,3 +75,14 @@ def test_non_admin_governor_can_delete_only_an_empty_leaf_project(monkeypatch):
 
     monkeypatch.setattr(project_permission_service, "is_system_admin", lambda *_args: True)
     assert project_permission_service.can_delete_project(SimpleNamespace(), 12, actor) is True
+
+
+def test_iteration_owner_membership_error_uses_concise_chinese_message(monkeypatch):
+    monkeypatch.setattr(project_permission_service, "is_project_member", lambda *_args: False)
+
+    with pytest.raises(HTTPException) as error:
+        project_permission_service.ensure_iteration_owner_membership(
+            SimpleNamespace(), owner_id=7, project_ids=[12]
+        )
+
+    assert error.value.detail == "请选择当前项目的成员作为迭代负责人"

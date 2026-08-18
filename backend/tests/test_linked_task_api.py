@@ -304,6 +304,11 @@ def test_bug_close_checks_every_linked_task_without_mutating_blockers(client: Te
         json={"name": f"Multi Task Iteration {uuid4().hex[:8]}", "project_ids": [project["id"]]},
     )
     assert iteration.status_code == 200, iteration.text
+    started = client.post(
+        f"/api/v1/workflow-runtime/iteration/{iteration.json()['id']}/transition",
+        json={"action_key": "start"},
+    )
+    assert started.status_code == 200, started.text
     bug = client.post(
         "/api/v1/bugs",
         json={

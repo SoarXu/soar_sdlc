@@ -143,6 +143,7 @@ def defer_work_items(
     payload: DeferIterationWorkItemsRequest,
     actor_id: int | None = None,
 ) -> dict:
+    defer_reason = (payload.defer_reason or payload.remark or "").strip() or None
     locked_iterations = lock_iterations_for_mutation(db, {iteration_id, payload.target_iteration_id})
     source_iteration = locked_iterations[iteration_id]
     target_iteration = locked_iterations[payload.target_iteration_id]
@@ -166,7 +167,14 @@ def defer_work_items(
         if requirement.project_id not in target_project_ids:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="存在需求不在目标迭代项目范围内")
         source_iteration_id = requirement.iteration_id
-        move_work_item_to_iteration(db, requirement, target_iteration.id, actor_id=actor_id, reason="deferred")
+        move_work_item_to_iteration(
+            db,
+            requirement,
+            target_iteration.id,
+            actor_id=actor_id,
+            reason="deferred",
+            remark=defer_reason,
+        )
         move_requirement_dependents_to_iteration(
             db,
             requirement.id,
@@ -174,13 +182,21 @@ def defer_work_items(
             target_iteration.id,
             actor_id=actor_id,
             reason="deferred",
+            remark=defer_reason,
         )
         moved_requirement_ids.append(requirement.id)
 
     for task in direct_tasks:
         if task.project_id not in target_project_ids:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="存在任务不在目标迭代项目范围内")
-        move_work_item_to_iteration(db, task, target_iteration.id, actor_id=actor_id, reason="deferred")
+        move_work_item_to_iteration(
+            db,
+            task,
+            target_iteration.id,
+            actor_id=actor_id,
+            reason="deferred",
+            remark=defer_reason,
+        )
         moved_task_ids.append(task.id)
 
     db.commit()

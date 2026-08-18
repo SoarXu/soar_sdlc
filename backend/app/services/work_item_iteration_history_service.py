@@ -26,6 +26,7 @@ def move_work_item_to_iteration(
     *,
     actor_id: int | None = None,
     reason: str,
+    remark: str | None = None,
     operation_log_id: int | None = None,
     record_same_iteration_transition: bool = False,
 ) -> None:
@@ -45,7 +46,7 @@ def move_work_item_to_iteration(
     if current_iteration_id == target_iteration_id:
         if target_iteration_id and not any(row.iteration_id == target_iteration_id for row in open_rows):
             operation_log_id = operation_log_id or _create_membership_operation(
-                db, item, object_type, current_iteration_id, target_iteration_id, actor_id, reason
+                db, item, object_type, current_iteration_id, target_iteration_id, actor_id, reason, remark
             )
             _open_history(db, object_type, item.id, target_iteration_id, actor_id, reason, operation_log_id)
             return
@@ -54,7 +55,7 @@ def move_work_item_to_iteration(
 
     operation_log_id = operation_log_id or (
         None if reason == "reactivated" else _create_membership_operation(
-            db, item, object_type, current_iteration_id, target_iteration_id, actor_id, reason
+            db, item, object_type, current_iteration_id, target_iteration_id, actor_id, reason, remark
         )
     )
     now = datetime.now()
@@ -81,6 +82,7 @@ def move_requirement_dependents_to_iteration(
     *,
     actor_id: int | None,
     reason: str,
+    remark: str | None = None,
 ) -> None:
     tasks = (
         db.query(Task)
@@ -101,11 +103,11 @@ def move_requirement_dependents_to_iteration(
     _ensure_dependency_sources_mutable(db, [*tasks, *following_bugs], target_iteration_id)
     for task in tasks:
         move_work_item_to_iteration(
-            db, task, target_iteration_id, actor_id=actor_id, reason=reason
+            db, task, target_iteration_id, actor_id=actor_id, reason=reason, remark=remark
         )
     for bug in following_bugs:
         move_work_item_to_iteration(
-            db, bug, target_iteration_id, actor_id=actor_id, reason=reason
+            db, bug, target_iteration_id, actor_id=actor_id, reason=reason, remark=remark
         )
 
 
@@ -197,6 +199,7 @@ def _create_membership_operation(
     target_iteration_id: int | None,
     actor_id: int | None,
     reason: str,
+    remark: str | None,
 ) -> int:
     action_by_reason = {
         "linked": "iteration_link",
@@ -220,6 +223,7 @@ def _create_membership_operation(
         from_status=state_name,
         to_status=state_name,
         reason=reason,
+        remark=remark,
         effective_time=datetime.now(),
         actor_id=actor_id,
         selected_values={

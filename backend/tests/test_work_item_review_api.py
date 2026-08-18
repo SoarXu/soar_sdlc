@@ -13,7 +13,7 @@ from app.models.role import Role, UserRole
 from app.models.user import User
 from app.models.workflow_definition import WorkflowTransition
 from app.services.iteration_assignment_service import create_unstarted_iteration
-from app.services.work_item_review_service import decide_review_round
+from app.services.work_item_review_service import decide_review_round, submit_work_item_review
 from app.services.workflow_state_service import initial_system_workflow_values, initial_workflow_values
 
 
@@ -73,7 +73,7 @@ def test_review_round_decision_enforces_reviewer_and_records_workflow_audit():
         db.add(review_round)
         db.commit()
 
-        with pytest.raises(HTTPException, match="Only the assigned development lead"):
+        with pytest.raises(HTTPException, match="仅指定的研发负责人可以进行评审"):
             decide_review_round(db, review_round.id, "approve", None, outsider)
 
         result = decide_review_round(db, review_round.id, "approve", None, lead)
@@ -85,6 +85,77 @@ def test_review_round_decision_enforces_reviewer_and_records_workflow_audit():
             WorkflowTransition.action_key == "approve_review",
         ).first()
         assert db.query(Requirement).filter(Requirement.id == requirement.id).one().current_state_id == approved_transition.to_state_id
+    finally:
+        db.close()
+
+
+def test_manual_review_submission_creates_commitless_round_then_auto_submission_updates_it(client):
+    db = SessionLocal()
+    try:
+        developer = _user(db, "developer")
+        lead = _user(db, "development_lead")
+        project = Project(name=f"Manual review {uuid4().hex[:8]}", **initial_system_workflow_values(db, "project"))
+        db.add(project)
+        db.flush()
+        iteration = create_unstarted_iteration(db, project.id)
+        requirement = Requirement(
+            project_id=project.id,
+            iteration_id=iteration.id,
+            title="Manual review requirement",
+            owner_id=developer.id,
+            **initial_workflow_values(db, "requirement", project.id),
+        )
+        db.add(requirement)
+        db.flush()
+        submit = db.query(WorkflowTransition).filter(
+            WorkflowTransition.definition_id == requirement.workflow_definition_id,
+            WorkflowTransition.action_key == "submit_review",
+        ).one()
+        requirement.current_state_id = submit.from_state_id
+        db.commit()
+
+        submitted = client.post(
+            f"/api/v1/devops/work-item-reviews/requirement/{requirement.id}/submit",
+            headers={"Authorization": f"Bearer {create_access_token(developer.username)}"},
+        )
+        assert submitted.status_code == 200, submitted.text
+        assert submitted.json()["latest_commit_id"] is None
+        db.rollback()
+        manual_round = db.query(WorkItemReviewRound).filter(WorkItemReviewRound.id == submitted.json()["id"]).one()
+        assert manual_round.status == "open"
+        assert db.query(Requirement).filter(Requirement.id == requirement.id).one().current_state_id == submit.to_state_id
+
+        context = client.get(
+            f"/api/v1/devops/work-item-reviews/requirement/{requirement.id}/context",
+            headers={"Authorization": f"Bearer {create_access_token(lead.username)}"},
+        )
+        assert context.status_code == 200, context.text
+        assert context.json()["review_round"]["id"] == manual_round.id
+        assert context.json()["commit"] is None
+        assert context.json()["has_diff"] is False
+        assert context.json()["diff_text"] is None
+
+        commit = DevopsCommit(
+            provider="gitea",
+            commit_sha=f"manual-follow-up{uuid4().hex}",
+            diff_text="diff --git a/review.txt b/review.txt\n+new file",
+        )
+        db.add(commit)
+        db.flush()
+        updated_round = submit_work_item_review(db, "requirement", requirement.id, developer, commit=commit)
+        assert updated_round.id == manual_round.id
+        assert updated_round.latest_commit_id == commit.id
+        assert db.query(WorkItemReviewRound).filter(WorkItemReviewRound.object_id == requirement.id).count() == 1
+        db.commit()
+
+        context_with_diff = client.get(
+            f"/api/v1/devops/work-item-reviews/requirement/{requirement.id}/context",
+            headers={"Authorization": f"Bearer {create_access_token(lead.username)}"},
+        )
+        assert context_with_diff.status_code == 200, context_with_diff.text
+        assert context_with_diff.json()["commit"]["id"] == commit.id
+        assert context_with_diff.json()["has_diff"] is True
+        assert context_with_diff.json()["diff_text"] == commit.diff_text
     finally:
         db.close()
 

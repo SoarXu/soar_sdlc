@@ -52,9 +52,6 @@
           <el-select v-model="priorityFilter" multiple collapse-tags collapse-tags-tooltip clearable placeholder="优先级" class="workbench-filter">
             <el-option v-for="option in filterOptions.priorities" :key="option.value" :label="option.label" :value="option.value" />
           </el-select>
-          <el-select v-model="ownerFilter" multiple collapse-tags collapse-tags-tooltip clearable placeholder="负责人" class="workbench-filter">
-            <el-option v-for="option in filterOptions.owners" :key="option.value" :label="option.label" :value="option.value" />
-          </el-select>
           <el-select v-model="handlerFilter" multiple collapse-tags collapse-tags-tooltip clearable placeholder="当前处理人" class="workbench-filter">
             <el-option v-for="option in filterOptions.handlers" :key="option.value" :label="option.label" :value="option.value" />
           </el-select>
@@ -80,16 +77,11 @@
               <el-button link type="primary" @click="openWorkItemReview(row)">{{ typeLabel(row.object_type) }}-{{ row.object_id }}</el-button>
             </template>
           </el-table-column>
-          <el-table-column label="最新提交" min-width="180">
-            <template #default="{ row }">
-              <el-button link type="primary" @click="openWorkItemReviewDiff(row)">{{ row.short_sha || row.commit_sha || `Commit #${row.latest_commit_id}` }}</el-button>
-            </template>
-          </el-table-column>
+          <el-table-column label="最新提交" min-width="180"><template #default="{ row }">{{ row.short_sha || row.commit_sha || '未关联提交' }}</template></el-table-column>
           <el-table-column label="更新时间" width="180"><template #default="{ row }">{{ formatWorkbenchDateTime(row.update_time) }}</template></el-table-column>
           <el-table-column label="操作" width="180" fixed="right">
             <template #default="{ row }">
-              <el-button link type="success" @click="decideWorkbenchReview(row, 'approve')">通过</el-button>
-              <el-button link type="danger" @click="decideWorkbenchReview(row, 'reject')">驳回</el-button>
+              <el-button link type="primary" @click="openWorkbenchReviewDialog(row)">评审</el-button>
             </template>
           </el-table-column>
         </el-table>
@@ -131,9 +123,6 @@
             <el-table-column prop="project_name" label="项目" min-width="140" show-overflow-tooltip />
             <el-table-column label="迭代" min-width="140" show-overflow-tooltip>
               <template #default="{ row }">{{ iterationLabel(row.iteration_id, row.iteration_name) }}</template>
-            </el-table-column>
-            <el-table-column label="负责人" width="130">
-              <template #default="{ row }">{{ ownerName(row.owner_id) }}</template>
             </el-table-column>
             <el-table-column label="当前处理人" width="130">
               <template #default="{ row }">{{ ownerName(row.handler_id) }}</template>
@@ -278,16 +267,22 @@
       :item-id="activeEditorId"
       @saved="handleEditorSaved"
     />
+    <WorkItemReviewDialog
+      v-if="selectedWorkbenchReview"
+      v-model:visible="workbenchReviewDialogVisible"
+      :object-type="selectedWorkbenchReview.object_type"
+      :object-id="selectedWorkbenchReview.object_id"
+      @decided="loadWorkbench"
+    />
   </section>
 </template>
 
 <script setup>
 import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessage } from 'element-plus'
 
 import { fetchWorkbench } from '../api/dashboard'
-import { decideWorkItemReview } from '../api/devops'
 import { createBugFromTestCase, executeTestCase } from '../api/testCases'
 import { fetchUsers } from '../api/users'
 import { fetchWorkflowTransitionsBatch } from '../api/workflowRuntime'
@@ -296,6 +291,7 @@ import { resolveWorkbenchWorkflowCommand } from '../utils/workbenchWorkflowComma
 import RequirementPriorityBadge from '../components/RequirementPriorityBadge.vue'
 import RichTextPasteEditor from '../components/RichTextPasteEditor.vue'
 import WorkflowActionButtons from '../components/WorkflowActionButtons.vue'
+import WorkItemReviewDialog from '../components/WorkItemReviewDialog.vue'
 import BatchAssignmentBar from '../components/BatchAssignmentBar.vue'
 import BugEditDialog from '../components/work-items/BugEditDialog.vue'
 import RequirementEditDialog from '../components/work-items/RequirementEditDialog.vue'
@@ -335,7 +331,6 @@ const iterationFilter = ref([])
 const typeFilter = ref([])
 const stateFilter = ref([])
 const priorityFilter = ref([])
-const ownerFilter = ref([])
 const handlerFilter = ref([])
 const currentPage = ref(1)
 const pageSize = ref(20)
@@ -345,6 +340,8 @@ const caseBugVisible = ref(false)
 const editorVisible = ref(false)
 const activeEditorType = ref('')
 const activeEditorId = ref(null)
+const selectedWorkbenchReview = ref(null)
+const workbenchReviewDialogVisible = ref(false)
 const caseExecutionForm = reactive({ execute_time: '', steps_result_json: [] })
 const caseBugForm = reactive({ title: '', bug_type: DEFAULT_BUG_TYPE_KEY, severity: '3', priority: '3', reproduce_steps: '', actual_result: '' })
 
@@ -389,7 +386,6 @@ const activeFilters = computed(() => ({
   types: typeFilter.value,
   stateIds: stateFilter.value,
   priorities: priorityFilter.value,
-  ownerIds: ownerFilter.value,
   handlerIds: handlerFilter.value
 }))
 
@@ -483,22 +479,9 @@ function openWorkItemReview(review) {
   openWorkItemDetail({ object_type: review.object_type, id: review.object_id })
 }
 
-function openWorkItemReviewDiff(review) {
-  router.push({ name: 'devops', query: { tab: 'work-item-reviews', commitId: review.latest_commit_id } })
-}
-
-async function decideWorkbenchReview(review, decision) {
-  let remark = null
-  if (decision === 'reject') {
-    const result = await ElMessageBox.prompt('请填写驳回原因', '驳回评审', {
-      inputPattern: /\S+/,
-      inputErrorMessage: '请填写驳回原因'
-    })
-    remark = result.value
-  }
-  await decideWorkItemReview(review.id, { decision, remark })
-  ElMessage.success(decision === 'approve' ? '评审已通过' : '评审已驳回')
-  await loadWorkbench()
+function openWorkbenchReviewDialog(review) {
+  selectedWorkbenchReview.value = review
+  workbenchReviewDialogVisible.value = true
 }
 
 function detailLink(item) {
@@ -654,7 +637,6 @@ watch([
   typeFilter,
   stateFilter,
   priorityFilter,
-  ownerFilter,
   handlerFilter
 ], resetWorkbenchPagination, { deep: true })
 watch(() => pagedListPage.value.page, (correctedPage) => {

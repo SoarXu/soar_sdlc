@@ -806,6 +806,17 @@ body {
   margin-left: 0;
 }
 
+.work-item-list-actions {
+  min-height: 32px;
+  align-items: center;
+}
+
+.work-item-list-actions .workflow-action-buttons-list,
+.work-item-list-actions .workflow-primary-actions,
+.work-item-list-actions .el-button {
+  min-height: 32px;
+}
+
 .project-list-actions {
   --workflow-action-gap: 6px;
   gap: var(--workflow-action-gap);

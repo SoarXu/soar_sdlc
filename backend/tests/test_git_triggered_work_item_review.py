@@ -54,6 +54,12 @@ def test_linked_git_commits_open_and_update_one_review_round_per_development_wor
         db.add(project)
         db.flush()
         iteration = create_unstarted_iteration(db, project.id)
+        db.commit()
+        started = client.post(
+            f"/api/v1/workflow-runtime/iteration/{iteration.id}/transition",
+            json={"action_key": "start", "payload": {"effective_time": "2026-08-19T09:00:00"}},
+        )
+        assert started.status_code == 200, started.text
         requirement = Requirement(
             project_id=project.id,
             iteration_id=iteration.id,

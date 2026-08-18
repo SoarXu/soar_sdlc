@@ -189,7 +189,6 @@ import {
     types: ['bug'],
     priorities: ['1'],
     stateIds: [101],
-    ownerIds: [7],
     handlerIds: [8],
     minOverdueHours: 6
   }).map((item) => item.id), [1])
@@ -239,7 +238,7 @@ import {
   assert.deepEqual(filterWorkbenchItems(items, { types: ['bug'] }).map((item) => item.id), [1])
   assert.deepEqual(filterWorkbenchItems(items, { stateIds: [101] }).map((item) => item.id), [1])
   assert.deepEqual(filterWorkbenchItems(items, { priorities: ['1'] }).map((item) => item.id), [1])
-  assert.deepEqual(filterWorkbenchItems(items, { ownerIds: [7] }).map((item) => item.id), [1])
+  assert.deepEqual(filterWorkbenchItems(items, { ownerIds: [7] }).map((item) => item.id), [1, 2, 3])
   assert.deepEqual(filterWorkbenchItems(items, { handlerIds: [8] }).map((item) => item.id), [1])
   assert.deepEqual(
     filterWorkbenchItems(items, { projectIds: [10], stateIds: [101], handlerIds: [8] }).map((item) => item.id),
@@ -351,8 +350,8 @@ import {
   assert.match(dashboardSource, /v-model="iterationFilter"/)
   assert.match(dashboardSource, /v-model="stateFilter"/)
   assert.match(dashboardSource, /v-model="priorityFilter"/)
-  assert.match(dashboardSource, /v-model="ownerFilter"/)
   assert.match(dashboardSource, /v-model="handlerFilter"/)
+  assert.doesNotMatch(dashboardSource, /v-model="ownerFilter"/)
   assert.doesNotMatch(dashboardSource, /activeListSection|workbench-entry-switch|workbench-follow-tabs|exception-filter-toolbar/)
 }
 
@@ -372,8 +371,8 @@ import {
 {
   const dashboardSource = readFileSync(new URL('../views/DashboardView.vue', import.meta.url), 'utf8')
 
-  assert.match(dashboardSource, /<el-table-column label="负责人" width="130">/)
   assert.match(dashboardSource, /<el-table-column label="当前处理人" width="130">/)
+  assert.doesNotMatch(dashboardSource, /<el-table-column label="负责人" width="130">/)
 }
 
 {

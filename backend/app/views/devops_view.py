@@ -177,7 +177,7 @@ class WorkItemReviewRoundRead(BaseModel):
     id: int
     object_type: str
     object_id: int
-    latest_commit_id: int
+    latest_commit_id: int | None = None
     reviewer_id: int | None = None
     status: str
     decision_by_id: int | None = None
@@ -185,6 +185,14 @@ class WorkItemReviewRoundRead(BaseModel):
     remark: str | None = None
     create_time: datetime | None = None
     update_time: datetime | None = None
+
+
+class WorkItemReviewContextRead(BaseModel):
+    review_round: WorkItemReviewRoundRead
+    commit: DevopsCommitRead | None = None
+    diff_text: str | None = None
+    diff_json: Any | None = None
+    has_diff: bool
 
 
 class DevopsJenkinsBuildBase(BaseModel):

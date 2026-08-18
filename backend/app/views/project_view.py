@@ -83,8 +83,7 @@ class ProjectMemberRead(ProjectMemberBase):
     update_time: datetime | None = None
 
 
-class ProjectWorkPoolSummary(BaseModel):
-    iteration_ids: list[int] = []
+class ProjectUnfinishedWorkItemsSummary(BaseModel):
     requirement_count: int = 0
     task_count: int = 0
     bug_count: int = 0
@@ -93,7 +92,7 @@ class ProjectWorkPoolSummary(BaseModel):
 
 class ProjectIterationPage(BaseModel):
     items: list[IterationRead]
-    planning_pool: ProjectWorkPoolSummary
+    unfinished_work_items: ProjectUnfinishedWorkItemsSummary
     total: int
     page: int
     page_size: int

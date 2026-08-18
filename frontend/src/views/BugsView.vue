@@ -33,7 +33,7 @@
         <el-table-column label="状态" width="120"><template #default="{ row }">{{ row.status_name || '-' }}</template></el-table-column>
         <el-table-column label="操作" :width="workflowOperationWidth" fixed="right">
           <template #default="{ row }">
-            <div class="table-actions">
+            <div class="table-actions work-item-list-actions">
               <WorkflowActionButtons object-type="bug" :object-id="row.id" mode="list" :transitions="workflowTransitionsFor(row)" :auto-load="false" :users="users" @command="handleWorkflowCommand(row, $event)" @executed="loadData" /><el-popconfirm v-if="canDeleteBugRow(row)" title="确认删除该 Bug？" @confirm="removeBug(row.id)"><template #reference><el-button link type="danger">删除</el-button></template></el-popconfirm>
             </div>
           </template>
@@ -68,7 +68,7 @@
           <el-form-item label="任务"><el-select v-model="form.task_id" clearable filterable placeholder="请选择任务"><el-option v-for="task in tasks" :key="task.id" :label="task.title" :value="task.id" /></el-select></el-form-item>
           <el-form-item label="来源用例"><el-select v-model="form.test_case_id" clearable filterable placeholder="请选择用例"><el-option v-for="item in testCases" :key="item.id" :label="item.title" :value="item.id" /></el-select></el-form-item>
           <el-form-item label="来源测试单"><el-select v-model="form.test_run_id" clearable filterable placeholder="请选择测试单"><el-option v-for="run in testRuns" :key="run.id" :label="run.name" :value="run.id" /></el-select></el-form-item>
-          <el-form-item label="所属迭代"><el-select v-model="form.iteration_id" clearable filterable placeholder="请选择迭代"><el-option v-for="iteration in editableIterationDisplayOptions" :key="iteration.id" :label="iteration.name" :value="iteration.id" :disabled="iteration.disabled" /></el-select></el-form-item>
+          <el-form-item label="所属迭代" required><el-select v-model="form.iteration_id" clearable filterable placeholder="请选择规划中或进行中的迭代"><el-option v-for="iteration in editableIterationDisplayOptions" :key="iteration.id" :label="iteration.name" :value="iteration.id" :disabled="iteration.disabled" /></el-select></el-form-item>
           <el-form-item v-if="!editingId" label="当前处理人"><el-select v-model="form.owner_id" clearable filterable placeholder="请选择当前处理人"><el-option v-for="user in users" :key="user.id" :label="user.full_name" :value="user.id" /></el-select></el-form-item>
           <el-form-item label="提出人"><el-select v-model="form.reporter_id" clearable filterable placeholder="请选择提出人"><el-option v-for="user in users" :key="user.id" :label="user.full_name" :value="user.id" /></el-select></el-form-item>
         </div>
@@ -227,6 +227,7 @@ async function loadWorkflowTransitions() {
 }
 async function submitBug() {
   if (!form.project_id || !form.title.trim()) return ElMessage.warning('请选择项目并填写 Bug 标题')
+  if (!form.iteration_id) return ElMessage.warning('请选择规划中或进行中的迭代')
   saving.value = true
   try {
     const payload = { ...form, iteration_id: form.iteration_id || null, requirement_id: form.requirement_id || null, task_id: form.task_id || null, test_case_id: form.test_case_id || null, test_run_id: form.test_run_id || null, owner_id: form.owner_id || null, reporter_id: form.reporter_id || null }

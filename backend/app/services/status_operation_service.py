@@ -1,5 +1,6 @@
 from datetime import datetime
 
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from app.models.status_operation import StatusOperationLog
@@ -84,7 +85,10 @@ def list_status_operations(db: Session, object_type: str, object_id: int) -> lis
         .filter(
             StatusOperationLog.object_type == object_type,
             StatusOperationLog.object_id == object_id,
-            StatusOperationLog.operation_kind == "state",
+            or_(
+                StatusOperationLog.operation_kind == "state",
+                StatusOperationLog.action == "iteration_defer",
+            ),
         )
         .order_by(StatusOperationLog.effective_time.asc(), StatusOperationLog.id.asc())
         .all()

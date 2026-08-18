@@ -412,8 +412,7 @@ def _core_transitions(context: _ScanContext, item) -> list[WorkflowTransition]:
 
 def _state_requires_owner_from_context(context: _ScanContext, item) -> bool:
     return any(
-        (transition.ui_config or {}).get("requires_owner") is True
-        or (transition.ui_config or {}).get("handler_scope") == "current_handler"
+        (transition.ui_config or {}).get("handler_scope") == "current_handler"
         for transition in _core_transitions(context, item)
     )
 

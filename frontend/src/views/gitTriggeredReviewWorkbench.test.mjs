@@ -12,10 +12,14 @@ test('workbench exposes a pending-my-review section with a review entry action',
   assert.match(dashboardSource, /openWorkItemReview/)
 })
 
-test('DevOps review screen opens the latest commit Diff and submits review decisions', () => {
+test('workbench and DevOps use the shared work item review dialog', () => {
   assert.match(devopsSource, /工作项评审/)
-  assert.match(devopsSource, /openWorkItemReviewDiff/)
-  assert.match(devopsSource, /decideWorkItemReview/)
+  assert.match(dashboardSource, /WorkItemReviewDialog/)
+  assert.match(devopsSource, /WorkItemReviewDialog/)
+  assert.match(dashboardSource, /openWorkbenchReviewDialog/)
+  assert.match(devopsSource, /openReviewDialog/)
+  assert.doesNotMatch(dashboardSource, /decideWorkbenchReview/)
+  assert.doesNotMatch(devopsSource, /decideReview/)
   assert.match(apiSource, /\/devops\/work-item-reviews/)
-  assert.match(apiSource, /\/decision/)
+  assert.match(apiSource, /\/context/)
 })

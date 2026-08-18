@@ -24,6 +24,7 @@ from app.views.devops_view import (
     DevopsRepositoryRead,
     DevopsRepositoryUpdate,
     DevopsReviewRequest,
+    WorkItemReviewContextRead,
     WorkItemReviewDecisionRequest,
     WorkItemReviewRoundRead,
 )
@@ -209,6 +210,29 @@ def list_work_item_reviews(
     current_user=Depends(get_current_user),
 ):
     return work_item_review_service.list_open_review_rounds(db, current_user.id)
+
+
+@router.post("/work-item-reviews/{object_type}/{object_id}/submit", response_model=WorkItemReviewRoundRead)
+def submit_work_item_review(
+    object_type: str,
+    object_id: int,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    review_round = work_item_review_service.submit_work_item_review(db, object_type, object_id, current_user)
+    db.commit()
+    db.refresh(review_round)
+    return review_round
+
+
+@router.get("/work-item-reviews/{object_type}/{object_id}/context", response_model=WorkItemReviewContextRead)
+def get_work_item_review_context(
+    object_type: str,
+    object_id: int,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return work_item_review_service.get_review_context(db, object_type, object_id, current_user)
 
 
 @router.post("/work-item-reviews/{review_round_id}/decision", response_model=WorkItemReviewRoundRead)

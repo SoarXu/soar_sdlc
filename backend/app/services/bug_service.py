@@ -24,7 +24,10 @@ from app.services.lifecycle_service import (
     requirement_lifecycle_phase,
     test_case_lifecycle_phase,
 )
-from app.services.iteration_assignment_service import resolve_work_item_iteration
+from app.services.iteration_assignment_service import (
+    resolve_work_item_iteration,
+    validate_requirement_iteration,
+)
 from app.services.status_operation_service import list_status_operations
 from app.services.task_service import linked_task_summaries
 from app.services.work_item_iteration_history_service import list_iteration_history, move_work_item_to_iteration
@@ -62,15 +65,14 @@ def create_bug(db: Session, payload: BugCreate, actor_id: int | None = None) -> 
         )
         if not related_component_ids:
             related_component_ids = inherited_related_component_ids
-    source_iteration_id = _bug_source_iteration_id(db, data.get("task_id"), data.get("requirement_id"))
-    data["iteration_id"] = resolve_work_item_iteration(
+    requested_iteration_id = data.get("iteration_id")
+    ensure_iteration_assignment_mutable(db, None, requested_iteration_id)
+    data["iteration_id"] = validate_requirement_iteration(
         db,
         data["project_id"],
-        data.get("iteration_id"),
-        source_iteration_id=source_iteration_id,
+        requested_iteration_id,
     )
     data["creator_id"] = actor_id
-    ensure_iteration_assignment_mutable(db, None, data.get("iteration_id"))
     if data.get("iteration_id"):
         _ensure_iteration_can_accept_bug(db, data["iteration_id"], data.get("project_id"))
     data["lifecycle_phase"] = (

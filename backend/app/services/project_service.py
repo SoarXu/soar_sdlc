@@ -16,7 +16,7 @@ from app.models.task import Task
 from app.models.test_case import TestCase
 from app.models.test_run import TestRun
 from app.models.user import User
-from app.models.workflow_definition import WorkflowTransition
+from app.models.workflow_definition import WorkflowState, WorkflowTransition
 from app.services.assignee_rule_config_service import default_project_workflow_scheme
 from app.services.project_data_purge_service import purge_project_data
 from app.services.project_permission_service import visible_project_ids
@@ -65,14 +65,12 @@ def list_project_iterations_page(
         query = query.filter(Iteration.owner_id == owner_id)
     page_data = _paginate(query.order_by(Iteration.id.desc()), page, page_size)
     page_data["items"] = [_iteration_to_dict(db, item) for item in page_data["items"]]
-    iteration_ids = eligible_iteration_ids_for_project(db, project.id)
     counts = {
-        "requirement_count": _project_iteration_item_count(db, Requirement, project.id, iteration_ids),
-        "task_count": _project_iteration_item_count(db, Task, project.id, iteration_ids),
-        "bug_count": _project_iteration_item_count(db, Bug, project.id, iteration_ids),
+        "requirement_count": _project_unfinished_item_count(db, Requirement, project.id),
+        "task_count": _project_unfinished_item_count(db, Task, project.id),
+        "bug_count": _project_unfinished_item_count(db, Bug, project.id),
     }
-    page_data["planning_pool"] = {
-        "iteration_ids": iteration_ids,
+    page_data["unfinished_work_items"] = {
         **counts,
         "total_count": sum(counts.values()),
     }
@@ -88,7 +86,7 @@ def list_project_requirements_page(
     current_state_id: int | None = None,
     owner_id: int | None = None,
     iteration_id: int | None = None,
-    planning_pool: bool = False,
+    unfinished_work_items: bool = False,
 ) -> dict:
     _get_active_project(db, project_id)
     query = db.query(Requirement).filter(Requirement.deleted == 0, Requirement.project_id == project_id)
@@ -100,8 +98,8 @@ def list_project_requirements_page(
         query = query.filter(Requirement.owner_id == owner_id)
     if iteration_id:
         query = query.filter(Requirement.iteration_id == iteration_id)
-    elif planning_pool:
-        query = query.filter(Requirement.iteration_id.in_(eligible_iteration_ids_for_project(db, project_id)))
+    elif unfinished_work_items:
+        query = _filter_unfinished_work_items(query, Requirement)
     return _paginate(query.order_by(Requirement.id.desc()), page, page_size)
 
 
@@ -115,7 +113,7 @@ def list_project_tasks_page(
     owner_id: int | None = None,
     requirement_id: int | None = None,
     iteration_id: int | None = None,
-    planning_pool: bool = False,
+    unfinished_work_items: bool = False,
 ) -> dict:
     _get_active_project(db, project_id)
     query = db.query(Task).filter(Task.deleted == 0, Task.project_id == project_id)
@@ -129,8 +127,8 @@ def list_project_tasks_page(
         query = query.filter(Task.requirement_id == requirement_id)
     if iteration_id:
         query = query.filter(Task.iteration_id == iteration_id)
-    elif planning_pool:
-        query = query.filter(Task.iteration_id.in_(eligible_iteration_ids_for_project(db, project_id)))
+    elif unfinished_work_items:
+        query = _filter_unfinished_work_items(query, Task)
     return _paginate(query.order_by(Task.id.desc()), page, page_size)
 
 
@@ -186,7 +184,7 @@ def list_project_bugs_page(
     current_state_id: int | None = None,
     owner_id: int | None = None,
     iteration_id: int | None = None,
-    planning_pool: bool = False,
+    unfinished_work_items: bool = False,
 ) -> dict:
     _get_active_project(db, project_id)
     query = db.query(Bug).filter(Bug.deleted == 0, Bug.project_id == project_id)
@@ -199,8 +197,8 @@ def list_project_bugs_page(
         query = query.filter(Bug.owner_id == owner_id)
     if iteration_id:
         query = query.filter(Bug.iteration_id == iteration_id)
-    elif planning_pool:
-        query = query.filter(Bug.iteration_id.in_(eligible_iteration_ids_for_project(db, project_id)))
+    elif unfinished_work_items:
+        query = _filter_unfinished_work_items(query, Bug)
     return _paginate(query.order_by(Bug.id.desc()), page, page_size)
 
 
@@ -610,20 +608,23 @@ def _audit_logs_with_actor_names(db: Session, logs: list[AuditLog]) -> list[dict
     ]
 
 
-def _project_iteration_item_count(
-    db: Session, model, project_id: int, iteration_ids: list[int]
-) -> int:
-    if not iteration_ids:
-        return 0
+def _project_unfinished_item_count(db: Session, model, project_id: int) -> int:
     return int(
         db.query(func.count(model.id))
+        .join(WorkflowState, model.current_state_id == WorkflowState.id)
         .filter(
             model.deleted == 0,
             model.project_id == project_id,
-            model.iteration_id.in_(iteration_ids),
+            WorkflowState.category != "terminal",
         )
         .scalar()
         or 0
+    )
+
+
+def _filter_unfinished_work_items(query, model):
+    return query.join(WorkflowState, model.current_state_id == WorkflowState.id).filter(
+        WorkflowState.category != "terminal"
     )
 
 

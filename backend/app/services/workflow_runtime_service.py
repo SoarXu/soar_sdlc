@@ -89,6 +89,7 @@ def list_available_transitions(
 ) -> list[WorkflowTransitionActionRead]:
     ensure_default_workflow_templates(db)
     item = _get_item(db, object_type, object_id)
+    bug_iteration_active = object_type != "bug" or _bug_iteration_is_active(db, item)
     definition_context = _resolve_definition_context(db, object_type, item)
     if not definition_context:
         return []
@@ -101,6 +102,8 @@ def list_available_transitions(
     transitions = query.order_by(WorkflowTransition.sort_order.asc(), WorkflowTransition.id.asc()).all()
     result = []
     for transition in transitions:
+        if not bug_iteration_active and transition.action_key != "activate":
+            continue
         if _is_system_action(transition):
             continue
         if not _matches_transition_condition(item, transition):
@@ -928,6 +931,18 @@ def _matches_transition_condition(item, transition: WorkflowTransition) -> bool:
     return True
 
 
+def _bug_iteration_is_active(db: Session, bug: Bug) -> bool:
+    iteration_id = getattr(bug, "iteration_id", None)
+    if iteration_id is None:
+        return False
+    iteration = (
+        db.query(Iteration)
+        .filter(Iteration.id == iteration_id, Iteration.deleted == 0)
+        .first()
+    )
+    return bool(iteration and is_iteration_active(db, iteration))
+
+
 def _can_see_transition(db: Session, object_type: str, item, transition: WorkflowTransition, actor: User | None) -> bool:
     if transition.ui_config and transition.ui_config.get("hidden") is True:
         return False
@@ -978,6 +993,18 @@ def _ensure_can_execute(
     allow_system_action: bool = False,
     inherit_parent_permission: bool = False,
 ) -> None:
+    if (
+        object_type == "bug"
+        and transition.action_key != "activate"
+        and not _bug_iteration_is_active(db, item)
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={
+                "code": "BUG_ITERATION_NOT_ACTIVE",
+                "message": "Bug 所属迭代未进行中，无法执行工作流流转",
+            },
+        )
     if _is_system_action(transition) and not allow_system_action:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="System workflow transition cannot be executed manually")
     delegated = object_type != "project" and _is_delegated(db, item, actor)
@@ -1031,7 +1058,7 @@ def _matches_ownerless_visibility(object_type: str, item, transition: WorkflowTr
     owner_id = getattr(item, "owner_id", None)
     if ui_config.get("ownerless_only") is True:
         return owner_id is None
-    if ui_config.get("requires_owner") is True:
+    if ui_config.get("requires_owner") is True and ui_config.get("handler_scope") == "current_handler":
         return owner_id is not None
     return True
 

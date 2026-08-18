@@ -20,4 +20,4 @@ def test_default_workflows_define_a_development_lead_review_gate():
         assert review_transitions["reject_review"].to_ref in {"in_processing", "fixing"}
         assert review_transitions["approve_review"].allowed_roles == "development_lead"
         assert review_transitions["reject_review"].allowed_roles == "development_lead"
-        assert review_transitions["submit_review"].trigger_config["type"] == "system_action"
+        assert review_transitions["submit_review"].trigger_config is None

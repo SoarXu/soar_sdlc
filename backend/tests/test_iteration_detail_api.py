@@ -1272,6 +1272,44 @@ def test_iteration_defer_moves_selected_unfinished_items(client: TestClient):
     assert client.get(f"/api/v1/iterations/{target_iteration_id}/detail").status_code == 200
 
 
+def test_iteration_defer_keeps_unselected_items_and_records_defer_reason(client: TestClient):
+    project_id = _create_project(client)
+    source_iteration_id = _create_iteration(client, [project_id], "Selective source", status="active")
+    target_iteration_id = _create_iteration(client, [project_id], "Selective target", status="planning")
+    selected_task_id = _create_task(client, project_id, "Selected task")
+    retained_task_id = _create_task(client, project_id, "Retained task")
+    assert client.post(
+        f"/api/v1/iterations/{source_iteration_id}/tasks",
+        json={"task_ids": [selected_task_id, retained_task_id]},
+    ).status_code == 200
+    _set_task_status(selected_task_id, "in_processing")
+    _set_task_status(retained_task_id, "in_processing")
+
+    deferred = client.post(
+        f"/api/v1/iterations/{source_iteration_id}/defer-work-items",
+        json={
+            "target_iteration_id": target_iteration_id,
+            "task_ids": [selected_task_id],
+            "defer_reason": "等待外部接口准备完成",
+        },
+    )
+    history = client.get(f"/api/v1/tasks/{selected_task_id}/status-operations")
+
+    assert deferred.status_code == 200
+    assert deferred.json()["moved_task_ids"] == [selected_task_id]
+    assert client.get(f"/api/v1/tasks/{selected_task_id}").json()["iteration_id"] == target_iteration_id
+    assert client.get(f"/api/v1/tasks/{retained_task_id}").json()["iteration_id"] == source_iteration_id
+    assert history.status_code == 200
+    deferred_operation = next(item for item in history.json() if item["action"] == "iteration_defer")
+    assert deferred_operation["remark"] == "等待外部接口准备完成"
+    assert deferred_operation["actor_id"] is not None
+    assert deferred_operation["effective_time"]
+    assert deferred_operation["selected_values"] == {
+        "source_iteration_id": source_iteration_id,
+        "target_iteration_id": target_iteration_id,
+    }
+
+
 def test_iteration_defer_rejects_completed_and_canceled_items(client: TestClient):
     project_id = _create_project(client)
     current_iteration_id = _create_iteration(client, [project_id], "Current terminal iteration", status="active")

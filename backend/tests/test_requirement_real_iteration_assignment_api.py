@@ -6,7 +6,10 @@ from fastapi.testclient import TestClient
 from app.core.security import create_access_token, get_password_hash
 from app.db.session import SessionLocal
 from app.models.iteration import Iteration, IterationProject
+from app.models.bug import Bug
 from app.models.project import Project
+from app.models.requirement import Requirement
+from app.models.task import Task
 from app.models.user import User
 from app.models.workflow_definition import WorkflowState
 from app.models.work_item_iteration_history import WorkItemIterationHistory
@@ -92,6 +95,26 @@ def test_project_creation_does_not_provision_a_default_iteration(client: TestCli
         db.close()
 
 
+def _set_work_item_category(model, item_id: int, category: str) -> None:
+    db = SessionLocal()
+    try:
+        item = db.query(model).filter(model.id == item_id).one()
+        state = (
+            db.query(WorkflowState)
+            .filter(
+                WorkflowState.definition_id == item.workflow_definition_id,
+                WorkflowState.category == category,
+            )
+            .order_by(WorkflowState.sort_order.asc(), WorkflowState.id.asc())
+            .first()
+        )
+        assert state is not None
+        item.current_state_id = state.id
+        db.commit()
+    finally:
+        db.close()
+
+
 @pytest.mark.parametrize("iteration_payload", [{}, {"iteration_id": None}])
 def test_requirement_create_requires_explicit_iteration(client: TestClient, iteration_payload: dict):
     project = _create_project(client)
@@ -160,11 +183,24 @@ def test_requirement_update_rejects_clearing_or_closed_iteration(client: TestCli
     assert moved_to_closed.status_code == 400
 
 
-def test_task_and_bug_fallback_share_auto_created_real_unstarted_iteration(client: TestClient):
+def test_task_auto_iteration_does_not_allow_bug_creation_without_explicit_iteration(client: TestClient):
     project = _create_project(client, "Fallback")
     task = client.post("/api/v1/tasks", json={"project_id": project["id"], "title": "Task"})
-    bug = client.post("/api/v1/bugs", json={"project_id": project["id"], "title": "Bug"})
+    missing_iteration = client.post(
+        "/api/v1/bugs",
+        json={"project_id": project["id"], "title": "Bug"},
+        headers={"X-Test-Require-Explicit-Iteration": "1"},
+    )
     assert task.status_code == 200, task.text
+    assert missing_iteration.status_code == 422, missing_iteration.text
+    bug = client.post(
+        "/api/v1/bugs",
+        json={
+            "project_id": project["id"],
+            "iteration_id": task.json()["iteration_id"],
+            "title": "Bug",
+        },
+    )
     assert bug.status_code == 200, bug.text
     assert task.json()["iteration_id"] == bug.json()["iteration_id"]
     db = SessionLocal()
@@ -418,7 +454,12 @@ def test_requirement_iteration_change_atomically_moves_linked_tasks_and_followin
     ).json()
     bug = client.post(
         "/api/v1/bugs",
-        json={"project_id": project["id"], "requirement_id": requirement["id"], "title": "Following bug"},
+        json={
+            "project_id": project["id"],
+            "iteration_id": source["id"],
+            "requirement_id": requirement["id"],
+            "title": "Following bug",
+        },
     ).json()
 
     moved = client.patch(
@@ -496,7 +537,7 @@ def test_requirement_iteration_change_rejects_linked_task_in_terminal_source_ite
         db.close()
 
 
-def test_project_planning_pool_aggregates_all_items_in_eligible_iterations(client: TestClient):
+def test_project_unfinished_work_items_excludes_terminal_items(client: TestClient):
     project = _create_project(client, "Planning aggregate")
     unstarted = _create_iteration(client, project["id"], "Unstarted")
     active = _create_iteration(client, project["id"], "Active")
@@ -514,30 +555,30 @@ def test_project_planning_pool_aggregates_all_items_in_eligible_iterations(clien
         "/api/v1/bugs",
         json={"project_id": project["id"], "iteration_id": active["id"], "title": "Bug"},
     ).json()
+    _set_work_item_category(Requirement, requirement["id"], "terminal")
 
     page = client.get(f"/api/v1/projects/{project['id']}/iterations").json()
-    planning = page["planning_pool"]
-    assert set(planning["iteration_ids"]) == {unstarted["id"], active["id"]}
-    assert planning["requirement_count"] == 1
-    assert planning["task_count"] == 1
-    assert planning["bug_count"] == 1
-    assert planning["total_count"] == 3
+    unfinished = page["unfinished_work_items"]
+    assert unfinished["requirement_count"] == 0
+    assert unfinished["task_count"] == 1
+    assert unfinished["bug_count"] == 1
+    assert unfinished["total_count"] == 2
 
     requirement_page = client.get(
-        f"/api/v1/projects/{project['id']}/requirements", params={"planning_pool": True}
+        f"/api/v1/projects/{project['id']}/requirements", params={"unfinished_work_items": True}
     ).json()
     task_page = client.get(
-        f"/api/v1/projects/{project['id']}/tasks", params={"planning_pool": True}
+        f"/api/v1/projects/{project['id']}/tasks", params={"unfinished_work_items": True}
     ).json()
     bug_page = client.get(
-        f"/api/v1/projects/{project['id']}/bugs", params={"planning_pool": True}
+        f"/api/v1/projects/{project['id']}/bugs", params={"unfinished_work_items": True}
     ).json()
-    assert [item["id"] for item in requirement_page["items"]] == [requirement["id"]]
+    assert requirement_page["items"] == []
     assert [item["id"] for item in task_page["items"]] == [task["id"]]
     assert [item["id"] for item in bug_page["items"]] == [bug["id"]]
 
 
-def test_child_project_reuses_parent_iteration_for_fallback_and_planning_pool(client: TestClient):
+def test_child_project_reuses_parent_iteration_for_fallback_and_unfinished_work_items(client: TestClient):
     parent = _create_project(client, "Parent scope")
     child_response = client.post(
         "/api/v1/projects",
@@ -571,12 +612,11 @@ def test_child_project_reuses_parent_iteration_for_fallback_and_planning_pool(cl
     assert task.json()["iteration_id"] == parent_iteration["id"]
     assert bug.status_code == 200, bug.text
 
-    planning = client.get(f"/api/v1/projects/{child['id']}/iterations").json()["planning_pool"]
-    assert parent_iteration["id"] in planning["iteration_ids"]
-    assert planning["requirement_count"] == 1
-    assert planning["task_count"] == 1
-    assert planning["bug_count"] == 1
-    assert planning["total_count"] == 3
+    unfinished = client.get(f"/api/v1/projects/{child['id']}/iterations").json()["unfinished_work_items"]
+    assert unfinished["requirement_count"] == 1
+    assert unfinished["task_count"] == 1
+    assert unfinished["bug_count"] == 1
+    assert unfinished["total_count"] == 3
 
 
 def test_iteration_available_and_link_endpoints_move_items_from_other_eligible_iterations(client: TestClient):

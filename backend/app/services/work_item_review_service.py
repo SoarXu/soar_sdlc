@@ -30,41 +30,60 @@ def trigger_linked_work_item_reviews(
         item = _get_item(db, object_type, object_id)
         if not item:
             continue
-        active_round = _active_round(db, object_type, object_id)
-        if active_round:
-            active_round.latest_commit_id = commit.id
-            result.append(active_round)
-            continue
-        transition = _submit_review_transition(db, item)
-        if not transition:
-            continue
-        reviewer_id = _development_lead_user_id(db)
-        if reviewer_id is None:
-            continue
         actor = _transition_actor(db, item)
         if actor is None:
             continue
-        workflow_runtime_service._execute_transition(
-            db,
-            object_type,
-            item,
-            WorkflowTransitionExecuteRequest(transition_id=transition.id),
-            actor,
-            commit=False,
-            allow_system_action=True,
-        )
-        review_round = WorkItemReviewRound(
-            object_type=object_type,
-            object_id=object_id,
-            latest_commit_id=commit.id,
-            reviewer_id=reviewer_id,
-            status="open",
-            active_key="open",
-        )
-        db.add(review_round)
-        db.flush()
-        result.append(review_round)
+        try:
+            result.append(submit_work_item_review(db, object_type, object_id, actor, commit=commit))
+        except HTTPException:
+            continue
     return result
+
+
+def submit_work_item_review(
+    db: Session,
+    object_type: str,
+    object_id: int,
+    actor: User | None,
+    *,
+    commit: DevopsCommit | None = None,
+) -> WorkItemReviewRound:
+    item = _get_item(db, object_type, object_id)
+    if not item:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="未找到工作项")
+    active_round = _active_round(db, object_type, object_id)
+    if active_round:
+        if commit is not None:
+            active_round.latest_commit_id = commit.id
+            db.flush()
+        return active_round
+
+    transition = _submit_review_transition(db, item)
+    if not transition:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="当前状态不可提交评审")
+    reviewer_id = _development_lead_user_id(db)
+    if reviewer_id is None:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="未找到可用的研发负责人进行评审")
+    workflow_runtime_service._execute_transition(
+        db,
+        object_type,
+        item,
+        WorkflowTransitionExecuteRequest(transition_id=transition.id),
+        actor,
+        commit=False,
+        allow_system_action=True,
+    )
+    review_round = WorkItemReviewRound(
+        object_type=object_type,
+        object_id=object_id,
+        latest_commit_id=commit.id if commit else None,
+        reviewer_id=reviewer_id,
+        status="open",
+        active_key="open",
+    )
+    db.add(review_round)
+    db.flush()
+    return review_round
 
 
 def decide_review_round(
@@ -76,19 +95,19 @@ def decide_review_round(
 ) -> WorkItemReviewRound:
     review_round = db.query(WorkItemReviewRound).filter(WorkItemReviewRound.id == review_round_id).with_for_update().first()
     if not review_round:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Work item review round not found")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="未找到工作项评审记录")
     if review_round.status != "open":
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Work item review round is already decided")
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="该工作项评审已完成")
     if not actor or actor.id != review_round.reviewer_id or not _is_development_lead(db, actor.id):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only the assigned development lead can decide this review")
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="仅指定的研发负责人可以进行评审")
     if decision not in {"approve", "reject"}:
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Unsupported review decision")
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="不支持的评审决定")
     if decision == "reject" and not (remark or "").strip():
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Review rejection remark is required")
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="评审不通过时必须填写原因")
 
     item = _get_item(db, review_round.object_type, review_round.object_id)
     if not item:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Reviewed work item not found")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="未找到被评审的工作项")
     action_key = "approve_review" if decision == "approve" else "reject_review"
     transition = (
         db.query(WorkflowTransition)
@@ -101,7 +120,7 @@ def decide_review_round(
         .first()
     )
     if not transition:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Review workflow transition is unavailable")
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="当前状态不可执行评审流转")
     workflow_runtime_service._execute_transition(
         db,
         review_round.object_type,
@@ -118,6 +137,36 @@ def decide_review_round(
     db.commit()
     db.refresh(review_round)
     return review_round
+
+
+def get_review_context(
+    db: Session,
+    object_type: str,
+    object_id: int,
+    actor: User | None,
+) -> dict:
+    review_round = _open_round(db, object_type, object_id)
+    if not review_round:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="未找到待评审的工作项")
+    if not actor or actor.id != review_round.reviewer_id or not _is_development_lead(db, actor.id):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="仅指定的研发负责人可以查看该评审")
+
+    commit = None
+    if review_round.latest_commit_id:
+        commit = (
+            db.query(DevopsCommit)
+            .filter(DevopsCommit.id == review_round.latest_commit_id, DevopsCommit.deleted == 0)
+            .first()
+        )
+    diff_text = commit.diff_text if commit else None
+    diff_json = commit.diff_json if commit else None
+    return {
+        "review_round": review_round,
+        "commit": commit,
+        "diff_text": diff_text,
+        "diff_json": diff_json,
+        "has_diff": bool((diff_text or "").strip() or diff_json),
+    }
 
 
 def list_open_review_rounds(db: Session, reviewer_id: int) -> list[WorkItemReviewRound]:
@@ -148,6 +197,18 @@ def _active_round(db: Session, object_type: str, object_id: int) -> WorkItemRevi
             WorkItemReviewRound.status == "open",
         )
         .with_for_update()
+        .first()
+    )
+
+
+def _open_round(db: Session, object_type: str, object_id: int) -> WorkItemReviewRound | None:
+    return (
+        db.query(WorkItemReviewRound)
+        .filter(
+            WorkItemReviewRound.object_type == object_type,
+            WorkItemReviewRound.object_id == object_id,
+            WorkItemReviewRound.status == "open",
+        )
         .first()
     )
 

@@ -33,6 +33,7 @@ class AuthenticatedTestClient(TestClient):
         self.default_token = default_token
         self._real_iteration_defaults_enabled = False
         self._real_iteration_defaults: dict[int, int] = {}
+        self._active_real_iteration_defaults: set[int] = set()
 
     def enable_real_iteration_defaults(self) -> None:
         self._real_iteration_defaults_enabled = True
@@ -41,6 +42,7 @@ class AuthenticatedTestClient(TestClient):
         headers = dict(kwargs.pop("headers", {}) or {})
         skip_default_auth = headers.pop("X-Test-No-Auth", None)
         skip_transition_adapter = headers.pop("X-Test-Raw-Transition-Request", None)
+        require_explicit_iteration = headers.pop("X-Test-Require-Explicit-Iteration", None)
         legacy_graph_keys = []
         if not skip_transition_adapter:
             kwargs = _adapt_legacy_transition_request(method, str(url), kwargs)
@@ -48,9 +50,17 @@ class AuthenticatedTestClient(TestClient):
         if not skip_default_auth and "Authorization" not in headers:
             headers["Authorization"] = f"Bearer {self.default_token}"
         if (
-            self._real_iteration_defaults_enabled
-            and method.upper() == "POST"
-            and str(url).rstrip("/").endswith("/api/v1/requirements")
+            method.upper() == "POST"
+            and (
+                (
+                    self._real_iteration_defaults_enabled
+                    and str(url).rstrip("/").endswith("/api/v1/requirements")
+                )
+                or (
+                    not require_explicit_iteration
+                    and str(url).rstrip("/").endswith("/api/v1/bugs")
+                )
+            )
             and isinstance(kwargs.get("json"), dict)
             and "iteration_id" not in kwargs["json"]
         ):
@@ -64,6 +74,18 @@ class AuthenticatedTestClient(TestClient):
                 )
                 assert iteration_response.status_code == 200, iteration_response.text
                 self._real_iteration_defaults[project_id] = iteration_response.json()["id"]
+            if (
+                project_id in self._real_iteration_defaults
+                and str(url).rstrip("/").endswith("/api/v1/bugs")
+                and project_id not in self._active_real_iteration_defaults
+            ):
+                started = self.request(
+                    "POST",
+                    f"/api/v1/workflow-runtime/iteration/{self._real_iteration_defaults[project_id]}/transition",
+                    json={"action_key": "start"},
+                )
+                assert started.status_code == 200, started.text
+                self._active_real_iteration_defaults.add(project_id)
             if project_id in self._real_iteration_defaults:
                 kwargs["json"] = {
                     **kwargs["json"],

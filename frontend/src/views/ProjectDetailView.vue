@@ -28,7 +28,7 @@
       <template v-if="activeTab === 'overview'">
         <div class="project-overview">
         <ProjectWorkPoolBand
-          :summary="projectPlanningPool"
+          :summary="projectUnfinishedWorkItems"
           @view="openWorkPoolItems"
         />
         <div class="metrics project-detail-metrics">
@@ -82,7 +82,7 @@
 
       <template v-else-if="activeTab === 'iterations'">
         <ProjectWorkPoolBand
-          :summary="projectPlanningPool"
+          :summary="projectUnfinishedWorkItems"
           @view="openWorkPoolItems"
         />
         <div class="project-tab-toolbar">
@@ -492,22 +492,24 @@
             />
           </el-select>
         </el-form-item>
-        <el-form-item label="备注">
-          <el-input v-model="deferWorkItemsForm.remark" type="textarea" :rows="2" placeholder="例如：延期到下一迭代继续处理" />
+        <el-form-item label="延期原因">
+          <el-input v-model="deferWorkItemsForm.defer_reason" type="textarea" :rows="2" maxlength="500" show-word-limit placeholder="例如：等待外部接口准备完成" />
         </el-form-item>
       </el-form>
       <div class="defer-work-lists">
         <div>
-          <h3>未完成需求 {{ unfinishedIterationRequirements.length }}</h3>
-          <el-table :data="unfinishedIterationRequirements" max-height="220" border>
+          <h3>未完成需求（已选 {{ selectedDeferRequirementIds.length }}/{{ unfinishedIterationRequirements.length }}）</h3>
+          <el-table :data="unfinishedIterationRequirements" max-height="220" border @selection-change="onDeferRequirementSelection">
+            <el-table-column type="selection" width="48" />
             <el-table-column prop="title" label="标题" min-width="220" />
             <el-table-column label="状态" width="100"><template #default="{ row }">{{ row.status_name || '-' }}</template></el-table-column>
             <el-table-column label="当前处理人" width="120"><template #default="{ row }">{{ userLabel(users, row.owner_id) }}</template></el-table-column>
           </el-table>
         </div>
         <div>
-          <h3>未完成任务 {{ unfinishedIterationTasks.length }}</h3>
-          <el-table :data="unfinishedIterationTasks" max-height="220" border>
+          <h3>未完成独立任务（已选 {{ selectedDeferTaskIds.length }}/{{ directUnfinishedIterationTasks.length }}）</h3>
+          <el-table :data="directUnfinishedIterationTasks" max-height="220" border @selection-change="onDeferTaskSelection">
+            <el-table-column type="selection" width="48" />
             <el-table-column prop="title" label="标题" min-width="220" />
             <el-table-column label="状态" width="100"><template #default="{ row }">{{ row.status_name || '-' }}</template></el-table-column>
             <el-table-column label="当前处理人" width="120"><template #default="{ row }">{{ userLabel(users, row.owner_id) }}</template></el-table-column>
@@ -516,7 +518,7 @@
       </div>
       <template #footer>
         <el-button @click="deferWorkItemsVisible = false">取消</el-button>
-        <el-button type="primary" :loading="saving" @click="submitDeferWorkItems">延期到目标迭代</el-button>
+        <el-button type="primary" :loading="saving" @click="submitDeferWorkItems">延期已选工作项</el-button>
       </template>
     </el-dialog>
 
@@ -754,7 +756,7 @@ const testCases = ref([])
 const testRuns = ref([])
 const bugs = ref([])
 const projectIterationRows = ref([])
-const projectPlanningPoolRow = ref({ iteration_ids: [], requirement_count: 0, task_count: 0, bug_count: 0, total_count: 0 })
+const projectUnfinishedWorkItemsRow = ref({ requirement_count: 0, task_count: 0, bug_count: 0, total_count: 0 })
 const projectRequirementRows = ref([])
 const projectTaskRows = ref([])
 const projectTestCaseRows = ref([])
@@ -784,11 +786,11 @@ const projectListTotals = reactive({
 })
 const projectListFilters = reactive({
   iterations: { keyword: '' },
-  requirements: { keyword: '', iteration_id: null, planning_pool: false },
-  tasks: { keyword: '', iteration_id: null, planning_pool: false },
+  requirements: { keyword: '', iteration_id: null, unfinished_work_items: false },
+  tasks: { keyword: '', iteration_id: null, unfinished_work_items: false },
   testCases: { keyword: '' },
   testRuns: { keyword: '' },
-  bugs: { keyword: '', iteration_id: null, planning_pool: false }
+  bugs: { keyword: '', iteration_id: null, unfinished_work_items: false }
 })
 const projectListPagination = reactive({
   iterations: { currentPage: 1, pageSize: 10 },
@@ -815,7 +817,9 @@ const editingCaseId = ref(null), editingRunId = ref(null), editingBugId = ref(nu
 const selectedCase = ref(null)
 const bugSourceCase = ref(null)
 const caseExecutionHistory = ref([])
-const deferWorkItemsForm = reactive({ target_iteration_id: null, remark: '' })
+const deferWorkItemsForm = reactive({ target_iteration_id: null, defer_reason: '' })
+const selectedDeferRequirementIds = ref([])
+const selectedDeferTaskIds = ref([])
 const settingsForm = reactive({ assignee_rule_config_id: null })
 
 const tabs = [
@@ -921,8 +925,7 @@ const pagedProjectTestCases = computed(() => projectTestCases.value)
 const pagedProjectTestRuns = computed(() => projectTestRuns.value)
 const pagedProjectBugs = computed(() => projectBugs.value)
 const projectIterationOptions = computed(() => deliveryIterations(iterations.value).filter((item) => (item.project_ids || []).includes(projectId.value)))
-const projectPlanningPool = computed(() => projectPlanningPoolRow.value)
-const planningPoolIterationIds = computed(() => new Set(projectPlanningPool.value?.iteration_ids || []))
+const projectUnfinishedWorkItems = computed(() => projectUnfinishedWorkItemsRow.value)
 const projectWorkItemIterationOptions = computed(() => projectIterationOptions.value)
 const requirementIterationDisplayOptions = computed(() => requirementIterationOptions(project.value, projects.value, iterations.value))
 const requirementSelectableIterations = computed(() => requirementIterationDisplayOptions.value)
@@ -1030,13 +1033,13 @@ function projectListParams(key) {
     page_size: pager.pageSize,
     keyword: keyword || undefined,
     iteration_id: filters?.iteration_id || undefined,
-    planning_pool: filters?.planning_pool || undefined
+    unfinished_work_items: filters?.unfinished_work_items || undefined
   }
 }
 function applyProjectPage(key, response, targetRef) {
   const data = response.data
   targetRef.value = data.items || []
-  if (key === 'iterations') projectPlanningPoolRow.value = data.planning_pool || projectPlanningPoolRow.value
+  if (key === 'iterations') projectUnfinishedWorkItemsRow.value = data.unfinished_work_items || projectUnfinishedWorkItemsRow.value
   projectListTotals[key] = data.total || 0
   const pager = projectListPagination[key]
   const maxPage = Math.max(1, Math.ceil(projectListTotals[key] / pager.pageSize))
@@ -1123,9 +1126,6 @@ function projectWorkItemBatchRow(objectType, row) {
 }
 function canSelectProjectWorkItemForBatchAssignment(objectType, row) {
   const listKey = { requirement: 'requirements', task: 'tasks', bug: 'bugs' }[objectType]
-  if (isWorkPoolFiltered(listKey) && planningPoolIterationIds.value.has(row.iteration_id)) {
-    return objectType !== 'task' || !row.requirement_id
-  }
   return canSelectForBatchAssignment(projectWorkItemBatchRow(objectType, row), projectWorkItemSelectionRef(objectType).value)
 }
 function onProjectWorkItemSelectionChange(objectType, rows) {
@@ -1143,15 +1143,12 @@ async function onProjectWorkItemBatchAssignmentCompleted(objectType) {
   await loadProjectListPage({ requirement: 'requirements', task: 'tasks', bug: 'bugs' }[objectType])
 }
 function onProjectWorkItemBatchAssignmentError(error) { showActionError(error, '批量指派失败') }
-function isWorkPoolFiltered(listKey) {
-  return Boolean(projectListFilters[listKey]?.planning_pool)
-}
 async function openWorkPoolItems(objectType = 'requirement') {
   const listKey = { requirement: 'requirements', task: 'tasks', bug: 'bugs' }[objectType]
-  if (!listKey || !planningPoolIterationIds.value.size) return
+  if (!listKey) return
   setActiveTab(listKey)
   projectListFilters[listKey].iteration_id = null
-  projectListFilters[listKey].planning_pool = true
+  projectListFilters[listKey].unfinished_work_items = true
   projectListPagination[listKey].currentPage = 1
   await loadProjectListPage(listKey)
 }
@@ -1314,7 +1311,9 @@ function openIterationCreate() { editingIterationId.value = null; editingIterati
 function openIterationEdit(row) { editingIterationId.value = row.id; editingIterationCanAdminister.value = canManageCurrentProject.value; Object.assign(iterationForm, { ...row, project_ids: row.project_ids || [], goal: row.goal || '' }); iterationDialogVisible.value = true }
 function openDeferWorkItems(row) {
   startingIterationId.value = row.id
-  Object.assign(deferWorkItemsForm, { target_iteration_id: null, remark: '' })
+  Object.assign(deferWorkItemsForm, { target_iteration_id: null, defer_reason: '' })
+  selectedDeferRequirementIds.value = []
+  selectedDeferTaskIds.value = []
   deferWorkItemsVisible.value = true
 }
 function openRequirementCreate() { editingRequirementId.value = null; resetRequirementForm(); requirementDialogVisible.value = true }
@@ -1516,13 +1515,14 @@ async function submitIteration() {
 }
 async function submitDeferWorkItems() {
   if (!deferWorkItemsForm.target_iteration_id) return ElMessage.warning('请选择目标迭代')
+  if (!selectedDeferRequirementIds.value.length && !selectedDeferTaskIds.value.length) return ElMessage.warning('请选择需要延期的工作项')
   saving.value = true
   try {
     const { data } = await deferIterationWorkItems(startingIterationId.value, {
       target_iteration_id: deferWorkItemsForm.target_iteration_id,
-      requirement_ids: unfinishedIterationRequirements.value.map((item) => item.id),
-      task_ids: directUnfinishedIterationTasks.value.map((item) => item.id),
-      remark: deferWorkItemsForm.remark
+      requirement_ids: selectedDeferRequirementIds.value,
+      task_ids: selectedDeferTaskIds.value,
+      defer_reason: deferWorkItemsForm.defer_reason
     })
     deferWorkItemsVisible.value = false
     await refreshAfterMutation()
@@ -1533,6 +1533,8 @@ async function submitDeferWorkItems() {
     saving.value = false
   }
 }
+function onDeferRequirementSelection(rows) { selectedDeferRequirementIds.value = rows.map((row) => row.id) }
+function onDeferTaskSelection(rows) { selectedDeferTaskIds.value = rows.map((row) => row.id) }
 async function submitRequirement() {
   if (!requirementForm.iteration_id || !requirementForm.title.trim()) return ElMessage.warning('请选择迭代并填写需求标题')
   saving.value = true
@@ -1751,8 +1753,8 @@ function buildActualText(execution) {
 
 .defer-work-lists {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  gap: 16px;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 20px;
 }
 
 .defer-work-lists h3 {

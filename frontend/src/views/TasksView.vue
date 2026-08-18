@@ -29,10 +29,13 @@
         </el-table-column>
         <el-table-column label="操作" :width="workflowOperationWidth" fixed="right">
           <template #default="{ row }">
-            <WatchToggleButton object-type="task" :object-id="row.id" />
-            <WorkflowActionButtons object-type="task" :object-id="row.id" mode="list" :transitions="workflowTransitionsFor(row)" :auto-load="false" :users="users" @command="handleWorkflowCommand(row, $event)" @executed="loadData" /><el-popconfirm v-if="canDeleteTaskRow(row)" title="确认删除该任务？" @confirm="removeTask(row.id)">
-              <template #reference><el-button link type="danger">删除</el-button></template>
-            </el-popconfirm>
+            <div class="table-actions work-item-list-actions">
+              <WatchToggleButton object-type="task" :object-id="row.id" />
+              <WorkflowActionButtons object-type="task" :object-id="row.id" mode="list" :transitions="workflowTransitionsFor(row)" :auto-load="false" :users="users" @command="handleWorkflowCommand(row, $event)" @executed="loadData" />
+              <el-popconfirm v-if="canDeleteTaskRow(row)" title="确认删除该任务？" @confirm="removeTask(row.id)">
+                <template #reference><el-button link type="danger">删除</el-button></template>
+              </el-popconfirm>
+            </div>
           </template>
         </el-table-column>
       </el-table>

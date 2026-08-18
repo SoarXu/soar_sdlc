@@ -19,6 +19,7 @@ from app.models.test_run import TestRun as RunModel
 from app.models.user import User
 from app.models.workflow_definition import WorkflowTransition
 from app.services import iteration_service, workflow_runtime_service
+from app.services.exception_center_service import _state_requires_owner_from_context
 
 
 @pytest.fixture(autouse=True)
@@ -262,6 +263,39 @@ def test_list_available_transitions_uses_nonlocking_item_loader(monkeypatch):
     monkeypatch.setattr(workflow_runtime_service, "_resolve_definition_context", lambda *args: None)
 
     assert workflow_runtime_service.list_available_transitions(object(), "bug", 1, None) == []
+
+
+def test_ownerless_visibility_only_requires_handler_for_current_handler_scope():
+    item = SimpleNamespace(owner_id=None)
+    role_authorized_transition = SimpleNamespace(
+        ui_config={"requires_owner": True, "handler_scope": "allowed_identity"}
+    )
+    current_handler_transition = SimpleNamespace(
+        ui_config={"requires_owner": True, "handler_scope": "current_handler"}
+    )
+
+    assert workflow_runtime_service._matches_ownerless_visibility(
+        "requirement", item, role_authorized_transition
+    ) is True
+    assert workflow_runtime_service._matches_ownerless_visibility(
+        "requirement", item, current_handler_transition
+    ) is False
+
+    context = SimpleNamespace(
+        transitions=[
+            SimpleNamespace(
+                definition_id=1,
+                from_state_id=2,
+                ui_config=role_authorized_transition.ui_config,
+                condition_config=None,
+            )
+        ]
+    )
+    workflow_item = SimpleNamespace(workflow_definition_id=1, current_state_id=2)
+    assert _state_requires_owner_from_context(context, workflow_item) is False
+
+    context.transitions[0].ui_config = current_handler_transition.ui_config
+    assert _state_requires_owner_from_context(context, workflow_item) is True
 
 
 def _create_user(full_name: str, role_key: str | None = None) -> tuple[int, str]:
@@ -744,6 +778,12 @@ def test_project_manager_starts_another_owners_project_without_delegate_audit(cl
 
 def test_runtime_hides_transitions_from_non_handler_and_allows_manager_delegate(client: TestClient):
     _, project_id = _create_project_with_bug_workflow(client)
+    iteration_id = _project_iteration_id(client, project_id)
+    started_iteration = client.post(
+        f"/api/v1/workflow-runtime/iteration/{iteration_id}/transition",
+        json={"action_key": "start", "payload": {"effective_time": "2026-08-19T09:00:00"}},
+    )
+    assert started_iteration.status_code == 200, started_iteration.text
     owner_id, _ = _create_user("Runtime Owner", "developer")
     other_id, other_token = _create_user("Runtime Other", "developer")
     manager_id, manager_token = _create_user("Runtime Lead", "project_owner")
@@ -752,7 +792,7 @@ def test_runtime_hides_transitions_from_non_handler_and_allows_manager_delegate(
     _add_project_member(project_id, manager_id, "project_owner")
     bug = client.post(
         "/api/v1/bugs",
-        json={"project_id": project_id, "title": f"Visibility Bug {uuid4().hex[:8]}", "owner_id": owner_id},
+        json={"project_id": project_id, "iteration_id": iteration_id, "title": f"Visibility Bug {uuid4().hex[:8]}", "owner_id": owner_id},
     ).json()
 
     other_visible = client.get(
@@ -1716,11 +1756,17 @@ def test_bug_from_test_execution_routes_repair_and_verification_handlers_separat
     _add_project_member(project["id"], repair_id, "developer")
     _add_project_member(project["id"], default_tester_id, "tester", sort_order=0)
     _add_project_member(project["id"], executor_id, "tester", sort_order=10)
+    iteration_id = _project_iteration_id(client, project["id"])
+    started_iteration = client.post(
+        f"/api/v1/workflow-runtime/iteration/{iteration_id}/transition",
+        json={"action_key": "start"},
+    )
+    assert started_iteration.status_code == 200, started_iteration.text
     requirement = client.post(
         "/api/v1/requirements",
         json={
             "project_id": project["id"],
-            "iteration_id": _project_iteration_id(client, project["id"]),
+            "iteration_id": iteration_id,
             "title": f"Test Source Requirement {uuid4().hex[:8]}",
             "owner_id": repair_id,
         },

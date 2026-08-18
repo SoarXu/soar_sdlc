@@ -14,7 +14,7 @@ for (const source of sources) {
   assert.doesNotMatch(source, /v-model="(?:requirementForm|form)\.iteration_id" clearable/)
 }
 
-assert.match(sources[0], /data\.planning_pool/)
+assert.match(sources[0], /data\.unfinished_work_items/)
 assert.match(sources[1], /!form\.iteration_id/)
 assert.match(sources[2], /!requirementForm\.iteration_id/)
 

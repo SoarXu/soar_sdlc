@@ -17,7 +17,10 @@ def validate_requirement_iteration(db: Session, project_id: int, iteration_id: i
     if iteration_id is None:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="Iteration is required",
+            detail={
+                "code": "ITERATION_REQUIRED",
+                "message": "请选择规划中或进行中的迭代",
+            },
         )
     iteration = _active_iteration(db, iteration_id)
     if project_id not in iteration_scoped_project_ids(db, iteration.id):

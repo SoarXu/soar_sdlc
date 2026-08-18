@@ -59,7 +59,6 @@ function filterMatch(item, filters = {}) {
     ['iterationKeys', item.iteration_group_key || (item.iteration_id ? String(item.iteration_id) : 'uniterated')],
     ['priorities', item.priority || item.severity],
     ['stateIds', item.current_state_id],
-    ['ownerIds', item.owner_id],
     ['handlerIds', item.handler_id]
   ]
   for (const [filterKey, value] of scalarFilters) {
@@ -112,7 +111,6 @@ export function buildWorkbenchViewModel(payload = {}) {
       { key: 'exception_center', label: exceptionCenter.label, value: exceptionCenter.total },
       { key: 'following', label: '关注范围', value: trackingTotal }
     ],
-    owners: Array.isArray(payload.owners) ? payload.owners : [],
     roleKeys: Array.isArray(payload.role_keys) ? payload.role_keys : [],
     viewMode: payload.view_mode || 'mine'
   }
@@ -209,7 +207,6 @@ export function buildWorkbenchFilterOptions(items = [], users = []) {
     iterations: uniqueOptions(items, 'iteration_id', (item) => item.iteration_name || `迭代 #${item.iteration_id}`),
     statuses: uniqueOptions(items, 'current_state_id', (item) => itemStatusLabel(item)),
     priorities: [...priorities].map(([value, label]) => ({ value, label })),
-    owners: userOptions('owner_id'),
     handlers: userOptions('handler_id')
   }
 }

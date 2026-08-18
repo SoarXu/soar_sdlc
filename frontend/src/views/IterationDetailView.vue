@@ -297,20 +297,22 @@
             <el-option v-for="item in deferTargetIterations" :key="item.id" :label="item.name" :value="item.id" />
           </el-select>
         </el-form-item>
-        <el-form-item label="备注"><el-input v-model="deferWorkItemsForm.remark" type="textarea" :rows="2" placeholder="例如：延期到下一迭代继续处理" /></el-form-item>
+        <el-form-item label="延期原因"><el-input v-model="deferWorkItemsForm.defer_reason" type="textarea" :rows="2" maxlength="500" show-word-limit placeholder="例如：等待外部接口准备完成" /></el-form-item>
       </el-form>
       <div class="defer-work-lists">
         <div>
-          <h3>未完成需求 {{ unfinishedIterationRequirements.length }}</h3>
-          <el-table :data="unfinishedIterationRequirements" max-height="220" border>
+          <h3>未完成需求（已选 {{ selectedDeferRequirementIds.length }}/{{ unfinishedIterationRequirements.length }}）</h3>
+          <el-table :data="unfinishedIterationRequirements" max-height="220" border @selection-change="onDeferRequirementSelection">
+            <el-table-column type="selection" width="48" />
             <el-table-column prop="title" label="标题" min-width="220" />
             <el-table-column label="状态" width="100"><template #default="{ row }">{{ row.status_name || '-' }}</template></el-table-column>
             <el-table-column label="负责人" width="120"><template #default="{ row }">{{ userLabel(users, row.owner_id) }}</template></el-table-column>
           </el-table>
         </div>
         <div>
-          <h3>未完成任务 {{ unfinishedIterationTasks.length }}</h3>
-          <el-table :data="unfinishedIterationTasks" max-height="220" border>
+          <h3>未完成独立任务（已选 {{ selectedDeferTaskIds.length }}/{{ directUnfinishedIterationTasks.length }}）</h3>
+          <el-table :data="directUnfinishedIterationTasks" max-height="220" border @selection-change="onDeferTaskSelection">
+            <el-table-column type="selection" width="48" />
             <el-table-column prop="title" label="标题" min-width="220" />
             <el-table-column label="状态" width="100"><template #default="{ row }">{{ row.status_name || '-' }}</template></el-table-column>
             <el-table-column label="负责人" width="120"><template #default="{ row }">{{ userLabel(users, row.owner_id) }}</template></el-table-column>
@@ -319,7 +321,7 @@
       </div>
       <template #footer>
         <el-button @click="deferWorkItemsVisible = false">取消</el-button>
-        <el-button type="primary" :loading="saving" @click="submitDeferWorkItems">延期到目标迭代</el-button>
+        <el-button type="primary" :loading="saving" @click="submitDeferWorkItems">延期已选工作项</el-button>
       </template>
     </el-dialog>
 
@@ -468,7 +470,9 @@ const selectedCase = ref(null)
 const bugSourceCase = ref(null)
 const caseExecutionHistory = ref([])
 const caseExecutionForm = ref({ execute_time: '', steps_result_json: [] })
-const deferWorkItemsForm = ref({ target_iteration_id: null, remark: '' })
+const deferWorkItemsForm = ref({ target_iteration_id: null, defer_reason: '' })
+const selectedDeferRequirementIds = ref([])
+const selectedDeferTaskIds = ref([])
 const closeReasonByRequirement = ref({})
 const closeReasonByTask = ref({})
 const generatingRequirement = ref(null)
@@ -777,13 +781,14 @@ async function submitTaskEdit() {
 }
 async function submitDeferWorkItems() {
   if (!deferWorkItemsForm.value.target_iteration_id) return ElMessage.warning('请选择目标迭代')
+  if (!selectedDeferRequirementIds.value.length && !selectedDeferTaskIds.value.length) return ElMessage.warning('请选择需要延期的工作项')
   saving.value = true
   try {
     const { data } = await deferIterationWorkItems(iterationId.value, {
       target_iteration_id: deferWorkItemsForm.value.target_iteration_id,
-      requirement_ids: unfinishedIterationRequirements.value.map((item) => item.id),
-      task_ids: directUnfinishedIterationTasks.value.map((item) => item.id),
-      remark: deferWorkItemsForm.value.remark
+      requirement_ids: selectedDeferRequirementIds.value,
+      task_ids: selectedDeferTaskIds.value,
+      defer_reason: deferWorkItemsForm.value.defer_reason
     })
     deferWorkItemsVisible.value = false
     await loadData()
@@ -794,6 +799,8 @@ async function submitDeferWorkItems() {
     saving.value = false
   }
 }
+function onDeferRequirementSelection(rows) { selectedDeferRequirementIds.value = rows.map((row) => row.id) }
+function onDeferTaskSelection(rows) { selectedDeferTaskIds.value = rows.map((row) => row.id) }
 async function deleteTaskRow(id) { await deleteTask(id); await loadData() }
 async function openCaseExecution(row) {
   selectedCase.value = row
@@ -846,6 +853,12 @@ async function submitCaseBug() {
 
 onMounted(loadData)
 watch(() => route.query.tab, (value) => { activeTab.value = normalizeIterationTab(value) })
+watch(deferWorkItemsVisible, (visible) => {
+  if (!visible) return
+  Object.assign(deferWorkItemsForm.value, { target_iteration_id: null, defer_reason: '' })
+  selectedDeferRequirementIds.value = []
+  selectedDeferTaskIds.value = []
+})
 
 async function openNextCaseAfterExecution(currentId, rows) {
   const index = rows.findIndex((item) => item.id === currentId)
@@ -894,8 +907,8 @@ function buildActualText(execution) {
 
 .defer-work-lists {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  gap: 16px;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 20px;
 }
 
 .defer-work-lists h3 {

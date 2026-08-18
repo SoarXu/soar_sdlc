@@ -144,7 +144,7 @@ class WorkItemReviewRound(Base):
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     object_type: Mapped[str] = mapped_column(String(32), nullable=False)
     object_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
-    latest_commit_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    latest_commit_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     reviewer_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     status: Mapped[str] = mapped_column(String(32), default="open", nullable=False)
     active_key: Mapped[str | None] = mapped_column(String(16), nullable=True)

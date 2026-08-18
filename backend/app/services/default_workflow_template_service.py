@@ -150,7 +150,7 @@ def reconcile_review_subgraph(db: Session, definition: WorkflowDefinition) -> No
         transition = transitions_by_key.get(action_key)
         if transition:
             if action_key == "submit_review":
-                transition.trigger_config = {"type": "system_action"}
+                transition.trigger_config = None
                 transition.ui_config = {key: value for key, value in (transition.ui_config or {}).items() if key != "system_action"}
             continue
         db.add(
@@ -162,7 +162,7 @@ def reconcile_review_subgraph(db: Session, definition: WorkflowDefinition) -> No
                 to_state_id=to_state_id,
                 allowed_roles=allowed_roles,
                 handler_rule={"target_type": "keep_current"},
-                trigger_config={"type": "system_action"} if action_key == "submit_review" else None,
+                trigger_config=None,
                 ui_config={
                     "action_category": "process",
                     "list_display": "primary",
@@ -265,7 +265,6 @@ def _requirement_graph() -> WorkflowGraphSave:
                 "pending_review",
                 target_type="keep_current",
                 handler_scope="current_handler",
-                trigger_config={"type": "system_action"},
                 ui_config={"list_display": "primary", "list_priority": 5, "requires_owner": True},
             ),
             _transition(
@@ -415,7 +414,6 @@ def _task_graph() -> WorkflowGraphSave:
                 "pending_review",
                 target_type="keep_current",
                 handler_scope="current_handler",
-                trigger_config={"type": "system_action"},
                 ui_config={"list_display": "primary", "list_priority": 5, "requires_owner": True},
             ),
             _transition(
@@ -612,7 +610,6 @@ def _bug_graph() -> WorkflowGraphSave:
                 "pending_review",
                 target_type="keep_current",
                 handler_scope="current_handler",
-                trigger_config={"type": "system_action"},
                 ui_config={"list_display": "primary", "list_priority": 5, "requires_owner": True},
             ),
             _transition(

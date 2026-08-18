@@ -14,13 +14,14 @@ export function projectAncestorIds(projects, projectId) {
 }
 
 export function bugIterationOptions(iterations, projects, projectId) {
+  const eligibleStateCategories = new Set(['start', 'normal', 'in_progress'])
   if (!projectId) {
-    return iterations.filter((iteration) => iteration.state_category !== 'terminal')
+    return iterations.filter((iteration) => eligibleStateCategories.has(iteration.state_category))
   }
 
   const scopedProjectIds = new Set(projectAncestorIds(projects, projectId))
   return iterations.filter((iteration) => {
-    if (iteration.state_category === 'terminal') return false
+    if (!eligibleStateCategories.has(iteration.state_category)) return false
     return (iteration.project_ids || []).some((id) => scopedProjectIds.has(id))
   })
 }

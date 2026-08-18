@@ -24,6 +24,13 @@
       </template>
     </el-dropdown>
 
+    <WorkItemReviewDialog
+      v-model:visible="reviewDialogVisible"
+      :object-type="objectType"
+      :object-id="objectId"
+      @decided="handleReviewDecided"
+    />
+
     <el-dialog v-model="dialogVisible" :title="dialogTitle" width="640px" append-to-body>
       <el-form label-position="top">
         <el-form-item
@@ -189,6 +196,8 @@ import { executeWorkflowTransition, fetchWorkflowTransitions } from '../api/work
 import { fetchUsers } from '../api/users'
 import { createWorkItemComment } from '../api/workItemComments'
 import { showActionError } from '../utils/actionFeedback'
+import { submitWorkItemReview } from '../api/devops'
+import WorkItemReviewDialog from './WorkItemReviewDialog.vue'
 import { isDelegateReasonRequiredError } from '../utils/permissions'
 import {
   actionNeedsConfirmation,
@@ -226,9 +235,11 @@ const loadedUsers = ref([])
 const blockerDialogVisible = ref(false)
 const blockerDetail = ref({ counts: {}, items: [] })
 const blockerTypeFilter = ref('all')
+const reviewDialogVisible = ref(false)
 
 const actions = computed(() => props.transitions ?? loadedTransitions.value)
-const listSplit = computed(() => splitListActions(actions.value, props.objectType))
+const reviewAwareActions = computed(() => normalizeReviewActions(actions.value))
+const listSplit = computed(() => splitListActions(reviewAwareActions.value, props.objectType))
 const primaryActions = computed(() => listSplit.value.primaryActions)
 const moreActions = computed(() => listSplit.value.moreActions)
 const visibleActions = computed(() => [...primaryActions.value, ...moreActions.value])
@@ -324,6 +335,22 @@ function actionAllowsManualOwner(action) {
   return Boolean(action?.form_config?.allow_manual_owner || action?.ui_config?.allow_manual_owner)
 }
 
+function normalizeReviewActions(source) {
+  const reviewApprove = source.find((action) => action.action_key === 'approve_review')
+  if (!reviewApprove) return source
+  return [
+    ...source.filter((action) => !['approve_review', 'reject_review'].includes(action.action_key)),
+    {
+      ...reviewApprove,
+      transition_id: `review-${reviewApprove.transition_id}`,
+      action_key: 'review_work_item',
+      action_name: '评审',
+      button_type: 'primary',
+      ui_config: { ...(reviewApprove.ui_config || {}), list_display: 'primary' }
+    }
+  ]
+}
+
 function fieldOptions(field) {
   const options = field.options || []
   return options.map((option) => {
@@ -357,6 +384,14 @@ async function ensureUsersLoaded() {
 async function openAction(action) {
   activeAction.value = action
   resetForm(action)
+  if (action.action_key === 'submit_review') {
+    await submitReview(action)
+    return
+  }
+  if (action.action_key === 'review_work_item') {
+    reviewDialogVisible.value = true
+    return
+  }
   const commandType = workflowCommandType(action)
   if (commandType && commandType !== 'add_information') {
     emit('command', { commandType, action })
@@ -375,6 +410,25 @@ async function openAction(action) {
     })
   }
   await submitAction(action)
+}
+
+async function submitReview(action) {
+  submittingAction.value = action.transition_id
+  try {
+    const { data } = await submitWorkItemReview(props.objectType, props.objectId)
+    ElMessage.success('提交评审成功')
+    emit('executed', data)
+    if (props.autoLoad && props.objectId) await loadTransitions()
+  } catch (error) {
+    showActionError(error, '提交评审失败')
+  } finally {
+    submittingAction.value = ''
+  }
+}
+
+async function handleReviewDecided(data) {
+  emit('executed', data)
+  if (props.autoLoad && props.objectId) await loadTransitions()
 }
 
 function handleMoreCommand(transitionId) {

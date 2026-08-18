@@ -74,6 +74,7 @@ class DeferIterationWorkItemsRequest(BaseModel):
     target_iteration_id: int
     requirement_ids: list[int] | None = None
     task_ids: list[int] | None = None
+    defer_reason: str | None = None
     remark: str | None = None
 
 

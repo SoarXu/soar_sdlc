@@ -1,10 +1,10 @@
 <template>
   <section class="work-pool-band" :class="{ 'has-work': totalCount > 0 }">
     <div class="work-pool-heading">
-      <span class="work-pool-kicker">待规划工作池</span>
-      <strong>待规划 {{ totalCount }} 项</strong>
+      <span class="work-pool-kicker">未完成工作项</span>
+      <strong>未完成 {{ totalCount }} 项</strong>
     </div>
-    <div class="work-pool-counts" aria-label="待规划事项统计">
+    <div class="work-pool-counts" aria-label="未完成工作项统计">
       <button type="button" @click="emit('view', 'requirement')">
         <span>需求</span><b>{{ summary?.requirement_count || 0 }}</b>
       </button>

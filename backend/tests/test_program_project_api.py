@@ -187,6 +187,11 @@ def test_ancestor_program_owner_governs_descendant_project_but_not_its_work_item
     )
     assert iteration.status_code == 200, iteration.text
     iteration_id = iteration.json()["id"]
+    started_iteration = client.post(
+        f"/api/v1/workflow-runtime/iteration/{iteration_id}/transition",
+        json={"action_key": "start"},
+    )
+    assert started_iteration.status_code == 200, started_iteration.text
 
     requirement = client.post(
         "/api/v1/requirements",

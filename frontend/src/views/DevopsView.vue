@@ -78,8 +78,8 @@
       <el-tab-pane label="工作项评审" name="work-item-reviews">
         <el-table :data="workItemReviews" stripe>
           <el-table-column label="工作项" min-width="180"><template #default="{ row }"><el-tag size="small">{{ row.object_type }}</el-tag> #{{ row.object_id }}</template></el-table-column>
-          <el-table-column label="最新提交" min-width="180"><template #default="{ row }"><el-button link type="primary" @click="openWorkItemReviewDiff(row)">{{ row.latest_commit_id }}</el-button></template></el-table-column>
-          <el-table-column label="操作" width="180" fixed="right"><template #default="{ row }"><el-button link type="success" @click="decideReview(row, 'approve')">通过</el-button><el-button link type="danger" @click="decideReview(row, 'reject')">驳回</el-button></template></el-table-column>
+          <el-table-column label="最新提交" min-width="180"><template #default="{ row }">{{ row.latest_commit_id || '未关联提交' }}</template></el-table-column>
+          <el-table-column label="操作" width="120" fixed="right"><template #default="{ row }"><el-button link type="primary" @click="openReviewDialog(row)">评审</el-button></template></el-table-column>
         </el-table>
         <el-empty v-if="!workItemReviews.length" description="暂无待处理工作项评审" />
       </el-tab-pane>
@@ -159,6 +159,13 @@
       <CommitDiffViewer :diff-text="selectedCommit?.diff_text" :diff-json="selectedCommit?.diff_json" />
       <template #footer><el-button @click="diffDialogVisible = false">关闭</el-button><el-button v-if="selectedCommit?.review_status !== 'reviewed'" type="success" @click="reviewCommit(selectedCommit)">标记已评审</el-button></template>
     </el-dialog>
+    <WorkItemReviewDialog
+      v-if="selectedWorkItemReview"
+      v-model:visible="workItemReviewDialogVisible"
+      :object-type="selectedWorkItemReview.object_type"
+      :object-id="selectedWorkItemReview.object_id"
+      @decided="loadData"
+    />
 
     <el-dialog v-model="repositoryDialogVisible" :title="editingRepositoryId ? '编辑仓库' : '新增仓库'" width="560px">
       <el-form label-position="top">
@@ -210,6 +217,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { Connection, Delete, Edit } from '@element-plus/icons-vue'
 
 import CommitDiffViewer from '../components/CommitDiffViewer.vue'
+import WorkItemReviewDialog from '../components/WorkItemReviewDialog.vue'
 import {
   createDevopsRepository,
   createGitPlatform,
@@ -228,7 +236,6 @@ import {
   fetchJenkinsJobs,
   ingestDevopsCommit,
   markDevopsCommitReviewed,
-  decideWorkItemReview,
   testGitPlatformConnection,
   updateGitPlatform,
   updateDevopsRepository,
@@ -256,6 +263,8 @@ const editingRepositoryId = ref(null)
 const editingJobId = ref(null)
 const editingGitPlatformId = ref(null)
 const testingGitPlatformId = ref(null)
+const selectedWorkItemReview = ref(null)
+const workItemReviewDialogVisible = ref(false)
 
 const gitPlatformOptions = [
   { label: 'Gitea', value: 'gitea' },
@@ -431,22 +440,9 @@ async function openDiff(row) {
   diffDialogVisible.value = true
 }
 
-async function openWorkItemReviewDiff(row) {
-  await openDiff({ id: row.latest_commit_id })
-}
-
-async function decideReview(row, decision) {
-  let remark = null
-  if (decision === 'reject') {
-    const result = await ElMessageBox.prompt('请填写驳回原因', '驳回评审', {
-      inputPattern: /\S+/,
-      inputErrorMessage: '请填写驳回原因'
-    })
-    remark = result.value
-  }
-  await decideWorkItemReview(row.id, { decision, remark })
-  ElMessage.success(decision === 'approve' ? '评审已通过' : '评审已驳回')
-  await loadData()
+function openReviewDialog(row) {
+  selectedWorkItemReview.value = row
+  workItemReviewDialogVisible.value = true
 }
 
 async function reviewCommit(row) {

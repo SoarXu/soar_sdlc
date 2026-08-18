@@ -84,6 +84,14 @@ export function fetchWorkItemReviews() {
   return http.get('/devops/work-item-reviews')
 }
 
+export function submitWorkItemReview(objectType, objectId) {
+  return http.post(`/devops/work-item-reviews/${objectType}/${objectId}/submit`)
+}
+
+export function fetchWorkItemReviewContext(objectType, objectId) {
+  return http.get(`/devops/work-item-reviews/${objectType}/${objectId}/context`)
+}
+
 export function decideWorkItemReview(id, data) {
   return http.post(`/devops/work-item-reviews/${id}/decision`, data)
 }

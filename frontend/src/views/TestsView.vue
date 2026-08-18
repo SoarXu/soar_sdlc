@@ -16,6 +16,9 @@
             <el-select v-model="caseFilters.projectId" clearable filterable placeholder="项目">
               <el-option v-for="project in projects" :key="project.id" :label="project.name" :value="project.id" />
             </el-select>
+            <el-select v-model="caseFilters.scopes" multiple clearable placeholder="适用范围">
+              <el-option v-for="option in testScopeOptions" :key="option.value" :label="option.label" :value="option.value" />
+            </el-select>
             <el-tooltip content="重置筛选"><el-button :icon="RefreshLeft" circle @click="resetCaseFilters" /></el-tooltip>
           </div>
           <el-table v-loading="loading" :data="pagedTestCases" stripe>
@@ -85,7 +88,7 @@
           <el-form-item label="测试人"><el-select v-model="caseForm.default_tester_id" clearable filterable placeholder="请选择测试人"><el-option v-for="user in users" :key="user.id" :label="user.full_name" :value="user.id" /></el-select></el-form-item>
           <el-form-item label="用例类型"><el-select v-model="caseForm.case_type"><el-option v-for="option in caseTypeOptions" :key="option.value" :label="option.label" :value="option.value" /></el-select></el-form-item>
         </div>
-        <div class="form-grid"><el-form-item label="适用范围"><el-select v-model="caseForm.test_scope"><el-option v-for="option in testScopeOptions" :key="option.value" :label="option.label" :value="option.value" /></el-select></el-form-item></div>
+        <div class="form-grid"><el-form-item label="适用范围"><el-select v-model="caseForm.test_scopes" multiple><el-option v-for="option in testScopeOptions" :key="option.value" :label="option.label" :value="option.value" /></el-select></el-form-item></div>
         <el-form-item label="前置条件"><el-input v-model="caseForm.precondition" type="textarea" :rows="2" /></el-form-item>
         <el-form-item label="用例步骤">
           <div class="case-steps-editor">
@@ -201,13 +204,14 @@ import { safeExecutionCellHtml, testCaseExecutionRows } from '../utils/testCaseR
 const activeTab = ref('cases'), saving = ref(false), loading = ref(false)
 const testCases = ref([]), testRuns = ref([]), testRunCases = ref([]), projects = ref([]), requirements = ref([]), iterations = ref([]), users = ref([])
 const projectMembersById = ref({})
-const caseFilters = reactive({ keyword: '', projectId: null })
+const caseFilters = reactive({ keyword: '', projectId: null, scopes: [] })
 const runFilters = reactive({ keyword: '', projectId: null })
 const filteredTestCases = computed(() => {
   const keyword = caseFilters.keyword.trim().toLowerCase()
   return testCases.value.filter((item) => (
     (!keyword || item.title?.toLowerCase().includes(keyword))
     && (!caseFilters.projectId || item.project_id === caseFilters.projectId)
+    && (!caseFilters.scopes.length || caseFilters.scopes.some((scope) => (item.test_scopes?.length ? item.test_scopes : [item.test_scope]).includes(scope)))
   ))
 })
 const filteredTestRuns = computed(() => {
@@ -267,7 +271,7 @@ const priorityLevelOptions = [
   { label: '④ 低', value: '4' },
   { label: '⑤ 最低', value: '5' }
 ]
-const caseForm = reactive({ project_id: null, requirement_id: null, title: '', case_type: 'functional', test_scope: 'functional_test', default_tester_id: null, precondition: '', steps_json: [{ step: '', expected: '' }], expected_result: '' })
+const caseForm = reactive({ project_id: null, requirement_id: null, title: '', case_type: 'functional', test_scope: 'functional_test', test_scopes: ['functional_test'], default_tester_id: null, precondition: '', steps_json: [{ step: '', expected: '' }], expected_result: '' })
 const caseExecutionForm = reactive({ execute_time: '', steps_result_json: [] })
 const caseBugForm = reactive({ title: '', bug_type: DEFAULT_BUG_TYPE_KEY, severity: '3', priority: '3', reproduce_steps: '', actual_result: '' })
 const runForm = reactive({ project_id: null, iteration_id: null, name: '', test_owner_id: null, status: 'planning', remark: '' })
@@ -277,7 +281,7 @@ const currentUser = computed(() => currentUserFromStorage(users.value))
 const canManageAnyTestAsset = computed(() => projects.value.some((project) => canManageTestCase(project, currentUser.value, membersForProject(project.id))))
 
 function runCaseLabel(item) { return `${labelById(testRuns.value, item.test_run_id, 'name')} / ${labelById(testCases.value, item.test_case_id, 'title')} / ${item.result}` }
-function resetCaseFilters() { Object.assign(caseFilters, { keyword: '', projectId: null }) }
+function resetCaseFilters() { Object.assign(caseFilters, { keyword: '', projectId: null, scopes: [] }) }
 function resetRunFilters() { Object.assign(runFilters, { keyword: '', projectId: null }) }
 function membersForProject(projectId) { return projectMembersById.value[projectId] || [] }
 function projectForId(projectId) { return projects.value.find((item) => item.id === projectId) || null }
@@ -301,8 +305,8 @@ function defaultExecutionTime() {
   const pad = (value) => String(value).padStart(2, '0')
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`
 }
-function openCaseCreate() { editingCaseId.value = null; Object.assign(caseForm, { project_id: null, requirement_id: null, title: '', case_type: 'functional', test_scope: 'functional_test', default_tester_id: null, precondition: '', steps_json: [{ step: '', expected: '' }], expected_result: '' }); caseDialogVisible.value = true }
-function openCaseEdit(row) { editingCaseId.value = row.id; Object.assign(caseForm, { ...row, case_type: row.case_type || 'functional', test_scope: row.test_scope || 'functional_test', precondition: row.precondition || '', steps_json: normalizeCaseSteps(row.steps_json), expected_result: row.expected_result || '' }); caseDialogVisible.value = true }
+function openCaseCreate() { editingCaseId.value = null; Object.assign(caseForm, { project_id: null, requirement_id: null, title: '', case_type: 'functional', test_scope: 'functional_test', test_scopes: ['functional_test'], default_tester_id: null, precondition: '', steps_json: [{ step: '', expected: '' }], expected_result: '' }); caseDialogVisible.value = true }
+function openCaseEdit(row) { editingCaseId.value = row.id; Object.assign(caseForm, { ...row, case_type: row.case_type || 'functional', test_scope: row.test_scope || 'functional_test', test_scopes: row.test_scopes?.length ? row.test_scopes : [row.test_scope || 'functional_test'], precondition: row.precondition || '', steps_json: normalizeCaseSteps(row.steps_json), expected_result: row.expected_result || '' }); caseDialogVisible.value = true }
 async function openCaseExecution(row) {
   selectedCase.value = row
   Object.assign(caseExecutionForm, {

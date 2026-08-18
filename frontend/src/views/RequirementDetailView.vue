@@ -131,7 +131,7 @@
             </el-select>
           </el-form-item>
           <el-form-item label="适用范围">
-            <el-select v-model="caseForm.test_scope">
+            <el-select v-model="caseForm.test_scopes" multiple>
               <el-option v-for="option in testScopeOptions" :key="option.value" :label="option.label" :value="option.value" />
             </el-select>
           </el-form-item>
@@ -272,7 +272,7 @@ const caseBugVisible = ref(false)
 const selectedCase = ref(null)
 const bugSourceCase = ref(null)
 const caseExecutionForm = ref({ execute_time: '', steps_result_json: [] })
-const caseForm = reactive({ project_id: null, requirement_id: null, title: '', case_type: 'functional', test_scope: 'functional_test', default_tester_id: null, precondition: '', steps_json: [{ step: '', expected: '' }], expected_result: '' })
+const caseForm = reactive({ project_id: null, requirement_id: null, title: '', case_type: 'functional', test_scope: 'functional_test', test_scopes: ['functional_test'], default_tester_id: null, precondition: '', steps_json: [{ step: '', expected: '' }], expected_result: '' })
 const caseBugForm = reactive({ title: '', bug_type: DEFAULT_BUG_TYPE_KEY, severity: '3', priority: '3', reproduce_steps: '', actual_result: '' })
 const expandedHistory = reactive({})
 const requirementForm = reactive({ iteration_id: null, title: '', requirement_type: '功能', priority: '3', owner_id: null, proposer_id: null, description: '', acceptance_criteria: '' })
@@ -433,6 +433,7 @@ function resetCaseForm() {
     title: requirement.value.title || '',
     case_type: 'functional',
     test_scope: 'functional_test',
+    test_scopes: ['functional_test'],
     default_tester_id: null,
     precondition: '',
     steps_json: [{ step: '', expected: '' }],

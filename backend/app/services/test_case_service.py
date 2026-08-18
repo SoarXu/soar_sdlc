@@ -18,24 +18,36 @@ from app.services.workflow_state_service import initial_workflow_values
 from app.services.project_permission_service import visible_project_ids
 from app.views.test_case_view import BugFromTestCaseRequest, TestCaseCreate, TestCaseExecutionCreate, TestCaseUpdate
 
+VALID_TEST_SCOPES = {
+    "unit_test",
+    "functional_test",
+    "integration_test",
+    "system_test",
+    "smoke_test",
+    "release_validation",
+}
+
 
 def list_test_cases(db: Session, actor) -> list[TestCase]:
     test_cases = db.query(TestCase).filter(
         TestCase.deleted == 0, TestCase.project_id.in_(visible_project_ids(db, actor))
     ).order_by(TestCase.id.desc()).all()
     for test_case in test_cases:
+        _normalize_test_scopes(test_case)
         test_case.linked_tasks = linked_task_summaries(db, "test_case", test_case.id)
     return test_cases
 
 
 def get_test_case(db: Session, test_case_id: int) -> TestCase:
     test_case = _get_active_test_case(db, test_case_id)
+    _normalize_test_scopes(test_case)
     test_case.linked_tasks = linked_task_summaries(db, "test_case", test_case.id)
     return test_case
 
 
 def create_test_case(db: Session, payload: TestCaseCreate) -> TestCase:
     data = payload.model_dump()
+    _apply_test_scopes(data, legacy_scope=data.get("test_scope"))
     data["lifecycle_phase"] = (
         requirement_lifecycle_phase(db, data.get("requirement_id"))
         or project_lifecycle_phase(db, data.get("project_id"))
@@ -51,11 +63,33 @@ def create_test_case(db: Session, payload: TestCaseCreate) -> TestCase:
 
 def update_test_case(db: Session, test_case_id: int, payload: TestCaseUpdate) -> TestCase:
     test_case = _get_active_test_case(db, test_case_id)
-    for field, value in payload.model_dump(exclude_unset=True).items():
+    data = payload.model_dump(exclude_unset=True)
+    if "test_scopes" in data or "test_scope" in data:
+        _apply_test_scopes(data, legacy_scope=data.get("test_scope", test_case.test_scope))
+    for field, value in data.items():
         setattr(test_case, field, value)
     db.commit()
     db.refresh(test_case)
     return test_case
+
+
+def _apply_test_scopes(data: dict, *, legacy_scope: str | None) -> None:
+    scopes = data.get("test_scopes")
+    if scopes is None:
+        scopes = [legacy_scope] if legacy_scope else []
+    normalized = []
+    for scope in scopes:
+        if scope not in VALID_TEST_SCOPES:
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="存在不支持的适用范围")
+        if scope not in normalized:
+            normalized.append(scope)
+    data["test_scopes"] = normalized
+    data["test_scope"] = normalized[0] if normalized else None
+
+
+def _normalize_test_scopes(test_case: TestCase) -> None:
+    if test_case.test_scopes is None:
+        test_case.test_scopes = [test_case.test_scope] if test_case.test_scope else []
 
 
 def delete_test_case(db: Session, test_case_id: int) -> None:

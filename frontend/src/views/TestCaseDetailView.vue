@@ -20,7 +20,7 @@
           <el-form-item label="关联需求"><el-select v-model="caseForm.requirement_id" clearable filterable><el-option v-for="requirement in requirements" :key="requirement.id" :label="requirement.title" :value="requirement.id" /></el-select></el-form-item>
           <el-form-item label="测试人"><el-select v-model="caseForm.default_tester_id" clearable filterable><el-option v-for="user in users" :key="user.id" :label="user.full_name" :value="user.id" /></el-select></el-form-item>
           <el-form-item label="用例类型"><el-select v-model="caseForm.case_type"><el-option v-for="option in caseTypeOptions" :key="option.value" :label="option.label" :value="option.value" /></el-select></el-form-item>
-          <el-form-item label="适用范围"><el-select v-model="caseForm.test_scope"><el-option v-for="option in testScopeOptions" :key="option.value" :label="option.label" :value="option.value" /></el-select></el-form-item>
+          <el-form-item label="适用范围"><el-select v-model="caseForm.test_scopes" multiple><el-option v-for="option in testScopeOptions" :key="option.value" :label="option.label" :value="option.value" /></el-select></el-form-item>
         </div>
         <el-form-item label="前置条件"><RichTextPasteEditor v-model="caseForm.precondition" /></el-form-item>
         <el-form-item label="用例步骤"><RichTextPasteEditor v-model="caseForm.steps_content" /></el-form-item>
@@ -36,7 +36,7 @@
         </el-descriptions-item>
         <el-descriptions-item label="测试人">{{ userLabel(users, testCase.default_tester_id) }}</el-descriptions-item>
         <el-descriptions-item label="用例类型">{{ caseTypeLabel(testCase.case_type) }}</el-descriptions-item>
-        <el-descriptions-item label="适用范围">{{ testScopeLabel(testCase.test_scope) }}</el-descriptions-item>
+          <el-descriptions-item label="适用范围">{{ testScopeLabel(testCase.test_scopes?.length ? testCase.test_scopes : [testCase.test_scope]) }}</el-descriptions-item>
         <el-descriptions-item label="最近结果">{{ executionResultLabel(testCase.last_execute_result) }}</el-descriptions-item>
         <el-descriptions-item label="最近执行时间">{{ formatDateTime(testCase.last_execute_time) }}</el-descriptions-item>
       </el-descriptions>
@@ -134,7 +134,7 @@ const requirements = ref([])
 const users = ref([])
 const displayedStepsContent = computed(() => displayedTestCaseSteps(testCase.value))
 const linkedRequirement = computed(() => requirements.value.find((item) => item.id === testCase.value.requirement_id))
-const caseForm = reactive({ project_id: null, requirement_id: null, title: '', case_type: 'functional', test_scope: 'functional_test', default_tester_id: null, precondition: '', steps_content: '', expected_result: '' })
+const caseForm = reactive({ project_id: null, requirement_id: null, title: '', case_type: 'functional', test_scope: 'functional_test', test_scopes: ['functional_test'], default_tester_id: null, precondition: '', steps_content: '', expected_result: '' })
 
 const caseTypeOptions = [
   { label: '接口测试', value: 'api' },
@@ -162,7 +162,7 @@ const executionResultOptions = [
 
 function optionLabel(options, value) { return options.find((option) => option.value === value)?.label || value || '-' }
 function caseTypeLabel(value) { return optionLabel(caseTypeOptions, value) }
-function testScopeLabel(value) { return optionLabel(testScopeOptions, value) }
+function testScopeLabel(values) { return (values || []).filter(Boolean).map((value) => optionLabel(testScopeOptions, value)).join('、') || '-' }
 function executionResultLabel(value) { return optionLabel(executionResultOptions, value) }
 function formatDateTime(value) { return value ? new Date(value).toLocaleString('zh-CN', { hour12: false }) : '-' }
 function goBack() {
@@ -188,6 +188,7 @@ function fillCaseForm() {
     title: testCase.value.title || '',
     case_type: testCase.value.case_type || 'functional',
     test_scope: testCase.value.test_scope || 'functional_test',
+    test_scopes: testCase.value.test_scopes?.length ? testCase.value.test_scopes : [testCase.value.test_scope || 'functional_test'],
     default_tester_id: testCase.value.default_tester_id || null,
     precondition: testCase.value.precondition || '',
     steps_content: displayedTestCaseSteps(testCase.value),

@@ -22,7 +22,6 @@ from app.services.project_data_purge_service import purge_project_data
 from app.services.project_permission_service import visible_project_ids
 from app.services.status_operation_service import create_status_operation, list_status_operations
 from app.services.iteration_assignment_service import (
-    create_unstarted_iteration,
     eligible_iteration_ids_for_project,
 )
 from app.services.workflow_runtime_service import execute_transition
@@ -279,7 +278,6 @@ def create_project(db: Session, payload: ProjectCreate) -> Project:
         project_workflow_values = initial_workflow_values(db, "project", project.id)
         project.workflow_definition_id = project_workflow_values["workflow_definition_id"]
         project.current_state_id = project_workflow_values["current_state_id"]
-        create_unstarted_iteration(db, project.id)
         db.commit()
         db.refresh(project)
         return project

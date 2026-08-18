@@ -946,7 +946,7 @@ body {
 }
 
 .rich-text-paste-editor__surface {
-  min-height: 150px;
+  min-height: 44px;
   max-height: 320px;
   overflow: auto;
   padding: 10px 12px;

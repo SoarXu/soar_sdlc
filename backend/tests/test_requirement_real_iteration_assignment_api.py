@@ -78,8 +78,8 @@ def _create_project_owner(project_id: int) -> tuple[int, str]:
         db.close()
 
 
-def test_project_creation_provisions_one_real_unstarted_iteration(client: TestClient):
-    project = _create_project(client, "Provisioned")
+def test_project_creation_does_not_provision_a_default_iteration(client: TestClient):
+    project = _create_project(client, "No default iteration")
 
     assert "requirement_pool_iteration_id" not in project
     db = SessionLocal()
@@ -87,9 +87,7 @@ def test_project_creation_provisions_one_real_unstarted_iteration(client: TestCl
         memberships = db.query(IterationProject).filter(
             IterationProject.project_id == project["id"]
         ).all()
-        assert len(memberships) == 1
-        iteration = db.query(Iteration).filter(Iteration.id == memberships[0].iteration_id).one()
-        assert iteration.state_category == "start"
+        assert memberships == []
     finally:
         db.close()
 
@@ -181,7 +179,7 @@ def test_task_and_bug_fallback_share_auto_created_real_unstarted_iteration(clien
 def test_inherited_invalid_iteration_falls_back_but_explicit_terminal_is_rejected(client: TestClient):
     project = _create_project(client, "Inherited fallback")
     other_project = _create_project(client, "Inherited foreign")
-    fallback_id = client.get("/api/v1/iterations", params={"project_id": project["id"]}).json()[0]["id"]
+    fallback_id = _create_iteration(client, project["id"], "Fallback")["id"]
     terminal = _create_iteration(client, project["id"], "Terminal source")
     deleted = _create_iteration(client, project["id"], "Deleted source")
     foreign = _create_iteration(client, other_project["id"], "Foreign source")
@@ -213,7 +211,7 @@ def test_inherited_invalid_iteration_falls_back_but_explicit_terminal_is_rejecte
 
 def test_test_case_bug_falls_back_from_terminal_source_iteration(client: TestClient):
     project = _create_project(client, "Test case source fallback")
-    fallback_id = client.get("/api/v1/iterations", params={"project_id": project["id"]}).json()[0]["id"]
+    fallback_id = _create_iteration(client, project["id"], "Fallback")["id"]
     source = _create_iteration(client, project["id"], "Historical case iteration")
     test_case = client.post(
         "/api/v1/test-cases",
@@ -236,7 +234,7 @@ def test_test_case_bug_falls_back_from_terminal_source_iteration(client: TestCli
 
 def test_test_run_bug_falls_back_from_terminal_source_iteration(client: TestClient):
     project = _create_project(client, "Test run source fallback")
-    fallback_id = client.get("/api/v1/iterations", params={"project_id": project["id"]}).json()[0]["id"]
+    fallback_id = _create_iteration(client, project["id"], "Fallback")["id"]
     source = _create_iteration(client, project["id"], "Historical run iteration")
     test_case = client.post(
         "/api/v1/test-cases", json={"project_id": project["id"], "title": "Run case"}
@@ -502,9 +500,6 @@ def test_requirement_iteration_change_rejects_linked_task_in_terminal_source_ite
 
 def test_project_planning_pool_aggregates_all_items_in_eligible_iterations(client: TestClient):
     project = _create_project(client, "Planning aggregate")
-    provisioned_id = client.get(
-        "/api/v1/iterations", params={"project_id": project["id"]}
-    ).json()[0]["id"]
     unstarted = _create_iteration(client, project["id"], "Unstarted")
     active = _create_iteration(client, project["id"], "Active")
     _start_iteration(client, active["id"])
@@ -524,7 +519,7 @@ def test_project_planning_pool_aggregates_all_items_in_eligible_iterations(clien
 
     page = client.get(f"/api/v1/projects/{project['id']}/iterations").json()
     planning = page["planning_pool"]
-    assert set(planning["iteration_ids"]) == {provisioned_id, unstarted["id"], active["id"]}
+    assert set(planning["iteration_ids"]) == {unstarted["id"], active["id"]}
     assert planning["requirement_count"] == 1
     assert planning["task_count"] == 1
     assert planning["bug_count"] == 1

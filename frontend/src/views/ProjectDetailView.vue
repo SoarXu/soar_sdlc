@@ -548,7 +548,7 @@
           <el-form-item label="需求"><el-select v-model="caseForm.requirement_id" clearable filterable><el-option v-for="requirement in projectRequirementOptions" :key="requirement.id" :label="requirement.title" :value="requirement.id" /></el-select></el-form-item>
           <el-form-item label="测试人"><el-select v-model="caseForm.default_tester_id" clearable filterable><el-option v-for="user in users" :key="user.id" :label="user.full_name" :value="user.id" /></el-select></el-form-item>
           <el-form-item label="用例类型"><el-select v-model="caseForm.case_type"><el-option v-for="option in caseTypeOptions" :key="option.value" :label="option.label" :value="option.value" /></el-select></el-form-item>
-          <el-form-item label="适用范围"><el-select v-model="caseForm.test_scope"><el-option v-for="option in testScopeOptions" :key="option.value" :label="option.label" :value="option.value" /></el-select></el-form-item>
+          <el-form-item label="适用范围"><el-select v-model="caseForm.test_scopes" multiple><el-option v-for="option in testScopeOptions" :key="option.value" :label="option.label" :value="option.value" /></el-select></el-form-item>
         </div>
         <el-form-item label="前置条件"><RichTextPasteEditor v-model="caseForm.precondition" /></el-form-item>
         <el-form-item label="用例步骤"><RichTextPasteEditor v-model="caseForm.steps_content" /></el-form-item>
@@ -983,7 +983,7 @@ const importFile = ref(null)
 const importPreview = ref(null)
 const duplicateStrategy = ref('')
 const taskForm = reactive({ project_id: null, primary_component_id: null, requirement_id: null, title: '', task_type: 'standalone_operation', priority: 'medium', owner_id: null, due_date: null, description: '' })
-const caseForm = reactive({ project_id: null, requirement_id: null, title: '', case_type: 'functional', test_scope: 'functional_test', default_tester_id: null, precondition: '', steps_content: '', expected_result: '' })
+const caseForm = reactive({ project_id: null, requirement_id: null, title: '', case_type: 'functional', test_scope: 'functional_test', test_scopes: ['functional_test'], default_tester_id: null, precondition: '', steps_content: '', expected_result: '' })
 const caseExecutionForm = reactive({ execute_time: '', steps_result_json: [] })
 const runForm = reactive({ project_id: null, iteration_id: null, name: '', test_owner_id: null, status: 'planning', remark: '' })
 const bugForm = reactive({ project_id: null, primary_component_id: null, iteration_id: null, requirement_id: null, task_id: null, test_case_id: null, test_run_id: null, title: '', bug_type: DEFAULT_BUG_TYPE_KEY, severity: '3', priority: '3', owner_id: null, reporter_id: null, reproduce_steps: '', expected_result: '', actual_result: '' })
@@ -1306,7 +1306,7 @@ async function submitProjectMembers() {
 function resetIterationForm() { Object.assign(iterationForm, { project_ids: [projectId.value], name: '', owner_id: null, start_date: null, end_date: null, goal: '' }) }
 function resetRequirementForm() { Object.assign(requirementForm, { project_id: projectId.value, primary_component_id: null, iteration_id: null, title: '', requirement_type: '功能', priority: '3', owner_id: null, proposer_id: currentUserId(users.value), description: '', acceptance_criteria: '' }) }
 function resetTaskForm() { Object.assign(taskForm, { project_id: projectId.value, primary_component_id: null, requirement_id: null, title: '', task_type: 'standalone_operation', priority: 'medium', owner_id: null, due_date: null, description: '' }) }
-function resetCaseForm() { Object.assign(caseForm, { project_id: projectId.value, requirement_id: null, title: '', case_type: 'functional', test_scope: 'functional_test', default_tester_id: defaultTesterByRule('test_case_tester_roles', ['tester', 'test_lead']), precondition: '', steps_content: '', expected_result: '' }) }
+function resetCaseForm() { Object.assign(caseForm, { project_id: projectId.value, requirement_id: null, title: '', case_type: 'functional', test_scope: 'functional_test', test_scopes: ['functional_test'], default_tester_id: defaultTesterByRule('test_case_tester_roles', ['tester', 'test_lead']), precondition: '', steps_content: '', expected_result: '' }) }
 function resetRunForm() { Object.assign(runForm, { project_id: projectId.value, iteration_id: null, name: '', test_owner_id: defaultTesterByRule('test_run_owner_roles', ['tester', 'test_lead']), status: 'planning', remark: '' }) }
 function resetBugForm() { Object.assign(bugForm, { project_id: projectId.value, primary_component_id: null, iteration_id: null, requirement_id: null, task_id: null, test_case_id: null, test_run_id: null, title: '', bug_type: DEFAULT_BUG_TYPE_KEY, severity: '3', priority: '3', owner_id: null, reporter_id: null, reproduce_steps: '', expected_result: '', actual_result: '' }) }
 
@@ -1372,7 +1372,7 @@ function onTaskRequirementChange(requirementId) {
 }
 function openCaseCreate() { editingCaseId.value = null; resetCaseForm(); caseDialogVisible.value = true }
 function openCaseCreateForRequirement(row) { editingCaseId.value = null; resetCaseForm(); Object.assign(caseForm, { requirement_id: row.id, title: row.title }); caseDialogVisible.value = true }
-function openCaseEdit(row) { editingCaseId.value = row.id; Object.assign(caseForm, { project_id: row.project_id || projectId.value, requirement_id: row.requirement_id || null, title: row.title || '', case_type: row.case_type || 'functional', test_scope: row.test_scope || 'functional_test', default_tester_id: row.default_tester_id || null, precondition: row.precondition || '', steps_content: displayedTestCaseSteps(row), expected_result: row.expected_result || '' }); caseDialogVisible.value = true }
+function openCaseEdit(row) { editingCaseId.value = row.id; Object.assign(caseForm, { project_id: row.project_id || projectId.value, requirement_id: row.requirement_id || null, title: row.title || '', case_type: row.case_type || 'functional', test_scope: row.test_scope || 'functional_test', test_scopes: row.test_scopes?.length ? row.test_scopes : [row.test_scope || 'functional_test'], default_tester_id: row.default_tester_id || null, precondition: row.precondition || '', steps_content: displayedTestCaseSteps(row), expected_result: row.expected_result || '' }); caseDialogVisible.value = true }
 async function openCaseExecution(row) {
   selectedCase.value = row
   Object.assign(caseExecutionForm, {

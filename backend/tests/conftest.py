@@ -1,14 +1,30 @@
 from fastapi.testclient import TestClient
+from datetime import datetime
 import json
 import pytest
 import re
 from sqlalchemy import text
 
-from app.core.security import create_access_token, get_password_hash
+from app.core.security import create_access_token
 from app.db.session import SessionLocal
 from app.main import app
 from app.models.role import Role, UserRole
 from app.models.user import User
+
+
+TEST_USER_ALLOWLIST = frozenset(
+    {
+        "shuwan.yang",
+        "bob",
+        "tao.qu",
+        "wenyan.zhao",
+        "yanan.liu",
+        "xinlin.jiang",
+        "zheng.xu",
+        "xiang.xu",
+    }
+)
+TEST_ADMIN_USERNAME = "shuwan.yang"
 
 
 class AuthenticatedTestClient(TestClient):
@@ -167,11 +183,20 @@ def _restore_legacy_graph_keys(response, legacy_keys: list[str | None]) -> None:
 @pytest.fixture()
 def client() -> TestClient:
     before = _snapshot_table_ids()
-    default_token = _create_default_admin_token()
+    default_token = _test_admin_token()
     try:
         yield AuthenticatedTestClient(app, default_token=default_token)
     finally:
         _cleanup_created_rows(before)
+
+
+@pytest.fixture(autouse=True)
+def enforce_test_user_whitelist():
+    _deactivate_non_allowlisted_users()
+    try:
+        yield
+    finally:
+        _deactivate_non_allowlisted_users()
 
 
 TRACKED_TABLES = [
@@ -269,29 +294,53 @@ def _table_exists(db, table: str) -> bool:
     return bool(db.execute(text("show tables like :table"), {"table": table}).first())
 
 
-def _create_default_admin_token() -> str:
+def _deactivate_non_allowlisted_users() -> int:
     db = SessionLocal()
     try:
-        username = "pytest_default_admin"
-        user = db.query(User).filter(User.username == username).first()
-        if not user:
-            user = User(
-                username=username,
-                full_name="Pytest Default Admin",
-                password_hash=get_password_hash("User123456"),
-                is_active=True,
+        updated = (
+            db.query(User)
+            .filter(User.deleted == 0, User.username.not_in(TEST_USER_ALLOWLIST))
+            .update(
+                {
+                    User.deleted: 1,
+                    User.is_active: False,
+                    User.delete_time: datetime.now(),
+                },
+                synchronize_session=False,
             )
-            db.add(user)
-            db.flush()
-        role = db.query(Role).filter(Role.role_key == "system_admin").first()
-        if not role:
-            role = Role(role_key="system_admin", role_name="system_admin", enabled=True, is_system=True)
-            db.add(role)
-            db.flush()
-        exists = db.query(UserRole).filter(UserRole.user_id == user.id, UserRole.role_id == role.id).first()
-        if not exists:
-            db.add(UserRole(user_id=user.id, role_id=role.id))
+        )
         db.commit()
+        return int(updated or 0)
+    finally:
+        db.close()
+
+
+def _test_admin_token() -> str:
+    db = SessionLocal()
+    try:
+        user = (
+            db.query(User)
+            .filter(
+                User.username == TEST_ADMIN_USERNAME,
+                User.deleted == 0,
+                User.is_active.is_(True),
+            )
+            .first()
+        )
+        if not user:
+            raise RuntimeError(f"Missing active test administrator: {TEST_ADMIN_USERNAME}")
+        has_system_admin_role = (
+            db.query(UserRole)
+            .join(Role, Role.id == UserRole.role_id)
+            .filter(
+                UserRole.user_id == user.id,
+                Role.role_key == "system_admin",
+                Role.enabled.is_(True),
+            )
+            .first()
+        )
+        if not has_system_admin_role:
+            raise RuntimeError(f"Test administrator lacks system_admin role: {TEST_ADMIN_USERNAME}")
         return create_access_token(user.username)
     finally:
         db.close()

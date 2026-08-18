@@ -691,6 +691,8 @@ def ensure_runtime_schema(engine: Engine) -> None:
                    "CREATE INDEX idx_test_cases_iteration ON test_cases (iteration_id)")
     _ensure_column(engine, "test_cases", "test_scope",
                    "ALTER TABLE test_cases ADD COLUMN test_scope VARCHAR(64) NULL COMMENT '适用范围/测试环境' AFTER case_type")
+    _ensure_column(engine, "test_cases", "test_scopes",
+                   "ALTER TABLE test_cases ADD COLUMN test_scopes JSON NULL COMMENT '适用范围列表' AFTER test_scope")
     _ensure_column(engine, "test_cases", "steps_content",
                    "ALTER TABLE test_cases ADD COLUMN steps_content MEDIUMTEXT NULL COMMENT '整块富文本用例步骤' AFTER steps_json")
     _ensure_test_case_rich_text_capacity(engine)

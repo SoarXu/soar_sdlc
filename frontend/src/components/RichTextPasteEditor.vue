@@ -24,7 +24,7 @@ import { syncRichTextEditorValue } from '../utils/richTextEditorModel'
 
 const props = defineProps({
   modelValue: { type: String, default: '' },
-  placeholder: { type: String, default: 'Paste text or screenshots here' }
+  placeholder: { type: String, default: '可粘贴文本或截图' }
 })
 const emit = defineEmits(['update:modelValue'])
 const editorRef = ref(null)

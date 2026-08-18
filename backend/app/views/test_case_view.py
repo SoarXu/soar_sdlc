@@ -12,6 +12,7 @@ class TestCaseBase(BaseModel):
     title: str
     case_type: str | None = None
     test_scope: str | None = None
+    test_scopes: list[str] | None = None
     default_tester_id: int | None = None
     precondition: str | None = None
     steps_json: dict | list | None = None
@@ -31,6 +32,7 @@ class TestCaseUpdate(BaseModel):
     title: str | None = None
     case_type: str | None = None
     test_scope: str | None = None
+    test_scopes: list[str] | None = None
     default_tester_id: int | None = None
     precondition: str | None = None
     steps_json: dict | list | None = None
@@ -43,6 +45,7 @@ class TestCaseUpdate(BaseModel):
 class TestCaseRead(TestCaseBase):
     model_config = ConfigDict(from_attributes=True)
 
+    test_scopes: list[str] = Field(default_factory=list)
     id: int
     creator_id: int | None = None
     updater_id: int | None = None
@@ -91,6 +94,7 @@ class ValidationCaseRead(BaseModel):
     title: str
     case_type: str | None = None
     test_scope: str | None = None
+    test_scopes: list[str] = Field(default_factory=list)
     default_tester_id: int | None = None
     latest_execute_time: datetime | None = None
     latest_result: str | None = None

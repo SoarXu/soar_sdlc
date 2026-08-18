@@ -63,6 +63,7 @@ def _case_item(db: Session, test_case: TestCase) -> dict:
         "title": test_case.title,
         "case_type": test_case.case_type,
         "test_scope": test_case.test_scope,
+        "test_scopes": test_case.test_scopes or ([test_case.test_scope] if test_case.test_scope else []),
         "default_tester_id": test_case.default_tester_id,
         "latest_execute_time": test_case.last_execute_time,
         "latest_result": test_case.last_execute_result,

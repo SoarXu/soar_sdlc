@@ -85,22 +85,28 @@ def test_linked_task_creation_supports_all_sources_and_records_relation_and_audi
         json={"name": f"Linked Source Project {uuid4().hex[:8]}"},
     ).json()
     _add_member(project["id"], handler_id, "tester")
+    iteration = client.post(
+        "/api/v1/iterations",
+        json={"name": f"Linked Source Iteration {uuid4().hex[:8]}", "project_ids": [project["id"]]},
+    )
+    assert iteration.status_code == 200, iteration.text
+    iteration_id = iteration.json()["id"]
     requirement = client.post(
         "/api/v1/requirements",
-        json={"project_id": project["id"], "title": f"Linked Requirement {uuid4().hex[:8]}", "owner_id": handler_id},
+        json={"project_id": project["id"], "iteration_id": iteration_id, "title": f"Linked Requirement {uuid4().hex[:8]}", "owner_id": handler_id},
     ).json()
     bug = client.post(
         "/api/v1/bugs",
-        json={"project_id": project["id"], "title": f"Linked Bug {uuid4().hex[:8]}", "owner_id": handler_id},
+        json={"project_id": project["id"], "iteration_id": iteration_id, "title": f"Linked Bug {uuid4().hex[:8]}", "owner_id": handler_id},
     ).json()
     test_case = client.post(
         "/api/v1/test-cases",
-        json={"project_id": project["id"], "title": f"Linked Case {uuid4().hex[:8]}", "default_tester_id": handler_id},
+        json={"project_id": project["id"], "iteration_id": iteration_id, "title": f"Linked Case {uuid4().hex[:8]}", "default_tester_id": handler_id},
         headers=_auth(handler_token),
     ).json()
     test_run = client.post(
         "/api/v1/test-runs",
-        json={"project_id": project["id"], "name": f"Linked Run {uuid4().hex[:8]}", "test_owner_id": handler_id},
+        json={"project_id": project["id"], "iteration_id": iteration_id, "name": f"Linked Run {uuid4().hex[:8]}", "test_owner_id": handler_id},
         headers=_auth(handler_token),
     ).json()
     sources = [
@@ -231,9 +237,14 @@ def test_linked_task_permissions_owner_inheritance_and_override(client: TestClie
     ).json()
     for user_id, role in [(source_owner_id, "developer"), (ordinary_id, "developer"), (target_id, "developer")]:
         _add_member(project["id"], user_id, role)
+    iteration = client.post(
+        "/api/v1/iterations",
+        json={"name": f"Linked Permission Iteration {uuid4().hex[:8]}", "project_ids": [project["id"]]},
+    )
+    assert iteration.status_code == 200, iteration.text
     bug = client.post(
         "/api/v1/bugs",
-        json={"project_id": project["id"], "title": f"Permission Bug {uuid4().hex[:8]}", "owner_id": source_owner_id},
+        json={"project_id": project["id"], "iteration_id": iteration.json()["id"], "title": f"Permission Bug {uuid4().hex[:8]}", "owner_id": source_owner_id},
     ).json()
 
     rejected = client.post(
@@ -287,10 +298,21 @@ def test_linked_task_permissions_owner_inheritance_and_override(client: TestClie
 def test_bug_close_checks_every_linked_task_without_mutating_blockers(client: TestClient):
     handler_id, handler_token = _create_user("Multi Task Bug Handler", "developer")
     project = client.post("/api/v1/projects", json={"name": f"Multi Task Bug Project {uuid4().hex[:8]}"}).json()
-    _add_member(project["id"], handler_id, "developer")
+    _add_member(project["id"], handler_id, "tester")
+    iteration = client.post(
+        "/api/v1/iterations",
+        json={"name": f"Multi Task Iteration {uuid4().hex[:8]}", "project_ids": [project["id"]]},
+    )
+    assert iteration.status_code == 200, iteration.text
     bug = client.post(
         "/api/v1/bugs",
-        json={"project_id": project["id"], "title": f"Multi Task Bug {uuid4().hex[:8]}", "owner_id": handler_id},
+        json={
+            "project_id": project["id"],
+            "iteration_id": iteration.json()["id"],
+            "title": f"Multi Task Bug {uuid4().hex[:8]}",
+            "owner_id": handler_id,
+            "reporter_id": handler_id,
+        },
     ).json()
     first = client.post(
         "/api/v1/tasks/linked",
@@ -330,8 +352,7 @@ def test_bug_close_checks_every_linked_task_without_mutating_blockers(client: Te
         headers=_auth(handler_token),
     )
     assert blocked.status_code == 400
-    assert "1 unfinished linked task" in blocked.json()["detail"].lower()
-    assert "unfinished linked task" in blocked.json()["detail"]
+    assert blocked.json()["detail"]["code"] == "BUG_LINKED_TASKS_UNFINISHED"
     assert client.get(f"/api/v1/bugs/{bug['id']}").json()["status_name"] == "已验证"
     assert client.get(f"/api/v1/tasks/{second['id']}").json()["status_name"] == "处理中"
 

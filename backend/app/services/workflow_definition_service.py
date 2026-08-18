@@ -447,6 +447,11 @@ def _validate_graph(db: Session, definition: WorkflowDefinition, payload: Workfl
         _validate_form_config(transition.form_config)
         _validate_typed_config(transition.validator_config, VALIDATOR_TYPES, "validator")
         _validate_ui_config(transition.ui_config)
+        transition.diagram_config = _normalize_generated_diagram_config(
+            transition.diagram_config,
+            states_by_id[transition.from_state_id],
+            states_by_id[transition.to_state_id],
+        )
         _validate_diagram_config(
             transition.diagram_config,
             states_by_id[transition.from_state_id],
@@ -552,8 +557,20 @@ def _validate_ui_config(config: dict | None) -> None:
 def _diagram_error() -> HTTPException:
     return HTTPException(
         status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-        detail="Invalid diagram configuration",
+        detail="图形路径无效，请恢复自动布线或重新绘制路径",
     )
+
+
+def _normalize_generated_diagram_config(config: dict | None, from_state, to_state) -> dict | None:
+    if not isinstance(config, dict) or config.get("routing_mode") != "generated":
+        return config
+    try:
+        _validate_diagram_config(config, from_state, to_state)
+    except HTTPException:
+        # Generated paths can become stale when an editor changes a transition endpoint.
+        # A null route makes the client regenerate it for the current endpoints.
+        return None
+    return config
 
 
 def _validate_diagram_config(config: dict | None, from_state, to_state) -> None:

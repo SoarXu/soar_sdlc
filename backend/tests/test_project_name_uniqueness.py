@@ -34,7 +34,10 @@ def _create_project(
 
 def _assert_project_name_conflict(response) -> None:
     assert response.status_code == 422
-    assert response.json()["detail"] == "项目名称已存在"
+    assert response.json()["detail"] == {
+        "code": "PROJECT_NAME_ALREADY_EXISTS",
+        "message": "项目名称已存在",
+    }
 
 
 def test_rejects_duplicate_sibling_project_name_in_same_program(client: TestClient):

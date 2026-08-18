@@ -34,6 +34,7 @@ from app.services.bug_type_service import bug_type_options, get_enabled_bug_type
 from app.services.project_permission_service import (
     actor_role_keys,
     can_admin_action,
+    can_govern_project,
     can_manage_iteration,
     can_view_project_work_items,
     ensure_authenticated,
@@ -206,12 +207,22 @@ def _execute_transition(
     *,
     commit: bool,
     allow_system_action: bool = False,
+    inherit_parent_permission: bool = False,
 ):
     transition_context = _get_executable_transition(db, object_type, item, request.transition_id)
     transition, current_state = transition_context
     _ensure_supported_runtime_configuration(transition)
     from_status = current_state.status_name
-    _ensure_can_execute(db, object_type, item, transition, actor, request, allow_system_action=allow_system_action)
+    _ensure_can_execute(
+        db,
+        object_type,
+        item,
+        transition,
+        actor,
+        request,
+        allow_system_action=allow_system_action,
+        inherit_parent_permission=inherit_parent_permission,
+    )
     if (transition.ui_config or {}).get("command_type"):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Non-status command must use its dedicated endpoint")
 
@@ -467,6 +478,7 @@ def _sync_iteration_start_hierarchy(
             ),
             actor,
             commit=False,
+            inherit_parent_permission=True,
         )
 
     for program in programs:
@@ -964,17 +976,18 @@ def _ensure_can_execute(
     request: WorkflowTransitionExecuteRequest,
     *,
     allow_system_action: bool = False,
+    inherit_parent_permission: bool = False,
 ) -> None:
     if _is_system_action(transition) and not allow_system_action:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="System workflow transition cannot be executed manually")
     delegated = object_type != "project" and _is_delegated(db, item, actor)
     if not _matches_ownerless_visibility(object_type, item, transition):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Workflow transition not available for current handler state")
-    if not _handler_allowed(db, object_type, item, transition, actor):
+    if not inherit_parent_permission and not _handler_allowed(db, object_type, item, transition, actor):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only current handler can execute transition")
     if delegated and not request.delegate_reason:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Delegate reason is required")
-    if not _role_allowed(db, object_type, item, transition, actor):
+    if not inherit_parent_permission and not _role_allowed(db, object_type, item, transition, actor):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Transition role not allowed")
     if (transition.handler_rule or {}).get("target_type") == "explicit_owner" and not request.next_owner_id:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Next handler is required")
@@ -988,6 +1001,8 @@ def _handler_allowed(
 ) -> bool:
     if object_type == "iteration":
         return can_manage_iteration(db, item.id, actor)
+    if object_type == "project":
+        return can_govern_project(db, item.id, actor)
     scope = (transition.ui_config or {}).get("handler_scope")
     if not actor:
         return object_type in {"iteration", "project"}
@@ -1088,6 +1103,8 @@ def _is_delegated(db: Session, item, actor: User | None) -> bool:
         return False
     if owner_id == actor.id:
         return False
+    if _object_type_for_item(item) == "iteration":
+        return can_manage_iteration(db, item.id, actor)
     project_id = _project_id_for_item(db, _object_type_for_item(item), item)
     return can_admin_action(db, project_id, actor.id)
 
@@ -1748,10 +1765,12 @@ def _require_bug_close_tasks_complete(db: Session, bug: Bug, validator: dict[str
     tasks = db.query(Task).filter(Task.id.in_(task_ids), Task.deleted == 0).order_by(Task.id.asc()).all()
     blockers = [task for task in tasks if not is_terminal_state(task)]
     if blockers:
-        summaries = ", ".join(f"#{task.id} {task.title} [{current_state_name(task) or '-'}]" for task in blockers)
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Bug has {len(blockers)} unfinished linked task blocker(s): {summaries}",
+            detail={
+                "code": "BUG_LINKED_TASKS_UNFINISHED",
+                "message": "关联任务未完成，不能关闭缺陷",
+            },
         )
 
 
@@ -1768,14 +1787,26 @@ def _require_requirement_relations_complete(
         if not is_terminal_state(task)
     ]
     if blocking_tasks:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Requirement has unfinished task blockers")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "code": "REQUIREMENT_HAS_UNFINISHED_TASKS",
+                "message": "关联任务未完成，不能结束需求",
+            },
+        )
     blocking_bugs = [
         bug
         for bug in db.query(Bug).filter(Bug.requirement_id == requirement.id, Bug.deleted == 0).all()
         if not is_terminal_state(bug)
     ]
     if blocking_bugs:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Requirement has unclosed bug blockers")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "code": "REQUIREMENT_HAS_UNCLOSED_BUGS",
+                "message": "关联缺陷未关闭，不能结束需求",
+            },
+        )
 
 
 def ensure_iteration_items_complete(db: Session, iteration_id: int) -> None:

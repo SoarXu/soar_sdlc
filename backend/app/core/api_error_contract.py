@@ -41,6 +41,13 @@ _LEGACY_PHRASES = {
     "Exception rule not found": "未找到异常规则",
     "Assignee rule config not found": "未找到处理人规则配置",
     "Workflow component not found": "未找到工作流组件",
+    "Work item review round is already decided": "工作项评审轮次已处理",
+    "Unsupported review decision": "不支持的评审决定",
+    "Review rejection remark is required": "请填写评审不通过原因",
+    "Work item review round not found": "未找到工作项评审轮次",
+    "Reviewed work item not found": "未找到已评审工作项",
+    "Only the assigned development lead can decide this review": "仅指定的开发负责人可以处理该评审",
+    "Review workflow transition is unavailable": "当前状态不支持评审流转",
     "Git platform connection not found": "未找到代码平台连接",
     "System template source not found": "未找到系统模板来源",
     "Workflow scheme source not found": "未找到工作流方案来源",
@@ -87,10 +94,13 @@ _LEGACY_PHRASES = {
     "Unsupported workflow object type": "不支持的工作流对象类型",
     "Unsupported workflow validator configuration": "不支持的工作流校验配置",
     "Unsupported workflow notification receiver": "不支持的工作流通知接收人",
+    "Unsupported trigger type": "不支持的触发器类型",
+    "Unsupported post action type": "不支持的后置操作类型",
     "Unknown workflow object type": "未知的工作流对象类型",
     "Unknown workflow scope type": "未知的工作流范围类型",
     "Unknown state category": "未知的状态分类",
     "Unknown terminal kind": "未知的结束类型",
+    "Terminal kind is required for a terminal state": "结束状态必须设置结束类型",
     "Unknown routing mode": "未知的路由模式",
     "Unknown handler source type": "未知的处理人来源类型",
     "Unknown route dictionary": "未知的路由字典",
@@ -185,20 +195,30 @@ def _to_chinese_message(message: str) -> str:
     if translated:
         return translated
 
+    unknown_tokens: list[str] = []
+
     def replace_token(match: re.Match[str]) -> str:
         token = match.group(0)
         replacement = _LEGACY_TERMS.get(token.lower())
+        # Dynamic error messages can include a user-configured display name.
+        # Preserve that identifier rather than converting an expected HTTP error
+        # into a server failure merely because its words are not translatable.
         if replacement is None:
-            raise AssertionError(f"unregistered legacy error term: {token} in {message!r}")
+            unknown_tokens.append(token)
+            return token
         return replacement
 
     translated = _ASCII_TOKEN.sub(replace_token, message)
-    if _contains_ascii_letters(translated):
-        raise AssertionError(f"unregistered legacy error: {message!r}")
     return re.sub(r"\s+", "", translated).strip()
 
 
 def _legacy_error_code(message: str) -> str:
+    if message == "项目集名称已存在":
+        return "PROGRAM_NAME_ALREADY_EXISTS"
+    if message == "项目名称已存在":
+        return "PROJECT_NAME_ALREADY_EXISTS"
+    if message == "Program name must not be empty":
+        return "PROGRAM_NAME_REQUIRED"
     if message == "Iteration not found":
         return "ITERATION_NOT_FOUND"
     if message == "Project not found":

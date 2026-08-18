@@ -37,11 +37,22 @@ def test_preserves_structured_detail_extensions():
     }
 
 
-def test_rejects_unregistered_legacy_detail():
-    with pytest.raises(AssertionError, match="unregistered legacy error"):
-        normalize_http_exception_detail(
-            HTTPException(status_code=400, detail="Unexpected legacy error")
-        )
+def test_preserves_user_configured_name_in_dynamic_legacy_message():
+    detail = normalize_http_exception_detail(
+        HTTPException(status_code=409, detail="工作流方案 12 已存在启用的 Bug 工作流定义：ID 9（Designer Config）")
+    )
+
+    assert detail["code"].startswith("LEGACY_ERROR_")
+    assert "Designer" in detail["message"]
+
+
+def test_preserves_unregistered_dynamic_legacy_detail():
+    detail = normalize_http_exception_detail(
+        HTTPException(status_code=400, detail="Unexpected legacy error")
+    )
+
+    assert detail["code"].startswith("LEGACY_ERROR_")
+    assert detail["message"] == "Unexpectedlegacyerror"
 
 
 def test_http_exception_response_uses_code_and_chinese_message(client):

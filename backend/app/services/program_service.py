@@ -9,6 +9,7 @@ from app.models.program import Program
 from app.models.project import Project
 from app.models.user import User
 from app.services.program_permission_service import can_create_child_program, can_delete_program, can_manage_program
+from app.services.project_permission_service import is_system_admin
 from app.services.status_operation_service import create_status_operation, list_status_operations
 from app.services.workflow_state_query_service import non_terminal_state_clause
 from app.views.program_view import ProgramCreate, ProgramUpdate
@@ -190,6 +191,8 @@ def delete_program(db: Session, program_id: int, actor_id: int) -> None:
     program = _get_active_program(db, program_id)
     if not can_delete_program(db, program_id, actor_id):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="无权限")
+    if is_system_admin(db, actor_id) and _has_unclosed_children(db, program_id):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="存在子项目集或项目为未关闭状态")
     now = datetime.now()
 
     descendant_ids = _collect_descendant_program_ids(db, program_id)

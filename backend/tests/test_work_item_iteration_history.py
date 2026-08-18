@@ -27,10 +27,14 @@ def _create_iteration(client: TestClient, project_id: int) -> int:
     return response.json()["id"]
 
 
-def _create_requirement(client: TestClient, project_id: int) -> int:
+def _create_requirement(client: TestClient, project_id: int, iteration_id: int) -> int:
     response = client.post(
         "/api/v1/requirements",
-        json={"project_id": project_id, "title": f"History Requirement-{uuid4().hex[:8]}"},
+        json={
+            "project_id": project_id,
+            "iteration_id": iteration_id,
+            "title": f"History Requirement-{uuid4().hex[:8]}",
+        },
     )
     assert response.status_code == 200
     return response.json()["id"]
@@ -57,11 +61,11 @@ def test_history_open_lookup_schema_rejects_same_name_with_wrong_columns():
     assert schema._history_open_lookup_index_exists(indexes) is False
 
 
-def test_link_and_unlink_requirement_open_and_close_membership_history(client: TestClient):
+def test_link_and_unlink_requirement_rehomes_to_a_real_iteration_with_history(client: TestClient):
     project_id = _create_project(client)
+    source_iteration_id = _create_iteration(client, project_id)
     iteration_id = _create_iteration(client, project_id)
-    requirement_id = _create_requirement(client, project_id)
-    pool_id = client.get(f"/api/v1/projects/{project_id}").json()["requirement_pool_iteration_id"]
+    requirement_id = _create_requirement(client, project_id, source_iteration_id)
 
     linked = client.post(
         f"/api/v1/iterations/{iteration_id}/requirements",
@@ -79,7 +83,7 @@ def test_link_and_unlink_requirement_open_and_close_membership_history(client: T
             {"object_id": requirement_id},
         ).all()
         assert [(row.iteration_id, row.enter_reason, row.left_at is None) for row in rows] == [
-            (pool_id, "created", False),
+            (source_iteration_id, "created", False),
             (iteration_id, "linked", True),
         ]
     finally:
@@ -98,19 +102,20 @@ def test_link_and_unlink_requirement_open_and_close_membership_history(client: T
             {"object_id": requirement_id},
         ).all()
         assert [(row.iteration_id, row.enter_reason, row.leave_reason, row.left_at is None) for row in rows] == [
-            (pool_id, "created", "linked", False),
+            (source_iteration_id, "created", "linked", False),
             (iteration_id, "linked", "unlinked", False),
-            (pool_id, "unlinked", None, True),
+            (source_iteration_id, "unlinked", None, True),
         ]
-        assert db.query(Requirement).filter(Requirement.id == requirement_id).one().iteration_id == pool_id
+        assert db.query(Requirement).filter(Requirement.id == requirement_id).one().iteration_id == source_iteration_id
     finally:
         db.close()
 
 
 def test_iteration_membership_changes_do_not_replace_latest_status_operation(client: TestClient):
     project_id = _create_project(client)
+    source_iteration_id = _create_iteration(client, project_id)
     iteration_id = _create_iteration(client, project_id)
-    requirement_id = _create_requirement(client, project_id)
+    requirement_id = _create_requirement(client, project_id, source_iteration_id)
     db = SessionLocal()
     try:
         requirement = db.query(Requirement).filter(Requirement.id == requirement_id).one()
@@ -143,7 +148,7 @@ def test_iteration_membership_changes_do_not_replace_latest_status_operation(cli
     assert history[-1]["next_owner_id"] == 77
 
 
-def test_requirement_patch_closes_current_membership_history(client: TestClient):
+def test_requirement_patch_rejects_clearing_current_membership_history(client: TestClient):
     project_id = _create_project(client)
     iteration_id = _create_iteration(client, project_id)
     response = client.post(
@@ -158,7 +163,7 @@ def test_requirement_patch_closes_current_membership_history(client: TestClient)
     requirement_id = response.json()["id"]
 
     updated = client.patch(f"/api/v1/requirements/{requirement_id}", json={"iteration_id": None})
-    assert updated.status_code == 200
+    assert updated.status_code == 422
 
     db = SessionLocal()
     try:
@@ -171,14 +176,10 @@ def test_requirement_patch_closes_current_membership_history(client: TestClient)
             .order_by(WorkItemIterationHistory.id)
             .all()
         )
-        pool_id = client.get(f"/api/v1/projects/{project_id}").json()["requirement_pool_iteration_id"]
-        assert updated.json()["iteration_id"] == pool_id
-        assert [row.enter_reason for row in histories] == ["created", "updated"]
+        assert [row.enter_reason for row in histories] == ["created"]
         assert histories[0].iteration_id == iteration_id
-        assert histories[0].leave_reason == "updated"
-        assert histories[0].left_at is not None
-        assert histories[1].iteration_id == pool_id
-        assert histories[1].left_at is None
+        assert histories[0].leave_reason is None
+        assert histories[0].left_at is None
     finally:
         db.close()
 
@@ -241,7 +242,7 @@ def test_membership_move_locks_and_refreshes_stale_work_item_before_history_chan
         mover_db.close()
 
 
-def test_requirement_clear_moves_from_delivery_to_pool_with_history(client: TestClient):
+def test_requirement_clear_is_rejected_and_keeps_membership_history(client: TestClient):
     project_id = _create_project(client)
     delivery_id = _create_iteration(client, project_id)
     created = client.post(
@@ -256,9 +257,7 @@ def test_requirement_clear_moves_from_delivery_to_pool_with_history(client: Test
 
     updated = client.patch(f"/api/v1/requirements/{created.json()['id']}", json={"iteration_id": None})
 
-    assert updated.status_code == 200, updated.text
-    pool_id = client.get(f"/api/v1/projects/{project_id}").json()["requirement_pool_iteration_id"]
-    assert updated.json()["iteration_id"] == pool_id
+    assert updated.status_code == 422, updated.text
     db = SessionLocal()
     try:
         histories = (
@@ -270,10 +269,8 @@ def test_requirement_clear_moves_from_delivery_to_pool_with_history(client: Test
             .order_by(WorkItemIterationHistory.id)
             .all()
         )
-        assert [history.enter_reason for history in histories] == ["created", "updated"]
+        assert [history.enter_reason for history in histories] == ["created"]
         assert histories[0].iteration_id == delivery_id
-        assert histories[0].left_at is not None
-        assert histories[1].iteration_id == pool_id
-        assert histories[1].left_at is None
+        assert histories[0].left_at is None
     finally:
         db.close()

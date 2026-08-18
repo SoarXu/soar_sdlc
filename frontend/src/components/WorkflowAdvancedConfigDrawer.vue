@@ -108,7 +108,10 @@
               <el-form-item label="流转名称"><el-input v-model="transition.action_name" /></el-form-item>
               <el-form-item label="来源状态"><el-input :model-value="stateName(transition.from_state_id)" disabled /></el-form-item>
               <el-form-item label="目标状态">
-                <el-select v-model="transition.to_state_id">
+                <el-select
+                  :model-value="transition.to_state_id"
+                  @update:model-value="requestTransitionTargetChange"
+                >
                   <el-option v-for="item in states" :key="item.id" :label="item.status_name" :value="item.id" />
                 </el-select>
               </el-form-item>
@@ -398,7 +401,7 @@ const props = defineProps({
 
 const emit = defineEmits([
   'update:modelValue', 'apply', 'back', 'select-transition', 'move-transition',
-  'add-transition', 'remove-state', 'remove-transition', 'reset-diagram-route'
+  'add-transition', 'remove-state', 'remove-transition', 'reset-diagram-route', 'retarget-transition'
 ])
 
 const drawerSize = 'clamp(520px, 42vw, 640px)'
@@ -604,6 +607,22 @@ async function resetDiagramRoute() {
   } catch {
     // Keep the current manual path when the user cancels.
   }
+}
+
+async function requestTransitionTargetChange(toStateId) {
+  if (!props.transition || props.transition.to_state_id === toStateId) return
+  if (isManualDiagramRoute(props.transition.diagram_config)) {
+    try {
+      await ElMessageBox.confirm(
+        '修改目标状态将清除当前手工路径并恢复自动布线，确认继续？',
+        '修改目标状态',
+        { type: 'warning' }
+      )
+    } catch {
+      return
+    }
+  }
+  emit('retarget-transition', toStateId)
 }
 
 function errorFor(field) {

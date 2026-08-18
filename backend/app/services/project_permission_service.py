@@ -89,7 +89,9 @@ def can_govern_project(db: Session, project_id: int | None, actor: User | None) 
 
 
 def can_create_project(db: Session, program_id: int | None, actor: User | None) -> bool:
-    return actor is not None
+    if actor is None:
+        return False
+    return program_id is None or is_program_governor(db, program_id, actor.id)
 
 
 def can_delete_project(db: Session, project_id: int | None, actor: User | None) -> bool:
@@ -212,6 +214,13 @@ def can_manage_iteration(db: Session, iteration_id: int, actor: User | None) -> 
     return is_iteration_owner(db, iteration_id, actor) or can_govern_iteration(db, iteration_id, actor)
 
 
+def can_directly_manage_iteration_scope(db: Session, iteration_id: int, actor: User | None) -> bool:
+    if is_iteration_owner(db, iteration_id, actor):
+        return True
+    project_ids = iteration_project_ids(db, iteration_id)
+    return bool(project_ids) and all(can_manage_project(db, project_id, actor) for project_id in project_ids)
+
+
 def can_assign_iteration_owner(db: Session, iteration_id: int, actor: User | None) -> bool:
     if actor is None:
         return False
@@ -238,6 +247,12 @@ def ensure_iteration_management_permission(db: Session, iteration_id: int, actor
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="No permission to manage iteration delivery")
 
 
+def ensure_iteration_scope_management_permission(db: Session, iteration_id: int, actor: User | None) -> None:
+    ensure_authenticated(actor)
+    if not can_directly_manage_iteration_scope(db, iteration_id, actor):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="无权调整迭代工作项范围")
+
+
 def ensure_iteration_owner_assignment_permission(db: Session, iteration_id: int, actor: User | None) -> None:
     ensure_authenticated(actor)
     if not can_assign_iteration_owner(db, iteration_id, actor):
@@ -250,10 +265,22 @@ def ensure_project_manage_permission(db: Session, project_id: int | None, actor:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="无权管理项目配置")
 
 
+def ensure_project_direct_manage_permission(db: Session, project_id: int | None, actor: User | None) -> None:
+    ensure_authenticated(actor)
+    if not can_manage_project(db, project_id, actor):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="无权管理项目业务配置")
+
+
 def ensure_project_governance_permission(db: Session, project_id: int | None, actor: User | None) -> None:
     ensure_authenticated(actor)
     if not can_govern_project(db, project_id, actor):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="无权治理项目")
+
+
+def ensure_program_governance_permission(db: Session, program_id: int | None, actor: User | None) -> None:
+    ensure_authenticated(actor)
+    if not is_program_governor(db, program_id, actor.id):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="无权治理目标项目集")
 
 
 def ensure_project_create_permission(db: Session, program_id: int | None, actor: User | None) -> None:

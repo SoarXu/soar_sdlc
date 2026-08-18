@@ -10,6 +10,7 @@ from app.services.project_permission_service import (
     ensure_project_delete_permission,
     ensure_project_governance_audit_view_permission,
     ensure_project_governance_permission,
+    ensure_program_governance_permission,
     ensure_project_view_permission,
 )
 from app.services.project_service import (
@@ -220,7 +221,7 @@ def patch_project(
     project, payload, target_parent = resolve_project_update_payload(db, project_id, payload)
     update_fields = payload.model_fields_set
     if "program_id" in update_fields and payload.program_id != project.program_id:
-        ensure_project_create_permission(db, payload.program_id, current_user)
+        ensure_program_governance_permission(db, payload.program_id, current_user)
     if target_parent and target_parent.id != project.parent_id:
         ensure_project_governance_permission(db, target_parent.id, current_user)
     return update_project(db, project_id, payload, actor_id=current_user.id if current_user else None)

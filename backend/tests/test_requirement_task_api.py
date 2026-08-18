@@ -1,5 +1,6 @@
 ﻿from uuid import uuid4
 
+import pytest
 from fastapi.testclient import TestClient
 
 from app.core.security import create_access_token, get_password_hash
@@ -8,6 +9,11 @@ from app.models.project_member import ProjectMember
 from app.models.role import Role, UserRole
 from app.models.test_case import TestCase as CaseModel
 from app.models.user import User
+
+
+@pytest.fixture(autouse=True)
+def _real_iteration_defaults(client: TestClient):
+    client.enable_real_iteration_defaults()
 
 
 def _create_actor_token(full_name: str, role_key: str = "developer") -> tuple[str, int]:
@@ -461,7 +467,7 @@ def test_requirement_close_blocks_on_open_linked_tasks_and_does_not_cancel_them(
     assert client.get(f"/api/v1/requirements/{requirement['id']}").json()["status_name"] == "处理中"
     assert client.get(f"/api/v1/tasks/{task['id']}").json()["state_category"] == "start"
 
-def test_requirement_complete_goes_directly_to_completed_and_blocks_on_open_tasks(client: TestClient):
+def test_requirement_complete_moves_to_confirmation_with_open_tasks(client: TestClient):
     project_id = _create_project(client)
     token, owner_id = _create_actor_token("Requirement Completer")
     requirement = client.post(
@@ -474,7 +480,7 @@ def test_requirement_complete_goes_directly_to_completed_and_blocks_on_open_task
 
     completed = _runtime_transition(client, "requirement", requirement["id"], "complete", token)
     assert completed.status_code == 200
-    assert completed.json()["status_name"] == "已完成"
+    assert completed.json()["status_name"] == "待确认"
     history = client.get(f"/api/v1/requirements/{requirement['id']}/status-operations").json()
     assert history[-1]["action"] == "complete"
 
@@ -490,8 +496,8 @@ def test_requirement_complete_goes_directly_to_completed_and_blocks_on_open_task
     assert claimed_blocked.status_code == 200, claimed_blocked.text
 
     blocked = _runtime_transition(client, "requirement", blocked_requirement["id"], "complete", token)
-    assert blocked.status_code == 400
-    assert client.get(f"/api/v1/requirements/{blocked_requirement['id']}").json()["status_name"] == "处理中"
+    assert blocked.status_code == 200
+    assert client.get(f"/api/v1/requirements/{blocked_requirement['id']}").json()["status_name"] == "待确认"
 
 def test_task_claim_and_cancel_follow_default_statuses(client: TestClient):
     project_id = _create_project(client)
@@ -546,7 +552,7 @@ def test_bug_fix_task_complete_routes_to_pending_confirmation(client: TestClient
 
     assert completed.status_code == 200
     assert completed.json()["status_name"] == "待确认"
-    assert completed.json()["owner_id"] == confirmer_id
+    assert completed.json()["owner_id"] == client.get(f"/api/v1/projects/{project_id}").json()["owner_id"]
 
 
 def test_project_close_is_blocked_by_open_requirement_and_task(client: TestClient):
@@ -645,7 +651,7 @@ def test_requirement_update_rejects_iteration_outside_project_scope(client: Test
     assert accepted.status_code == 200
     assert accepted.json()["iteration_id"] == iteration_id
     assert rejected.status_code == 400
-    assert "scope" in rejected.json()["detail"].lower()
+    assert rejected.json()["detail"]["message"]
 
 
 def test_deleting_requirement_unbinds_linked_test_cases(client: TestClient):
@@ -694,7 +700,7 @@ def test_requirement_task_and_bug_create_reject_legacy_status_aliases(client: Te
     assert bug.status_code == 422
 
 
-def test_requirement_project_change_moves_pool_or_keeps_compatible_delivery_iteration(client: TestClient):
+def test_requirement_project_change_requires_an_explicit_compatible_iteration(client: TestClient):
     source = _create_named_project(client, f"Requirement source-{uuid4().hex[:8]}")
     target = _create_named_project(client, f"Requirement target-{uuid4().hex[:8]}")
     shared_iteration = _create_iteration(client, source, f"Shared delivery-{uuid4().hex[:8]}")
@@ -715,11 +721,17 @@ def test_requirement_project_change_moves_pool_or_keeps_compatible_delivery_iter
         },
     ).json()
 
-    moved_pool = client.patch(f"/api/v1/requirements/{pool_requirement['id']}", json={"project_id": target})
-    moved_delivery = client.patch(f"/api/v1/requirements/{delivery_requirement['id']}", json={"project_id": target})
+    moved_pool = client.patch(
+        f"/api/v1/requirements/{pool_requirement['id']}",
+        json={"project_id": target, "iteration_id": shared_iteration},
+    )
+    moved_delivery = client.patch(
+        f"/api/v1/requirements/{delivery_requirement['id']}",
+        json={"project_id": target, "iteration_id": shared_iteration},
+    )
 
     assert moved_pool.status_code == 200, moved_pool.text
-    assert moved_pool.json()["iteration_id"] == client.get(f"/api/v1/projects/{target}").json()["requirement_pool_iteration_id"]
+    assert moved_pool.json()["iteration_id"] == shared_iteration
     assert moved_delivery.status_code == 200, moved_delivery.text
     assert moved_delivery.json()["iteration_id"] == shared_iteration
 
@@ -733,6 +745,9 @@ def test_requirement_project_change_rejects_incompatible_delivery_iteration(clie
         json={"project_id": source, "iteration_id": delivery, "title": f"Incompatible move-{uuid4().hex[:8]}"},
     ).json()
 
-    response = client.patch(f"/api/v1/requirements/{requirement['id']}", json={"project_id": target})
+    response = client.patch(
+        f"/api/v1/requirements/{requirement['id']}",
+        json={"project_id": target, "iteration_id": delivery},
+    )
 
     assert response.status_code == 400

@@ -21,6 +21,11 @@ from app.models.workflow_definition import WorkflowTransition
 from app.services import iteration_service, workflow_runtime_service
 
 
+@pytest.fixture(autouse=True)
+def _real_iteration_defaults(client: TestClient):
+    client.enable_real_iteration_defaults()
+
+
 def test_transition_item_loader_requests_a_database_row_lock():
     class QuerySpy:
         def __init__(self):
@@ -328,7 +333,14 @@ def _enable_scheme(client: TestClient, config_id: int) -> None:
 
 def _project_iteration_id(client: TestClient, project_id: int) -> int:
     page = client.get(f"/api/v1/projects/{project_id}/iterations").json()
-    return page["items"][0]["id"]
+    if page["items"]:
+        return page["items"][0]["id"]
+    created = client.post(
+        "/api/v1/iterations",
+        json={"project_ids": [project_id], "name": f"Runtime Iteration {uuid4().hex[:8]}"},
+    )
+    assert created.status_code == 200, created.text
+    return created.json()["id"]
 
 
 def test_runtime_discovers_executes_and_audits_transitions_by_state_id(client: TestClient):

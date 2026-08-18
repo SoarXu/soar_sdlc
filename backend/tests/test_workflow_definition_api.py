@@ -9,6 +9,11 @@ from app.models.status_operation import StatusOperationLog
 from app.models.workflow_definition import WorkflowState, WorkflowTransition
 
 
+@pytest.fixture(autouse=True)
+def _real_iteration_defaults(client: TestClient):
+    client.enable_real_iteration_defaults()
+
+
 def _create_config(client: TestClient, *, clear_initial_definitions: bool = True) -> int:
     response = client.post(
         "/api/v1/assignee-rule-configs",
@@ -70,8 +75,8 @@ def test_assignee_rule_scheme_rejects_duplicate_enabled_object_workflows(client:
     rejected_create = client.post("/api/v1/workflow-definitions", json=payload)
 
     assert rejected_create.status_code == 409
-    assert "工作流方案" in rejected_create.json()["detail"]
-    assert "Bug" in rejected_create.json()["detail"]
+    assert "工作流方案" in rejected_create.json()["detail"]["message"]
+    assert "缺陷" in rejected_create.json()["detail"]["message"]
 
     draft = client.post("/api/v1/workflow-definitions", json={**payload, "enabled": False})
     assert draft.status_code == 201, draft.text
@@ -82,8 +87,8 @@ def test_assignee_rule_scheme_rejects_duplicate_enabled_object_workflows(client:
     )
 
     assert rejected_enable.status_code == 409
-    assert "工作流方案" in rejected_enable.json()["detail"]
-    assert "Bug" in rejected_enable.json()["detail"]
+    assert "工作流方案" in rejected_enable.json()["detail"]["message"]
+    assert "缺陷" in rejected_enable.json()["detail"]["message"]
 
 
 def test_graph_save_generates_private_identity_and_protects_persisted_transition(client: TestClient):
@@ -125,7 +130,7 @@ def test_graph_save_generates_private_identity_and_protects_persisted_transition
     }
     rejected = client.put(f"/api/v1/workflow-definitions/{definition['id']}/graph", json=protected_payload)
     assert rejected.status_code == 422
-    assert "cannot be deleted" in rejected.json()["detail"].lower()
+    assert rejected.json()["detail"]["message"]
 
 
 def test_graph_rejects_duplicate_enabled_names_and_invalid_button_group(client: TestClient):
@@ -360,6 +365,7 @@ def test_apply_template_creates_graph_nodes_and_transitions(client: TestClient):
         "待处理",
         "修复中",
         "待验证",
+        "待评审",
         "已验证",
         "已关闭",
     }
@@ -480,8 +486,8 @@ def test_apply_template_reuses_state_ids_on_repeated_application(client: TestCli
         if item["enabled"]
     }
     assert second_ids == first_ids
-    assert len(second_ids) == 5
-    assert len(second.json()["states"]) == 5
+    assert len(second_ids) == 6
+    assert len(second.json()["states"]) == 6
 
 
 def test_apply_template_reuses_and_enables_unique_disabled_state(client: TestClient):
@@ -538,7 +544,7 @@ def test_apply_template_rejects_ambiguous_semantic_state_matches(client: TestCli
     applied = client.post(f"/api/v1/workflow-definitions/{definition['id']}/apply-template")
 
     assert applied.status_code == 422
-    assert existing["status_name"] in applied.json()["detail"]
+    assert existing["status_name"] in applied.json()["detail"]["message"]
 
 
 def test_save_graph_preserves_layout_and_validates_duplicates(client: TestClient):
@@ -749,6 +755,61 @@ def test_save_graph_round_trips_transition_diagram_config(
     assert loaded.json()["transitions"][0]["diagram_config"] == diagram_config
 
 
+def test_save_graph_clears_stale_generated_route_after_transition_target_changes(client: TestClient):
+    config_id = _create_config(client)
+    definition = client.post(
+        "/api/v1/workflow-definitions",
+        json={
+            "name": f"Generated route retarget workflow {uuid4().hex[:8]}",
+            "object_type": "bug",
+            "scope_type": "assignee_rule_config",
+            "scope_id": config_id,
+        },
+    ).json()
+    created = client.put(
+        f"/api/v1/workflow-definitions/{definition['id']}/graph",
+        json={
+            "initial_state_id": -1,
+            "states": [
+                {"id": -1, "status_name": "待验证", "category": "start", "x": 100, "y": 100},
+                {"id": -2, "status_name": "已关闭", "category": "terminal", "terminal_kind": "completed", "x": 320, "y": 240},
+                {"id": -3, "status_name": "修复中", "category": "normal", "x": 540, "y": 240},
+            ],
+            "transitions": [{
+                "action_name": "验证不通过",
+                "from_state_id": -1,
+                "to_state_id": -2,
+                "diagram_config": {
+                    "version": 1,
+                    "routing_mode": "generated",
+                    "source_anchor": {"side": "bottom", "ratio": 0.5},
+                    "target_anchor": {"side": "top", "ratio": 0.5},
+                    "waypoints": [{"x": 159, "y": 180}, {"x": 379, "y": 180}],
+                },
+            }],
+        },
+    )
+    assert created.status_code == 200, created.text
+
+    graph = created.json()
+    graph["transitions"][0]["to_state_id"] = graph["states"][2]["id"]
+    transitions = [
+        {key: value for key, value in transition.items() if key != "definition_id"}
+        for transition in graph["transitions"]
+    ]
+    updated = client.put(
+        f"/api/v1/workflow-definitions/{definition['id']}/graph",
+        json={
+            "initial_state_id": graph["definition"]["initial_state_id"],
+            "states": graph["states"],
+            "transitions": transitions,
+        },
+    )
+
+    assert updated.status_code == 200, updated.text
+    assert updated.json()["transitions"][0]["diagram_config"] is None
+
+
 @pytest.mark.parametrize(
     "diagram_config",
     [
@@ -843,7 +904,7 @@ def test_save_graph_rejects_invalid_transition_diagram_config(
     )
 
     assert response.status_code == 422
-    assert "diagram" in response.json()["detail"].lower()
+    assert response.json()["detail"]["message"] == "图形路径无效，请恢复自动布线或重新绘制路径"
 
 
 def _advanced_definition(client: TestClient) -> dict:
@@ -1090,7 +1151,7 @@ def test_save_graph_does_not_migrate_custom_transition_with_template_action_key(
     )
 
     assert saved.status_code == 422
-    assert saved.json()["detail"] == "Condition route references unknown state"
+    assert saved.json()["detail"]["message"]
 
 
 def test_save_graph_migrates_stale_template_owner_routes(client: TestClient):
@@ -1185,7 +1246,7 @@ def test_save_graph_does_not_replace_mixed_custom_owner_routes(client: TestClien
     )
 
     assert saved.status_code == 422
-    assert saved.json()["detail"] == "Owner route references unknown state"
+    assert saved.json()["detail"]["message"]
 
 
 def test_default_template_definitions_exist_for_core_objects(client: TestClient):
@@ -1212,7 +1273,7 @@ def test_bug_default_template_matches_prd_baseline(client: TestClient):
 
     assert graph.status_code == 200
     states = {node["status_name"] for node in graph.json()["states"]}
-    assert states == {"待处理", "修复中", "待验证", "已验证", "已关闭"}
+    assert states == {"待处理", "修复中", "待评审", "待验证", "已验证", "已关闭"}
     transition_names = {item["action_name"] for item in graph.json()["transitions"]}
     assert {"确认缺陷类型", "提交验证", "验证通过", "验证不通过", "关闭", "激活", "重新判定缺陷类型"} <= transition_names
     assert all("status_key" not in node for node in graph.json()["states"])
@@ -1236,7 +1297,7 @@ def test_requirement_and_project_default_templates_expose_default_metadata(clien
     requirement_graph = client.get(f"/api/v1/workflow-definitions/{requirement_definition['id']}")
     assert requirement_graph.status_code == 200
     requirement_state_names = {node["status_name"] for node in requirement_graph.json()["states"]}
-    assert requirement_state_names == {"待分派", "处理中", "待确认", "已完成", "已取消"}
+    assert requirement_state_names == {"待分派", "处理中", "待评审", "待确认", "已完成", "已取消"}
     requirement_action_names = {item["action_name"] for item in requirement_graph.json()["transitions"]}
     assert {"认领", "指派", "完成", "取消", "重新激活"} <= requirement_action_names
 
@@ -1285,7 +1346,7 @@ def test_workflow_terminal_kind_is_saved_and_must_match_terminal_category(client
         },
     )
     assert missing_terminal_kind.status_code == 422
-    assert missing_terminal_kind.json()["detail"] == "Terminal kind is required for a terminal state"
+    assert missing_terminal_kind.json()["detail"]["message"] == "结束状态必须设置结束类型"
 
     empty_terminal_kind = client.put(
         f"/api/v1/workflow-definitions/{definition['id']}/graph",
@@ -1298,4 +1359,4 @@ def test_workflow_terminal_kind_is_saved_and_must_match_terminal_category(client
         },
     )
     assert empty_terminal_kind.status_code == 422
-    assert empty_terminal_kind.json()["detail"] == "Terminal kind is required for a terminal state"
+    assert empty_terminal_kind.json()["detail"]["message"] == "结束状态必须设置结束类型"

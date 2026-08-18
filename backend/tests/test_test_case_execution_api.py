@@ -1,5 +1,6 @@
 from uuid import uuid4
 
+import pytest
 from fastapi.testclient import TestClient
 
 from app.db.session import SessionLocal
@@ -8,6 +9,11 @@ from app.models.iteration import Iteration
 from app.models import test_case as test_case_models
 from app.models.work_item_iteration_history import WorkItemIterationHistory
 from app.models.workflow_definition import WorkflowDefinition, WorkflowState
+
+
+@pytest.fixture(autouse=True)
+def _real_iteration_defaults(client: TestClient):
+    client.enable_real_iteration_defaults()
 
 
 def _create_project(client: TestClient) -> int:
@@ -126,10 +132,11 @@ def test_failed_case_bug_creation_succeeds_after_duplicate_bug_workflow_is_disab
         f"/api/v1/workflow-definitions?scope_type=assignee_rule_config&scope_id={config_id}"
     ).json()
     by_type = {item["object_type"]: item for item in definitions}
-    for object_type in ("requirement", "task", "bug"):
+    for object_type in by_type:
         applied = client.post(f"/api/v1/workflow-definitions/{by_type[object_type]['id']}/apply-template")
         assert applied.status_code == 200, applied.text
-    assert client.post(f"/api/v1/assignee-rule-configs/{config_id}/enable").status_code == 200
+    enabled = client.post(f"/api/v1/assignee-rule-configs/{config_id}/enable")
+    assert enabled.status_code == 200, enabled.text
 
     project = client.post(
         "/api/v1/projects",
@@ -160,8 +167,8 @@ def test_failed_case_bug_creation_succeeds_after_duplicate_bug_workflow_is_disab
     blocked = client.post(f"/api/v1/test-cases/{case_id}/bugs", json={"title": "Bug blocked by duplicate workflow"})
 
     assert blocked.status_code == 409
-    assert "工作流方案" in blocked.json()["detail"]
-    assert f"ID {duplicate_id}" in blocked.json()["detail"]
+    assert "工作流方案" in blocked.json()["detail"]["message"]
+    assert f"编号{duplicate_id}" in blocked.json()["detail"]["message"]
 
     db = SessionLocal()
     try:
@@ -273,11 +280,19 @@ def test_test_case_bug_rejects_terminal_or_out_of_scope_inherited_iteration(clie
         db.commit()
     finally:
         db.close()
-    assert client.post(f"/api/v1/test-cases/{case_id}/bugs", json={"title": "Out scope bug"}).status_code == 400
+    out_of_scope = client.post(f"/api/v1/test-cases/{case_id}/bugs", json={"title": "Out scope bug"})
+    assert out_of_scope.status_code == 400, out_of_scope.text
 
+    terminal_iteration = client.post(
+        "/api/v1/iterations",
+        json={"project_ids": [project_id], "name": f"Terminal {uuid4().hex[:8]}"},
+    ).json()
     db = SessionLocal()
     try:
-        iteration = db.query(Iteration).filter(Iteration.id == other_iteration["id"]).one()
+        db.query(test_case_models.TestCase).filter(test_case_models.TestCase.id == case_id).update(
+            {"iteration_id": terminal_iteration["id"]}
+        )
+        iteration = db.query(Iteration).filter(Iteration.id == terminal_iteration["id"]).one()
         terminal_state = db.query(WorkflowState).filter(
             WorkflowState.definition_id == iteration.workflow_definition_id,
             WorkflowState.category == "terminal",

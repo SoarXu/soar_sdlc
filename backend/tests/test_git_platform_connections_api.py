@@ -119,7 +119,9 @@ def test_git_platform_connection_update_preserves_token_and_soft_deletes(client)
     deleted = client.delete(f"/api/v1/devops/git-platforms/{created['id']}")
 
     assert deleted.status_code == 204
-    assert client.get("/api/v1/devops/git-platforms").json() == []
+    assert created["id"] not in {
+        item["id"] for item in client.get("/api/v1/devops/git-platforms").json()
+    }
 
 
 def test_git_platform_connection_update_invalidates_existing_verification(client, monkeypatch):

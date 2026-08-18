@@ -209,9 +209,8 @@ def test_inherited_invalid_iteration_falls_back_but_explicit_terminal_is_rejecte
         db.close()
 
 
-def test_test_case_bug_falls_back_from_terminal_source_iteration(client: TestClient):
+def test_test_case_bug_rejects_terminal_source_iteration(client: TestClient):
     project = _create_project(client, "Test case source fallback")
-    fallback_id = _create_iteration(client, project["id"], "Fallback")["id"]
     source = _create_iteration(client, project["id"], "Historical case iteration")
     test_case = client.post(
         "/api/v1/test-cases",
@@ -228,13 +227,12 @@ def test_test_case_bug_falls_back_from_terminal_source_iteration(client: TestCli
         f"/api/v1/test-cases/{test_case['id']}/bugs", json={"title": "Case failure"}
     )
 
-    assert bug.status_code == 200, bug.text
-    assert bug.json()["iteration_id"] == fallback_id
+    assert bug.status_code == 409, bug.text
+    assert bug.json()["detail"]["code"] == "ITERATION_NOT_MUTABLE"
 
 
-def test_test_run_bug_falls_back_from_terminal_source_iteration(client: TestClient):
+def test_test_run_bug_rejects_terminal_source_iteration(client: TestClient):
     project = _create_project(client, "Test run source fallback")
-    fallback_id = _create_iteration(client, project["id"], "Fallback")["id"]
     source = _create_iteration(client, project["id"], "Historical run iteration")
     test_case = client.post(
         "/api/v1/test-cases", json={"project_id": project["id"], "title": "Run case"}
@@ -255,8 +253,8 @@ def test_test_run_bug_falls_back_from_terminal_source_iteration(client: TestClie
         f"/api/v1/test-run-cases/{run_case['id']}/bugs", json={"title": "Run failure"}
     )
 
-    assert bug.status_code == 200, bug.text
-    assert bug.json()["iteration_id"] == fallback_id
+    assert bug.status_code == 409, bug.text
+    assert bug.json()["detail"]["code"] == "ITERATION_NOT_MUTABLE"
 
 
 def test_iteration_delete_rehomes_work_items_and_preserves_iteration_history(client: TestClient):

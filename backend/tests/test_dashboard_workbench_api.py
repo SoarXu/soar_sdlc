@@ -1129,12 +1129,12 @@ def test_workbench_uses_requirement_iteration_for_legacy_linked_task(client: Tes
     assert active_items[("task", task["id"])]["iteration_id"] == iteration_id
 
 
-def test_workbench_includes_auto_created_real_iteration_items_only_after_start(client: TestClient):
+def test_workbench_includes_explicit_planned_iteration_items_only_after_start(client: TestClient):
     user_id, token = _create_user_with_role(f"auto_iteration_scope_{uuid4().hex[:6]}", "developer")
     project_response = client.post("/api/v1/projects", json={"name": "Auto iteration workbench scope"})
     assert project_response.status_code == 200
     project = project_response.json()
-    iteration_id = client.get("/api/v1/iterations", params={"project_id": project["id"]}).json()[0]["id"]
+    iteration_id = _create_iteration(client, project["id"], "Explicit planned iteration")
     _add_project_member(project["id"], user_id, "developer")
     requirement = client.post(
         "/api/v1/requirements",

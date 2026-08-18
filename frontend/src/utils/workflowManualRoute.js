@@ -14,6 +14,11 @@ export function isGeneratedDiagramRoute(config) {
   return config?.version === 1 && config?.routing_mode === 'generated'
 }
 
+export function retargetWorkflowTransition(transition, toStateId) {
+  if (!transition || transition.to_state_id === toStateId) return transition
+  return { ...transition, to_state_id: toStateId, diagram_config: null }
+}
+
 export function anchorPointForNode(node, anchor) {
   if (!node || !SIDES.has(anchor?.side) || !Number.isFinite(Number(anchor?.ratio))) return null
   const ratio = clamp(Number(anchor.ratio), 0, 1)

@@ -159,6 +159,7 @@ def create_bug_from_test_case(
         project_id,
         None,
         source_iteration_id=test_case.iteration_id or (requirement.iteration_id if requirement else None),
+        strict_source_iteration=True,
     )
     ensure_iteration_assignment_mutable(db, None, inherited_iteration_id)
     _ensure_iteration_can_accept_bug(db, inherited_iteration_id, project_id)

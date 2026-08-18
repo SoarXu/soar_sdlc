@@ -9,6 +9,7 @@ from app.services.project_permission_service import (
     can_view_audit,
     ensure_audit_view_permission,
     ensure_iteration_management_permission,
+    ensure_iteration_scope_management_permission,
     ensure_iteration_owner_assignment_permission,
     ensure_iteration_owner_membership,
     ensure_project_manage_permission,
@@ -123,8 +124,8 @@ def defer_iteration_work_items(
 ):
     _ensure_delivery_iteration_operation(db, iteration_id)
     _ensure_delivery_iteration_operation(db, payload.target_iteration_id)
-    _ensure_can_manage_iteration(db, iteration_id, current_user)
-    _ensure_can_manage_iteration(db, payload.target_iteration_id, current_user)
+    _ensure_can_manage_iteration_scope(db, iteration_id, current_user)
+    _ensure_can_manage_iteration_scope(db, payload.target_iteration_id, current_user)
     return defer_work_items(db, iteration_id, payload, actor_id=current_user.id if current_user else None)
 
 
@@ -142,7 +143,7 @@ def post_iteration_requirements(
     current_user: User | None = Depends(get_optional_current_user),
 ):
     _ensure_delivery_iteration_operation(db, iteration_id)
-    _ensure_can_manage_iteration(db, iteration_id, current_user)
+    _ensure_can_manage_iteration_scope(db, iteration_id, current_user)
     return link_requirements(
         db,
         iteration_id,
@@ -159,7 +160,7 @@ def delete_iteration_requirement(
     current_user: User | None = Depends(get_optional_current_user),
 ):
     _ensure_delivery_iteration_operation(db, iteration_id)
-    _ensure_can_manage_iteration(db, iteration_id, current_user)
+    _ensure_can_manage_iteration_scope(db, iteration_id, current_user)
     unlink_requirement(db, iteration_id, requirement_id, actor_id=current_user.id if current_user else None)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
@@ -178,7 +179,7 @@ def post_iteration_tasks(
     current_user: User | None = Depends(get_optional_current_user),
 ):
     _ensure_delivery_iteration_operation(db, iteration_id)
-    _ensure_can_manage_iteration(db, iteration_id, current_user)
+    _ensure_can_manage_iteration_scope(db, iteration_id, current_user)
     return link_tasks(db, iteration_id, payload.task_ids, actor_id=current_user.id if current_user else None)
 
 
@@ -190,7 +191,7 @@ def post_iteration_bugs(
     current_user: User | None = Depends(get_optional_current_user),
 ):
     _ensure_delivery_iteration_operation(db, iteration_id)
-    _ensure_can_manage_iteration(db, iteration_id, current_user)
+    _ensure_can_manage_iteration_scope(db, iteration_id, current_user)
     return link_bugs(db, iteration_id, payload.bug_ids, actor_id=current_user.id if current_user else None)
 
 
@@ -233,6 +234,10 @@ def _ensure_can_manage_projects(db: Session, project_ids: list[int], current_use
 
 def _ensure_can_manage_iteration(db: Session, iteration_id: int, current_user: User | None) -> None:
     ensure_iteration_management_permission(db, iteration_id, current_user)
+
+
+def _ensure_can_manage_iteration_scope(db: Session, iteration_id: int, current_user: User | None) -> None:
+    ensure_iteration_scope_management_permission(db, iteration_id, current_user)
 
 
 def _ensure_can_view_iteration(db: Session, iteration_id: int, current_user: User | None) -> None:

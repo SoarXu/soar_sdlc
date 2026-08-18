@@ -39,6 +39,7 @@ def resolve_work_item_iteration(
     requested_iteration_id: int | None,
     *,
     source_iteration_id: int | None = None,
+    strict_source_iteration: bool = False,
 ) -> int:
     if requested_iteration_id is not None:
         iteration = _active_iteration(db, requested_iteration_id)
@@ -50,10 +51,29 @@ def resolve_work_item_iteration(
         if iteration.state_category not in ELIGIBLE_ITERATION_CATEGORIES:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
-                detail="Closed iteration cannot accept work items",
+                detail={
+                    "code": "ITERATION_NOT_MUTABLE",
+                    "message": "已结束的迭代不能新增工作项",
+                },
             )
         return iteration.id
     if source_iteration_id is not None:
+        if strict_source_iteration:
+            source = _active_iteration(db, source_iteration_id)
+            if project_id not in iteration_scoped_project_ids(db, source.id):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Work item is outside iteration scope",
+                )
+            if source.state_category not in ELIGIBLE_ITERATION_CATEGORIES:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail={
+                        "code": "ITERATION_NOT_MUTABLE",
+                        "message": "已结束的迭代不能新增工作项",
+                    },
+                )
+            return source.id
         source = (
             db.query(Iteration)
             .filter(Iteration.id == source_iteration_id, Iteration.deleted == 0)

@@ -1,5 +1,6 @@
 from uuid import uuid4
 
+import pytest
 from fastapi.testclient import TestClient
 
 from app.core.security import create_access_token, get_password_hash
@@ -7,6 +8,11 @@ from app.db.session import SessionLocal
 from app.models.project_member import ProjectMember
 from app.models.role import Role, UserRole
 from app.models.user import User
+
+
+@pytest.fixture(autouse=True)
+def enable_real_iteration_defaults(client: TestClient):
+    client.enable_real_iteration_defaults()
 
 
 def _create_user(full_name: str, role_key: str | None = None) -> tuple[int, str]:

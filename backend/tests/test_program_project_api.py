@@ -11,6 +11,7 @@ from app.models.requirement import Requirement
 from app.models.task import Task
 from app.models.bug import Bug
 from app.models.business_component import BusinessComponent
+from app.models.iteration import Iteration
 from app.models.program import Program
 from app.models.project import Project
 from app.models.assignee_rule_config import AssigneeRuleConfig
@@ -138,13 +139,17 @@ def test_ancestor_program_owner_governs_descendant_project_but_not_its_work_item
 
     created = client.post(
         "/api/v1/projects",
-        json={"name": f"Descendant Governed Project {uuid4().hex[:8]}", "program_id": descendant.id},
+        json={
+            "name": f"Descendant Governed Project {uuid4().hex[:8]}",
+            "program_id": descendant.id,
+            "owner_id": handler_id,
+        },
         headers=_program_auth(governor_token),
     )
 
     assert created.status_code == 200, created.text
     project = created.json()
-    assert project["owner_id"] is None
+    assert project["owner_id"] == handler_id
 
     updated = client.patch(
         f"/api/v1/projects/{project['id']}",
@@ -176,14 +181,22 @@ def test_ancestor_program_owner_governs_descendant_project_but_not_its_work_item
     assert status_history.status_code == 200
     assert audit_history.status_code == 200
 
+    iteration = client.post(
+        "/api/v1/iterations",
+        json={"name": f"Governance Iteration {uuid4().hex[:8]}", "project_ids": [project["id"]]},
+    )
+    assert iteration.status_code == 200, iteration.text
+    iteration_id = iteration.json()["id"]
+
     requirement = client.post(
         "/api/v1/requirements",
-        json={"project_id": project["id"], "title": "Protected requirement", "owner_id": handler_id},
+        json={"project_id": project["id"], "iteration_id": iteration_id, "title": "Protected requirement", "owner_id": handler_id},
     ).json()
     task = client.post(
         "/api/v1/tasks",
         json={
             "project_id": project["id"],
+            "iteration_id": iteration_id,
             "title": "Protected task",
             "task_type": "standalone_operation",
             "owner_id": handler_id,
@@ -191,16 +204,17 @@ def test_ancestor_program_owner_governs_descendant_project_but_not_its_work_item
     ).json()
     bug = client.post(
         "/api/v1/bugs",
-        json={"project_id": project["id"], "title": "Protected bug", "owner_id": handler_id},
+        json={"project_id": project["id"], "iteration_id": iteration_id, "title": "Protected bug", "owner_id": handler_id},
     ).json()
 
     assert {requirement["owner_id"], task["owner_id"], bug["owner_id"]} == {handler_id}
     for endpoint, work_item in (("requirements", requirement), ("tasks", task), ("bugs", bug)):
         rejected_create = client.post(
             f"/api/v1/{endpoint}",
-            json={
-                "project_id": project["id"],
-                "title": f"Program governor cannot create {endpoint}",
+                json={
+                    "project_id": project["id"],
+                    "iteration_id": iteration_id,
+                    "title": f"Program governor cannot create {endpoint}",
                 "owner_id": governor_id,
                 **({"task_type": "standalone_operation"} if endpoint == "tasks" else {}),
             },
@@ -240,15 +254,15 @@ def test_program_governor_cannot_change_business_workflows_or_iteration_work_ite
         json={"name": f"Governance Boundary Project {uuid4().hex[:8]}", "program_id": descendant.id},
     ).json()
     component = _seed_business_component(project["id"])
-    requirement = client.post(
-        "/api/v1/requirements",
-        json={"project_id": project["id"], "title": "Governance boundary requirement"},
-    ).json()
-    transition_id = _first_current_transition_id("requirement", requirement["id"])
     source_iteration = client.post(
         "/api/v1/iterations",
         json={"name": f"Governance source iteration {uuid4().hex[:8]}", "project_ids": [project["id"]]},
     ).json()
+    requirement = client.post(
+        "/api/v1/requirements",
+        json={"project_id": project["id"], "iteration_id": source_iteration["id"], "title": "Governance boundary requirement"},
+    ).json()
+    transition_id = _first_current_transition_id("requirement", requirement["id"])
     target_iteration = client.post(
         "/api/v1/iterations",
         json={"name": f"Governance target iteration {uuid4().hex[:8]}", "project_ids": [project["id"]]},
@@ -287,29 +301,37 @@ def test_program_governor_cannot_change_business_workflows_or_iteration_work_ite
 
 def test_program_governor_can_read_project_audit_but_not_work_item_comments_or_watches(client: TestClient):
     governor_id, governor_token = _create_program_permission_user("Project Audit Only Governor")
+    owner_id, _ = _create_program_permission_user("Project Audit Boundary Owner")
     root = _seed_program(owner_id=governor_id)
     descendant = _seed_program(owner_id=None, parent_id=root.id)
     project = client.post(
         "/api/v1/projects",
-        json={"name": f"Project Audit Boundary {uuid4().hex[:8]}", "program_id": descendant.id},
+        json={"name": f"Project Audit Boundary {uuid4().hex[:8]}", "program_id": descendant.id, "owner_id": owner_id},
         headers=_program_auth(governor_token),
     ).json()
+    iteration = client.post(
+        "/api/v1/iterations",
+        json={"name": f"Project Audit Iteration {uuid4().hex[:8]}", "project_ids": [project["id"]]},
+    )
+    assert iteration.status_code == 200, iteration.text
+    iteration_id = iteration.json()["id"]
     work_items = {
         "requirement": client.post(
             "/api/v1/requirements",
-            json={"project_id": project["id"], "title": "Audit boundary requirement"},
+            json={"project_id": project["id"], "iteration_id": iteration_id, "title": "Audit boundary requirement"},
         ).json(),
         "task": client.post(
             "/api/v1/tasks",
             json={
-                "project_id": project["id"],
+                    "project_id": project["id"],
+                    "iteration_id": iteration_id,
                 "title": "Audit boundary task",
                 "task_type": "standalone_operation",
             },
         ).json(),
         "bug": client.post(
             "/api/v1/bugs",
-            json={"project_id": project["id"], "title": "Audit boundary bug"},
+            json={"project_id": project["id"], "iteration_id": iteration_id, "title": "Audit boundary bug"},
         ).json(),
     }
 
@@ -1251,34 +1273,40 @@ def test_project_without_assignee_rule_leaves_default_assignees_empty(client: Te
     assert saved_members.status_code == 200
     members = saved_members.json()
     assert {item["project_role"] for item in members} == {"product_owner", "developer", "tester"}
+    iteration = client.post(
+        "/api/v1/iterations",
+        json={"name": f"Team Defaults Iteration-{uuid4().hex[:8]}", "project_ids": [project_id]},
+    )
+    assert iteration.status_code == 200, iteration.text
+    iteration_id = iteration.json()["id"]
 
     requirement = client.post(
         "/api/v1/requirements",
-        json={"project_id": project_id, "title": "Requirement has no default owner"},
+        json={"project_id": project_id, "iteration_id": iteration_id, "title": "Requirement has no default owner"},
     ).json()
     assert requirement["owner_id"] is None
 
     standalone_task = client.post(
         "/api/v1/tasks",
-        json={"project_id": project_id, "title": "Standalone task has no default owner"},
+        json={"project_id": project_id, "iteration_id": iteration_id, "title": "Standalone task has no default owner"},
     ).json()
     assert standalone_task["owner_id"] is None
 
     requirement_task = client.post(
         "/api/v1/tasks",
-        json={"project_id": project_id, "requirement_id": requirement["id"], "title": "Requirement task has no default owner"},
+        json={"project_id": project_id, "iteration_id": iteration_id, "requirement_id": requirement["id"], "title": "Requirement task has no default owner"},
     ).json()
     assert requirement_task["owner_id"] is None
 
     test_case = client.post(
         "/api/v1/test-cases",
-        json={"project_id": project_id, "requirement_id": requirement["id"], "title": "Case has no default tester"},
+        json={"project_id": project_id, "iteration_id": iteration_id, "requirement_id": requirement["id"], "title": "Case has no default tester"},
     ).json()
     assert test_case["default_tester_id"] is None
 
     bug = client.post(
         "/api/v1/bugs",
-        json={"project_id": project_id, "requirement_id": requirement["id"], "title": "Bug has no default owner"},
+        json={"project_id": project_id, "iteration_id": iteration_id, "requirement_id": requirement["id"], "title": "Bug has no default owner"},
     ).json()
     assert bug["owner_id"] is None
 
@@ -1340,34 +1368,40 @@ def test_project_workflow_scheme_does_not_drive_work_item_current_handlers(clien
         ],
     )
     assert saved_members.status_code == 200
+    iteration = client.post(
+        "/api/v1/iterations",
+        json={"name": f"Rule Defaults Iteration-{uuid4().hex[:8]}", "project_ids": [project_id]},
+    )
+    assert iteration.status_code == 200, iteration.text
+    iteration_id = iteration.json()["id"]
 
     requirement = client.post(
         "/api/v1/requirements",
-        json={"project_id": project_id, "title": "Requirement has no current handler from scheme"},
+        json={"project_id": project_id, "iteration_id": iteration_id, "title": "Requirement has no current handler from scheme"},
     ).json()
     assert requirement["owner_id"] is None
 
     standalone_task = client.post(
         "/api/v1/tasks",
-        json={"project_id": project_id, "title": "Task has no current handler from scheme"},
+        json={"project_id": project_id, "iteration_id": iteration_id, "title": "Task has no current handler from scheme"},
     ).json()
     assert standalone_task["owner_id"] is None
 
     test_case = client.post(
         "/api/v1/test-cases",
-        json={"project_id": project_id, "title": "Case uses configured developer"},
+        json={"project_id": project_id, "iteration_id": iteration_id, "title": "Case uses configured developer"},
     ).json()
     assert test_case["default_tester_id"] == developer_id
 
     test_run = client.post(
         "/api/v1/test-runs",
-        json={"project_id": project_id, "name": "Test run uses configured tester"},
+        json={"project_id": project_id, "iteration_id": iteration_id, "name": "Test run uses configured tester"},
     ).json()
     assert test_run["test_owner_id"] == tester_id
 
     bug = client.post(
         "/api/v1/bugs",
-        json={"project_id": project_id, "title": "Bug has no current handler from scheme"},
+        json={"project_id": project_id, "iteration_id": iteration_id, "title": "Bug has no current handler from scheme"},
     ).json()
     assert bug["owner_id"] is None
 
@@ -1468,11 +1502,11 @@ def test_project_can_create_child_project_and_inherit_program(client: TestClient
 
     invalid = client.patch(f"/api/v1/projects/{parent['id']}", json={"parent_id": parent["id"]})
     assert invalid.status_code == 400
-    assert invalid.json()["detail"] == "项目不能选择自身作为上级项目"
+    assert invalid.json()["detail"]["message"] == "项目不能选择自身作为上级项目"
 
     cycle = client.patch(f"/api/v1/projects/{parent['id']}", json={"parent_id": child["id"]})
     assert cycle.status_code == 400
-    assert cycle.json()["detail"] == "项目不能选择下级项目作为上级项目"
+    assert cycle.json()["detail"]["message"] == "项目不能选择下级项目作为上级项目"
 
 
 def test_project_iteration_list_exposes_workflow_state_identity(client: TestClient):
@@ -1486,7 +1520,6 @@ def test_project_iteration_list_exposes_workflow_state_identity(client: TestClie
 
     assert response.status_code == 200
     listed = next(item for item in response.json()["items"] if item["id"] == iteration["id"])
-    assert listed["is_requirement_pool"] is False
     assert {
         "workflow_definition_id": listed.get("workflow_definition_id"),
         "current_state_id": listed.get("current_state_id"),
@@ -1502,12 +1535,10 @@ def test_project_iteration_list_exposes_workflow_state_identity(client: TestClie
 
 def test_project_delete_cascades_project_tree_work_items_and_iterations(client: TestClient):
     parent = client.post("/api/v1/projects", json={"name": f"级联删除父项目-{uuid4().hex[:8]}"}).json()
-    parent_pool_iteration_id = parent["requirement_pool_iteration_id"]
     child = client.post(
         "/api/v1/projects",
         json={"name": f"级联删除子项目-{uuid4().hex[:8]}", "parent_id": parent["id"]},
     ).json()
-    child_pool_iteration_id = child["requirement_pool_iteration_id"]
     iteration = client.post(
         "/api/v1/iterations",
         json={"project_ids": [parent["id"], child["id"]], "name": f"级联删除迭代-{uuid4().hex[:8]}"},
@@ -1578,7 +1609,7 @@ def test_project_delete_cascades_project_tree_work_items_and_iterations(client: 
             row["id"]: row
             for row in db.execute(
                 text(
-                    "SELECT id, deleted, requirement_pool_iteration_id "
+                    "SELECT id, deleted "
                     "FROM projects WHERE id IN (:parent_id, :child_id)"
                 ),
                 {"parent_id": parent["id"], "child_id": child["id"]},
@@ -1586,9 +1617,7 @@ def test_project_delete_cascades_project_tree_work_items_and_iterations(client: 
         }
         assert set(project_rows) == {parent["id"], child["id"]}
         assert project_rows[parent["id"]]["deleted"] == 1
-        assert project_rows[parent["id"]]["requirement_pool_iteration_id"] is None
         assert project_rows[child["id"]]["deleted"] == 1
-        assert project_rows[child["id"]]["requirement_pool_iteration_id"] is None
 
         assert db.execute(
             text("SELECT id FROM requirements WHERE id IN (:parent_id, :child_id)"),
@@ -1607,13 +1636,9 @@ def test_project_delete_cascades_project_tree_work_items_and_iterations(client: 
         assert db.execute(
             text(
                 "SELECT id FROM iterations "
-                "WHERE id IN (:iteration_id, :parent_pool_id, :child_pool_id)"
+                "WHERE id = :iteration_id"
             ),
-            {
-                "iteration_id": iteration["id"],
-                "parent_pool_id": parent_pool_iteration_id,
-                "child_pool_id": child_pool_iteration_id,
-            },
+            {"iteration_id": iteration["id"]},
         ).all() == []
     finally:
         db.close()
@@ -1622,9 +1647,7 @@ def test_project_delete_cascades_project_tree_work_items_and_iterations(client: 
 
 def test_project_delete_keeps_shared_iteration_and_removes_deleted_project_scope(client: TestClient):
     deleted_project = client.post("/api/v1/projects", json={"name": f"Shared Delete Project-{uuid4().hex[:8]}"}).json()
-    deleted_pool_iteration_id = deleted_project["requirement_pool_iteration_id"]
     kept_project = client.post("/api/v1/projects", json={"name": f"Shared Keep Project-{uuid4().hex[:8]}"}).json()
-    kept_pool_iteration_id = kept_project["requirement_pool_iteration_id"]
     iteration = client.post(
         "/api/v1/iterations",
         json={"project_ids": [deleted_project["id"], kept_project["id"]], "name": f"Shared Iteration-{uuid4().hex[:8]}"},
@@ -1653,11 +1676,6 @@ def test_project_delete_keeps_shared_iteration_and_removes_deleted_project_scope
             text("SELECT id FROM requirements WHERE id = :id"),
             {"id": deleted_requirement["id"]},
         ).all() == []
-        assert db.execute(
-            text("SELECT id FROM iterations WHERE id = :id"),
-            {"id": deleted_pool_iteration_id},
-        ).all() == []
-
         kept_requirement_row = db.execute(
             text("SELECT id, deleted FROM requirements WHERE id = :id"),
             {"id": kept_requirement["id"]},
@@ -1665,17 +1683,10 @@ def test_project_delete_keeps_shared_iteration_and_removes_deleted_project_scope
         assert kept_requirement_row["deleted"] == 0
 
         kept_project_row = db.execute(
-            text("SELECT id, deleted, requirement_pool_iteration_id FROM projects WHERE id = :id"),
+            text("SELECT id, deleted FROM projects WHERE id = :id"),
             {"id": kept_project["id"]},
         ).mappings().one()
         assert kept_project_row["deleted"] == 0
-        assert kept_project_row["requirement_pool_iteration_id"] == kept_pool_iteration_id
-
-        kept_pool_row = db.execute(
-            text("SELECT id, deleted FROM iterations WHERE id = :id"),
-            {"id": kept_pool_iteration_id},
-        ).mappings().one()
-        assert kept_pool_row["deleted"] == 0
 
         shared_iteration_row = db.execute(
             text("SELECT id, deleted FROM iterations WHERE id = :id"),
@@ -1688,11 +1699,10 @@ def test_project_delete_keeps_shared_iteration_and_removes_deleted_project_scope
         ).scalars().all() == [kept_project["id"]]
 
         deleted_project_row = db.execute(
-            text("SELECT id, deleted, requirement_pool_iteration_id FROM projects WHERE id = :id"),
+            text("SELECT id, deleted FROM projects WHERE id = :id"),
             {"id": deleted_project["id"]},
         ).mappings().one()
         assert deleted_project_row["deleted"] == 1
-        assert deleted_project_row["requirement_pool_iteration_id"] is None
     finally:
         db.close()
 
@@ -1712,13 +1722,19 @@ def test_open_project_move_only_changes_parent(client: TestClient):
 def test_closed_project_move_only_changes_parent_after_phase_removed(client: TestClient):
     parent = client.post("/api/v1/projects", json={"name": f"最终规则父项目-{uuid4().hex[:8]}"}).json()
     project = client.post("/api/v1/projects", json={"name": f"最终规则子项目-{uuid4().hex[:8]}"}).json()
+    iteration = client.post(
+        "/api/v1/iterations",
+        json={"name": f"最终规则迭代-{uuid4().hex[:8]}", "project_ids": [project["id"]]},
+    )
+    assert iteration.status_code == 200, iteration.text
+    iteration_id = iteration.json()["id"]
     development_requirement = client.post(
         "/api/v1/requirements",
-        json={"project_id": project["id"], "title": f"转移前需求-{uuid4().hex[:8]}"},
+        json={"project_id": project["id"], "iteration_id": iteration_id, "title": f"转移前需求-{uuid4().hex[:8]}"},
     ).json()
     development_task = client.post(
         "/api/v1/tasks",
-        json={"project_id": project["id"], "title": f"转移前任务-{uuid4().hex[:8]}"},
+        json={"project_id": project["id"], "iteration_id": iteration_id, "title": f"转移前任务-{uuid4().hex[:8]}"},
     ).json()
     client.post(f"/api/v1/projects/{project['id']}/start", json={"effective_time": "2026-06-01T09:00:00"})
     blocked_close = client.post(f"/api/v1/projects/{project['id']}/close", json={"effective_time": "2026-06-10T18:00:00"})
@@ -1757,9 +1773,14 @@ def test_dashboard_summary_reads_database_counts(client: TestClient):
 
 def test_project_requirement_list_filters_by_current_state_id(client: TestClient):
     project = client.post("/api/v1/projects", json={"name": f"状态筛选项目-{uuid4().hex[:8]}"}).json()
+    iteration = client.post(
+        "/api/v1/iterations",
+        json={"name": f"状态筛选迭代-{uuid4().hex[:8]}", "project_ids": [project["id"]]},
+    )
+    assert iteration.status_code == 200, iteration.text
     requirement = client.post(
         "/api/v1/requirements",
-        json={"project_id": project["id"], "title": "按节点 ID 筛选的需求"},
+        json={"project_id": project["id"], "iteration_id": iteration.json()["id"], "title": "按节点 ID 筛选的需求"},
     ).json()
 
     matched = client.get(
@@ -1779,9 +1800,14 @@ def test_project_requirement_list_filters_by_current_state_id(client: TestClient
 
 def test_project_close_gate_uses_work_item_state_category(client: TestClient):
     project = client.post("/api/v1/projects", json={"name": f"终态门禁项目-{uuid4().hex[:8]}"}).json()
+    iteration = client.post(
+        "/api/v1/iterations",
+        json={"name": f"终态门禁迭代-{uuid4().hex[:8]}", "project_ids": [project["id"]]},
+    )
+    assert iteration.status_code == 200, iteration.text
     requirement = client.post(
         "/api/v1/requirements",
-        json={"project_id": project["id"], "title": "终态门禁需求"},
+        json={"project_id": project["id"], "iteration_id": iteration.json()["id"], "title": "终态门禁需求"},
     ).json()
     db = SessionLocal()
     try:
@@ -1795,6 +1821,13 @@ def test_project_close_gate_uses_work_item_state_category(client: TestClient):
         db.add(terminal)
         db.flush()
         stored.current_state_id = terminal.id
+        stored_iteration = db.query(Iteration).filter(Iteration.id == iteration.json()["id"]).one()
+        iteration_terminal = db.query(WorkflowState).filter(
+            WorkflowState.definition_id == stored_iteration.workflow_definition_id,
+            WorkflowState.category == "terminal",
+        ).first()
+        assert iteration_terminal is not None
+        stored_iteration.current_state_id = iteration_terminal.id
         db.commit()
     finally:
         db.close()
@@ -2002,7 +2035,7 @@ def test_closing_program_blocks_when_descendants_are_not_closed(client: TestClie
     blocked = client.post(f"/api/v1/programs/{parent['id']}/close")
 
     assert blocked.status_code == 400
-    assert blocked.json()["detail"] == "存在子项目集或项目为未关闭状态"
+    assert blocked.json()["detail"]["message"] == "存在子项目集或项目为未关闭状态"
 
     client.post(f"/api/v1/programs/{child['id']}/start", json={"effective_time": "2026-06-01T09:00:00"})
     client.post(f"/api/v1/programs/{child['id']}/close", json={"effective_time": "2026-06-02T18:00:00"})

@@ -13,7 +13,11 @@ from app.services.business_component_service import (
     replace_business_component_routes,
     update_business_component,
 )
-from app.services.project_permission_service import ensure_project_manage_permission, ensure_project_view_permission
+from app.services.project_permission_service import (
+    ensure_project_direct_manage_permission,
+    ensure_project_manage_permission,
+    ensure_project_view_permission,
+)
 from app.views.business_component_view import (
     BusinessComponentCreateFromProject,
     BusinessComponentMemberWrite,
@@ -91,7 +95,7 @@ def put_business_component_routes(
     db: Session = Depends(get_db),
     current_user: User | None = Depends(get_optional_current_user),
 ):
-    ensure_project_manage_permission(db, project_id, current_user)
+    ensure_project_direct_manage_permission(db, project_id, current_user)
     return replace_business_component_routes(db, project_id, component_id, payload)
 
 
@@ -105,7 +109,7 @@ def post_workflow_migration(
     db: Session = Depends(get_db),
     current_user: User | None = Depends(get_optional_current_user),
 ):
-    ensure_project_manage_permission(db, project_id, current_user)
+    ensure_project_direct_manage_permission(db, project_id, current_user)
     item = migrate_work_item_workflow(
         db,
         project_id,

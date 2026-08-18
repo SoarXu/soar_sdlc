@@ -34,7 +34,10 @@ def _create_program(client: TestClient, name: str, *, parent_id: int | None = No
 
 def _assert_program_name_conflict(response) -> None:
     assert response.status_code == 422
-    assert response.json()["detail"] == "项目集名称已存在"
+    assert response.json()["detail"] == {
+        "code": "PROGRAM_NAME_ALREADY_EXISTS",
+        "message": "项目集名称已存在",
+    }
 
 
 def test_rejects_duplicate_top_level_program_name(client: TestClient):
@@ -79,7 +82,7 @@ def test_rejects_whitespace_only_program_name(client: TestClient):
     rejected = client.post("/api/v1/programs", json={"name": " \t "})
 
     assert rejected.status_code == 422
-    assert "name" in rejected.json()["detail"].lower()
+    assert rejected.json()["detail"]["code"] == "PROGRAM_NAME_REQUIRED"
 
 
 def test_rejects_null_program_name_on_update(client: TestClient):
@@ -88,7 +91,7 @@ def test_rejects_null_program_name_on_update(client: TestClient):
     rejected = client.patch(f"/api/v1/programs/{program['id']}", json={"name": None})
 
     assert rejected.status_code == 422
-    assert "name" in rejected.json()["detail"].lower()
+    assert rejected.json()["detail"]["code"] == "PROGRAM_NAME_REQUIRED"
 
 
 def test_allows_updating_program_with_its_own_normalized_name(client: TestClient):
@@ -117,7 +120,7 @@ def test_rejects_whitespace_only_program_name_on_update(client: TestClient):
     rejected = client.patch(f"/api/v1/programs/{program['id']}", json={"name": " \t "})
 
     assert rejected.status_code == 422
-    assert "name" in rejected.json()["detail"].lower()
+    assert rejected.json()["detail"]["code"] == "PROGRAM_NAME_REQUIRED"
 
 
 def test_rejects_case_only_and_whitespace_only_program_name_variants(client: TestClient):

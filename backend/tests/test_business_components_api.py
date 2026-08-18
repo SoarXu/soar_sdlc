@@ -1,5 +1,6 @@
 from uuid import uuid4
 
+import pytest
 from fastapi.testclient import TestClient
 
 from app.core.security import create_access_token, get_password_hash
@@ -11,6 +12,11 @@ from app.models.user import User
 from app.models.workflow_definition import WorkflowDefinition, WorkflowTransition
 from app.models.business_component import WorkflowMigrationLog
 from app.services.workflow_runtime_service import _eligible_transition_assignee_ids
+
+
+@pytest.fixture(autouse=True)
+def _real_iteration_defaults(client: TestClient):
+    client.enable_real_iteration_defaults()
 
 
 def _create_project(client: TestClient, name: str, workflow_scheme_id: int | None = None) -> dict:

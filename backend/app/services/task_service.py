@@ -132,6 +132,7 @@ def create_linked_task(db: Session, payload: LinkedTaskCreate, actor: User | Non
         project_id,
         None,
         source_iteration_id=getattr(source, "iteration_id", None),
+        strict_source_iteration=True,
     )
     ensure_iteration_assignment_mutable(db, None, inherited_iteration_id)
     _ensure_task_iteration_scope(db, project_id, inherited_iteration_id)

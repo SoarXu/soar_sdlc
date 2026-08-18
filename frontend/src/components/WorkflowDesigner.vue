@@ -191,6 +191,7 @@
       @remove-state="removeSelectedState"
       @remove-transition="removeSelectedTransition"
       @reset-diagram-route="resetSelectedDiagramRoute"
+      @retarget-transition="retargetSelectedTransition"
       @back="returnToStateActions"
     />
     <el-dialog
@@ -237,7 +238,8 @@ import {
   createManualDiagramConfig,
   isManualDiagramRoute,
   moveManualAnchor,
-  moveManualSegment
+  moveManualSegment,
+  retargetWorkflowTransition
 } from '../utils/workflowManualRoute'
 import { requestWorkflowOrganization } from '../utils/workflowLayoutInteraction'
 import { selectEnabledWorkflowDefinition } from '../utils/workflowDefinitionSelection'
@@ -688,6 +690,14 @@ function selectTransition(transition) {
 
 function moveTransition({ transitionIdentity, targetGroup, targetIndex }) {
   transitions.value = moveStateTransition(transitions.value, transitionIdentity, targetGroup, targetIndex)
+}
+
+function retargetSelectedTransition(toStateId) {
+  if (!selectedTransition.value) return
+  Object.assign(
+    selectedTransition.value,
+    retargetWorkflowTransition(selectedTransition.value, toStateId)
+  )
 }
 
 function returnToStateActions() {

@@ -1,9 +1,15 @@
 from uuid import uuid4
 
+import pytest
 from fastapi.testclient import TestClient
 
 from app.db.session import SessionLocal
 from app.models.test_run import TestRun as RunModel
+
+
+@pytest.fixture(autouse=True)
+def _real_iteration_defaults(client: TestClient):
+    client.enable_real_iteration_defaults()
 
 
 def _create_project(client: TestClient) -> int:
@@ -13,7 +19,12 @@ def _create_project(client: TestClient) -> int:
 
 
 def _create_requirement(client: TestClient, project_id: int, owner_id: int = 1) -> int:
-    iteration_id = client.get("/api/v1/iterations", params={"project_id": project_id}).json()[0]["id"]
+    iteration = client.post(
+        "/api/v1/iterations",
+        json={"project_ids": [project_id], "name": f"Testing Iteration {uuid4().hex[:8]}"},
+    )
+    assert iteration.status_code == 200, iteration.text
+    iteration_id = iteration.json()["id"]
     response = client.post(
         "/api/v1/requirements",
         json={"project_id": project_id, "iteration_id": iteration_id, "title": f"Testing Requirement {uuid4().hex[:8]}", "owner_id": owner_id},

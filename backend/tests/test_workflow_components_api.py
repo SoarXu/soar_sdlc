@@ -1,6 +1,12 @@
 from uuid import uuid4
 
+import pytest
 from fastapi.testclient import TestClient
+
+
+@pytest.fixture(autouse=True)
+def _real_iteration_defaults(client: TestClient):
+    client.enable_real_iteration_defaults()
 
 
 def test_workflow_handlers_are_exposed_as_backend_whitelist(client: TestClient):
@@ -73,4 +79,4 @@ def test_workflow_component_rejects_unknown_handler(client: TestClient):
     )
 
     assert response.status_code == 400
-    assert "handler" in response.json()["detail"]
+    assert response.json()["detail"]["message"] == "未知的工作流处理人"

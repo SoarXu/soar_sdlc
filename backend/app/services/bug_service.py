@@ -123,6 +123,7 @@ def create_bug_from_test_run_case(
         source_iteration_id=(
             requirement.iteration_id if requirement else (test_case.iteration_id or test_run.iteration_id)
         ),
+        strict_source_iteration=True,
     )
     ensure_iteration_assignment_mutable(db, None, iteration_id)
     _ensure_iteration_can_accept_bug(db, iteration_id, test_run.project_id)

@@ -7,6 +7,7 @@ from app.db.session import SessionLocal
 from app.models.project_member import ProjectMember
 from app.models.status_operation import StatusOperationLog
 from app.models.user import User
+from app.services.project_permission_service import can_manage_iteration
 
 
 def _create_user(full_name: str) -> tuple[int, str]:
@@ -86,9 +87,18 @@ def test_iteration_owner_can_manage_scope_but_cannot_reassign_or_delete(client: 
             "owner_id": owner_id,
         },
     ).json()
+    source_iteration = client.post(
+        "/api/v1/iterations",
+        json={"project_ids": [project["id"]], "name": f"Iteration source {uuid4().hex[:8]}"},
+    )
+    assert source_iteration.status_code == 200, source_iteration.text
     requirement = client.post(
         "/api/v1/requirements",
-        json={"project_id": project["id"], "title": f"Scoped requirement {uuid4().hex[:8]}"},
+        json={
+            "project_id": project["id"],
+            "iteration_id": source_iteration.json()["id"],
+            "title": f"Scoped requirement {uuid4().hex[:8]}",
+        },
     ).json()
 
     linked = client.post(
@@ -127,6 +137,14 @@ def test_iteration_owner_can_execute_lifecycle_transition(client: TestClient):
         },
     ).json()
 
+    db = SessionLocal()
+    try:
+        owner = db.query(User).filter(User.id == owner_id).first()
+        assert owner is not None
+        assert can_manage_iteration(db, iteration["id"], owner)
+    finally:
+        db.close()
+
     transition = client.post(
         f"/api/v1/workflow-runtime/iteration/{iteration['id']}/transition",
         json={"action_key": "start"},
@@ -158,7 +176,7 @@ def test_iteration_governance_override_requires_reason(client: TestClient):
     )
 
     assert response.status_code == 422
-    assert response.json()["detail"] == "Delegate reason is required"
+    assert response.json()["detail"]["code"] == "DELEGATE_REASON_REQUIRED"
 
 
 def test_parent_project_owner_can_override_iteration_lifecycle_with_reason(client: TestClient):

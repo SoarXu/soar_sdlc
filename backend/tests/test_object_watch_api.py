@@ -52,9 +52,18 @@ def _add_project_member(project_id: int, user_id: int, project_role: str = "deve
 def test_manual_watch_and_unwatch_supported_work_item(client: TestClient):
     user_id, token = _create_user("Watch User")
     project = client.post("/api/v1/projects", json={"name": f"Watch Project {uuid4().hex[:8]}"}).json()
+    iteration = client.post(
+        "/api/v1/iterations",
+        json={"name": f"Watch Iteration {uuid4().hex[:8]}", "project_ids": [project["id"]]},
+    )
+    assert iteration.status_code == 200, iteration.text
     requirement = client.post(
         "/api/v1/requirements",
-        json={"project_id": project["id"], "title": f"Watch Requirement {uuid4().hex[:8]}"},
+        json={
+            "project_id": project["id"],
+            "iteration_id": iteration.json()["id"],
+            "title": f"Watch Requirement {uuid4().hex[:8]}",
+        },
     ).json()
     _add_project_member(project["id"], user_id)
 

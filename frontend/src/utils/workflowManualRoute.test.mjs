@@ -9,7 +9,8 @@ import {
   isManualDiagramRoute,
   moveManualAnchor,
   moveManualSegment,
-  normalizeManualWaypoints
+  normalizeManualWaypoints,
+  retargetWorkflowTransition
 } from './workflowManualRoute.js'
 
 const from = { id: 1, x: 100, y: 100 }
@@ -114,5 +115,16 @@ assert.deepEqual(normalizeManualWaypoints([
 
 assert.equal(moveManualSegment(manual, 0, { x: 200, y: 200 }, from, to), null)
 assert.equal(moveManualSegment(manual, 2, { x: 200, y: 200 }, from, to), null)
+
+const retargeted = retargetWorkflowTransition({
+  id: 12,
+  from_state_id: 1,
+  to_state_id: 2,
+  diagram_config: manual
+}, 3)
+assert.equal(retargeted.to_state_id, 3)
+assert.equal(retargeted.diagram_config, null)
+assert.equal(retargeted.id, 12)
+assert.equal(manual.routing_mode, 'manual')
 
 console.log('workflow manual route tests passed')

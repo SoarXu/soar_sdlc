@@ -70,7 +70,13 @@ def _project_iteration_id(client: TestClient, project_id: int) -> int:
     response = client.get("/api/v1/iterations", params={"project_id": project_id})
     assert response.status_code == 200, response.text
     iterations = response.json()
-    assert iterations
+    if not iterations:
+        created = client.post(
+            "/api/v1/iterations",
+            json={"name": f"Exception center test iteration {uuid4().hex[:8]}", "project_ids": [project_id]},
+        )
+        assert created.status_code == 200, created.text
+        return created.json()["id"]
     return iterations[0]["id"]
 
 

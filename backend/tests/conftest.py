@@ -60,7 +60,7 @@ class AuthenticatedTestClient(TestClient):
                     "POST",
                     "/api/v1/iterations",
                     json={"name": f"Test iteration {project_id}", "project_ids": [project_id]},
-                    headers=headers,
+                    headers={"Authorization": f"Bearer {self.default_token}"},
                 )
                 assert iteration_response.status_code == 200, iteration_response.text
                 self._real_iteration_defaults[project_id] = iteration_response.json()["id"]

@@ -435,9 +435,12 @@ def test_iteration_start_rejects_terminal_hierarchy_without_partial_changes(
 
 
 def _create_requirement(client: TestClient, project_id: int, title: str | None = None, owner_id: int | None = None) -> int:
-    iteration_id = min(
-        item["id"] for item in client.get("/api/v1/iterations", params={"project_id": project_id}).json()
+    iteration = client.post(
+        "/api/v1/iterations",
+        json={"name": f"Iteration detail source iteration {uuid4().hex[:8]}", "project_ids": [project_id]},
     )
+    assert iteration.status_code == 200, iteration.text
+    iteration_id = iteration.json()["id"]
     response = client.post(
         "/api/v1/requirements",
         json={

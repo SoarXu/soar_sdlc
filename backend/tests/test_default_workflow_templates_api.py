@@ -1,5 +1,6 @@
 from uuid import uuid4
 
+import pytest
 from fastapi.testclient import TestClient
 
 from app.core.security import create_access_token, get_password_hash
@@ -15,6 +16,11 @@ from app.models.user import User
 from app.models.workflow_definition import WorkflowState, WorkflowTransition
 from app.services.default_workflow_template_service import graph_for_object_type
 from app.views.workflow_definition_view import WorkflowTemplateState, WorkflowTemplateTransition
+
+
+@pytest.fixture(autouse=True)
+def _real_iteration_defaults(client: TestClient):
+    client.enable_real_iteration_defaults()
 
 
 def test_template_build_contract_uses_request_local_refs_not_status_columns():
@@ -304,7 +310,7 @@ def test_bug_defaults_to_pending_handling_and_close_blocks_on_direct_task(client
     )
 
     assert close.status_code == 400
-    assert "task" in close.json()["detail"].lower()
+    assert close.json()["detail"]["code"] == "BUG_LINKED_TASKS_UNFINISHED"
 
 
 def test_task_branch_defaults_follow_confirmation_template(client: TestClient):
@@ -692,7 +698,7 @@ def test_requirement_complete_and_cancel_block_on_direct_relations(client: TestC
     )
 
     assert complete.status_code == 400
-    assert "bug" in complete.json()["detail"].lower()
+    assert complete.json()["detail"]["code"] == "REQUIREMENT_HAS_UNCLOSED_BUGS"
 
     _set_bug_status(bug["id"], "closed")
     _set_task_status(task["id"], "in_processing")
@@ -703,7 +709,7 @@ def test_requirement_complete_and_cancel_block_on_direct_relations(client: TestC
     )
 
     assert cancel.status_code == 400
-    assert "task" in cancel.json()["detail"].lower()
+    assert cancel.json()["detail"]["code"] == "REQUIREMENT_HAS_UNFINISHED_TASKS"
 
 
 def test_iteration_complete_and_cancel_block_on_direct_items(client: TestClient):
@@ -789,4 +795,4 @@ def test_project_close_blocks_on_direct_scoped_objects(client: TestClient):
     )
 
     assert close.status_code == 400
-    assert "bug" in close.json()["detail"].lower() or "iteration" in close.json()["detail"].lower()
+    assert close.json()["detail"]["code"] == "PROJECT_HAS_UNFINISHED_ITEMS"

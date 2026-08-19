@@ -11,6 +11,7 @@ from app.models.iteration import Iteration, IterationProject
 from app.models.program import Program
 from app.models.project import Project
 from app.models.project_member import ProjectMember
+from app.models.role import Role
 from app.models.requirement import Requirement
 from app.models.task import Task
 from app.models.test_case import TestCase
@@ -392,21 +393,34 @@ def delete_project(db: Session, project_id: int) -> None:
     db.commit()
 
 
-def list_project_members(db: Session, project_id: int) -> list[ProjectMember]:
+def list_project_members(db: Session, project_id: int) -> list[dict]:
     _get_active_project(db, project_id)
-    return (
-        db.query(ProjectMember)
+    rows = (
+        db.query(ProjectMember, Role.role_name)
+        .outerjoin(Role, Role.id == ProjectMember.role_id)
         .filter(ProjectMember.project_id == project_id)
         .order_by(ProjectMember.sort_order.asc(), ProjectMember.id.asc())
         .all()
     )
+    return [{
+        "id": member.id, "project_id": member.project_id, "user_id": member.user_id,
+        "role_id": member.role_id, "role_name": role_name or member.project_role,
+        "project_role": member.project_role, "is_default_assignee": member.is_default_assignee,
+        "is_workbench_participant": member.is_workbench_participant, "sort_order": member.sort_order,
+        "join_time": member.join_time, "create_time": member.create_time, "update_time": member.update_time,
+    } for member, role_name in rows]
 
 
 def replace_project_members(db: Session, project_id: int, payload: list[ProjectMemberCreate]) -> list[ProjectMember]:
     _get_active_project(db, project_id)
     db.query(ProjectMember).filter(ProjectMember.project_id == project_id).delete(synchronize_session=False)
+    roles = {role.id: role for role in db.query(Role).filter(Role.id.in_([item.role_id for item in payload]), Role.enabled.is_(True)).all()}
     for index, item in enumerate(payload):
         data = item.model_dump()
+        role = roles.get(data["role_id"])
+        if not role:
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="角色不存在或已停用")
+        data["project_role"] = role.role_key
         data["project_id"] = project_id
         if not data.get("sort_order"):
             data["sort_order"] = index

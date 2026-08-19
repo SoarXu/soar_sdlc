@@ -63,7 +63,7 @@ class ProjectRead(ProjectBase):
 
 class ProjectMemberBase(BaseModel):
     user_id: int
-    project_role: str
+    role_id: int
     is_default_assignee: bool = False
     is_workbench_participant: bool = True
     sort_order: int = 0
@@ -78,6 +78,8 @@ class ProjectMemberRead(ProjectMemberBase):
 
     id: int
     project_id: int
+    role_name: str
+    project_role: str
     join_time: datetime | None = None
     create_time: datetime | None = None
     update_time: datetime | None = None

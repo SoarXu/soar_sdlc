@@ -6,7 +6,6 @@ from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.core.security import ALGORITHM
 from app.db.session import get_db
-from app.models.role import Role, UserRole
 from app.models.user import User
 
 
@@ -47,16 +46,6 @@ def require_system_admin(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> User:
-    role = (
-        db.query(Role)
-        .join(UserRole, UserRole.role_id == Role.id)
-        .filter(
-            UserRole.user_id == current_user.id,
-            Role.role_key == "system_admin",
-            Role.enabled.is_(True),
-        )
-        .first()
-    )
-    if not role:
+    if not current_user.is_system_admin:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="System administrator role required")
     return current_user

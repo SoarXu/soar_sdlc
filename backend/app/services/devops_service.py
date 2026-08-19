@@ -15,7 +15,6 @@ from app.models.devops import (
     DevopsRepository,
 )
 from app.models.requirement import Requirement
-from app.models.role import Role, UserRole
 from app.models.task import Task
 from app.models.user import User
 from app.services.project_team_service import default_tech_lead_id
@@ -449,13 +448,10 @@ def _commit_author_user_id(db: Session, commit: DevopsCommit) -> int | None:
 def _fallback_reviewer_user_id(db: Session, exclude_user_id: int | None = None) -> int | None:
     row = (
         db.query(User.id)
-        .join(UserRole, UserRole.user_id == User.id)
-        .join(Role, Role.id == UserRole.role_id)
         .filter(
             User.deleted == 0,
             User.is_active.is_(True),
-            Role.enabled.is_(True),
-            Role.role_key == "system_admin",
+            User.is_system_admin.is_(True),
         )
         .order_by(User.id.asc())
     )

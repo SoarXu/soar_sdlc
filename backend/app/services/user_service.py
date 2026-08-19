@@ -77,7 +77,6 @@ def list_users(db: Session, user_id: int | None = None) -> list[dict]:
     if user_id:
         query = query.filter(User.id == user_id)
     users = query.order_by(User.id.asc()).all()
-    system_admin_ids = _system_admin_user_ids(db, [user.id for user in users])
     return [
         {
             "id": user.id,
@@ -88,7 +87,7 @@ def list_users(db: Session, user_id: int | None = None) -> list[dict]:
             "department": user.department,
             "is_active": user.is_active,
             "must_change_password": user.must_change_password,
-            "is_system_admin": user.id in system_admin_ids,
+            "is_system_admin": user.is_system_admin,
         }
         for user in users
     ]
@@ -146,11 +145,7 @@ def create_managed_user(db: Session, payload: UserCreate) -> tuple[User, str]:
     )
     db.add(user)
     db.flush()
-    if payload.is_system_admin:
-        system_admin_role = db.query(Role).filter(Role.role_key == "system_admin", Role.enabled.is_(True)).first()
-        if not system_admin_role:
-            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="System administrator role is unavailable")
-        db.add(UserRole(user_id=user.id, role_id=system_admin_role.id))
+    user.is_system_admin = payload.is_system_admin
     db.commit()
     db.refresh(user)
     return user, initial_password
@@ -211,19 +206,3 @@ def _password_matches(password_hash: str, password: str) -> bool:
         return False
 
 
-def _system_admin_user_ids(db: Session, user_ids: list[int]) -> set[int]:
-    if not user_ids:
-        return set()
-    return {
-        user_id
-        for (user_id,) in (
-            db.query(UserRole.user_id)
-        .join(Role, Role.id == UserRole.role_id)
-        .filter(
-            UserRole.user_id.in_(user_ids),
-            Role.role_key == "system_admin",
-            Role.enabled.is_(True),
-        )
-        .all()
-        )
-    }

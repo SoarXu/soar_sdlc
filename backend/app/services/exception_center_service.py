@@ -17,7 +17,6 @@ from app.models.test_case import TestCase
 from app.models.test_run import TestRun
 from app.models.user import User
 from app.models.project_member import ProjectMember
-from app.models.role import Role, UserRole
 from app.models.work_item_iteration_history import WorkItemIterationHistory
 from app.models.workflow_definition import WorkflowTransition
 from app.services.exception_rule_service import ensure_default_exception_rules
@@ -112,14 +111,11 @@ def _load_scan_context(
             member_roles[(member.project_id, member.user_id)].add(member.project_role)
     global_roles: dict[int, set[str]] = defaultdict(set)
     if owner_ids:
-        for user_id, role_key in db.query(UserRole.user_id, Role.role_key).join(
-            Role, Role.id == UserRole.role_id
-        ).filter(
-            UserRole.user_id.in_(owner_ids),
-            Role.role_key == "system_admin",
-            Role.enabled.is_(True),
+        for (user_id,) in db.query(User.id).filter(
+            User.id.in_(owner_ids),
+            User.is_system_admin.is_(True),
         ).all():
-            global_roles[user_id].add(role_key)
+            global_roles[user_id].add("system_admin")
     projects = {
         project.id: project for project in db.query(Project).filter(Project.id.in_(project_ids)).all()
     } if project_ids else {}

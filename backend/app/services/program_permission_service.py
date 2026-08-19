@@ -2,7 +2,6 @@ from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 
 from app.models.program import Program
-from app.models.role import Role, UserRole
 from app.models.user import User
 
 
@@ -59,13 +58,4 @@ def can_delete_program(db: Session, program_id: int | None, user_id: int | None)
 
 
 def _is_system_admin(db: Session, user_id: int) -> bool:
-    return bool(
-        db.query(Role)
-        .join(UserRole, UserRole.role_id == Role.id)
-        .filter(
-            UserRole.user_id == user_id,
-            Role.role_key == "system_admin",
-            Role.enabled.is_(True),
-        )
-        .first()
-    )
+    return bool(db.query(User.is_system_admin).filter(User.id == user_id, User.deleted == 0).scalar())

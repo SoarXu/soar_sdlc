@@ -372,7 +372,7 @@
           </el-table-column>
           <el-table-column label="项目角色" min-width="180">
             <template #default="{ row }">
-              <el-select v-model="row.project_role" :disabled="!canManageCurrentProject">
+              <el-select v-model="row.role_id" :disabled="!canManageCurrentProject">
                 <el-option v-for="option in projectMemberRoleOptions" :key="option.value" :label="option.label" :value="option.value" />
               </el-select>
             </template>
@@ -886,13 +886,13 @@ const testRunStatusOptions = [
 const projectMemberRoleOptions = computed(() => {
   const enabledRoles = roleCatalog.value
     .filter((role) => role.enabled && role.role_key !== 'system_admin')
-    .map((role) => ({ label: role.role_name, value: role.role_key }))
+    .map((role) => ({ label: role.role_name, value: role.id }))
   const enabledKeys = new Set(enabledRoles.map((role) => role.value))
-  const historicalRoles = [...new Set(projectMembers.value.map((member) => member.project_role).filter(Boolean))]
-    .filter((roleKey) => !enabledKeys.has(roleKey))
-    .map((roleKey) => {
-      const role = roleCatalog.value.find((item) => item.role_key === roleKey)
-      return { label: role ? `${role.role_name}（已停用）` : `${roleKey}（历史角色）`, value: roleKey, disabled: true }
+  const historicalRoles = [...new Set(projectMembers.value.map((member) => member.role_id).filter(Boolean))]
+    .filter((roleId) => !enabledKeys.has(roleId))
+    .map((roleId) => {
+      const role = roleCatalog.value.find((item) => item.id === roleId)
+      return { label: role ? `${role.role_name}（已停用）` : `角色 #${roleId}（历史角色）`, value: roleId, disabled: true }
     })
   return [...enabledRoles, ...historicalRoles]
 })
@@ -1281,7 +1281,7 @@ function defaultTesterByRule(field, fallbackRoles) {
 function addProjectMember() {
   projectMembers.value.push({
     user_id: null,
-    project_role: 'developer',
+    role_id: roleCatalog.value.find((role) => role.role_key === 'developer')?.id || null,
     is_workbench_participant: true,
     sort_order: projectMembers.value.length
   })
@@ -1291,10 +1291,10 @@ function removeProjectMember(index) {
 }
 async function submitProjectMembers() {
   const payload = projectMembers.value
-    .filter((item) => item.user_id && item.project_role)
+    .filter((item) => item.user_id && item.role_id)
     .map((item, index) => ({
       user_id: item.user_id,
-      project_role: item.project_role,
+      role_id: item.role_id,
       is_workbench_participant: item.is_workbench_participant !== false,
       sort_order: item.sort_order ?? index
     }))

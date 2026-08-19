@@ -15,7 +15,6 @@ from app.services.program_permission_service import is_program_governor
 
 
 SYSTEM_ADMIN_ROLE_KEYS = {"system_admin"}
-PROJECT_OWNER_ROLE_KEYS = {"project_owner"}
 PROJECT_OWNER_PROJECT_ROLES = {"project_owner"}
 TEST_PROJECT_ROLES = {"tester", "test_lead", "qa", "quality_assurance"}
 
@@ -41,12 +40,6 @@ def is_project_owner(db: Session, project_id: int | None, user_id: int | None) -
     project = db.query(Project).filter(Project.id == project_id, Project.deleted == 0).first()
     if project and project.owner_id == user_id:
         return True
-    if _has_role(db, user_id, PROJECT_OWNER_ROLE_KEYS):
-        return bool(
-            db.query(ProjectMember)
-            .filter(ProjectMember.project_id == project_id, ProjectMember.user_id == user_id)
-            .first()
-        )
     return bool(
         db.query(ProjectMember)
         .filter(
@@ -398,15 +391,6 @@ def ensure_project_view_permission(db: Session, project_id: int | None, actor: U
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="无权查看项目数据")
 
 
-def _has_role(db: Session, user_id: int, role_keys: set[str]) -> bool:
-    return bool(
-        db.query(Role)
-        .join(UserRole, UserRole.role_id == Role.id)
-        .filter(UserRole.user_id == user_id, Role.role_key.in_(role_keys), Role.enabled.is_(True))
-        .first()
-    )
-
-
 def _has_project_role(db: Session, project_id: int | None, user_id: int, project_roles: set[str]) -> bool:
     if not project_id:
         return False
@@ -430,15 +414,7 @@ def _get_active_project(db: Session, project_id: int | None) -> Project | None:
 def actor_role_keys(db: Session, project_id: int | None, user_id: int | None) -> set[str]:
     if user_id is None:
         return set()
-    role_keys = {
-        row.role_key
-        for row in (
-            db.query(Role)
-            .join(UserRole, UserRole.role_id == Role.id)
-            .filter(UserRole.user_id == user_id, Role.enabled.is_(True))
-            .all()
-        )
-    }
+    role_keys = global_role_keys(db, user_id)
     if project_id:
         role_keys.update(
             row.project_role
@@ -448,3 +424,7 @@ def actor_role_keys(db: Session, project_id: int | None, user_id: int | None) ->
             )
         )
     return role_keys
+
+
+def global_role_keys(db: Session, user_id: int | None) -> set[str]:
+    return {"system_admin"} if is_system_admin(db, user_id) else set()

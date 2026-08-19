@@ -1,5 +1,4 @@
 export const SYSTEM_ADMIN_ROLE_KEYS = new Set(['system_admin'])
-export const PROJECT_OWNER_ROLE_KEYS = new Set(['project_owner'])
 export const PROJECT_OWNER_PROJECT_ROLES = new Set(['project_owner'])
 export const TEST_PROJECT_ROLES = new Set(['tester', 'test_lead', 'qa', 'quality_assurance'])
 
@@ -15,7 +14,7 @@ export function currentUserFromStorage(users = []) {
 }
 
 export function isSystemAdmin(user) {
-  return hasEnabledRole(user, SYSTEM_ADMIN_ROLE_KEYS)
+  return Boolean(user?.is_system_admin)
 }
 
 export function isProjectOwner(project, user, members = []) {
@@ -23,8 +22,7 @@ export function isProjectOwner(project, user, members = []) {
   if (!project || !userId) return false
   const projectId = normalizedId(project.id)
   if (normalizedId(project.owner_id) === userId) return true
-  if (hasProjectRole(members, projectId, userId, PROJECT_OWNER_PROJECT_ROLES)) return true
-  return hasEnabledRole(user, PROJECT_OWNER_ROLE_KEYS) && isProjectMember(members, projectId, userId)
+  return hasProjectRole(members, projectId, userId, PROJECT_OWNER_PROJECT_ROLES)
 }
 
 export function isProjectMember(members = [], projectOrId, userOrId) {
@@ -77,10 +75,6 @@ export function actionErrorMessage(error) {
 export function isDelegateReasonRequiredError(error) {
   const detail = error?.response?.data?.detail
   return error?.apiErrorCode === 'DELEGATE_REASON_REQUIRED' || detail?.code === 'DELEGATE_REASON_REQUIRED'
-}
-
-function hasEnabledRole(user, roleKeys) {
-  return Boolean(user?.roles?.some((role) => role.enabled !== false && roleKeys.has(role.role_key)))
 }
 
 function hasProjectRole(members = [], projectId, userId, projectRoles) {

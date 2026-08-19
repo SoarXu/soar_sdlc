@@ -8,8 +8,8 @@ export function createUser(data) {
   return http.post('/users', data)
 }
 
-export function assignUserRoles(userId, roleIds) {
-  return http.put(`/users/${userId}/roles`, { role_ids: roleIds })
+export function setUserSystemAdmin(userId, isSystemAdmin) {
+  return http.put(`/users/${userId}/system-admin`, { is_system_admin: isSystemAdmin })
 }
 
 export function resetUserPassword(userId) {

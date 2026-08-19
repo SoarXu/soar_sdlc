@@ -10,12 +10,13 @@ from app.models.object_watch import ObjectWatch
 from app.models.program import Program
 from app.models.project import Project
 from app.models.requirement import Requirement
-from app.models.role import Role, UserRole
+from app.models.project_member import ProjectMember
 from app.models.task import Task
 from app.models.user import User
 from app.models.work_item_comment import WorkItemComment
 from app.models.workflow_definition import WorkflowState, WorkflowTransition
 from app.services.exception_center_service import list_exception_refs
+from app.services.project_permission_service import global_role_keys
 from app.services.project_team_service import workbench_project_ids_for_user
 from app.services.workflow_state_query_service import (
     current_state_name,
@@ -46,9 +47,9 @@ def get_dashboard_summary(db: Session) -> DashboardSummary:
 
 
 def get_workbench(db: Session, user_id: int | None = None) -> WorkbenchResponse:
-    role_keys = _role_keys_for_user(db, user_id)
-    view_mode = _workbench_view_mode(role_keys)
     team_project_ids = workbench_project_ids_for_user(db, user_id) if user_id else set()
+    role_keys = _role_keys_for_user(db, user_id, team_project_ids)
+    view_mode = _workbench_view_mode(role_keys)
     scoped_project_ids = team_project_ids
     projects = {item.id: item for item in db.query(Project).filter(Project.deleted == 0).all()}
     iteration_names = {item.id: item.name for item in db.query(Iteration).filter(Iteration.deleted == 0).all()}
@@ -762,17 +763,18 @@ def _dedup_and_sort_workbench_items(items: list[WorkbenchItem]) -> list[Workbenc
     return _sort_workbench_items(list(deduped.values()))
 
 
-def _role_keys_for_user(db: Session, user_id: int | None) -> list[str]:
+def _role_keys_for_user(db: Session, user_id: int | None, project_ids: set[int]) -> list[str]:
     if not user_id:
         return []
-    rows = (
-        db.query(Role.role_key)
-        .join(UserRole, UserRole.role_id == Role.id)
-        .filter(UserRole.user_id == user_id, Role.enabled.is_(True))
-        .order_by(Role.id.asc())
-        .all()
-    )
-    return [row.role_key for row in rows]
+    role_keys = global_role_keys(db, user_id)
+    if project_ids:
+        role_keys.update(
+            role_key
+            for (role_key,) in db.query(ProjectMember.project_role)
+            .filter(ProjectMember.user_id == user_id, ProjectMember.project_id.in_(project_ids))
+            .all()
+        )
+    return sorted(role_keys)
 
 
 def _workbench_view_mode(role_keys: list[str]) -> str:

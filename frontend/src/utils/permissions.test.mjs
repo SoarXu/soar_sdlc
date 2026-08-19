@@ -15,12 +15,12 @@ import {
   isSystemAdmin
 } from './permissions.js'
 
-const admin = { id: 1, username: 'admin', roles: [{ role_key: 'system_admin', enabled: true }] }
-const owner = { id: 2, username: 'owner', roles: [] }
-const member = { id: 3, username: 'dev', roles: [] }
-const tester = { id: 4, username: 'qa', roles: [] }
-const outsider = { id: 5, username: 'guest', roles: [] }
-const globalProjectOwner = { id: 6, username: 'po', roles: [{ role_key: 'project_owner', enabled: true }] }
+const admin = { id: 1, username: 'admin', is_system_admin: true }
+const owner = { id: 2, username: 'owner', is_system_admin: false }
+const member = { id: 3, username: 'dev', is_system_admin: false }
+const tester = { id: 4, username: 'qa', is_system_admin: false }
+const outsider = { id: 5, username: 'guest', is_system_admin: false }
+const globalProjectOwner = { id: 6, username: 'po', is_system_admin: false }
 
 const project = { id: 10, owner_id: owner.id }
 const members = [
@@ -31,14 +31,14 @@ const members = [
 
 {
   assert.equal(isSystemAdmin(admin), true)
-  assert.equal(isSystemAdmin({ ...admin, roles: [{ role_key: 'system_admin', enabled: false }] }), false)
+  assert.equal(isSystemAdmin({ ...admin, is_system_admin: false }), false)
   assert.equal(canConfigureWorkflow(admin), true)
   assert.equal(canConfigureWorkflow(owner), false)
 }
 
 {
   assert.equal(isProjectOwner(project, owner, members), true)
-  assert.equal(isProjectOwner(project, globalProjectOwner, members), true)
+  assert.equal(isProjectOwner(project, globalProjectOwner, members), false)
   assert.equal(isProjectOwner(project, member, members), false)
   assert.equal(canManageProject(project, admin, members), true)
   assert.equal(canManageProject(project, owner, members), true)

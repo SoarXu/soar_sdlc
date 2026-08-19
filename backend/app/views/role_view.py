@@ -27,7 +27,3 @@ class RoleRead(RoleBase):
     is_system: bool = False
     create_time: datetime | None = None
     update_time: datetime | None = None
-
-
-class UserRoleAssignRequest(BaseModel):
-    role_ids: list[int]

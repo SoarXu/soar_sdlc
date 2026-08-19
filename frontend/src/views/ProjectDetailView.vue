@@ -884,7 +884,7 @@ const testRunStatusOptions = [
 const projectMemberRoleOptions = [
   { label: '产品经理', value: 'product_owner' },
   { label: '部门负责人', value: 'department_head' },
-  { label: '开发主管', value: 'tech_lead' },
+  { label: '技术主管（兼容旧配置）', value: 'tech_lead' },
   { label: '开发', value: 'developer' },
   { label: '测试主管', value: 'test_lead' },
   { label: '测试', value: 'tester' },

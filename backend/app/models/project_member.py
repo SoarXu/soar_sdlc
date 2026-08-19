@@ -12,6 +12,7 @@ class ProjectMember(Base):
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     project_id: Mapped[int] = mapped_column(BigInteger)
     user_id: Mapped[int] = mapped_column(BigInteger)
+    role_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True, index=True)
     project_role: Mapped[str] = mapped_column(String(64))
     is_default_assignee: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("0"))
     is_workbench_participant: Mapped[bool] = mapped_column(Boolean, default=True, server_default=text("1"))

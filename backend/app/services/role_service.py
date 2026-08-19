@@ -9,7 +9,6 @@ from app.views.role_view import RoleCreate, RoleUpdate
 
 
 DEFAULT_ROLES = [
-    ("system_admin", "系统管理员", "系统初始化、用户、角色、基础配置"),
     ("department_head", "部门负责人", "负责部门内项目集、项目资源协调和交付治理"),
     ("project_owner", "项目负责人", "管理项目交付"),
     ("product_manager", "产品经理", "维护需求和产品规划"),
@@ -78,17 +77,7 @@ def set_user_system_admin(db: Session, user_id: int, is_system_admin: bool) -> U
     user = db.query(User).filter(User.id == user_id, User.deleted == 0).first()
     if not user:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
-    system_admin_role = db.query(Role).filter(Role.role_key == "system_admin", Role.enabled.is_(True)).first()
-    if not system_admin_role:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="System administrator role is unavailable")
-    binding = db.query(UserRole).filter(
-        UserRole.user_id == user_id,
-        UserRole.role_id == system_admin_role.id,
-    ).first()
-    if is_system_admin and not binding:
-        db.add(UserRole(user_id=user_id, role_id=system_admin_role.id))
-    elif not is_system_admin and binding:
-        db.delete(binding)
+    user.is_system_admin = is_system_admin
     db.commit()
     db.refresh(user)
     return user

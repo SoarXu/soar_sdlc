@@ -66,6 +66,9 @@ class WorkflowTransitionBase(BaseModel):
     from_state_id: int
     to_state_id: int
     allowed_roles: str = ""
+    allowed_role_ids: list[int] = Field(default_factory=list)
+    handler_target_role_ids: list[int] = Field(default_factory=list)
+    handler_fallback_role_ids: list[int] = Field(default_factory=list)
     handler_rule: dict[str, Any] | None = None
     trigger_config: dict[str, Any] | list[Any] | None = None
     condition_config: dict[str, Any] | list[Any] | None = None

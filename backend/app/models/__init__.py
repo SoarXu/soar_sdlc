@@ -32,7 +32,7 @@ from app.models.user import User
 from app.models.work_item_comment import WorkItemComment
 from app.models.work_item_iteration_history import WorkItemIterationHistory
 from app.models.workflow_component import WorkflowComponent
-from app.models.workflow_definition import WorkflowDefinition, WorkflowState, WorkflowTransition
+from app.models.workflow_definition import WorkflowDefinition, WorkflowState, WorkflowTransition, WorkflowTransitionRole
 
 __all__ = [
     "Attachment",
@@ -78,6 +78,7 @@ __all__ = [
     "WorkflowMigrationLog",
     "WorkflowState",
     "WorkflowTransition",
+    "WorkflowTransitionRole",
     "WorkItemComponent",
     "WorkItemReviewRound",
 ]

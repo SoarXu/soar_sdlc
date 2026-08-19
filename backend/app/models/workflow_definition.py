@@ -98,3 +98,13 @@ class WorkflowTransition(Base):
         server_default=text("CURRENT_TIMESTAMP"),
         server_onupdate=text("CURRENT_TIMESTAMP"),
     )
+
+
+class WorkflowTransitionRole(Base):
+    __tablename__ = "workflow_transition_roles"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    transition_id: Mapped[int] = mapped_column(BigInteger, index=True)
+    role_id: Mapped[int] = mapped_column(BigInteger, index=True)
+    purpose: Mapped[str] = mapped_column(String(32))
+    sort_order: Mapped[int] = mapped_column(Integer, default=0)

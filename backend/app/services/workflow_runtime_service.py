@@ -28,7 +28,7 @@ from app.models.test_case_execution import TestCaseExecutionLog
 from app.models.test_run import TestRun, TestRunCase
 from app.models.user import User
 from app.models.work_item_iteration_history import WorkItemIterationHistory
-from app.models.workflow_definition import WorkflowDefinition, WorkflowState, WorkflowTransition
+from app.models.workflow_definition import WorkflowDefinition, WorkflowState, WorkflowTransition, WorkflowTransitionRole
 from app.services.default_workflow_template_service import ensure_default_workflow_templates
 from app.services.bug_type_service import bug_type_options, get_enabled_bug_type
 from app.services.project_permission_service import (
@@ -1067,14 +1067,26 @@ def _matches_ownerless_visibility(object_type: str, item, transition: WorkflowTr
 def _role_allowed(db: Session, object_type: str, item, transition: WorkflowTransition, actor: User | None) -> bool:
     if object_type == "iteration":
         return can_manage_iteration(db, item.id, actor)
-    roles = _split_csv(transition.allowed_roles)
-    if not roles:
-        return True
     if not actor:
         return False
     project_id = _project_id_for_item(db, object_type, item)
     if not project_id:
         return True
+    business_role_ids = {
+        role_id for (role_id,) in db.query(WorkflowTransitionRole.role_id).filter(
+            WorkflowTransitionRole.transition_id == transition.id,
+            WorkflowTransitionRole.purpose == "allowed",
+        ).all()
+    }
+    if business_role_ids and db.query(ProjectMember.id).filter(
+        ProjectMember.project_id == project_id,
+        ProjectMember.user_id == actor.id,
+        ProjectMember.role_id.in_(business_role_ids),
+    ).first():
+        return True
+    roles = _split_csv(transition.allowed_roles)
+    if not roles:
+        return bool(business_role_ids) is False
     identities = _actor_identities(db, object_type, item, actor)
     effective_roles = actor_role_keys(db, project_id, actor.id) | identities
     component_roles = active_primary_component_member_roles(db, object_type, item, actor.id)
@@ -1936,7 +1948,7 @@ def _next_owner_resolution(
     actor: User | None,
     transition_action_key: str,
 ) -> dict[str, Any]:
-    rule = transition.handler_rule or {}
+    rule = {**(transition.handler_rule or {}), "_transition_id": transition.id, "_role_purpose": "target"}
     original_owner_id = getattr(item, "owner_id", None)
     component_route = resolve_component_transition_route(db, object_type, item, transition)
     if component_route is not None:
@@ -2074,6 +2086,8 @@ def _handler_fallback_chain(rule: dict[str, Any]) -> list[dict[str, Any]]:
             "type": fallback_type,
             "roles": rule.get("fallback_roles", ""),
             "fixed_user_id": rule.get("fallback_user_id"),
+            "_transition_id": rule.get("_transition_id"),
+            "_role_purpose": "fallback",
         }
     ]
 
@@ -2109,6 +2123,16 @@ def _resolve_handler_source(
     if source_type == "previous_handler":
         return _previous_handler_id(db, object_type, item, original_owner_id), source_type
     if source_type in {"project_role", "fixed_role"}:
+        role_ids = [role_id for (role_id,) in db.query(WorkflowTransitionRole.role_id).filter(
+            WorkflowTransitionRole.transition_id == config.get("_transition_id"),
+            WorkflowTransitionRole.purpose == config.get("_role_purpose", "target"),
+        ).all()]
+        if role_ids:
+            member = db.query(ProjectMember).filter(
+                ProjectMember.project_id == project_id,
+                ProjectMember.role_id.in_(role_ids),
+            ).order_by(ProjectMember.sort_order.asc(), ProjectMember.id.asc()).first()
+            return (member.user_id if member else None), f"{source_type}:role_ids"
         roles = _split_csv(config.get("target_roles") or config.get("roles"))
         return _first_project_member_id(db, project_id, roles), f"{source_type}:{','.join(roles)}"
     if source_type == "project_owner":

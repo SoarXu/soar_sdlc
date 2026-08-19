@@ -6,7 +6,6 @@ from app.models.iteration import Iteration, IterationProject
 from app.models.project import Project
 from app.models.project_member import ProjectMember
 from app.models.requirement import Requirement
-from app.models.role import Role, UserRole
 from app.models.task import Task
 from app.models.test_case import TestCase
 from app.models.test_run import TestRun
@@ -22,16 +21,7 @@ TEST_PROJECT_ROLES = {"tester", "test_lead", "qa", "quality_assurance"}
 def is_system_admin(db: Session, user_id: int | None) -> bool:
     if user_id is None:
         return False
-    return bool(
-        db.query(Role)
-        .join(UserRole, UserRole.role_id == Role.id)
-        .filter(
-            UserRole.user_id == user_id,
-            Role.role_key.in_(SYSTEM_ADMIN_ROLE_KEYS),
-            Role.enabled.is_(True),
-        )
-        .first()
-    )
+    return bool(db.query(User.is_system_admin).filter(User.id == user_id, User.deleted == 0).scalar())
 
 
 def is_project_owner(db: Session, project_id: int | None, user_id: int | None) -> bool:

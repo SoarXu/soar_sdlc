@@ -8,6 +8,7 @@ const [workflowSource, projectSource] = await Promise.all([
 
 assert.match(workflowSource, /\{ label: '开发主管', value: 'development_lead' \}/)
 assert.match(workflowSource, /\{ label: '技术主管（兼容旧配置）', value: 'tech_lead' \}/)
+assert.match(projectSource, /\{ label: '开发主管', value: 'development_lead' \}/)
 assert.match(projectSource, /\{ label: '技术主管（兼容旧配置）', value: 'tech_lead' \}/)
 
 console.log('workflow role option labels passed')

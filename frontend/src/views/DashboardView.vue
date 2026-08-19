@@ -63,30 +63,6 @@
     </div>
 
     <div v-loading="loading" class="workbench-list">
-      <section v-if="workItemReviews.length" class="workbench-list-section workbench-review-section">
-        <header class="workbench-list-section-head">
-          <div>
-            <h2>待我评审</h2>
-            <p>关联 Git 提交后自动进入的需求、任务和 Bug 评审。</p>
-          </div>
-          <el-tag type="warning">{{ workItemReviews.length }} 项</el-tag>
-        </header>
-        <el-table :data="workItemReviews" border stripe>
-          <el-table-column label="工作项" min-width="180">
-            <template #default="{ row }">
-              <el-button link type="primary" @click="openWorkItemReview(row)">{{ typeLabel(row.object_type) }}-{{ row.object_id }}</el-button>
-            </template>
-          </el-table-column>
-          <el-table-column label="最新提交" min-width="180"><template #default="{ row }">{{ row.short_sha || row.commit_sha || '未关联提交' }}</template></el-table-column>
-          <el-table-column label="更新时间" width="180"><template #default="{ row }">{{ formatWorkbenchDateTime(row.update_time) }}</template></el-table-column>
-          <el-table-column label="操作" width="180" fixed="right">
-            <template #default="{ row }">
-              <el-button link type="primary" @click="openWorkbenchReviewDialog(row)">评审</el-button>
-            </template>
-          </el-table-column>
-        </el-table>
-      </section>
-
       <section class="workbench-list-section">
         <header class="workbench-list-section-head">
           <div>
@@ -267,13 +243,6 @@
       :item-id="activeEditorId"
       @saved="handleEditorSaved"
     />
-    <WorkItemReviewDialog
-      v-if="selectedWorkbenchReview"
-      v-model:visible="workbenchReviewDialogVisible"
-      :object-type="selectedWorkbenchReview.object_type"
-      :object-id="selectedWorkbenchReview.object_id"
-      @decided="loadWorkbench"
-    />
   </section>
 </template>
 
@@ -291,7 +260,6 @@ import { resolveWorkbenchWorkflowCommand } from '../utils/workbenchWorkflowComma
 import RequirementPriorityBadge from '../components/RequirementPriorityBadge.vue'
 import RichTextPasteEditor from '../components/RichTextPasteEditor.vue'
 import WorkflowActionButtons from '../components/WorkflowActionButtons.vue'
-import WorkItemReviewDialog from '../components/WorkItemReviewDialog.vue'
 import BatchAssignmentBar from '../components/BatchAssignmentBar.vue'
 import BugEditDialog from '../components/work-items/BugEditDialog.vue'
 import RequirementEditDialog from '../components/work-items/RequirementEditDialog.vue'
@@ -340,8 +308,6 @@ const caseBugVisible = ref(false)
 const editorVisible = ref(false)
 const activeEditorType = ref('')
 const activeEditorId = ref(null)
-const selectedWorkbenchReview = ref(null)
-const workbenchReviewDialogVisible = ref(false)
 const caseExecutionForm = reactive({ execute_time: '', steps_result_json: [] })
 const caseBugForm = reactive({ title: '', bug_type: DEFAULT_BUG_TYPE_KEY, severity: '3', priority: '3', reproduce_steps: '', actual_result: '' })
 
@@ -368,7 +334,6 @@ const priorityLevelOptions = [
 ]
 
 const activeIterationItems = computed(() => workbenchData.value.active_iteration_items || [])
-const workItemReviews = computed(() => workbenchData.value.work_item_reviews || [])
 const filterOptions = computed(() => buildWorkbenchFilterOptions(activeIterationItems.value, users.value))
 const filteredListItems = computed(() => sortWorkbenchItems(filterWorkbenchItems(activeIterationItems.value, activeFilters.value)))
 const pagedListPage = computed(() => paginateWorkbenchItems(filteredListItems.value, currentPage.value, pageSize.value))
@@ -473,15 +438,6 @@ function workbenchRowClassName({ row }) {
 
 function openWorkItemDetail(item) {
   router.push(detailLink(item))
-}
-
-function openWorkItemReview(review) {
-  openWorkItemDetail({ object_type: review.object_type, id: review.object_id })
-}
-
-function openWorkbenchReviewDialog(review) {
-  selectedWorkbenchReview.value = review
-  workbenchReviewDialogVisible.value = true
 }
 
 function detailLink(item) {

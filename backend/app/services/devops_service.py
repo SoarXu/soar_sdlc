@@ -372,7 +372,7 @@ def _ensure_commit_link(db: Session, commit_id: int, object_type: str, object_id
 def _ensure_review_task(db: Session, commit: DevopsCommit, links: list[dict[str, Any]]) -> None:
     task = db.query(DevopsCodeReviewTask).filter(DevopsCodeReviewTask.commit_id == commit.id).first()
     author_id = _commit_author_user_id(db, commit)
-    owner_id = _project_reviewer_user_id(db, links, author_id) or _development_lead_user_id(db, author_id) or _fallback_reviewer_user_id(db, author_id) or _first_owner_id(db, links, author_id)
+    owner_id = _project_reviewer_user_id(db, links, author_id) or _first_owner_id(db, links, author_id) or _fallback_reviewer_user_id(db, author_id)
     if task:
         task.title = f"Code Review: {commit.short_sha or commit.commit_sha[:8]} {commit.title or ''}".strip()
         if not task.owner_id:
@@ -385,25 +385,6 @@ def _ensure_review_task(db: Session, commit: DevopsCommit, links: list[dict[str,
             owner_id=owner_id,
         )
     )
-
-
-def _development_lead_user_id(db: Session, exclude_user_id: int | None = None) -> int | None:
-    row = (
-        db.query(User.id)
-        .join(UserRole, UserRole.user_id == User.id)
-        .join(Role, Role.id == UserRole.role_id)
-        .filter(
-            User.deleted == 0,
-            User.is_active.is_(True),
-            Role.enabled.is_(True),
-            Role.role_key == "development_lead",
-        )
-        .order_by(User.id.asc())
-    )
-    if exclude_user_id:
-        row = row.filter(User.id != exclude_user_id)
-    row = row.first()
-    return row.id if row else None
 
 
 def _first_owner_id(db: Session, links: list[dict[str, Any]], exclude_user_id: int | None = None) -> int | None:
@@ -474,7 +455,7 @@ def _fallback_reviewer_user_id(db: Session, exclude_user_id: int | None = None) 
             User.deleted == 0,
             User.is_active.is_(True),
             Role.enabled.is_(True),
-            Role.role_key.in_(["system_admin", "program_owner"]),
+            Role.role_key == "system_admin",
         )
         .order_by(User.id.asc())
     )

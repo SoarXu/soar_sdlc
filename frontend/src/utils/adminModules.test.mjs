@@ -13,7 +13,7 @@ test('admin modules keep the expected backend order', () => {
 test('admin modules expose stable card titles', () => {
   assert.deepEqual(
     adminModules.slice(0, 2).map((item) => item.title),
-    ['角色管理', '工作流配置']
+    ['用户管理', '工作流配置']
   )
 })
 

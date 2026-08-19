@@ -54,8 +54,8 @@
               <el-select v-model="member.user_id" filterable placeholder="选择成员">
                 <el-option v-for="user in projectUsers" :key="user.id" :label="user.full_name || user.username" :value="user.id" />
               </el-select>
-              <el-select v-model="member.component_role" filterable placeholder="选择后台角色">
-                <el-option v-for="role in enabledBackendRoles" :key="role.role_key" :label="role.role_name" :value="role.role_key" />
+              <el-select v-model="member.component_role" filterable placeholder="选择项目角色">
+                <el-option v-for="role in projectRoleOptions(member.user_id)" :key="role.value" :label="role.label" :value="role.value" />
               </el-select>
               <el-button link type="danger" @click="removeEditMember(index)">删除</el-button>
             </div>
@@ -79,7 +79,6 @@ import { createBusinessComponentFromProject, fetchBusinessComponents, saveBusine
 import { fetchProject, fetchProjectMembers, fetchProjects } from '../api/projects'
 import { fetchUsers } from '../api/users'
 import { fetchAssigneeRuleConfigs } from '../api/assigneeRuleConfigs'
-import { fetchRoles } from '../api/roles'
 import { actionErrorMessage } from '../utils/permissions'
 
 const props = defineProps({
@@ -98,13 +97,11 @@ const components = ref([])
 const users = ref([])
 const projectMembers = ref([])
 const workflowSchemes = ref([])
-const backendRoles = ref([])
 const form = reactive({ source_project_id: null, name: '', description: '' })
 const editForm = reactive({ id: null, name: '', description: '', workflow_scheme_id: null, enabled: true, members: [] })
 const projectClosed = computed(() => project.value.state_category === 'terminal')
 const closedProjects = computed(() => projects.value.filter((item) => item.id !== projectId.value && item.state_category === 'terminal'))
 const enabledWorkflowSchemes = computed(() => workflowSchemes.value.filter((item) => item.lifecycle_status === 'enabled'))
-const enabledBackendRoles = computed(() => backendRoles.value.filter((item) => item.enabled !== false))
 const projectUsers = computed(() => {
   const memberIds = new Set(projectMembers.value.map((item) => item.user_id))
   return users.value.filter((item) => memberIds.has(item.id))
@@ -156,27 +153,30 @@ function memberLabel(members) {
 }
 
 function backendRoleLabel(roleKey) {
-  return backendRoles.value.find((role) => role.role_key === roleKey)?.role_name || roleKey
+  return projectRoleOptions().find((role) => role.value === roleKey)?.label || roleKey
 }
 
-function membersMissingAssignedRole() {
-  return editForm.members.filter((member) => {
-    const user = users.value.find((item) => item.id === member.user_id)
-    return !user?.roles?.some((role) => role.enabled !== false && role.role_key === member.component_role)
-  })
+function projectRoleOptions(userId = null) {
+  const roles = projectMembers.value
+    .filter((member) => !userId || member.user_id === userId)
+    .map((member) => member.project_role)
+  return [...new Set(roles)].map((role) => ({ value: role, label: projectRoleLabel(role) }))
+}
+
+function projectRoleLabel(role) {
+  return ({ project_owner: '项目负责人', product_manager: '产品经理', development_lead: '开发主管', developer: '开发', tester: '测试', viewer: '访客' })[role] || role
 }
 
 async function loadData() {
   loading.value = true
   try {
-    const [projectRes, projectsRes, componentsRes, usersRes, membersRes, schemesRes, rolesRes] = await Promise.all([
+    const [projectRes, projectsRes, componentsRes, usersRes, membersRes, schemesRes] = await Promise.all([
       fetchProject(projectId.value),
       fetchProjects(),
       fetchBusinessComponents(projectId.value),
       fetchUsers(),
       fetchProjectMembers(projectId.value),
-      fetchAssigneeRuleConfigs(),
-      fetchRoles()
+      fetchAssigneeRuleConfigs()
     ])
     project.value = projectRes.data
     projects.value = projectsRes.data
@@ -184,7 +184,6 @@ async function loadData() {
     users.value = usersRes.data
     projectMembers.value = membersRes.data
     workflowSchemes.value = schemesRes.data
-    backendRoles.value = rolesRes.data
   } finally {
     loading.value = false
   }
@@ -194,7 +193,7 @@ async function saveComponent() {
   if (!editForm.name.trim()) return ElMessage.warning('请填写组件名称')
   if (editForm.members.some((member) => !member.user_id || !member.component_role)) return ElMessage.warning('请选择组件成员和后台角色')
   if (new Set(editForm.members.map((member) => member.user_id)).size !== editForm.members.length) return ElMessage.warning('组件成员不可重复')
-  if (membersMissingAssignedRole().length) return ElMessage.warning('请先在后台角色管理中为该用户分配所选角色')
+  if (editForm.members.some((member) => !projectRoleOptions(member.user_id).some((role) => role.value === member.component_role))) return ElMessage.warning('请选择该成员在当前项目中的角色')
   saving.value = true
   try {
     await updateBusinessComponent(projectId.value, editForm.id, {

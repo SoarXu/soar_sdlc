@@ -74,37 +74,24 @@ def delete_role(db: Session, role_id: int) -> None:
     db.commit()
 
 
-def assign_user_roles(db: Session, user_id: int, role_ids: list[int]) -> User:
+def set_user_system_admin(db: Session, user_id: int, is_system_admin: bool) -> User:
     user = db.query(User).filter(User.id == user_id, User.deleted == 0).first()
     if not user:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
-    roles = db.query(Role).filter(Role.id.in_(role_ids), Role.enabled.is_(True)).all() if role_ids else []
-    found_ids = {role.id for role in roles}
-    missing_ids = set(role_ids) - found_ids
-    if missing_ids:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Role not found or disabled")
-    db.query(UserRole).filter(UserRole.user_id == user_id).delete()
-    for role in roles:
-        db.add(UserRole(user_id=user_id, role_id=role.id))
+    system_admin_role = db.query(Role).filter(Role.role_key == "system_admin", Role.enabled.is_(True)).first()
+    if not system_admin_role:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="System administrator role is unavailable")
+    binding = db.query(UserRole).filter(
+        UserRole.user_id == user_id,
+        UserRole.role_id == system_admin_role.id,
+    ).first()
+    if is_system_admin and not binding:
+        db.add(UserRole(user_id=user_id, role_id=system_admin_role.id))
+    elif not is_system_admin and binding:
+        db.delete(binding)
     db.commit()
     db.refresh(user)
     return user
-
-
-def roles_for_users(db: Session, user_ids: list[int]) -> dict[int, list[Role]]:
-    if not user_ids:
-        return {}
-    rows = (
-        db.query(UserRole.user_id, Role)
-        .join(Role, Role.id == UserRole.role_id)
-        .filter(UserRole.user_id.in_(user_ids), Role.enabled.is_(True))
-        .order_by(Role.id.asc())
-        .all()
-    )
-    result: dict[int, list[Role]] = {user_id: [] for user_id in user_ids}
-    for user_id, role in rows:
-        result.setdefault(user_id, []).append(role)
-    return result
 
 
 def seed_default_roles_if_needed(db: Session) -> None:

@@ -114,7 +114,11 @@ def _load_scan_context(
     if owner_ids:
         for user_id, role_key in db.query(UserRole.user_id, Role.role_key).join(
             Role, Role.id == UserRole.role_id
-        ).filter(UserRole.user_id.in_(owner_ids), Role.enabled.is_(True)).all():
+        ).filter(
+            UserRole.user_id.in_(owner_ids),
+            Role.role_key == "system_admin",
+            Role.enabled.is_(True),
+        ).all():
             global_roles[user_id].add(role_key)
     projects = {
         project.id: project for project in db.query(Project).filter(Project.id.in_(project_ids)).all()

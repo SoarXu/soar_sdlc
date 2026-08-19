@@ -77,7 +77,7 @@ def list_users(db: Session, user_id: int | None = None) -> list[dict]:
     if user_id:
         query = query.filter(User.id == user_id)
     users = query.order_by(User.id.asc()).all()
-    role_map = _roles_for_users(db, [user.id for user in users])
+    system_admin_ids = _system_admin_user_ids(db, [user.id for user in users])
     return [
         {
             "id": user.id,
@@ -88,7 +88,7 @@ def list_users(db: Session, user_id: int | None = None) -> list[dict]:
             "department": user.department,
             "is_active": user.is_active,
             "must_change_password": user.must_change_password,
-            "roles": role_map.get(user.id, []),
+            "is_system_admin": user.id in system_admin_ids,
         }
         for user in users
     ]
@@ -119,9 +119,6 @@ def register_user(db: Session, payload: RegisterRequest) -> User:
     )
     db.add(user)
     db.flush()
-    developer_role = db.query(Role).filter(Role.role_key == "developer", Role.enabled.is_(True)).first()
-    if developer_role:
-        db.add(UserRole(user_id=user.id, role_id=developer_role.id))
     db.commit()
     db.refresh(user)
     return user
@@ -136,7 +133,6 @@ def create_managed_user(db: Session, payload: UserCreate) -> tuple[User, str]:
         raise ValueError("Full name is required")
     if db.query(User).filter(User.username == username, User.deleted == 0).first():
         raise LookupError("Username already exists")
-    roles = _roles_by_ids(db, payload.role_ids)
     initial_password = generate_initial_password()
     user = User(
         username=username,
@@ -150,8 +146,11 @@ def create_managed_user(db: Session, payload: UserCreate) -> tuple[User, str]:
     )
     db.add(user)
     db.flush()
-    for role in roles:
-        db.add(UserRole(user_id=user.id, role_id=role.id))
+    if payload.is_system_admin:
+        system_admin_role = db.query(Role).filter(Role.role_key == "system_admin", Role.enabled.is_(True)).first()
+        if not system_admin_role:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="System administrator role is unavailable")
+        db.add(UserRole(user_id=user.id, role_id=system_admin_role.id))
     db.commit()
     db.refresh(user)
     return user, initial_password
@@ -198,17 +197,6 @@ def get_or_create_demo_user(db: Session) -> User:
     return db.query(User).filter(User.username == "admin").one()
 
 
-def _roles_by_ids(db: Session, role_ids: list[int]) -> list[Role]:
-    if not role_ids:
-        return []
-    roles = db.query(Role).filter(Role.id.in_(role_ids), Role.enabled.is_(True)).all()
-    found_ids = {role.id for role in roles}
-    missing_ids = set(role_ids) - found_ids
-    if missing_ids:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Role not found or disabled")
-    return roles
-
-
 def _get_active_user(db: Session, user_id: int) -> User:
     user = db.query(User).filter(User.id == user_id, User.deleted == 0, User.is_active.is_(True)).first()
     if not user:
@@ -223,28 +211,19 @@ def _password_matches(password_hash: str, password: str) -> bool:
         return False
 
 
-def _roles_for_users(db: Session, user_ids: list[int]) -> dict[int, list[dict]]:
+def _system_admin_user_ids(db: Session, user_ids: list[int]) -> set[int]:
     if not user_ids:
-        return {}
-    rows = (
-        db.query(UserRole.user_id, Role)
+        return set()
+    return {
+        user_id
+        for (user_id,) in (
+            db.query(UserRole.user_id)
         .join(Role, Role.id == UserRole.role_id)
-        .filter(UserRole.user_id.in_(user_ids), Role.enabled.is_(True))
-        .order_by(Role.id.asc())
-        .all()
-    )
-    result: dict[int, list[dict]] = {user_id: [] for user_id in user_ids}
-    for user_id, role in rows:
-        result.setdefault(user_id, []).append(
-            {
-                "id": role.id,
-                "role_key": role.role_key,
-                "role_name": role.role_name,
-                "description": role.description,
-                "is_system": role.is_system,
-                "enabled": role.enabled,
-                "create_time": role.create_time,
-                "update_time": role.update_time,
-            }
+        .filter(
+            UserRole.user_id.in_(user_ids),
+            Role.role_key == "system_admin",
+            Role.enabled.is_(True),
         )
-    return result
+        .all()
+        )
+    }

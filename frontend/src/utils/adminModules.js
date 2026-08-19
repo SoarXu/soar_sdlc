@@ -1,8 +1,8 @@
 export const adminModules = [
   {
     key: 'roles',
-    title: '\u89d2\u8272\u7ba1\u7406',
-    description: '\u7ef4\u62a4\u4e1a\u52a1\u89d2\u8272\uff0c\u5e76\u7ed9\u7528\u6237\u5206\u914d\u89d2\u8272\u3002',
+    title: '\u7528\u6237\u7ba1\u7406',
+    description: '\u7ef4\u62a4\u7cfb\u7edf\u7528\u6237\u4e0e\u7cfb\u7edf\u7ba1\u7406\u5458\u6743\u9650\u3002',
     navGroupPath: '/admin',
     path: '/roles'
   },

@@ -7,7 +7,6 @@ from app.models.bug import Bug
 from app.models.devops import DevopsCommit, DevopsCommitLink, WorkItemReviewRound
 from app.models.project_member import ProjectMember
 from app.models.requirement import Requirement
-from app.models.role import Role, UserRole
 from app.models.task import Task
 from app.models.user import User
 from app.models.workflow_definition import WorkflowTransition
@@ -273,20 +272,7 @@ def _development_lead_user_id(db: Session, project_id: int | None = None) -> int
         )
         if row:
             return row.id
-    row = (
-        db.query(User.id)
-        .join(UserRole, UserRole.user_id == User.id)
-        .join(Role, Role.id == UserRole.role_id)
-        .filter(
-            User.deleted == 0,
-            User.is_active.is_(True),
-            Role.enabled.is_(True),
-            Role.role_key == "development_lead",
-        )
-        .order_by(User.id.asc())
-        .first()
-    )
-    return row.id if row else None
+    return None
 
 
 def _is_project_development_lead(db: Session, item, actor: User | None) -> bool:

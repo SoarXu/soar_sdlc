@@ -1,5 +1,5 @@
 <template>
-  <el-dialog :model-value="visible" title="评审" width="920px" append-to-body @update:model-value="emit('update:visible', $event)">
+  <el-dialog :model-value="visible" title="代码评审" width="920px" append-to-body @update:model-value="emit('update:visible', $event)">
     <div v-loading="loading" class="work-item-review-dialog">
       <CommitDiffViewer
         v-if="context?.has_diff"
@@ -9,14 +9,14 @@
       <el-empty v-else description="未找到 Git Diff 片段" :image-size="80" />
       <el-form label-position="top" class="work-item-review-decision-form">
         <el-form-item label="不通过理由" required>
-          <el-input v-model="remark" type="textarea" :rows="3" maxlength="1000" show-word-limit placeholder="评审不通过时必填" />
+          <el-input v-model="remark" type="textarea" :rows="3" maxlength="1000" show-word-limit placeholder="代码评审不通过时必填" />
         </el-form-item>
       </el-form>
     </div>
     <template #footer>
       <el-button @click="emit('update:visible', false)">取消</el-button>
-      <el-button type="danger" :loading="deciding === 'reject'" @click="decide('reject')">评审不通过</el-button>
-      <el-button type="success" :loading="deciding === 'approve'" @click="decide('approve')">评审通过</el-button>
+      <el-button type="danger" :loading="deciding === 'reject'" @click="decide('reject')">代码评审不通过</el-button>
+      <el-button type="success" :loading="deciding === 'approve'" @click="decide('approve')">代码评审通过</el-button>
     </template>
   </el-dialog>
 </template>
@@ -69,11 +69,11 @@ async function decide(decision) {
       decision,
       remark: decision === 'reject' ? value : null
     })
-    ElMessage.success(decision === 'approve' ? '评审已通过' : '评审已驳回')
+    ElMessage.success(decision === 'approve' ? '代码评审已通过' : '代码评审未通过')
     emit('update:visible', false)
     emit('decided', data)
   } catch (error) {
-    showActionError(error, '评审失败')
+    showActionError(error, '代码评审失败')
   } finally {
     deciding.value = ''
   }

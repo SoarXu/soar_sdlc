@@ -778,6 +778,7 @@ def _transition_read(db: Session, item, transition: WorkflowTransition, actor: U
     )
     return WorkflowTransitionActionRead(
         transition_id=transition.id,
+        action_key=transition.action_key,
         action_name=transition.action_name,
         from_state_id=transition.from_state_id,
         to_state_id=transition.to_state_id,

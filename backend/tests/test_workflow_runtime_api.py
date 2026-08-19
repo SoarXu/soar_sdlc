@@ -20,6 +20,7 @@ from app.models.user import User
 from app.models.workflow_definition import WorkflowTransition
 from app.services import iteration_service, workflow_runtime_service
 from app.services.exception_center_service import _state_requires_owner_from_context
+from app.views.workflow_runtime_view import WorkflowTransitionActionRead
 
 
 @pytest.fixture(autouse=True)
@@ -265,6 +266,18 @@ def test_list_available_transitions_uses_nonlocking_item_loader(monkeypatch):
     assert workflow_runtime_service.list_available_transitions(object(), "bug", 1, None) == []
 
 
+def test_workflow_transition_action_response_preserves_action_key():
+    action = WorkflowTransitionActionRead(
+        transition_id=1,
+        action_key="approve_review",
+        action_name="评审通过",
+        from_state_id=2,
+        to_state_id=3,
+    )
+
+    assert action.model_dump()["action_key"] == "approve_review"
+
+
 def test_ownerless_visibility_only_requires_handler_for_current_handler_scope():
     item = SimpleNamespace(owner_id=None)
     role_authorized_transition = SimpleNamespace(
@@ -395,7 +408,7 @@ def test_runtime_discovers_executes_and_audits_transitions_by_state_id(client: T
     assert actions.status_code == 200
     claim = next(item for item in actions.json() if item["action_name"] == "认领")
     assert isinstance(claim["transition_id"], int)
-    assert "action_key" not in claim
+    assert claim["action_key"] == "claim"
     assert "list_priority" not in claim
     assert claim["sort_order"] >= 0
     assert claim["from_state_id"] == requirement["current_state_id"]

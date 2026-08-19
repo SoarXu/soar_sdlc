@@ -8,6 +8,7 @@ from app.core.security import create_access_token
 from app.db.session import SessionLocal
 from app.models.devops import DevopsCommit, WorkItemReviewRound
 from app.models.project import Project
+from app.models.project_member import ProjectMember
 from app.models.requirement import Requirement
 from app.models.role import Role, UserRole
 from app.models.user import User
@@ -73,7 +74,7 @@ def test_review_round_decision_enforces_reviewer_and_records_workflow_audit():
         db.add(review_round)
         db.commit()
 
-        with pytest.raises(HTTPException, match="仅指定的研发负责人可以进行评审"):
+        with pytest.raises(HTTPException, match="仅指定的开发主管可以进行代码评审"):
             decide_review_round(db, review_round.id, "approve", None, outsider)
 
         result = decide_review_round(db, review_round.id, "approve", None, lead)
@@ -156,6 +157,50 @@ def test_manual_review_submission_creates_commitless_round_then_auto_submission_
         assert context_with_diff.json()["commit"]["id"] == commit.id
         assert context_with_diff.json()["has_diff"] is True
         assert context_with_diff.json()["diff_text"] == commit.diff_text
+    finally:
+        db.close()
+
+
+def test_pending_review_without_round_recovers_context_for_project_development_lead(client):
+    db = SessionLocal()
+    try:
+        reviewer = db.query(User).filter(User.username == "bob", User.deleted == 0, User.is_active.is_(True)).one()
+        project = Project(name=f"Legacy review {uuid4().hex[:8]}", **initial_system_workflow_values(db, "project"))
+        db.add(project)
+        db.flush()
+        db.add(ProjectMember(project_id=project.id, user_id=reviewer.id, project_role="development_lead"))
+        iteration = create_unstarted_iteration(db, project.id)
+        requirement = Requirement(
+            project_id=project.id,
+            iteration_id=iteration.id,
+            title="Legacy pending review requirement",
+            owner_id=reviewer.id,
+            **initial_workflow_values(db, "requirement", project.id),
+        )
+        db.add(requirement)
+        db.flush()
+        approve = db.query(WorkflowTransition).filter(
+            WorkflowTransition.definition_id == requirement.workflow_definition_id,
+            WorkflowTransition.action_key == "approve_review",
+        ).one()
+        requirement.current_state_id = approve.from_state_id
+        db.commit()
+
+        context = client.get(
+            f"/api/v1/devops/work-item-reviews/requirement/{requirement.id}/context",
+            headers={"Authorization": f"Bearer {create_access_token(reviewer.username)}"},
+        )
+
+        assert context.status_code == 200, context.text
+        assert context.json()["has_diff"] is False
+        assert context.json()["review_round"]["reviewer_id"] == reviewer.id
+        db.rollback()
+        round_row = db.query(WorkItemReviewRound).filter(
+            WorkItemReviewRound.object_type == "requirement",
+            WorkItemReviewRound.object_id == requirement.id,
+            WorkItemReviewRound.status == "open",
+        ).one()
+        assert round_row.latest_commit_id is None
     finally:
         db.close()
 

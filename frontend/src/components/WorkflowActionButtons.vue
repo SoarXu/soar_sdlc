@@ -344,7 +344,7 @@ function normalizeReviewActions(source) {
       ...reviewApprove,
       transition_id: `review-${reviewApprove.transition_id}`,
       action_key: 'review_work_item',
-      action_name: '评审',
+      action_name: '代码评审',
       button_type: 'primary',
       ui_config: { ...(reviewApprove.ui_config || {}), list_display: 'primary' }
     }

@@ -62,6 +62,7 @@ assert.match(source, /存在未完成事项，无法结束迭代/)
 assert.match(source, /WorkItemReviewDialog/)
 assert.match(source, /submitWorkItemReview/)
 assert.match(source, /review_work_item/)
+assert.match(source, /action_name: '代码评审'/)
 assert.match(source, /提交评审成功/)
 
 const blockerDialogStart = source.indexOf('<el-dialog v-model="blockerDialogVisible"')

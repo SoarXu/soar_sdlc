@@ -15,17 +15,22 @@
     </div>
     <template #footer>
       <el-button @click="emit('update:visible', false)">取消</el-button>
-      <el-button type="danger" :loading="deciding === 'reject'" @click="decide('reject')">代码评审不通过</el-button>
-      <el-button type="success" :loading="deciding === 'approve'" @click="decide('approve')">代码评审通过</el-button>
+      <el-button v-if="rejectAction" :type="buttonType(rejectAction)" :loading="deciding === 'reject'" @click="decide(rejectAction)">
+        {{ rejectAction.action_name }}
+      </el-button>
+      <el-button v-if="approveAction" :type="buttonType(approveAction)" :loading="deciding === 'approve'" @click="decide(approveAction)">
+        {{ approveAction.action_name }}
+      </el-button>
     </template>
   </el-dialog>
 </template>
 
 <script setup>
-import { ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 
 import { decideWorkItemReview, fetchWorkItemReviewContext } from '../api/devops'
+import { fetchWorkflowTransitions } from '../api/workflowRuntime'
 import { showActionError } from '../utils/actionFeedback'
 import CommitDiffViewer from './CommitDiffViewer.vue'
 
@@ -39,14 +44,22 @@ const loading = ref(false)
 const deciding = ref('')
 const context = ref(null)
 const remark = ref('')
+const reviewActions = ref([])
+const approveAction = computed(() => reviewActions.value.find((action) => action.action_key === 'approve_review'))
+const rejectAction = computed(() => reviewActions.value.find((action) => action.action_key === 'reject_review'))
 
 watch(() => [props.visible, props.objectType, props.objectId], async ([visible]) => {
   if (!visible || !props.objectType || !props.objectId) return
   loading.value = true
   remark.value = ''
+  reviewActions.value = []
   try {
-    const { data } = await fetchWorkItemReviewContext(props.objectType, props.objectId)
-    context.value = data
+    const [contextResponse, transitionsResponse] = await Promise.all([
+      fetchWorkItemReviewContext(props.objectType, props.objectId),
+      fetchWorkflowTransitions(props.objectType, props.objectId)
+    ])
+    context.value = contextResponse.data
+    reviewActions.value = transitionsResponse.data || []
   } catch (error) {
     context.value = null
     showActionError(error, '加载评审信息失败')
@@ -56,8 +69,13 @@ watch(() => [props.visible, props.objectType, props.objectId], async ([visible])
   }
 }, { immediate: true })
 
-async function decide(decision) {
+function buttonType(action) {
+  return action?.button_type || action?.ui_config?.button_type || 'primary'
+}
+
+async function decide(action) {
   if (!context.value?.review_round?.id) return
+  const decision = action.action_key === 'approve_review' ? 'approve' : 'reject'
   const value = remark.value.trim()
   if (decision === 'reject' && !value) {
     ElMessage.warning('请填写不通过理由')

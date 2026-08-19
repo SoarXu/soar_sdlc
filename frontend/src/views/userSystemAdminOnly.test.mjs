@@ -6,8 +6,8 @@ const usersApi = await readFile(new URL('../api/users.js', import.meta.url), 'ut
 
 assert.match(rolesView, /用户管理/)
 assert.match(rolesView, /系统管理员/)
-assert.doesNotMatch(rolesView, /label="角色"/)
-assert.doesNotMatch(rolesView, /name="roles"/)
+assert.match(rolesView, /<el-tab-pane label="角色" name="roles">/)
+assert.match(rolesView, /fetchRoles/)
 assert.doesNotMatch(rolesView, /role_ids/)
 assert.match(usersApi, /setUserSystemAdmin/)
 assert.doesNotMatch(usersApi, /assignUserRoles/)

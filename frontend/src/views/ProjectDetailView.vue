@@ -713,6 +713,7 @@ import { createTask, deleteTask, fetchTaskStatusOperations, fetchTasks, updateTa
 import { createBugFromTestCase, createTestCase, deleteTestCase, executeTestCase, fetchTestCaseExecutions, updateTestCase } from '../api/testCases'
 import { createTestRun, deleteTestRun, updateTestRun } from '../api/testRuns'
 import { fetchUsers } from '../api/users'
+import { fetchRoles } from '../api/roles'
 import { fetchAssigneeRuleConfigs } from '../api/assigneeRuleConfigs'
 import { fetchWorkflowTransitionsBatch } from '../api/workflowRuntime'
 import { workflowActionColumnWidth } from '../utils/workflowActionColumn'
@@ -748,6 +749,7 @@ const project = ref({})
 const projects = ref([])
 const programs = ref([])
 const users = ref([])
+const roleCatalog = ref([])
 const assigneeRuleConfigs = ref([])
 const iterations = ref([])
 const requirements = ref([])
@@ -881,16 +883,19 @@ const testRunStatusOptions = [
   { label: '执行中', value: 'running' },
   { label: '完成', value: 'finished' }
 ]
-const projectMemberRoleOptions = [
-  { label: '产品经理', value: 'product_owner' },
-  { label: '部门负责人', value: 'department_head' },
-  { label: '开发主管', value: 'development_lead' },
-  { label: '技术主管（兼容旧配置）', value: 'tech_lead' },
-  { label: '开发', value: 'developer' },
-  { label: '测试主管', value: 'test_lead' },
-  { label: '测试', value: 'tester' },
-  { label: '观察者', value: 'viewer' }
-]
+const projectMemberRoleOptions = computed(() => {
+  const enabledRoles = roleCatalog.value
+    .filter((role) => role.enabled && role.role_key !== 'system_admin')
+    .map((role) => ({ label: role.role_name, value: role.role_key }))
+  const enabledKeys = new Set(enabledRoles.map((role) => role.value))
+  const historicalRoles = [...new Set(projectMembers.value.map((member) => member.project_role).filter(Boolean))]
+    .filter((roleKey) => !enabledKeys.has(roleKey))
+    .map((roleKey) => {
+      const role = roleCatalog.value.find((item) => item.role_key === roleKey)
+      return { label: role ? `${role.role_name}（已停用）` : `${roleKey}（历史角色）`, value: roleKey, disabled: true }
+    })
+  return [...enabledRoles, ...historicalRoles]
+})
 
 const projectIterations = computed(() => deliveryIterations(projectIterationRows.value))
 const projectRequirements = computed(() => projectRequirementRows.value)
@@ -1421,6 +1426,7 @@ async function loadData() {
       projectsRes,
       programRes,
       userRes,
+      roleRes,
       assigneeRuleRes,
       iterationRefRes,
       requirementRefRes,
@@ -1439,6 +1445,7 @@ async function loadData() {
       fetchProjects(),
       fetchPrograms(),
       fetchUsers(),
+      fetchRoles(),
       fetchAssigneeRuleConfigs(),
       fetchIterations(),
       fetchRequirements(),
@@ -1456,7 +1463,7 @@ async function loadData() {
     project.value = projectRes.data
     resetProjectSettings()
     projects.value = projectsRes.data
-    programs.value = programRes.data; users.value = userRes.data; assigneeRuleConfigs.value = assigneeRuleRes.data
+    programs.value = programRes.data; users.value = userRes.data; roleCatalog.value = roleRes.data; assigneeRuleConfigs.value = assigneeRuleRes.data
     iterations.value = iterationRefRes.data; requirements.value = requirementRefRes.data; tasks.value = taskRefRes.data
     projectMembers.value = memberRes.data
     applyProjectPage('iterations', iterationRes, projectIterationRows)

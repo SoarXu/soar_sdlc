@@ -78,6 +78,7 @@ import { ElMessage } from 'element-plus'
 import { createBusinessComponentFromProject, fetchBusinessComponents, saveBusinessComponentMembers, updateBusinessComponent } from '../api/businessComponents'
 import { fetchProject, fetchProjectMembers, fetchProjects } from '../api/projects'
 import { fetchUsers } from '../api/users'
+import { fetchRoles } from '../api/roles'
 import { fetchAssigneeRuleConfigs } from '../api/assigneeRuleConfigs'
 import { actionErrorMessage } from '../utils/permissions'
 
@@ -97,6 +98,7 @@ const components = ref([])
 const users = ref([])
 const projectMembers = ref([])
 const workflowSchemes = ref([])
+const roleCatalog = ref([])
 const form = reactive({ source_project_id: null, name: '', description: '' })
 const editForm = reactive({ id: null, name: '', description: '', workflow_scheme_id: null, enabled: true, members: [] })
 const projectClosed = computed(() => project.value.state_category === 'terminal')
@@ -157,25 +159,25 @@ function backendRoleLabel(roleKey) {
 }
 
 function projectRoleOptions(userId = null) {
-  const roles = projectMembers.value
+  const projectRoles = projectMembers.value
     .filter((member) => !userId || member.user_id === userId)
     .map((member) => member.project_role)
-  return [...new Set(roles)].map((role) => ({ value: role, label: projectRoleLabel(role) }))
-}
-
-function projectRoleLabel(role) {
-  return ({ project_owner: '项目负责人', product_manager: '产品经理', development_lead: '开发主管', developer: '开发', tester: '测试', viewer: '访客' })[role] || role
+  return [...new Set(projectRoles)].map((roleKey) => {
+    const role = roleCatalog.value.find((item) => item.role_key === roleKey)
+    return { value: roleKey, label: role?.role_name || `${roleKey}（历史角色）` }
+  }).filter((role) => role.value !== 'system_admin')
 }
 
 async function loadData() {
   loading.value = true
   try {
-    const [projectRes, projectsRes, componentsRes, usersRes, membersRes, schemesRes] = await Promise.all([
+    const [projectRes, projectsRes, componentsRes, usersRes, membersRes, rolesRes, schemesRes] = await Promise.all([
       fetchProject(projectId.value),
       fetchProjects(),
       fetchBusinessComponents(projectId.value),
       fetchUsers(),
       fetchProjectMembers(projectId.value),
+      fetchRoles(),
       fetchAssigneeRuleConfigs()
     ])
     project.value = projectRes.data
@@ -183,6 +185,7 @@ async function loadData() {
     components.value = componentsRes.data
     users.value = usersRes.data
     projectMembers.value = membersRes.data
+    roleCatalog.value = rolesRes.data.filter((role) => role.role_key !== 'system_admin')
     workflowSchemes.value = schemesRes.data
   } finally {
     loading.value = false

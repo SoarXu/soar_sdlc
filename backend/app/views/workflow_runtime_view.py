@@ -16,6 +16,7 @@ class WorkflowBulkAssignmentMetadata(BaseModel):
 
 class WorkflowTransitionActionRead(BaseModel):
     transition_id: int
+    action_key: str
     action_name: str
     from_state_id: int
     to_state_id: int

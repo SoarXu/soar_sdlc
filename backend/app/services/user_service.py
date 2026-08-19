@@ -5,7 +5,6 @@ from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 
 from app.core.security import get_password_hash, verify_password
-from app.models.role import Role, UserRole
 from app.models.user import User
 from app.views.auth_view import RegisterRequest
 from app.views.user_view import UserCreate

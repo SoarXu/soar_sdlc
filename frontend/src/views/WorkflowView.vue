@@ -260,6 +260,7 @@ import {
 import { fetchPrograms } from '../api/programs'
 import { fetchProjects, updateProject } from '../api/projects'
 import { fetchUsers } from '../api/users'
+import { fetchRoles } from '../api/roles'
 import { fetchBusinessComponents } from '../api/businessComponents'
 import WorkflowDesigner from '../components/WorkflowDesigner.vue'
 import { showActionError } from '../utils/actionFeedback'
@@ -280,6 +281,7 @@ const projects = ref([])
 const componentLinksByConfig = ref({})
 const programs = ref([])
 const users = ref([])
+const roleCatalog = ref([])
 const editingId = ref(null)
 const viewMode = ref('list')
 const selectedProjectIds = ref([])
@@ -292,33 +294,12 @@ const currentUser = computed(() => currentUserFromStorage(users.value))
 const canEditWorkflow = computed(() => canConfigureWorkflow(currentUser.value))
 const currentConfig = computed(() => configs.value.find((item) => item.id === editingId.value) || null)
 const templateSourceGroups = computed(() => groupWorkflowTemplateSources(templateSources.value))
-const workflowExecutionRoleOptions = [
-  { label: '系统管理员', value: 'system_admin' },
-  { label: '项目负责人', value: 'project_owner' },
-  { label: '项目成员', value: 'project_member' },
-  { label: '当前处理人', value: 'current_handler' },
-  { label: '当前负责人', value: 'owner' },
-  { label: '创建人', value: 'creator' },
-  { label: '需求提出人', value: 'proposer' },
-  { label: '缺陷报告人', value: 'reporter' },
-  { label: '产品/需求负责人', value: 'product_owner' },
-  { label: '产品经理', value: 'product_manager' },
-  { label: '部门负责人', value: 'department_head' },
-  { label: '技术主管（兼容旧配置）', value: 'tech_lead' },
-  { label: '开发主管', value: 'development_lead' },
-  { label: '开发', value: 'developer' },
-  { label: '测试主管', value: 'test_lead' },
-  { label: '测试', value: 'tester' },
-  { label: '访客', value: 'viewer' }
-]
+const workflowExecutionRoleOptions = computed(() => roleCatalog.value
+  .filter((role) => role.enabled)
+  .map((role) => ({ label: role.role_name, value: role.id })))
 const form = reactive({
   name: '',
   description: '',
-  requirement_owner_roles: '',
-  task_owner_roles: '',
-  test_case_tester_roles: '',
-  test_run_owner_roles: '',
-  bug_owner_roles: '',
   lifecycle_status: 'draft',
   creation_mode: 'blank',
   template_source_value: ''
@@ -338,11 +319,6 @@ function resetForm() {
   Object.assign(form, {
     name: '',
     description: '',
-    requirement_owner_roles: '',
-    task_owner_roles: '',
-    test_case_tester_roles: '',
-    test_run_owner_roles: '',
-    bug_owner_roles: '',
     lifecycle_status: 'draft',
     creation_mode: 'blank',
     template_source_value: ''
@@ -363,11 +339,6 @@ function openDetail(row) {
   Object.assign(form, {
     name: row.name,
     description: row.description || '',
-    requirement_owner_roles: '',
-    task_owner_roles: '',
-    test_case_tester_roles: '',
-    test_run_owner_roles: '',
-    bug_owner_roles: '',
     lifecycle_status: row.lifecycle_status,
     creation_mode: 'blank',
     template_source_value: ''
@@ -386,12 +357,13 @@ async function backToList() {
 async function loadData() {
   loading.value = true
   try {
-    const [configRes, templateSourceRes, projectRes, programRes, userRes] = await Promise.all([
+    const [configRes, templateSourceRes, projectRes, programRes, userRes, roleRes] = await Promise.all([
       fetchAssigneeRuleConfigs(),
       fetchAssigneeRuleConfigTemplateSources(),
       fetchProjects(),
       fetchPrograms(),
-      fetchUsers()
+      fetchUsers(),
+      fetchRoles()
     ])
     configs.value = configRes.data
     templateSources.value = templateSourceRes.data
@@ -417,6 +389,7 @@ async function loadData() {
     }, {})
     programs.value = programRes.data
     users.value = userRes.data
+    roleCatalog.value = roleRes.data
     pruneTransferTargets()
   } finally {
     loading.value = false

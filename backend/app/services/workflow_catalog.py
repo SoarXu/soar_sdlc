@@ -272,7 +272,7 @@ DEFAULT_WORKFLOW_COMPONENTS = [
         "description": "限制只有特定角色可以执行后续动作。",
         "object_type": None,
         "handler_key": "role_matches",
-        "config_schema": [{"field": "role_key", "label": "角色标识", "type": "text"}],
+        "config_schema": [{"field": "role_name", "label": "角色名称", "type": "text"}],
         "enabled": True,
         "is_system": True,
         "sort_order": 140,

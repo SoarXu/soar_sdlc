@@ -37,7 +37,6 @@
           <template #header>角色字典</template>
           <el-table v-loading="loading" :data="roles" stripe>
             <el-table-column prop="role_name" label="角色名称" min-width="160" />
-            <el-table-column prop="role_key" label="角色标识" min-width="160" />
             <el-table-column prop="description" label="描述" min-width="220" show-overflow-tooltip />
             <el-table-column label="系统角色" width="100"><template #default="{ row }">{{ row.is_system ? '是' : '否' }}</template></el-table-column>
             <el-table-column label="状态" width="100"><template #default="{ row }">{{ row.enabled ? '启用' : '停用' }}</template></el-table-column>
@@ -55,7 +54,6 @@
     <el-dialog v-model="roleDialogVisible" :title="editingRoleId ? '编辑角色' : '新增角色'" width="520px">
       <el-form label-position="top">
         <el-form-item label="角色名称" required><el-input v-model="roleForm.role_name" /></el-form-item>
-        <el-form-item label="角色标识" required><el-input v-model="roleForm.role_key" :disabled="Boolean(editingRoleId)" /></el-form-item>
         <el-form-item label="描述"><el-input v-model="roleForm.description" type="textarea" :rows="3" /></el-form-item>
         <el-form-item label="启用"><el-switch v-model="roleForm.enabled" /></el-form-item>
       </el-form>
@@ -104,7 +102,7 @@ const userDialogVisible = ref(false)
 const passwordDialogVisible = ref(false)
 const editingRoleId = ref(null)
 const oneTimePassword = ref('')
-const roleForm = reactive({ role_key: '', role_name: '', description: '', enabled: true })
+const roleForm = reactive({ role_name: '', description: '', enabled: true })
 const userForm = reactive({ username: '', full_name: '', email: '', mobile: '', department: '', is_system_admin: false })
 const currentUserId = computed(() => Number(localStorage.getItem('current_user_id') || 0))
 const currentUser = computed(() => users.value.find((user) => user.id === currentUserId.value))
@@ -112,11 +110,11 @@ const isSystemAdmin = computed(() => Boolean(currentUser.value?.is_system_admin)
 
 function backToAdmin() { router.push('/admin') }
 function openCreateUser() { Object.assign(userForm, { username: '', full_name: '', email: '', mobile: '', department: '', is_system_admin: false }); userDialogVisible.value = true }
-function openCreateRole() { editingRoleId.value = null; Object.assign(roleForm, { role_key: '', role_name: '', description: '', enabled: true }); roleDialogVisible.value = true }
-function openEditRole(row) { editingRoleId.value = row.id; Object.assign(roleForm, { role_key: row.role_key, role_name: row.role_name, description: row.description || '', enabled: row.enabled }); roleDialogVisible.value = true }
+function openCreateRole() { editingRoleId.value = null; Object.assign(roleForm, { role_name: '', description: '', enabled: true }); roleDialogVisible.value = true }
+function openEditRole(row) { editingRoleId.value = row.id; Object.assign(roleForm, { role_name: row.role_name, description: row.description || '', enabled: row.enabled }); roleDialogVisible.value = true }
 
 async function submitRole() {
-  if (!roleForm.role_key.trim() || !roleForm.role_name.trim()) return ElMessage.warning('请填写角色名称和标识')
+  if (!roleForm.role_name.trim()) return ElMessage.warning('请填写角色名称')
   saving.value = true
   try {
     if (editingRoleId.value) await updateRole(editingRoleId.value, { ...roleForm })

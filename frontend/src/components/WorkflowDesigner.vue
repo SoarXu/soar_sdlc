@@ -183,6 +183,7 @@
       :transitions="transitions"
       :states="states"
       :role-options="roleOptions"
+      :identity-options="identityOptions"
       :target-types="targetTypes"
       @apply="applyAdvancedDraft"
       @select-transition="selectTransition"
@@ -275,7 +276,6 @@ const targetTypes = [
   { label: '手动指定', value: 'explicit_owner' },
   { label: '创建人', value: 'creator' },
   { label: '上一处理人', value: 'previous_handler' },
-  { label: '项目负责人', value: 'project_owner' },
   { label: '需求负责人', value: 'requirement_owner' },
   { label: '来源负责人', value: 'source_owner' },
   { label: '任务确认人', value: 'task_confirmation' },
@@ -289,6 +289,15 @@ const targetTypes = [
   { label: '缺陷报告人', value: 'reporter' },
   { label: '上次修复人', value: 'last_resolver' },
   { label: '无处理人', value: 'none' }
+]
+const identityOptions = [
+  { label: '系统管理员', value: 'system_admin' },
+  { label: '项目成员', value: 'project_member' },
+  { label: '当前处理人', value: 'current_handler' },
+  { label: '当前负责人', value: 'owner' },
+  { label: '创建人', value: 'creator' },
+  { label: '需求提出人', value: 'proposer' },
+  { label: '缺陷报告人', value: 'reporter' }
 ]
 const minimumCanvas = { width: 2400, height: 1400 }
 const viewportSize = { width: 980, height: 540 }
@@ -641,11 +650,12 @@ function addTransition(group = 'more') {
     to_state_id: to.id,
     _client_id: `new-transition-${Date.now()}-${transitions.value.length + 1}`,
     allowed_roles: '',
+    allowed_role_ids: [],
+    handler_target_role_ids: [],
+    handler_fallback_role_ids: [],
     handler_rule: {
       target_type: 'keep_current',
-      target_roles: '',
-      fallback_type: 'keep_current',
-      fallback_roles: ''
+      fallback_type: 'keep_current'
     },
     enabled: true,
     sort_order: nextGroupSortOrder(transitions.value, from.id, group),
@@ -821,8 +831,8 @@ function roleSummary(roles) {
 
 function handlerSummary(transition) {
   const rule = transition.handler_rule || {}
-  const target = handlerTypeSummary(rule.target_type, transition.handler_target_roles)
-  const fallback = handlerTypeSummary(rule.fallback_type, transition.handler_fallback_roles)
+  const target = handlerTypeSummary(rule.target_type, transition.handler_target_role_ids)
+  const fallback = handlerTypeSummary(rule.fallback_type, transition.handler_fallback_role_ids)
   return `${target}；兜底 ${fallback}`
 }
 

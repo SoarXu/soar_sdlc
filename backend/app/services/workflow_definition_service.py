@@ -10,9 +10,10 @@ from app.models.assignee_rule_config import AssigneeRuleConfig
 from app.models.bug import Bug
 from app.models.requirement import Requirement
 from app.models.role import Role
+from app.models.role import RoleCapability
 from app.models.status_operation import StatusOperationLog
 from app.models.task import Task
-from app.models.workflow_definition import WorkflowDefinition, WorkflowState, WorkflowTransition
+from app.models.workflow_definition import WorkflowDefinition, WorkflowState, WorkflowTransition, WorkflowTransitionRole
 from app.services.default_workflow_template_service import ensure_default_workflow_templates, graph_for_object_type
 from app.views.workflow_definition_view import (
     WorkflowDefinitionCreate,
@@ -28,10 +29,12 @@ SCOPE_TYPES = {"system", "project", "assignee_rule_config"}
 STATE_CATEGORIES = {"start", "normal", "terminal"}
 TERMINAL_KINDS = {"completed", "terminated"}
 IDENTITY_ROLES = {
-    "system_admin", "project_owner", "project_member", "current_handler", "owner",
-    "creator", "reporter", "proposer", "product_owner", "product_manager",
-    "department_head", "tech_lead", "development_lead", "developer", "test_lead",
-    "tester", "viewer",
+    "system_admin", "project_member", "current_handler", "owner", "creator", "reporter", "proposer",
+}
+TEMPLATE_CAPABILITY_ALIASES = {
+    "product_owner": ("product_owner", "product_manager"),
+    "tech_lead": ("tech_lead", "development_lead"),
+    "test_lead": ("test_lead", "tester"),
 }
 HANDLER_SOURCE_TYPES = {
     "keep_current", "none", "actor", "explicit_owner", "creator", "proposer",
@@ -50,7 +53,7 @@ UI_CONFIG_KEYS = {
     "action_category", "system_action",
 }
 CONDITION_CONFIG_KEYS = {
-    "task_types", "field", "routes", "route_dictionary", "routing_mode", "allow_override_roles",
+    "task_types", "field", "routes", "route_dictionary", "routing_mode", "allow_override_role_ids",
     "target_state_id_by_owner", "target_status_by_owner",
 }
 FORM_CONFIG_KEYS = {"title", "submit_text", "fields", "allow_manual_owner", "allow_unassigned"}
@@ -441,8 +444,14 @@ def _validate_graph(db: Session, definition: WorkflowDefinition, payload: Workfl
             )
         if transition.enabled:
             transition_names.add(name_key)
-        _validate_roles(db, transition.allowed_roles)
-        _validate_handler_rule(db, transition.handler_rule)
+        _validate_roles(transition.allowed_roles)
+        _validate_role_ids(db, transition.allowed_role_ids, "Allowed role")
+        _validate_handler_rule(
+            db,
+            transition.handler_rule,
+            transition.handler_target_role_ids,
+            transition.handler_fallback_role_ids,
+        )
         _validate_condition_config(db, transition.condition_config, state_ids)
         _validate_form_config(transition.form_config)
         _validate_typed_config(transition.validator_config, VALIDATOR_TYPES, "validator")
@@ -461,34 +470,53 @@ def _validate_graph(db: Session, definition: WorkflowDefinition, payload: Workfl
         _validate_automation_config(transition.post_action_config, "post action")
 
 
-def _validate_handler_rule(db: Session, handler_rule: dict | None) -> None:
+def _validate_handler_rule(
+    db: Session,
+    handler_rule: dict | None,
+    target_role_ids: list[int],
+    fallback_role_ids: list[int],
+) -> None:
     if not handler_rule:
         return
     target_type = handler_rule.get("target_type", "keep_current")
     fallback_type = handler_rule.get("fallback_type", "keep_current")
     if target_type not in HANDLER_SOURCE_TYPES or fallback_type not in HANDLER_SOURCE_TYPES:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Unknown handler source type")
-    if target_type == "project_role" and not handler_rule.get("target_roles"):
+    if target_type in {"project_role", "fixed_role"} and not target_role_ids:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Target roles are required")
-    if fallback_type == "project_role" and not handler_rule.get("fallback_roles"):
+    if fallback_type in {"project_role", "fixed_role"} and not fallback_role_ids:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Fallback roles are required")
-    _validate_roles(db, handler_rule.get("target_roles"))
-    _validate_roles(db, handler_rule.get("fallback_roles"))
+    _validate_role_ids(db, target_role_ids, "Target role")
+    _validate_role_ids(db, fallback_role_ids, "Fallback role")
 
 
-def _validate_roles(db: Session, value) -> None:
-    role_keys = set(_csv(value).split(",")) - {""}
-    if not role_keys:
+def _validate_roles(value) -> None:
+    identities = set(_csv(value).split(",")) - {""}
+    if not identities:
         return
-    persisted = {
-        item[0]
-        for item in db.query(Role.role_key).filter(Role.role_key.in_(role_keys), Role.enabled.is_(True)).all()
-    }
-    unknown = role_keys - persisted - IDENTITY_ROLES
+    unknown = identities - IDENTITY_ROLES
     if unknown:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=f"Unknown workflow role(s): {', '.join(sorted(unknown))}",
+        )
+
+
+def _validate_role_ids(db: Session, role_ids: list[int], label: str) -> None:
+    unique_ids = set(role_ids)
+    if len(unique_ids) != len(role_ids) or any(role_id <= 0 for role_id in unique_ids):
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=f"Invalid {label.lower()} IDs")
+    if not unique_ids:
+        return
+    persisted_ids = {
+        role_id
+        for (role_id,) in db.query(Role.id).filter(Role.id.in_(unique_ids), Role.enabled.is_(True)).all()
+    }
+    unknown_ids = unique_ids - persisted_ids
+    if unknown_ids:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Unknown {label.lower()} ID(s): {', '.join(str(item) for item in sorted(unknown_ids))}",
         )
 
 
@@ -513,7 +541,7 @@ def _validate_condition_config(db: Session, config: dict | list | None, state_id
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Owner route references unknown state")
     if config.get("routing_mode") and config["routing_mode"] not in ROUTING_MODES:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Unknown routing mode")
-    _validate_roles(db, config.get("allow_override_roles"))
+    _validate_role_ids(db, config.get("allow_override_role_ids") or [], "Override role")
 
 
 def _validate_form_config(config: dict | None) -> None:
@@ -706,7 +734,7 @@ def _persist_graph(
     for item in payload.transitions:
         from_state_id = state_id_map[item.from_state_id]
         to_state_id = state_id_map[item.to_state_id]
-        data = item.model_dump(exclude={"id", "from_state_id", "to_state_id", "action_key"})
+        data = item.model_dump(exclude={"id", "from_state_id", "to_state_id", "action_key", "allowed_role_ids", "handler_target_role_ids", "handler_fallback_role_ids"})
         data["condition_config"] = _remap_condition_state_ids(data.get("condition_config"), state_id_map)
         if item.id is not None and item.id > 0:
             transition = existing_transitions.get(item.id)
@@ -729,6 +757,20 @@ def _persist_graph(
         transition.to_state_id = to_state_id
         persisted_transitions.append(transition)
     db.flush()
+    for item, transition in zip(payload.transitions, persisted_transitions):
+        submitted_role_fields = {
+            "allowed_role_ids", "handler_target_role_ids", "handler_fallback_role_ids",
+        } & item.model_fields_set
+        if not submitted_role_fields and item.id is not None and item.id > 0:
+            continue
+        role_refs = [
+            ("allowed", item.allowed_role_ids),
+            ("target", item.handler_target_role_ids),
+            ("fallback", item.handler_fallback_role_ids),
+        ]
+        db.query(WorkflowTransitionRole).filter(WorkflowTransitionRole.transition_id == transition.id).delete()
+        for purpose, role_ids in role_refs:
+            db.add_all(WorkflowTransitionRole(transition_id=transition.id, role_id=role_id, purpose=purpose, sort_order=index) for index, role_id in enumerate(role_ids))
 
     omitted_transition_ids = set(existing_transitions) - submitted_transition_ids
     if omitted_transition_ids:
@@ -840,6 +882,7 @@ def _template_graph_payload(db: Session, definition: WorkflowDefinition, templat
                     for key, value in owner_targets.items()
                 }
         data["condition_config"] = condition
+        _resolve_template_role_references(db, data)
         transitions.append(data)
     initial = next((item for item in template.states if item.category == "start"), None)
     return WorkflowTemplateGraphSave(
@@ -847,6 +890,47 @@ def _template_graph_payload(db: Session, definition: WorkflowDefinition, templat
         states=states,
         transitions=transitions,
     )
+
+
+def _resolve_template_role_references(db: Session, data: dict) -> None:
+    identities, role_ids = _template_role_values(db, data.get("allowed_roles"))
+    data["allowed_roles"] = ",".join(identities)
+    data["allowed_role_ids"] = role_ids
+    rule = dict(data.get("handler_rule") or {})
+    for field, target_field in (("target_roles", "handler_target_role_ids"), ("fallback_roles", "handler_fallback_role_ids")):
+        _identities, ids = _template_role_values(db, rule.pop(field, ""))
+        data[target_field] = ids
+    data["handler_rule"] = rule or None
+    condition = data.get("condition_config")
+    if isinstance(condition, dict) and "allow_override_roles" in condition:
+        condition = dict(condition)
+        _identities, ids = _template_role_values(db, condition.pop("allow_override_roles"))
+        condition["allow_override_role_ids"] = ids
+        data["condition_config"] = condition
+
+
+def _template_role_values(db: Session, value) -> tuple[list[str], list[int]]:
+    identities: list[str] = []
+    role_ids: list[int] = []
+    for name in _csv(value).split(","):
+        if not name:
+            continue
+        if name in IDENTITY_ROLES:
+            identities.append(name)
+            continue
+        candidates = TEMPLATE_CAPABILITY_ALIASES.get(name, (name,))
+        role_id = None
+        for capability in candidates:
+            role_id = db.query(RoleCapability.role_id).filter(RoleCapability.capability == capability).scalar()
+            if role_id is not None:
+                break
+        if role_id is None:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"Default workflow role is not configured: {name}",
+            )
+        role_ids.append(int(role_id))
+    return list(dict.fromkeys(identities)), list(dict.fromkeys(role_ids))
 
 
 def _graph_response(db: Session, definition: WorkflowDefinition) -> dict:
@@ -862,6 +946,13 @@ def _graph_response(db: Session, definition: WorkflowDefinition) -> dict:
         .order_by(WorkflowTransition.sort_order.asc(), WorkflowTransition.id.asc())
         .all()
     )
+    role_refs = {}
+    for ref in db.query(WorkflowTransitionRole).filter(WorkflowTransitionRole.transition_id.in_([item.id for item in transitions])).all():
+        role_refs.setdefault((ref.transition_id, ref.purpose), []).append(ref.role_id)
+    for transition in transitions:
+        transition.allowed_role_ids = role_refs.get((transition.id, "allowed"), [])
+        transition.handler_target_role_ids = role_refs.get((transition.id, "target"), [])
+        transition.handler_fallback_role_ids = role_refs.get((transition.id, "fallback"), [])
     return {"definition": definition, "states": states, "transitions": transitions}
 
 

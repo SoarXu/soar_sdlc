@@ -147,10 +147,10 @@
                 v-if="draft.condition_config.routing_mode === 'automatic_with_override'"
                 class="full-width"
                 label="允许覆盖角色"
-                :error="errorFor('condition_config.allow_override_roles')"
+                :error="errorFor('condition_config.allow_override_role_ids')"
               >
                 <el-select
-                  v-model="draft.condition_config.allow_override_roles"
+                  v-model="draft.condition_config.allow_override_role_ids"
                   multiple
                   collapse-tags
                   collapse-tags-tooltip
@@ -204,9 +204,20 @@
               <p>允许执行角色和流转后的处理人来源分别配置。</p>
             </div>
             <div class="form-grid">
-              <el-form-item class="full-width" label="允许执行角色">
+              <el-form-item class="full-width" label="允许执行身份">
                 <el-select
                   v-model="draft.allowed_role_list"
+                  multiple
+                  collapse-tags
+                  collapse-tags-tooltip
+                  :max-collapse-tags="2"
+                >
+                  <el-option v-for="option in identityOptions" :key="option.value" v-bind="option" />
+                </el-select>
+              </el-form-item>
+              <el-form-item class="full-width" label="允许执行角色">
+                <el-select
+                  v-model="draft.allowed_role_ids"
                   multiple
                   collapse-tags
                   collapse-tags-tooltip
@@ -228,10 +239,10 @@
               <el-form-item
                 v-if="draft.handler_rule.target_type === 'project_role'"
                 label="主要目标角色"
-                :error="errorFor('handler_target_roles')"
+                :error="errorFor('handler_target_role_ids')"
               >
                 <el-select
-                  v-model="draft.handler_target_roles"
+                  v-model="draft.handler_target_role_ids"
                   multiple
                   collapse-tags
                   collapse-tags-tooltip
@@ -243,10 +254,10 @@
               <el-form-item
                 v-if="draft.handler_rule.fallback_type === 'project_role'"
                 label="回退目标角色"
-                :error="errorFor('handler_fallback_roles')"
+                :error="errorFor('handler_fallback_role_ids')"
               >
                 <el-select
-                  v-model="draft.handler_fallback_roles"
+                  v-model="draft.handler_fallback_role_ids"
                   multiple
                   collapse-tags
                   collapse-tags-tooltip
@@ -396,6 +407,7 @@ const props = defineProps({
   transitions: { type: Array, default: () => [] },
   states: { type: Array, default: () => [] },
   roleOptions: { type: Array, default: () => [] },
+  identityOptions: { type: Array, default: () => [] },
   targetTypes: { type: Array, default: () => [] }
 })
 

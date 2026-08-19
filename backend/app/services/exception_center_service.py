@@ -18,7 +18,7 @@ from app.models.test_run import TestRun
 from app.models.user import User
 from app.models.project_member import ProjectMember
 from app.models.work_item_iteration_history import WorkItemIterationHistory
-from app.models.workflow_definition import WorkflowTransition
+from app.models.workflow_definition import WorkflowTransition, WorkflowTransitionRole
 from app.services.exception_rule_service import ensure_default_exception_rules
 from app.services.workflow_state_query_service import (
     current_state_name,
@@ -44,7 +44,8 @@ class _ScanContext:
     histories: dict[tuple[str, int], list[WorkItemIterationHistory]]
     transitions: list[WorkflowTransition]
     users: dict[int, User]
-    member_roles: dict[tuple[int, int], set[str]]
+    member_role_ids: dict[tuple[int, int], set[int]]
+    transition_role_ids: dict[int, set[int]]
     global_roles: dict[int, set[str]]
     bug_tester_ids: dict[int, set[int]]
     projects: dict[int, Project]
@@ -102,13 +103,22 @@ def _load_scan_context(
     users = {
         user.id: user for user in db.query(User).filter(User.id.in_(owner_ids)).all()
     } if owner_ids else {}
-    member_roles: dict[tuple[int, int], set[str]] = defaultdict(set)
+    member_role_ids: dict[tuple[int, int], set[int]] = defaultdict(set)
     if project_ids and owner_ids:
         for member in db.query(ProjectMember).filter(
             ProjectMember.project_id.in_(project_ids),
             ProjectMember.user_id.in_(owner_ids),
         ).all():
-            member_roles[(member.project_id, member.user_id)].add(member.project_role)
+            if member.role_id is not None:
+                member_role_ids[(member.project_id, member.user_id)].add(member.role_id)
+    transition_role_ids: dict[int, set[int]] = defaultdict(set)
+    transition_ids = [transition.id for transition in transitions]
+    if transition_ids:
+        for transition_id, role_id in db.query(WorkflowTransitionRole.transition_id, WorkflowTransitionRole.role_id).filter(
+            WorkflowTransitionRole.transition_id.in_(transition_ids),
+            WorkflowTransitionRole.purpose == "allowed",
+        ).all():
+            transition_role_ids[transition_id].add(role_id)
     global_roles: dict[int, set[str]] = defaultdict(set)
     if owner_ids:
         for (user_id,) in db.query(User.id).filter(
@@ -184,7 +194,8 @@ def _load_scan_context(
         histories=dict(histories),
         transitions=transitions,
         users=users,
-        member_roles=dict(member_roles),
+        member_role_ids=dict(member_role_ids),
+        transition_role_ids=dict(transition_role_ids),
         global_roles=dict(global_roles),
         bug_tester_ids=dict(bug_tester_ids),
         projects=projects,
@@ -419,13 +430,13 @@ def _state_requires_owner_from_context(context: _ScanContext, item) -> bool:
 
 def _owner_is_eligible_from_context(context: _ScanContext, object_type: str, item) -> bool:
     owner = context.users.get(item.owner_id)
-    member_roles = context.member_roles.get((item.project_id, item.owner_id), set())
-    if not owner or owner.deleted != 0 or not owner.is_active or not member_roles:
+    member_role_ids = context.member_role_ids.get((item.project_id, item.owner_id), set())
+    if not owner or owner.deleted != 0 or not owner.is_active or not member_role_ids:
         return False
     transitions = _core_transitions(context, item)
     if not transitions:
         return True
-    identities = set(context.global_roles.get(owner.id, set())) | set(member_roles)
+    identities = set(context.global_roles.get(owner.id, set()))
     identities.update({"current_handler", "owner", "project_member"})
     if getattr(item, "creator_id", None) == owner.id:
         identities.add("creator")
@@ -434,13 +445,13 @@ def _owner_is_eligible_from_context(context: _ScanContext, object_type: str, ite
     if getattr(item, "proposer_id", None) == owner.id:
         identities.add("proposer")
     project = context.projects.get(item.project_id)
-    if (project and project.owner_id == owner.id) or "project_owner" in identities:
+    if project and project.owner_id == owner.id:
         identities.add("project_owner")
     if "system_admin" in identities:
         identities.add("project_owner")
     if object_type == "bug":
         if getattr(item, "verified_by", None) == owner.id or owner.id in context.bug_tester_ids.get(item.id, set()):
-            identities.add("tester")
+            identities.add("test_executor")
 
     for transition in transitions:
         ui_config = transition.ui_config or {}
@@ -449,8 +460,11 @@ def _owner_is_eligible_from_context(context: _ScanContext, object_type: str, ite
         scope = ui_config.get("handler_scope")
         if scope not in {None, "allowed_identity", "project_member", "current_handler"}:
             continue
+        allowed_role_ids = context.transition_role_ids.get(transition.id, set())
         allowed_roles = {role.strip() for role in (transition.allowed_roles or "").split(",") if role.strip()}
-        if not allowed_roles or allowed_roles & identities:
+        if not allowed_roles and not allowed_role_ids:
+            return True
+        if allowed_role_ids & member_role_ids or allowed_roles & identities:
             return True
     return False
 

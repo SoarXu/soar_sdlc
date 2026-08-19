@@ -15,17 +15,23 @@ branch_labels = None
 depends_on = None
 
 
+ROLE_ALIASES = {"product_owner": "product_manager", "tech_lead": "development_lead", "test_lead": "tester"}
+
+
 def upgrade() -> None:
-    op.create_table(
-        "workflow_transition_roles",
-        sa.Column("id", sa.BigInteger(), primary_key=True),
-        sa.Column("transition_id", sa.BigInteger(), nullable=False),
-        sa.Column("role_id", sa.BigInteger(), nullable=False),
-        sa.Column("purpose", sa.String(length=32), nullable=False),
-        sa.Column("sort_order", sa.Integer(), nullable=False, server_default="0"),
-    )
-    op.create_index("ix_workflow_transition_roles_transition_id", "workflow_transition_roles", ["transition_id"])
-    op.create_index("ix_workflow_transition_roles_role_id", "workflow_transition_roles", ["role_id"])
+    bind = op.get_bind()
+    inspector = sa.inspect(bind)
+    if "workflow_transition_roles" not in inspector.get_table_names():
+        op.create_table(
+            "workflow_transition_roles",
+            sa.Column("id", sa.BigInteger(), primary_key=True),
+            sa.Column("transition_id", sa.BigInteger(), nullable=False),
+            sa.Column("role_id", sa.BigInteger(), nullable=False),
+            sa.Column("purpose", sa.String(length=32), nullable=False),
+            sa.Column("sort_order", sa.Integer(), nullable=False, server_default="0"),
+        )
+        op.create_index("ix_workflow_transition_roles_transition_id", "workflow_transition_roles", ["transition_id"])
+        op.create_index("ix_workflow_transition_roles_role_id", "workflow_transition_roles", ["role_id"])
     session = Session(bind=op.get_bind())
     try:
         role_ids = dict(session.execute(sa.text("SELECT role_key, id FROM roles")).all())
@@ -39,7 +45,8 @@ def upgrade() -> None:
                 ("fallback", rule.get("fallback_roles")),
             ):
                 for index, role_key in enumerate((values or "").split(",")):
-                    role_id = role_ids.get(role_key.strip())
+                    normalized_role_key = ROLE_ALIASES.get(role_key.strip(), role_key.strip())
+                    role_id = role_ids.get(normalized_role_key)
                     if role_id:
                         references.append({"transition_id": transition_id, "role_id": role_id, "purpose": purpose, "sort_order": index})
         if references:

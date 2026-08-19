@@ -10,7 +10,7 @@ from app.models.requirement import Requirement
 from app.models.task import Task
 from app.models.user import User
 from app.models.workflow_definition import WorkflowTransition
-from app.services.project_permission_service import actor_role_keys
+from app.services.role_capability_service import role_ids_for_capabilities
 from app.services import workflow_runtime_service
 from app.views.workflow_runtime_view import WorkflowTransitionExecuteRequest
 
@@ -258,12 +258,15 @@ def _transition_actor(db: Session, item) -> User | None:
 
 def _development_lead_user_id(db: Session, project_id: int | None = None) -> int | None:
     if project_id:
+        role_ids = role_ids_for_capabilities(db, {"development_lead"})
+        if not role_ids:
+            return None
         row = (
             db.query(User.id)
             .join(ProjectMember, ProjectMember.user_id == User.id)
             .filter(
                 ProjectMember.project_id == project_id,
-                ProjectMember.project_role == "development_lead",
+                ProjectMember.role_id.in_(role_ids),
                 User.deleted == 0,
                 User.is_active.is_(True),
             )
@@ -276,9 +279,16 @@ def _development_lead_user_id(db: Session, project_id: int | None = None) -> int
 
 
 def _is_project_development_lead(db: Session, item, actor: User | None) -> bool:
+    if not actor:
+        return False
+    role_ids = role_ids_for_capabilities(db, {"development_lead"})
     return bool(
-        actor
-        and "development_lead" in actor_role_keys(db, getattr(item, "project_id", None), actor.id)
+        role_ids
+        and db.query(ProjectMember.id).filter(
+            ProjectMember.project_id == getattr(item, "project_id", None),
+            ProjectMember.user_id == actor.id,
+            ProjectMember.role_id.in_(role_ids),
+        ).first()
     )
 
 

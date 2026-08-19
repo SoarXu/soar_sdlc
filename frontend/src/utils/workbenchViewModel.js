@@ -111,7 +111,7 @@ export function buildWorkbenchViewModel(payload = {}) {
       { key: 'exception_center', label: exceptionCenter.label, value: exceptionCenter.total },
       { key: 'following', label: '关注范围', value: trackingTotal }
     ],
-    roleKeys: Array.isArray(payload.role_keys) ? payload.role_keys : [],
+    roleIds: Array.isArray(payload.role_ids) ? payload.role_ids : [],
     viewMode: payload.view_mode || 'mine'
   }
 }

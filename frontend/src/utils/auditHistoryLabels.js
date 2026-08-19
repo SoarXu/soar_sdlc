@@ -22,7 +22,7 @@ const FIELD_OPTION_CONTEXT = {
   result: 'executionResultOptions',
   bug_type: 'bugTypeOptions',
   resolution: 'bugResolutionOptions',
-  project_role: 'projectMemberRoleOptions'
+  role_id: 'projectMemberRoleOptions'
 }
 
 function emptyValue(value) {

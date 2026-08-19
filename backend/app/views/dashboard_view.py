@@ -78,5 +78,5 @@ class WorkbenchResponse(BaseModel):
     owners: list[dict] = Field(default_factory=list)
     review_tasks: list[dict] = Field(default_factory=list)
     work_item_reviews: list[dict] = Field(default_factory=list)
-    role_keys: list[str] = Field(default_factory=list)
+    role_ids: list[int] = Field(default_factory=list)
     view_mode: str = "all"

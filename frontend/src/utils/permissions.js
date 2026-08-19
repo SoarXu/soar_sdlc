@@ -1,7 +1,3 @@
-export const SYSTEM_ADMIN_ROLE_KEYS = new Set(['system_admin'])
-export const PROJECT_OWNER_PROJECT_ROLES = new Set(['project_owner'])
-export const TEST_PROJECT_ROLES = new Set(['tester', 'test_lead', 'qa', 'quality_assurance'])
-
 export function currentUserFromStorage(users = []) {
   const storedId = Number(globalThis.localStorage?.getItem('current_user_id') || 0)
   if (storedId) {
@@ -22,7 +18,7 @@ export function isProjectOwner(project, user, members = []) {
   if (!project || !userId) return false
   const projectId = normalizedId(project.id)
   if (normalizedId(project.owner_id) === userId) return true
-  return hasProjectRole(members, projectId, userId, PROJECT_OWNER_PROJECT_ROLES)
+  return false
 }
 
 export function isProjectMember(members = [], projectOrId, userOrId) {
@@ -63,7 +59,7 @@ export function canManageTestCase(project, user, members = []) {
   return (
     isSystemAdmin(user)
     || isProjectOwner(project, user, members)
-    || hasProjectRole(members, normalizedId(project?.id), normalizedId(user?.id), TEST_PROJECT_ROLES)
+    || isProjectMember(members, project, user)
   )
 }
 
@@ -75,15 +71,6 @@ export function actionErrorMessage(error) {
 export function isDelegateReasonRequiredError(error) {
   const detail = error?.response?.data?.detail
   return error?.apiErrorCode === 'DELEGATE_REASON_REQUIRED' || detail?.code === 'DELEGATE_REASON_REQUIRED'
-}
-
-function hasProjectRole(members = [], projectId, userId, projectRoles) {
-  if (!projectId || !userId) return false
-  return members.some((member) => (
-    normalizedId(member.project_id) === projectId
-    && normalizedId(member.user_id) === userId
-    && projectRoles.has(member.project_role)
-  ))
 }
 
 function normalizedId(value) {

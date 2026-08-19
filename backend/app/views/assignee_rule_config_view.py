@@ -7,11 +7,11 @@ from pydantic import BaseModel, ConfigDict
 class AssigneeRuleConfigBase(BaseModel):
     name: str
     description: str | None = None
-    requirement_owner_roles: str = ""
-    task_owner_roles: str = ""
-    test_case_tester_roles: str = ""
-    test_run_owner_roles: str = ""
-    bug_owner_roles: str = ""
+    requirement_owner_role_ids: list[int] = []
+    task_owner_role_ids: list[int] = []
+    test_case_tester_role_ids: list[int] = []
+    test_run_owner_role_ids: list[int] = []
+    bug_owner_role_ids: list[int] = []
 
 
 class WorkflowTemplateSourceRef(BaseModel):
@@ -37,11 +37,11 @@ class AssigneeRuleConfigUpdate(BaseModel):
 
     name: str | None = None
     description: str | None = None
-    requirement_owner_roles: str | None = None
-    task_owner_roles: str | None = None
-    test_case_tester_roles: str | None = None
-    test_run_owner_roles: str | None = None
-    bug_owner_roles: str | None = None
+    requirement_owner_role_ids: list[int] | None = None
+    task_owner_role_ids: list[int] | None = None
+    test_case_tester_role_ids: list[int] | None = None
+    test_run_owner_role_ids: list[int] | None = None
+    bug_owner_role_ids: list[int] | None = None
 
 
 class AssigneeRuleConfigRead(AssigneeRuleConfigBase):

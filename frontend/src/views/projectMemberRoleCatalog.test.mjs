@@ -5,7 +5,8 @@ const source = await readFile(new URL('./ProjectDetailView.vue', import.meta.url
 
 assert.match(source, /import \{ fetchRoles \} from '\.\.\/api\/roles'/)
 assert.match(source, /fetchRoles\(\)/)
-assert.match(source, /role\.role_key !== 'system_admin'/)
+assert.doesNotMatch(source, /role\.role_key/)
+assert.doesNotMatch(source, /item\.project_role/)
 assert.match(source, /projectMemberRoleOptions/)
 
 console.log('project members use the business role catalog')

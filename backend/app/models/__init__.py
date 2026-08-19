@@ -22,7 +22,7 @@ from app.models.project_member import ProjectMember
 from app.models.program import Program
 from app.models.relation import ObjectRelation
 from app.models.requirement import Requirement
-from app.models.role import Role, UserRole
+from app.models.role import Role, RoleCapability
 from app.models.status_operation import StatusOperationLog
 from app.models.task import Task
 from app.models.test_case import TestCase
@@ -62,6 +62,7 @@ __all__ = [
     "ProjectMember",
     "Requirement",
     "Role",
+    "RoleCapability",
     "StatusOperationLog",
     "Tag",
     "Task",
@@ -70,7 +71,6 @@ __all__ = [
     "TestRun",
     "TestRunCase",
     "User",
-    "UserRole",
     "WorkItemComment",
     "WorkItemIterationHistory",
     "WorkflowComponent",

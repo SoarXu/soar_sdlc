@@ -4,9 +4,10 @@ export const ADVANCED_SECTION_KEYS = ['rules', 'assignment', 'form', 'button', '
 
 const ADVANCED_KEYS = [
   'allowed_role_list',
+  'allowed_role_ids',
   'handler_rule',
-  'handler_target_roles',
-  'handler_fallback_roles',
+  'handler_target_role_ids',
+  'handler_fallback_role_ids',
   'condition_config',
   'condition_routes',
   'form_config',
@@ -68,14 +69,13 @@ export function clearAdvancedSection(source, section) {
     draft.validator_config = null
   } else if (section === 'assignment') {
     draft.allowed_role_list = []
+    draft.allowed_role_ids = []
     draft.handler_rule = {
       target_type: 'keep_current',
-      target_roles: '',
-      fallback_type: 'keep_current',
-      fallback_roles: ''
+      fallback_type: 'keep_current'
     }
-    draft.handler_target_roles = []
-    draft.handler_fallback_roles = []
+    draft.handler_target_role_ids = []
+    draft.handler_fallback_role_ids = []
   } else if (section === 'form') {
     draft.form_config = { fields: [] }
   } else if (section === 'button') {
@@ -148,20 +148,20 @@ export function validateAdvancedConfig(draft, states) {
       add('rules', 'route_status_invalid', `condition_routes.${index}.status`, '目标状态无效')
     }
   })
-  if (condition.routing_mode === 'automatic_with_override' && !(condition.allow_override_roles || []).length) {
+  if (condition.routing_mode === 'automatic_with_override' && !(condition.allow_override_role_ids || []).length) {
     add(
       'rules',
       'override_roles_required',
-      'condition_config.allow_override_roles',
+      'condition_config.allow_override_role_ids',
       '至少选择一个允许覆盖角色'
     )
   }
 
-  if (draft.handler_rule?.target_type === 'project_role' && !(draft.handler_target_roles || []).length) {
-    add('assignment', 'target_roles_required', 'handler_target_roles', '请选择主要目标角色')
+  if (draft.handler_rule?.target_type === 'project_role' && !(draft.handler_target_role_ids || []).length) {
+    add('assignment', 'target_roles_required', 'handler_target_role_ids', '请选择主要目标角色')
   }
-  if (draft.handler_rule?.fallback_type === 'project_role' && !(draft.handler_fallback_roles || []).length) {
-    add('assignment', 'fallback_roles_required', 'handler_fallback_roles', '请选择回退目标角色')
+  if (draft.handler_rule?.fallback_type === 'project_role' && !(draft.handler_fallback_role_ids || []).length) {
+    add('assignment', 'fallback_roles_required', 'handler_fallback_role_ids', '请选择回退目标角色')
   }
 
   for (const [field, config] of [
@@ -194,6 +194,7 @@ function isSectionConfigured(draft, section) {
     const fallbackType = draft.handler_rule?.fallback_type || 'keep_current'
     return Boolean(
       draft.allowed_role_list?.length ||
+      draft.allowed_role_ids?.length ||
       targetType !== 'keep_current' ||
       fallbackType !== 'keep_current' ||
       draft.handler_rule?.allow_manual_owner

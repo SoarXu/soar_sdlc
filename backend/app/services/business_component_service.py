@@ -93,7 +93,7 @@ def replace_business_component_members(
     if len(user_ids) != len(set(user_ids)):
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Component members must be unique")
     target_member_roles = {
-        (row.user_id, row.project_role)
+        (row.user_id, row.role_id)
         for row in db.query(ProjectMember)
         .filter(ProjectMember.project_id == target_project.id, ProjectMember.user_id.in_(user_ids))
         .all()
@@ -107,9 +107,9 @@ def replace_business_component_members(
         )
 
     unassigned_members = [
-        {"user_id": item.user_id, "role_key": item.component_role}
+        {"user_id": item.user_id, "role_id": item.role_id}
         for item in payload
-        if (item.user_id, item.component_role) not in target_member_roles
+        if (item.user_id, item.role_id) not in target_member_roles
     ]
     if unassigned_members:
         raise HTTPException(
@@ -128,7 +128,7 @@ def replace_business_component_members(
         BusinessComponentMember(
             component_id=component.id,
             user_id=item.user_id,
-            component_role=item.component_role,
+            role_id=item.role_id,
         )
         for item in payload
     )
@@ -186,7 +186,17 @@ def replace_business_component_routes(
     route_keys = {(item.object_type, item.transition_id) for item in payload}
     if len(route_keys) != len(payload):
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Transition routes must be unique")
+    component_role_ids = {
+        role_id
+        for (role_id,) in db.query(BusinessComponentMember.role_id)
+        .filter(BusinessComponentMember.component_id == component.id, BusinessComponentMember.enabled.is_(True))
+        .all()
+        if role_id is not None
+    }
     for item in payload:
+        configured_role_ids = set(item.eligible_role_ids) | set(item.next_owner_role_ids)
+        if any(role_id <= 0 for role_id in configured_role_ids) or not configured_role_ids.issubset(component_role_ids):
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="组件路由角色必须属于已启用组件成员")
         transition = db.query(WorkflowTransition).filter(WorkflowTransition.id == item.transition_id).first()
         definition = (
             db.query(WorkflowDefinition)
@@ -287,12 +297,12 @@ def work_item_component_ids(db: Session, object_type: str, object_id: int) -> tu
     return primary_id, related_ids
 
 
-def active_primary_component_member_roles(db: Session, object_type: str, item, user_id: int) -> set[str] | None:
+def active_primary_component_member_roles(db: Session, object_type: str, item, user_id: int) -> set[int] | None:
     primary_component_id, _ = work_item_component_ids(db, object_type, item.id)
     if primary_component_id is None:
         return None
     return {
-        row.component_role
+        row.role_id
         for row in db.query(BusinessComponentMember)
         .filter(
             BusinessComponentMember.component_id == primary_component_id,
@@ -300,6 +310,7 @@ def active_primary_component_member_roles(db: Session, object_type: str, item, u
             BusinessComponentMember.enabled.is_(True),
         )
         .all()
+        if row.role_id is not None
     }
 
 
@@ -346,8 +357,8 @@ def resolve_component_transition_route(db: Session, object_type: str, item, tran
         .order_by(BusinessComponentMember.id.asc())
         .all()
     )
-    eligible_ids = _member_ids_for_route(members, route.eligible_member_mode, route.eligible_roles, route.eligible_user_ids)
-    next_owner_ids = _member_ids_for_route(members, route.next_owner_mode, route.next_owner_roles, None)
+    eligible_ids = _member_ids_for_route(members, route.eligible_member_mode, route.eligible_role_ids, route.eligible_user_ids)
+    next_owner_ids = _member_ids_for_route(members, route.next_owner_mode, route.next_owner_role_ids, None)
     if route.next_owner_mode == "user":
         next_owner_ids = [route.next_owner_user_id] if route.next_owner_user_id in {member.user_id for member in members} else []
     return {
@@ -361,17 +372,17 @@ def resolve_component_transition_route(db: Session, object_type: str, item, tran
 
 
 def _member_ids_for_route(
-    members: list[BusinessComponentMember], mode: str, roles_value: str | None, users_value: str | None
+    members: list[BusinessComponentMember], mode: str, role_ids: list[int] | None, users_value: str | None
 ) -> list[int]:
     if mode in {"all", "manual"}:
         return sorted({member.user_id for member in members})
     if mode == "users":
         user_ids = _parse_id_csv(users_value)
         return sorted({member.user_id for member in members if member.user_id in user_ids})
-    roles = _split_csv(roles_value)
-    if not roles:
+    selected_role_ids = set(role_ids or [])
+    if not selected_role_ids:
         return sorted({member.user_id for member in members})
-    return sorted({member.user_id for member in members if member.component_role in roles})
+    return sorted({member.user_id for member in members if member.role_id in selected_role_ids})
 
 
 def _split_csv(value: str | None) -> list[str]:
@@ -398,7 +409,7 @@ def default_primary_component_handler_id(db: Session, object_type: str, item) ->
             BusinessComponentMember.component_id == primary_component_id,
             BusinessComponentMember.enabled.is_(True),
         )
-        .order_by(BusinessComponentMember.component_role.asc(), BusinessComponentMember.id.asc())
+        .order_by(BusinessComponentMember.role_id.asc(), BusinessComponentMember.id.asc())
         .first()
     )
     return member.user_id if member else None

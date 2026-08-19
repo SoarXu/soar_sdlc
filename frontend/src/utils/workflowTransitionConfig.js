@@ -15,12 +15,15 @@ function roleArray(value) {
     .filter(Boolean)
 }
 
+function roleIdArray(value) {
+  const source = Array.isArray(value) ? value : []
+  return [...new Set(source.map(Number).filter((item) => Number.isInteger(item) && item > 0))]
+}
+
 export function normalizeWorkflowTransition(item) {
   const handlerRule = item.handler_rule || {
     target_type: 'keep_current',
-    target_roles: '',
-    fallback_type: 'keep_current',
-    fallback_roles: ''
+    fallback_type: 'keep_current'
   }
   return {
     ...item,
@@ -44,13 +47,12 @@ export function normalizeWorkflowTransition(item) {
     handler_rule: {
       ...handlerRule,
       target_type: handlerRule.target_type || 'keep_current',
-      target_roles: roleArray(handlerRule.target_roles).join(','),
-      fallback_type: handlerRule.fallback_type || 'keep_current',
-      fallback_roles: roleArray(handlerRule.fallback_roles).join(',')
+      fallback_type: handlerRule.fallback_type || 'keep_current'
     },
     allowed_role_list: roleArray(item.allowed_roles),
-    handler_target_roles: roleArray(handlerRule.target_roles),
-    handler_fallback_roles: roleArray(handlerRule.fallback_roles)
+    allowed_role_ids: roleIdArray(item.allowed_role_ids),
+    handler_target_role_ids: roleIdArray(item.handler_target_role_ids),
+    handler_fallback_role_ids: roleIdArray(item.handler_fallback_role_ids)
   }
 }
 
@@ -60,8 +62,9 @@ export function serializeWorkflowTransition(item) {
     definition_id,
     _client_id,
     allowed_role_list,
-    handler_target_roles,
-    handler_fallback_roles,
+    allowed_role_ids,
+    handler_target_role_ids,
+    handler_fallback_role_ids,
     condition_routes,
     ...rest
   } = item
@@ -111,10 +114,11 @@ export function serializeWorkflowTransition(item) {
       : null,
     ui_config: uiConfig,
     allowed_roles: allowed_role_list.join(','),
+    allowed_role_ids: roleIdArray(allowed_role_ids),
+    handler_target_role_ids: roleIdArray(handler_target_role_ids),
+    handler_fallback_role_ids: roleIdArray(handler_fallback_role_ids),
     handler_rule: {
-      ...rest.handler_rule,
-      target_roles: handler_target_roles.join(','),
-      fallback_roles: handler_fallback_roles.join(',')
+      ...Object.fromEntries(Object.entries(rest.handler_rule || {}).filter(([key]) => !['target_roles', 'fallback_roles'].includes(key)))
     }
   }
 }

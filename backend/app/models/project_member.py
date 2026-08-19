@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import BigInteger, Boolean, DateTime, Integer, String, text
+from sqlalchemy import BigInteger, Boolean, DateTime, Integer, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.session import Base
@@ -12,8 +12,7 @@ class ProjectMember(Base):
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     project_id: Mapped[int] = mapped_column(BigInteger)
     user_id: Mapped[int] = mapped_column(BigInteger)
-    role_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True, index=True)
-    project_role: Mapped[str] = mapped_column(String(64))
+    role_id: Mapped[int] = mapped_column(BigInteger, nullable=False, index=True)
     is_default_assignee: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("0"))
     is_workbench_participant: Mapped[bool] = mapped_column(Boolean, default=True, server_default=text("1"))
     sort_order: Mapped[int] = mapped_column(Integer, default=0, server_default=text("0"))

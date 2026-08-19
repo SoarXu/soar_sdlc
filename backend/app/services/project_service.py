@@ -404,8 +404,8 @@ def list_project_members(db: Session, project_id: int) -> list[dict]:
     )
     return [{
         "id": member.id, "project_id": member.project_id, "user_id": member.user_id,
-        "role_id": member.role_id, "role_name": role_name or member.project_role,
-        "project_role": member.project_role, "is_default_assignee": member.is_default_assignee,
+        "role_id": member.role_id, "role_name": role_name or f"角色 #{member.role_id}",
+        "is_default_assignee": member.is_default_assignee,
         "is_workbench_participant": member.is_workbench_participant, "sort_order": member.sort_order,
         "join_time": member.join_time, "create_time": member.create_time, "update_time": member.update_time,
     } for member, role_name in rows]
@@ -420,7 +420,6 @@ def replace_project_members(db: Session, project_id: int, payload: list[ProjectM
         role = roles.get(data["role_id"])
         if not role:
             raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="角色不存在或已停用")
-        data["project_role"] = role.role_key
         data["project_id"] = project_id
         if not data.get("sort_order"):
             data["sort_order"] = index

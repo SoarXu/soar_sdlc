@@ -19,6 +19,11 @@ def upgrade() -> None:
         "UPDATE project_members JOIN roles ON roles.role_key = project_members.project_role "
         "SET project_members.role_id = roles.id"
     )
+    op.execute(
+        "UPDATE project_members JOIN roles ON roles.role_key = 'product_manager' "
+        "SET project_members.role_id = roles.id "
+        "WHERE project_members.project_role = 'product_owner' AND project_members.role_id IS NULL"
+    )
     op.create_index("ix_project_members_role_id", "project_members", ["role_id"])
 
 

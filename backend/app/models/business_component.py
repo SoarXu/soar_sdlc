@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import BigInteger, Boolean, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint, text
+from sqlalchemy import BigInteger, Boolean, DateTime, ForeignKey, Integer, JSON, String, Text, UniqueConstraint, text
 from sqlalchemy.dialects.mysql import BIGINT as MySQLBigInteger
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -52,7 +52,7 @@ class BusinessComponentMember(Base):
     user_id: Mapped[int] = mapped_column(
         BigInteger, ForeignKey("users.id", ondelete="RESTRICT"), nullable=False, index=True
     )
-    component_role: Mapped[str] = mapped_column(String(64), nullable=False)
+    role_id: Mapped[int] = mapped_column(BigInteger, nullable=False, index=True)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True, server_default=text("1"), nullable=False)
     effective_from: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     effective_to: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
@@ -81,10 +81,10 @@ class BusinessComponentTransitionRoute(Base):
         index=True,
     )
     eligible_member_mode: Mapped[str] = mapped_column(String(32), default="component_role", nullable=False)
-    eligible_roles: Mapped[str] = mapped_column(String(255), default="", nullable=False)
+    eligible_role_ids: Mapped[list[int]] = mapped_column(JSON, default=list)
     eligible_user_ids: Mapped[str] = mapped_column(String(1000), default="", nullable=False)
     next_owner_mode: Mapped[str] = mapped_column(String(32), default="component_role", nullable=False)
-    next_owner_roles: Mapped[str] = mapped_column(String(255), default="", nullable=False)
+    next_owner_role_ids: Mapped[list[int]] = mapped_column(JSON, default=list)
     next_owner_user_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     fallback_mode: Mapped[str] = mapped_column(String(32), default="pending_assignment", nullable=False)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True, server_default=text("1"), nullable=False)

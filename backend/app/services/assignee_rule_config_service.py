@@ -8,7 +8,9 @@ from sqlalchemy.orm import Session
 
 from app.models.assignee_rule_config import AssigneeRuleConfig
 from app.models.project import Project
-from app.models.workflow_definition import WorkflowDefinition, WorkflowState, WorkflowTransition
+from app.models.role import Role
+from app.models.workflow_definition import WorkflowDefinition, WorkflowState, WorkflowTransition, WorkflowTransitionRole
+from app.services.role_capability_service import role_ids_for_capabilities
 from app.services.default_workflow_template_service import ensure_default_workflow_templates, reconcile_review_subgraph
 from app.views.assignee_rule_config_view import AssigneeRuleConfigCreate, AssigneeRuleConfigUpdate
 
@@ -16,11 +18,11 @@ from app.views.assignee_rule_config_view import AssigneeRuleConfigCreate, Assign
 DEFAULT_ASSIGNEE_RULE_CONFIG = {
     "name": "默认工作流规则",
     "description": "通过工作流和处理人流转规则分派当前处理人",
-    "requirement_owner_roles": "",
-    "task_owner_roles": "",
-    "test_case_tester_roles": "",
-    "test_run_owner_roles": "",
-    "bug_owner_roles": "",
+    "requirement_owner_role_ids": [],
+    "task_owner_role_ids": [],
+    "test_case_tester_role_ids": [],
+    "test_run_owner_role_ids": [],
+    "bug_owner_role_ids": [],
     "lifecycle_status": "enabled",
     "enabled": True,
 }
@@ -176,6 +178,7 @@ def list_template_sources(db: Session) -> list[dict]:
 
 def create_config(db: Session, payload: AssigneeRuleConfigCreate) -> AssigneeRuleConfig:
     data = _clean_payload(payload.model_dump(exclude={"creation_mode", "template_source"}))
+    _validate_role_ids(db, data)
     if "name" in data:
         if not data["name"]:
             raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Name is required")
@@ -242,11 +245,11 @@ def clone_enabled_config(db: Session, source_config_id: int, name: str) -> Assig
     clone = AssigneeRuleConfig(
         name=name,
         description=source.description,
-        requirement_owner_roles=source.requirement_owner_roles,
-        task_owner_roles=source.task_owner_roles,
-        test_case_tester_roles=source.test_case_tester_roles,
-        test_run_owner_roles=source.test_run_owner_roles,
-        bug_owner_roles=source.bug_owner_roles,
+        requirement_owner_role_ids=list(source.requirement_owner_role_ids or []),
+        task_owner_role_ids=list(source.task_owner_role_ids or []),
+        test_case_tester_role_ids=list(source.test_case_tester_role_ids or []),
+        test_run_owner_role_ids=list(source.test_run_owner_role_ids or []),
+        bug_owner_role_ids=list(source.bug_owner_role_ids or []),
         lifecycle_status="enabled",
         enabled=True,
     )
@@ -308,8 +311,13 @@ def _copy_template_source(db: Session, config_id: int, source) -> None:
             **(submit_verification.handler_rule or {}),
             "target_type": "bug_verifier",
             "fallback_type": "project_role",
-            "fallback_roles": "project_owner",
         }
+        _replace_transition_role_purpose(
+            db,
+            submit_verification.id,
+            "fallback",
+            list(role_ids_for_capabilities(db, {"project_owner"})),
+        )
     db.flush()
 
 
@@ -380,6 +388,12 @@ def _clone_graph(db: Session, source: WorkflowDefinition, target: WorkflowDefini
         .order_by(WorkflowTransition.sort_order.asc(), WorkflowTransition.id.asc())
         .all()
     )
+    source_role_refs: dict[int, list[WorkflowTransitionRole]] = {}
+    if source_transitions:
+        for ref in db.query(WorkflowTransitionRole).filter(
+            WorkflowTransitionRole.transition_id.in_([item.id for item in source_transitions])
+        ).all():
+            source_role_refs.setdefault(ref.transition_id, []).append(ref)
     for item in source_transitions:
         from_state_id = state_id_map[item.from_state_id]
         to_state_id = state_id_map[item.to_state_id]
@@ -389,10 +403,8 @@ def _clone_graph(db: Session, source: WorkflowDefinition, target: WorkflowDefini
                 **(handler_rule or {}),
                 "target_type": "bug_verifier",
                 "fallback_type": "project_role",
-                "fallback_roles": "project_owner",
             }
-        db.add(
-            WorkflowTransition(
+        cloned = WorkflowTransition(
                 definition_id=target.id,
                 action_key=item.action_key,
                 action_name=item.action_name,
@@ -410,7 +422,24 @@ def _clone_graph(db: Session, source: WorkflowDefinition, target: WorkflowDefini
                 enabled=item.enabled,
                 sort_order=item.sort_order,
             )
+        db.add(cloned)
+        db.flush()
+        db.add_all(
+            WorkflowTransitionRole(
+                transition_id=cloned.id,
+                role_id=ref.role_id,
+                purpose=ref.purpose,
+                sort_order=ref.sort_order,
+            )
+            for ref in source_role_refs.get(item.id, [])
         )
+        if source.object_type == "bug" and item.action_key == "submit_verification":
+            _replace_transition_role_purpose(
+                db,
+                cloned.id,
+                "fallback",
+                list(role_ids_for_capabilities(db, {"project_owner"})),
+            )
     db.flush()
 
 
@@ -427,9 +456,26 @@ def _remap_state_ids(config, state_id_map: dict[int, int]):
     return remapped
 
 
+def _replace_transition_role_purpose(db: Session, transition_id: int, purpose: str, role_ids: list[int]) -> None:
+    db.query(WorkflowTransitionRole).filter(
+        WorkflowTransitionRole.transition_id == transition_id,
+        WorkflowTransitionRole.purpose == purpose,
+    ).delete()
+    db.add_all(
+        WorkflowTransitionRole(
+            transition_id=transition_id,
+            role_id=role_id,
+            purpose=purpose,
+            sort_order=index,
+        )
+        for index, role_id in enumerate(role_ids)
+    )
+
+
 def update_config(db: Session, config_id: int, payload: AssigneeRuleConfigUpdate) -> AssigneeRuleConfig:
     config = _get_config(db, config_id)
     data = _clean_payload(payload.model_dump(exclude_unset=True))
+    _validate_role_ids(db, data)
     if "name" in data:
         if not data["name"]:
             raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Name is required")
@@ -564,16 +610,37 @@ def _clean_payload(data: dict) -> dict:
     if "name" in cleaned and cleaned["name"] is not None:
         cleaned["name"] = cleaned["name"].strip()
     for field in [
-        "requirement_owner_roles",
-        "task_owner_roles",
-        "test_case_tester_roles",
-        "test_run_owner_roles",
-        "bug_owner_roles",
+        "requirement_owner_role_ids",
+        "task_owner_role_ids",
+        "test_case_tester_role_ids",
+        "test_run_owner_role_ids",
+        "bug_owner_role_ids",
     ]:
         if field in cleaned and cleaned[field] is not None:
-            cleaned[field] = ",".join(_split_roles(cleaned[field]))
+            cleaned[field] = _normalize_role_ids(cleaned[field])
     return cleaned
 
 
-def _split_roles(value: str) -> list[str]:
-    return [item.strip() for item in value.split(",") if item.strip()]
+def _normalize_role_ids(value) -> list[int]:
+    if not isinstance(value, list) or any(isinstance(item, bool) or not isinstance(item, int) or item <= 0 for item in value):
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="角色 ID 必须为正整数数组")
+    if len(set(value)) != len(value):
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="角色 ID 不能重复")
+    return list(value)
+
+
+def _validate_role_ids(db: Session, data: dict) -> None:
+    submitted = {
+        role_id
+        for field, values in data.items()
+        if field.endswith("_role_ids") and values is not None
+        for role_id in values
+    }
+    if not submitted:
+        return
+    persisted = {
+        role_id
+        for (role_id,) in db.query(Role.id).filter(Role.id.in_(submitted), Role.enabled.is_(True)).all()
+    }
+    if submitted - persisted:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="所选角色不存在或已停用")

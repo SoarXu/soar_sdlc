@@ -79,7 +79,6 @@ class ProjectMemberRead(ProjectMemberBase):
     id: int
     project_id: int
     role_name: str
-    project_role: str
     join_time: datetime | None = None
     create_time: datetime | None = None
     update_time: datetime | None = None

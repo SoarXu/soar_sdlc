@@ -16,7 +16,8 @@ from app.models.user import User
 from app.models.work_item_comment import WorkItemComment
 from app.models.workflow_definition import WorkflowState, WorkflowTransition
 from app.services.exception_center_service import list_exception_refs
-from app.services.project_permission_service import global_role_keys
+from app.services.project_permission_service import is_system_admin
+from app.services.role_capability_service import role_ids_for_capabilities
 from app.services.project_team_service import workbench_project_ids_for_user
 from app.services.workflow_state_query_service import (
     current_state_name,
@@ -48,8 +49,8 @@ def get_dashboard_summary(db: Session) -> DashboardSummary:
 
 def get_workbench(db: Session, user_id: int | None = None) -> WorkbenchResponse:
     team_project_ids = workbench_project_ids_for_user(db, user_id) if user_id else set()
-    role_keys = _role_keys_for_user(db, user_id, team_project_ids)
-    view_mode = _workbench_view_mode(role_keys)
+    role_ids = _role_ids_for_user(db, user_id, team_project_ids)
+    view_mode = _workbench_view_mode(db, user_id, role_ids)
     scoped_project_ids = team_project_ids
     projects = {item.id: item for item in db.query(Project).filter(Project.deleted == 0).all()}
     iteration_names = {item.id: item.name for item in db.query(Iteration).filter(Iteration.deleted == 0).all()}
@@ -121,7 +122,7 @@ def get_workbench(db: Session, user_id: int | None = None) -> WorkbenchResponse:
         owners=owners,
         review_tasks=review_tasks,
         work_item_reviews=work_item_reviews,
-        role_keys=role_keys,
+        role_ids=role_ids,
         view_mode=view_mode,
     )
 
@@ -763,25 +764,24 @@ def _dedup_and_sort_workbench_items(items: list[WorkbenchItem]) -> list[Workbenc
     return _sort_workbench_items(list(deduped.values()))
 
 
-def _role_keys_for_user(db: Session, user_id: int | None, project_ids: set[int]) -> list[str]:
+def _role_ids_for_user(db: Session, user_id: int | None, project_ids: set[int]) -> list[int]:
     if not user_id:
         return []
-    role_keys = global_role_keys(db, user_id)
-    if project_ids:
-        role_keys.update(
-            role_key
-            for (role_key,) in db.query(ProjectMember.project_role)
-            .filter(ProjectMember.user_id == user_id, ProjectMember.project_id.in_(project_ids))
-            .all()
-        )
-    return sorted(role_keys)
+    if not project_ids:
+        return []
+    return sorted({
+        role_id
+        for (role_id,) in db.query(ProjectMember.role_id)
+        .filter(ProjectMember.user_id == user_id, ProjectMember.project_id.in_(project_ids), ProjectMember.role_id.isnot(None))
+        .all()
+    })
 
 
-def _workbench_view_mode(role_keys: list[str]) -> str:
-    role_set = set(role_keys)
-    if "system_admin" in role_set:
+def _workbench_view_mode(db: Session, user_id: int | None, role_ids: list[int]) -> str:
+    if is_system_admin(db, user_id):
         return "all"
-    if role_set & {"project_owner", "product_manager", "development_lead"}:
+    lead_role_ids = role_ids_for_capabilities(db, {"project_owner", "product_manager", "development_lead"})
+    if set(role_ids) & lead_role_ids:
         return "lead"
     return "mine"
 def _filter_review_tasks_for_role(review_tasks: list[dict], user_id: int | None, view_mode: str) -> list[dict]:

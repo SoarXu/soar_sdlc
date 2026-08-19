@@ -8,7 +8,6 @@ from sqlalchemy import text
 from app.core.security import create_access_token
 from app.db.session import SessionLocal
 from app.main import app
-from app.models.role import Role, UserRole
 from app.models.user import User
 
 
@@ -351,18 +350,8 @@ def _test_admin_token() -> str:
         )
         if not user:
             raise RuntimeError(f"Missing active test administrator: {TEST_ADMIN_USERNAME}")
-        has_system_admin_role = (
-            db.query(UserRole)
-            .join(Role, Role.id == UserRole.role_id)
-            .filter(
-                UserRole.user_id == user.id,
-                Role.role_key == "system_admin",
-                Role.enabled.is_(True),
-            )
-            .first()
-        )
-        if not has_system_admin_role:
-            raise RuntimeError(f"Test administrator lacks system_admin role: {TEST_ADMIN_USERNAME}")
+        if not user.is_system_admin:
+            raise RuntimeError(f"Test administrator is not a system administrator: {TEST_ADMIN_USERNAME}")
         return create_access_token(user.username)
     finally:
         db.close()

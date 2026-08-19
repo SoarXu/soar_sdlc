@@ -13,23 +13,23 @@ class BusinessComponentMemberRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     user_id: int
-    component_role: str
+    role_id: int
     enabled: bool
 
 
 class BusinessComponentMemberWrite(BaseModel):
     user_id: int
-    component_role: str = Field(min_length=1, max_length=64)
+    role_id: int
 
 
 class BusinessComponentTransitionRouteWrite(BaseModel):
     object_type: str = Field(pattern="^(requirement|task|bug)$")
     transition_id: int
     eligible_member_mode: str = Field(default="component_role", pattern="^(all|component_role|users)$")
-    eligible_roles: str = ""
+    eligible_role_ids: list[int] = []
     eligible_user_ids: str = ""
     next_owner_mode: str = Field(default="component_role", pattern="^(keep_current|component_role|user|manual|pending_assignment)$")
-    next_owner_roles: str = ""
+    next_owner_role_ids: list[int] = []
     next_owner_user_id: int | None = None
     fallback_mode: str = Field(default="project_rule", pattern="^(project_rule|keep_current|pending_assignment)$")
     enabled: bool = True

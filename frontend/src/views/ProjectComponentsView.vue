@@ -54,7 +54,7 @@
               <el-select v-model="member.user_id" filterable placeholder="选择成员">
                 <el-option v-for="user in projectUsers" :key="user.id" :label="user.full_name || user.username" :value="user.id" />
               </el-select>
-              <el-select v-model="member.component_role" filterable placeholder="选择项目角色">
+              <el-select v-model="member.role_id" filterable placeholder="选择项目角色">
                 <el-option v-for="role in projectRoleOptions(member.user_id)" :key="role.value" :label="role.label" :value="role.value" />
               </el-select>
               <el-button link type="danger" @click="removeEditMember(index)">删除</el-button>
@@ -133,13 +133,13 @@ function openEditDialog(component) {
     description: component.description || '',
     workflow_scheme_id: component.workflow_scheme_id || null,
     enabled: component.enabled,
-    members: (component.members || []).map((member) => ({ user_id: member.user_id, component_role: member.component_role }))
+    members: (component.members || []).map((member) => ({ user_id: member.user_id, role_id: member.role_id }))
   })
   editDialogVisible.value = true
 }
 
 function addEditMember() {
-  editForm.members.push({ user_id: null, component_role: null })
+  editForm.members.push({ user_id: null, role_id: null })
 }
 
 function removeEditMember(index) {
@@ -150,22 +150,23 @@ function memberLabel(members) {
   if (!members?.length) return '-'
   return members.map((member) => {
     const user = users.value.find((item) => item.id === member.user_id)
-    return `${user?.full_name || user?.username || member.user_id} (${backendRoleLabel(member.component_role)})`
+    return `${user?.full_name || user?.username || member.user_id} (${backendRoleLabel(member.role_id)})`
   }).join('、')
 }
 
-function backendRoleLabel(roleKey) {
-  return projectRoleOptions().find((role) => role.value === roleKey)?.label || roleKey
+function backendRoleLabel(roleId) {
+  return projectRoleOptions().find((role) => role.value === roleId)?.label || `角色 #${roleId}`
 }
 
 function projectRoleOptions(userId = null) {
   const projectRoles = projectMembers.value
     .filter((member) => !userId || member.user_id === userId)
-    .map((member) => member.project_role)
-  return [...new Set(projectRoles)].map((roleKey) => {
-    const role = roleCatalog.value.find((item) => item.role_key === roleKey)
-    return { value: roleKey, label: role?.role_name || `${roleKey}（历史角色）` }
-  }).filter((role) => role.value !== 'system_admin')
+    .map((member) => member.role_id)
+    .filter(Boolean)
+  return [...new Set(projectRoles)].map((roleId) => {
+    const role = roleCatalog.value.find((item) => item.id === roleId)
+    return { value: roleId, label: role?.role_name || `角色 #${roleId}（历史角色）` }
+  })
 }
 
 async function loadData() {
@@ -185,7 +186,7 @@ async function loadData() {
     components.value = componentsRes.data
     users.value = usersRes.data
     projectMembers.value = membersRes.data
-    roleCatalog.value = rolesRes.data.filter((role) => role.role_key !== 'system_admin')
+    roleCatalog.value = rolesRes.data
     workflowSchemes.value = schemesRes.data
   } finally {
     loading.value = false
@@ -194,9 +195,9 @@ async function loadData() {
 
 async function saveComponent() {
   if (!editForm.name.trim()) return ElMessage.warning('请填写组件名称')
-  if (editForm.members.some((member) => !member.user_id || !member.component_role)) return ElMessage.warning('请选择组件成员和后台角色')
+  if (editForm.members.some((member) => !member.user_id || !member.role_id)) return ElMessage.warning('请选择组件成员和项目角色')
   if (new Set(editForm.members.map((member) => member.user_id)).size !== editForm.members.length) return ElMessage.warning('组件成员不可重复')
-  if (editForm.members.some((member) => !projectRoleOptions(member.user_id).some((role) => role.value === member.component_role))) return ElMessage.warning('请选择该成员在当前项目中的角色')
+  if (editForm.members.some((member) => !projectRoleOptions(member.user_id).some((role) => role.value === member.role_id))) return ElMessage.warning('请选择该成员在当前项目中的角色')
   saving.value = true
   try {
     await updateBusinessComponent(projectId.value, editForm.id, {

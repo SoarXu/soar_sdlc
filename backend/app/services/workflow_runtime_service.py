@@ -32,7 +32,6 @@ from app.models.workflow_definition import WorkflowDefinition, WorkflowState, Wo
 from app.services.default_workflow_template_service import ensure_default_workflow_templates
 from app.services.bug_type_service import bug_type_options, get_enabled_bug_type
 from app.services.project_permission_service import (
-    actor_role_keys,
     can_admin_action,
     can_govern_project,
     can_manage_iteration,
@@ -43,6 +42,7 @@ from app.services.project_permission_service import (
     is_system_admin,
 )
 from app.services.iteration_assignment_service import fallback_iteration_for_project
+from app.services.role_capability_service import role_ids_for_capabilities
 from app.services.status_operation_service import create_status_operation
 from app.services.iteration_completion_snapshot_service import create_completion_snapshot
 from app.services.iteration_service import (
@@ -874,19 +874,22 @@ def _bulk_assignment_metadata(
     }
 
 
-def _manual_owner_roles(rule: dict[str, Any]) -> list[str]:
-    roles = _split_csv(rule.get("manual_owner_roles"))
-    if roles:
-        return roles
-    if rule.get("target_type") in {"project_role", "fixed_role"}:
-        return _split_csv(rule.get("target_roles"))
-    return []
+def _transition_role_ids(db: Session, transition_id: int | None, purpose: str) -> list[int]:
+    if not transition_id:
+        return []
+    return [
+        role_id
+        for (role_id,) in db.query(WorkflowTransitionRole.role_id)
+        .filter(WorkflowTransitionRole.transition_id == transition_id, WorkflowTransitionRole.purpose == purpose)
+        .order_by(WorkflowTransitionRole.sort_order.asc(), WorkflowTransitionRole.id.asc())
+        .all()
+    ]
 
 
 def _eligible_manual_assignee_ids(db: Session, project_id: int | None, rule: dict[str, Any]) -> list[int]:
     if not project_id:
         return []
-    roles = _manual_owner_roles(rule)
+    role_ids = _transition_role_ids(db, rule.get("_transition_id"), "target")
     query = (
         db.query(ProjectMember.user_id)
         .join(User, User.id == ProjectMember.user_id)
@@ -896,8 +899,8 @@ def _eligible_manual_assignee_ids(db: Session, project_id: int | None, rule: dic
             User.is_active.is_(True),
         )
     )
-    if roles and "project_member" not in roles:
-        query = query.filter(ProjectMember.project_role.in_(roles))
+    if role_ids:
+        query = query.filter(ProjectMember.role_id.in_(role_ids))
     return sorted({row.user_id for row in query.all()})
 
 
@@ -915,10 +918,10 @@ def _eligible_transition_assignee_ids(
         return component_route["eligible_manual_owner_ids"]
     component_members = active_primary_component_members(db, _object_type_for_item(item), item)
     if component_members is not None:
-        roles = _manual_owner_roles(rule)
-        if not roles or "project_member" in roles:
+        role_ids = _transition_role_ids(db, transition.id, "target")
+        if not role_ids:
             return sorted({member.user_id for member in component_members})
-        return sorted({member.user_id for member in component_members if member.component_role in roles})
+        return sorted({member.user_id for member in component_members if member.role_id in role_ids})
     return _eligible_manual_assignee_ids(
         db, project_id=_project_id_for_item(db, _object_type_for_item(item), item), rule=rule
     )
@@ -1084,17 +1087,11 @@ def _role_allowed(db: Session, object_type: str, item, transition: WorkflowTrans
         ProjectMember.role_id.in_(business_role_ids),
     ).first():
         return True
-    roles = _split_csv(transition.allowed_roles)
-    if not roles:
+    allowed_identities = _split_csv(transition.allowed_roles)
+    if not allowed_identities:
         return bool(business_role_ids) is False
     identities = _actor_identities(db, object_type, item, actor)
-    effective_roles = actor_role_keys(db, project_id, actor.id) | identities
-    component_roles = active_primary_component_member_roles(db, object_type, item, actor.id)
-    if component_roles:
-        effective_roles |= component_roles
-    if "system_admin" in identities and "project_owner" in roles:
-        effective_roles.add("project_owner")
-    return bool(set(roles) & effective_roles)
+    return bool(set(allowed_identities) & identities)
 
 
 def _actor_identities(db: Session, object_type: str, item, actor: User | None) -> set[str]:
@@ -1215,9 +1212,18 @@ def _resolve_target_states(
             if selected_target_state_id not in allowed_target_state_ids:
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Selected target state is not allowed")
             if routing_mode == "automatic_with_override" and selected_target_state_id != default_target_state_id:
-                override_roles = set(condition_config.get("allow_override_roles") or [])
-                identities = _actor_identities(db, object_type, item, actor)
-                if not (override_roles & identities):
+                override_role_ids = set(condition_config.get("allow_override_role_ids") or [])
+                project_id = _project_id_for_item(db, object_type, item)
+                can_override = bool(
+                    actor
+                    and is_system_admin(db, actor.id)
+                    or actor and db.query(ProjectMember.id).filter(
+                        ProjectMember.project_id == project_id,
+                        ProjectMember.user_id == actor.id,
+                        ProjectMember.role_id.in_(override_role_ids),
+                    ).first()
+                )
+                if not can_override:
                     raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Target state override is not allowed")
                 override_reason = request.override_reason or request.payload.get("override_reason")
                 if not (override_reason or "").strip():
@@ -2084,7 +2090,6 @@ def _handler_fallback_chain(rule: dict[str, Any]) -> list[dict[str, Any]]:
     return [
         {
             "type": fallback_type,
-            "roles": rule.get("fallback_roles", ""),
             "fixed_user_id": rule.get("fallback_user_id"),
             "_transition_id": rule.get("_transition_id"),
             "_role_purpose": "fallback",
@@ -2133,8 +2138,7 @@ def _resolve_handler_source(
                 ProjectMember.role_id.in_(role_ids),
             ).order_by(ProjectMember.sort_order.asc(), ProjectMember.id.asc()).first()
             return (member.user_id if member else None), f"{source_type}:role_ids"
-        roles = _split_csv(config.get("target_roles") or config.get("roles"))
-        return _first_project_member_id(db, project_id, roles), f"{source_type}:{','.join(roles)}"
+        return None, f"{source_type}:role_ids"
     if source_type == "project_owner":
         return _project_owner_id(db, project_id), source_type
     if source_type == "fixed_user":
@@ -2271,17 +2275,12 @@ def _project_default_tester_id(db: Session, project_id: int | None) -> int | Non
     if not project or not project.assignee_rule_config_id:
         return None
     config = db.query(AssigneeRuleConfig).filter(AssigneeRuleConfig.id == project.assignee_rule_config_id).first()
-    roles = _split_csv(
-        ",".join(
-            value
-            for value in [
-                config.test_case_tester_roles if config else "",
-                config.test_run_owner_roles if config else "",
-            ]
-            if value
-        )
+    role_ids = (
+        list(config.test_case_tester_role_ids or [])
+        + list(config.test_run_owner_role_ids or [])
+        if config else []
     )
-    return _first_project_member_id(db, project_id, roles)
+    return _first_project_member_id_by_role_ids(db, project_id, role_ids)
 
 
 def _project_owner_id(db: Session, project_id: int | None) -> int | None:
@@ -2290,7 +2289,11 @@ def _project_owner_id(db: Session, project_id: int | None) -> int | None:
     project = db.query(Project).filter(Project.id == project_id, Project.deleted == 0).first()
     if project and project.owner_id:
         return project.owner_id
-    return _first_project_member_id(db, project_id, ["project_owner"])
+    return _first_project_member_id_by_role_ids(
+        db,
+        project_id,
+        list(role_ids_for_capabilities(db, {"project_owner"})),
+    )
 
 
 def _task_requirement(db: Session, task: Task) -> Requirement | None:
@@ -2352,18 +2355,18 @@ def _task_source_relation_id(db: Session, task_id: int, source_type: str) -> int
     return relation.source_id if relation else None
 
 
-def _first_project_member_id(db: Session, project_id: int | None, roles: list[str]) -> int | None:
-    if not project_id or not roles:
+def _first_project_member_id_by_role_ids(db: Session, project_id: int | None, role_ids: list[int]) -> int | None:
+    if not project_id or not role_ids:
         return None
-    for role in roles:
+    for role_id in role_ids:
         member = (
             db.query(ProjectMember)
             .join(User, User.id == ProjectMember.user_id)
             .filter(
                 ProjectMember.project_id == project_id,
+                ProjectMember.role_id == role_id,
                 User.deleted == 0,
                 User.is_active.is_(True),
-                *([] if role == "project_member" else [ProjectMember.project_role == role]),
             )
             .order_by(ProjectMember.sort_order.asc(), ProjectMember.id.asc())
             .first()

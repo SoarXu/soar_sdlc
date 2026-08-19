@@ -4,7 +4,6 @@ from pydantic import BaseModel, ConfigDict
 
 
 class RoleBase(BaseModel):
-    role_key: str
     role_name: str
     description: str | None = None
     enabled: bool = True

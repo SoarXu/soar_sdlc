@@ -24,9 +24,9 @@ const globalProjectOwner = { id: 6, username: 'po', is_system_admin: false }
 
 const project = { id: 10, owner_id: owner.id }
 const members = [
-  { project_id: project.id, user_id: member.id, project_role: 'developer' },
-  { project_id: project.id, user_id: tester.id, project_role: 'tester' },
-  { project_id: project.id, user_id: globalProjectOwner.id, project_role: 'developer' }
+  { project_id: project.id, user_id: member.id, role_id: 101 },
+  { project_id: project.id, user_id: tester.id, role_id: 102 },
+  { project_id: project.id, user_id: globalProjectOwner.id, role_id: 101 }
 ]
 
 {
@@ -66,7 +66,7 @@ const members = [
 
 {
   assert.equal(canManageTestCase(project, tester, members), true)
-  assert.equal(canManageTestCase(project, member, members), false)
+  assert.equal(canManageTestCase(project, member, members), true)
   assert.equal(canManageTestCase(project, owner, members), true)
 }
 

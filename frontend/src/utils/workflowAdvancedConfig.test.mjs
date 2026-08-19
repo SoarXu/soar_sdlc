@@ -18,9 +18,10 @@ import { normalizeWorkflowTransition } from './workflowTransitionConfig.js'
 
 const ADVANCED_OWNED_KEYS = [
   'allowed_role_list',
+  'allowed_role_ids',
   'handler_rule',
-  'handler_target_roles',
-  'handler_fallback_roles',
+  'handler_target_role_ids',
+  'handler_fallback_role_ids',
   'condition_config',
   'condition_routes',
   'form_config',
@@ -38,13 +39,14 @@ function createNormalizedTransition() {
     action_name: 'Verification failed',
     from_state_id: 10,
     to_state_id: 20,
-    allowed_roles: 'tester,project_owner',
+    allowed_roles: 'current_handler',
+    allowed_role_ids: [21, 34],
     handler_rule: {
       target_type: 'previous_handler',
-      target_roles: 'developer,tester',
-      fallback_type: 'project_role',
-      fallback_roles: 'project_owner'
+      fallback_type: 'project_role'
     },
+    handler_target_role_ids: [34],
+    handler_fallback_role_ids: [21],
     condition_config: {
       field: 'review_result',
       routes: { failed: 20 },
@@ -91,7 +93,7 @@ const states = [
 
 const SECTION_OWNED_KEYS = {
   rules: ['condition_config', 'condition_routes', 'validator_config'],
-  assignment: ['allowed_role_list', 'handler_rule', 'handler_target_roles', 'handler_fallback_roles'],
+  assignment: ['allowed_role_list', 'allowed_role_ids', 'handler_rule', 'handler_target_role_ids', 'handler_fallback_role_ids'],
   form: ['form_config'],
   button: ['ui_config'],
   notification: ['trigger_config', 'post_action_config']
@@ -146,10 +148,10 @@ assert.deepEqual(ADVANCED_SECTION_KEYS, ['rules', 'assignment', 'form', 'button'
   assert.notStrictEqual(draft.form_config.fields, source.form_config.fields)
   assert.notStrictEqual(draft.form_config.fields[0].options, source.form_config.fields[0].options)
 
-  draft.allowed_role_list.push('system_admin')
+  draft.allowed_role_ids.push(55)
   draft.handler_rule.target_type = 'project_role'
-  draft.handler_target_roles.push('project_owner')
-  draft.handler_fallback_roles[0] = 'system_admin'
+  draft.handler_target_role_ids.push(21)
+  draft.handler_fallback_role_ids[0] = 55
   draft.condition_config.routes.failed = 30
   draft.condition_routes[0].state_id = 30
   draft.form_config.fields[0].options[0].label = 'Rejected'
@@ -176,7 +178,7 @@ assert.deepEqual(ADVANCED_SECTION_KEYS, ['rules', 'assignment', 'form', 'button'
   const originalActionName = source.action_name
   const originalAllowedRoles = source.allowed_roles
 
-  draft.allowed_role_list.push('system_admin')
+  draft.allowed_role_ids.push(55)
   draft.form_config.fields[0].label = 'Updated review result'
   draft.action_name = 'Draft metadata must not be applied'
   draft.allowed_roles = 'system_admin'
@@ -192,7 +194,7 @@ assert.deepEqual(ADVANCED_SECTION_KEYS, ['rules', 'assignment', 'form', 'button'
   }
 
   const applied = structuredClone(source)
-  draft.allowed_role_list.push('project_manager')
+  draft.allowed_role_ids.push(89)
   draft.form_config.fields[0].options[0].label = 'Mutated after apply'
   draft.validator_config.options.strict = false
   assert.deepEqual(source, applied)
@@ -251,14 +253,13 @@ assert.deepEqual(ADVANCED_SECTION_KEYS, ['rules', 'assignment', 'form', 'button'
     },
     assignment: {
       allowed_role_list: [],
+      allowed_role_ids: [],
       handler_rule: {
         target_type: 'keep_current',
-        target_roles: '',
-        fallback_type: 'keep_current',
-        fallback_roles: ''
+        fallback_type: 'keep_current'
       },
-      handler_target_roles: [],
-      handler_fallback_roles: []
+      handler_target_role_ids: [],
+      handler_fallback_role_ids: []
     },
     form: { form_config: { fields: [] } },
     button: { ui_config: {} },
@@ -364,10 +365,10 @@ assert.deepEqual(ADVANCED_SECTION_KEYS, ['rules', 'assignment', 'form', 'button'
 
 {
   const draft = createEmptyDraft()
-  draft.condition_config = { routing_mode: 'automatic_with_override', allow_override_roles: [] }
+  draft.condition_config = { routing_mode: 'automatic_with_override', allow_override_role_ids: [] }
 
   assert.ok(validateAdvancedConfig(draft, states).errors.rules.some((item) => item.code === 'override_roles_required'))
-  draft.condition_config.allow_override_roles = ['project_owner']
+  draft.condition_config.allow_override_role_ids = [21]
   assert.equal(validateAdvancedConfig(draft, states).valid, true)
 }
 
@@ -380,8 +381,8 @@ assert.deepEqual(ADVANCED_SECTION_KEYS, ['rules', 'assignment', 'form', 'button'
   assert.ok(result.errors.assignment.some((item) => item.code === 'target_roles_required'))
   assert.ok(result.errors.assignment.some((item) => item.code === 'fallback_roles_required'))
 
-  draft.handler_target_roles = ['developer']
-  draft.handler_fallback_roles = ['project_owner']
+  draft.handler_target_role_ids = [34]
+  draft.handler_fallback_role_ids = [21]
   assert.equal(validateAdvancedConfig(draft, states).valid, true)
 }
 

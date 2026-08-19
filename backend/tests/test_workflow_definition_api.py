@@ -5,6 +5,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.db.session import SessionLocal
+from app.models.role import Role
 from app.models.status_operation import StatusOperationLog
 from app.models.workflow_definition import WorkflowState, WorkflowTransition
 
@@ -19,11 +20,6 @@ def _create_config(client: TestClient, *, clear_initial_definitions: bool = True
         "/api/v1/assignee-rule-configs",
         json={
             "name": f"Designer Config {uuid4().hex[:8]}",
-            "requirement_owner_roles": "product_owner",
-            "task_owner_roles": "developer",
-            "test_case_tester_roles": "tester",
-            "test_run_owner_roles": "tester",
-            "bug_owner_roles": "developer",
         },
     )
     assert response.status_code == 201
@@ -921,21 +917,28 @@ def _advanced_definition(client: TestClient) -> dict:
 
 
 def _advanced_graph(transition_overrides: dict | None = None) -> dict:
+    with SessionLocal() as db:
+        role_ids = {
+            role.role_name: role.id
+            for role in db.query(Role).filter(Role.role_name.in_(["项目负责人", "开发", "测试"])).all()
+        }
     transition = {
         "action_name": "Classify",
         "from_state_id": -1,
         "to_state_id": -2,
         "allowed_roles": "current_handler,system_admin",
+        "allowed_role_ids": [role_ids["开发"], role_ids["测试"]],
         "handler_rule": {
             "target_type": "project_role",
-            "target_roles": "project_member",
-            "fallback_type": "project_owner",
+            "fallback_type": "project_role",
         },
+        "handler_target_role_ids": [role_ids["开发"]],
+        "handler_fallback_role_ids": [role_ids["项目负责人"]],
         "condition_config": {
             "field": "classification",
             "routes": {"real": -2, "invalid": -3},
             "routing_mode": "automatic_with_override",
-            "allow_override_roles": ["system_admin"],
+            "allow_override_role_ids": [role_ids["项目负责人"]],
         },
         "form_config": {
             "title": "Classify Bug",
@@ -1034,11 +1037,22 @@ def test_save_graph_round_trips_controlled_runtime_configuration(client: TestCli
 
 def test_save_graph_accepts_builtin_workflow_roles(client: TestClient):
     definition = _advanced_definition(client)
-    payload = _advanced_graph({"allowed_roles": "test_lead,product_owner,tech_lead"})
+    with SessionLocal() as db:
+        role_ids = [role.id for role in db.query(Role).filter(Role.role_name.in_(["项目负责人", "开发主管"])).all()]
+    payload = _advanced_graph({"allowed_roles": "current_handler", "allowed_role_ids": role_ids})
 
     saved = client.put(f"/api/v1/workflow-definitions/{definition['id']}/graph", json=payload)
 
     assert saved.status_code == 200, saved.text
+
+
+def test_save_graph_rejects_unknown_business_role_id(client: TestClient):
+    definition = _advanced_definition(client)
+    payload = _advanced_graph({"allowed_role_ids": [999999999]})
+
+    saved = client.put(f"/api/v1/workflow-definitions/{definition['id']}/graph", json=payload)
+
+    assert saved.status_code == 422
 
 
 def test_save_graph_accepts_system_action_marker(client: TestClient):

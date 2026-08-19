@@ -3,7 +3,7 @@ from datetime import datetime
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 
-from app.models.role import Role, UserRole
+from app.models.role import Role, RoleCapability
 from app.models.user import User
 from app.views.role_view import RoleCreate, RoleUpdate
 
@@ -20,15 +20,17 @@ DEFAULT_ROLES = [
 
 
 def seed_default_roles(db: Session) -> list[Role]:
-    for role_key, role_name, description in DEFAULT_ROLES:
-        role = db.query(Role).filter(Role.role_key == role_key).first()
+    for capability, role_name, description in DEFAULT_ROLES:
+        binding = db.query(RoleCapability).filter(RoleCapability.capability == capability).first()
+        role = db.query(Role).filter(Role.id == binding.role_id).first() if binding else None
+        if role is None:
+            role = db.query(Role).filter(Role.role_name == role_name).first()
         if not role:
-            db.add(Role(role_key=role_key, role_name=role_name, description=description, is_system=True, enabled=True))
-        else:
-            role.role_name = role_name
-            role.description = description
-            role.is_system = True
-            role.enabled = True
+            role = Role(role_name=role_name, description=description, is_system=True, enabled=True)
+            db.add(role)
+            db.flush()
+        if not binding:
+            db.add(RoleCapability(capability=capability, role_id=role.id))
     db.commit()
     return list_roles(db)
 
@@ -39,14 +41,13 @@ def list_roles(db: Session) -> list[Role]:
 
 
 def create_role(db: Session, payload: RoleCreate) -> Role:
-    role_key = payload.role_key.strip()
-    if not role_key:
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Role key is required")
-    if db.query(Role).filter(Role.role_key == role_key).first():
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Role key already exists")
+    role_name = payload.role_name.strip()
+    if not role_name:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Role name is required")
+    if db.query(Role).filter(Role.role_name == role_name).first():
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Role name already exists")
     role = Role(
-        role_key=role_key,
-        role_name=payload.role_name.strip(),
+        role_name=role_name,
         description=payload.description,
         is_system=False,
         enabled=payload.enabled,
@@ -84,8 +85,11 @@ def set_user_system_admin(db: Session, user_id: int, is_system_admin: bool) -> U
 
 
 def seed_default_roles_if_needed(db: Session) -> None:
-    existing = {row.role_key for row in db.query(Role.role_key).all()}
-    if {role_key for role_key, _, _ in DEFAULT_ROLES}.issubset(existing):
+    existing = {
+        capability
+        for (capability,) in db.query(RoleCapability.capability).all()
+    }
+    if {capability for capability, _, _ in DEFAULT_ROLES}.issubset(existing):
         return
     seed_default_roles(db)
 

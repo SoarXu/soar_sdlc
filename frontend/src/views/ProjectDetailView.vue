@@ -885,7 +885,7 @@ const testRunStatusOptions = [
 ]
 const projectMemberRoleOptions = computed(() => {
   const enabledRoles = roleCatalog.value
-    .filter((role) => role.enabled && role.role_key !== 'system_admin')
+    .filter((role) => role.enabled)
     .map((role) => ({ label: role.role_name, value: role.id }))
   const enabledKeys = new Set(enabledRoles.map((role) => role.value))
   const historicalRoles = [...new Set(projectMembers.value.map((member) => member.role_id).filter(Boolean))]
@@ -1238,8 +1238,8 @@ function projectFieldLabel(field) {
     { label: '工作流方案', value: 'assignee_rule_config_id' }
   ], field)
 }
-function defaultProjectMember(roles) {
-  const candidates = projectMembers.value.filter((item) => roles.includes(item.project_role) && item.user_id)
+function defaultProjectMember(roleIds) {
+  const candidates = projectMembers.value.filter((item) => roleIds.includes(item.role_id) && item.user_id)
   candidates.sort((left, right) => (left.sort_order ?? 0) - (right.sort_order ?? 0))
   return candidates[0]?.user_id || null
 }
@@ -1267,21 +1267,17 @@ async function submitProjectSettings() {
     saving.value = false
   }
 }
-function splitAssigneeRoles(value) {
-  return (value || '').split(',').map((item) => item.trim()).filter(Boolean)
-}
-function configuredAssigneeRoles(field, fallbackRoles) {
+function configuredAssigneeRoleIds(field) {
   const config = activeAssigneeRuleConfig()
-  const roles = config ? splitAssigneeRoles(config[field]) : []
-  return roles.length ? roles : []
+  return config && Array.isArray(config[field]) ? config[field] : []
 }
-function defaultTesterByRule(field, fallbackRoles) {
-  return defaultProjectMember(configuredAssigneeRoles(field, fallbackRoles))
+function defaultTesterByRule(field) {
+  return defaultProjectMember(configuredAssigneeRoleIds(field))
 }
 function addProjectMember() {
   projectMembers.value.push({
     user_id: null,
-    role_id: roleCatalog.value.find((role) => role.role_key === 'developer')?.id || null,
+    role_id: null,
     is_workbench_participant: true,
     sort_order: projectMembers.value.length
   })
@@ -1309,8 +1305,8 @@ async function submitProjectMembers() {
 function resetIterationForm() { Object.assign(iterationForm, { project_ids: [projectId.value], name: '', owner_id: null, start_date: null, end_date: null, goal: '' }) }
 function resetRequirementForm() { Object.assign(requirementForm, { project_id: projectId.value, primary_component_id: null, iteration_id: null, title: '', requirement_type: '功能', priority: '3', owner_id: null, proposer_id: currentUserId(users.value), description: '', acceptance_criteria: '' }) }
 function resetTaskForm() { Object.assign(taskForm, { project_id: projectId.value, primary_component_id: null, requirement_id: null, title: '', task_type: 'standalone_operation', priority: 'medium', owner_id: null, due_date: null, description: '' }) }
-function resetCaseForm() { Object.assign(caseForm, { project_id: projectId.value, requirement_id: null, title: '', case_type: 'functional', test_scope: 'functional_test', test_scopes: ['functional_test'], default_tester_id: defaultTesterByRule('test_case_tester_roles', ['tester', 'test_lead']), precondition: '', steps_content: '', expected_result: '' }) }
-function resetRunForm() { Object.assign(runForm, { project_id: projectId.value, iteration_id: null, name: '', test_owner_id: defaultTesterByRule('test_run_owner_roles', ['tester', 'test_lead']), status: 'planning', remark: '' }) }
+function resetCaseForm() { Object.assign(caseForm, { project_id: projectId.value, requirement_id: null, title: '', case_type: 'functional', test_scope: 'functional_test', test_scopes: ['functional_test'], default_tester_id: defaultTesterByRule('test_case_tester_role_ids'), precondition: '', steps_content: '', expected_result: '' }) }
+function resetRunForm() { Object.assign(runForm, { project_id: projectId.value, iteration_id: null, name: '', test_owner_id: defaultTesterByRule('test_run_owner_role_ids'), status: 'planning', remark: '' }) }
 function resetBugForm() { Object.assign(bugForm, { project_id: projectId.value, primary_component_id: null, iteration_id: null, requirement_id: null, task_id: null, test_case_id: null, test_run_id: null, title: '', bug_type: DEFAULT_BUG_TYPE_KEY, severity: '3', priority: '3', owner_id: null, reporter_id: null, reproduce_steps: '', expected_result: '', actual_result: '' }) }
 
 function openIterationCreate() { editingIterationId.value = null; editingIterationCanAdminister.value = true; resetIterationForm(); iterationDialogVisible.value = true }

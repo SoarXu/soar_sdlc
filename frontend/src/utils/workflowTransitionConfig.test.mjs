@@ -13,13 +13,14 @@ const source = {
   action_name: 'Classify',
   from_state_id: 11,
   to_state_id: 12,
-  allowed_roles: 'current_handler,system_admin',
+  allowed_roles: 'current_handler',
+  allowed_role_ids: [101, 102],
   handler_rule: {
     target_type: 'project_role',
-    target_roles: 'developer,tester',
     fallback_type: 'project_owner',
-    fallback_roles: ''
   },
+  handler_target_role_ids: [102],
+  handler_fallback_role_ids: [101],
   condition_config: { field: 'bug_type', routes: { code_issue: 12 }, routing_mode: 'automatic' },
   form_config: { fields: [
     { field: 'bug_type', label: 'Bug Type', type: 'select', dictionary: 'bug_type' },
@@ -39,14 +40,21 @@ const source = {
 }
 
 const normalized = normalizeWorkflowTransition(source)
-assert.deepEqual(normalized.allowed_role_list, ['current_handler', 'system_admin'])
-assert.deepEqual(normalized.handler_target_roles, ['developer', 'tester'])
+assert.deepEqual(normalized.allowed_role_list, ['current_handler'])
+assert.deepEqual(normalized.allowed_role_ids, [101, 102])
+assert.deepEqual(normalized.handler_target_role_ids, [102])
+assert.deepEqual(normalized.handler_fallback_role_ids, [101])
 assert.deepEqual(normalized.condition_routes, [{ value: 'code_issue', state_id: 12 }])
 
 const serialized = serializeWorkflowTransition(normalized)
 assert.equal(serialized.id, 9)
 assert.equal(serialized.action_key, 'classify')
 assert.equal('definition_id' in serialized, false)
+assert.deepEqual(serialized.allowed_role_ids, [101, 102])
+assert.deepEqual(serialized.handler_target_role_ids, [102])
+assert.deepEqual(serialized.handler_fallback_role_ids, [101])
+assert.equal('target_roles' in serialized.handler_rule, false)
+assert.equal('fallback_roles' in serialized.handler_rule, false)
 for (const key of ['condition_config', 'form_config', 'validator_config', 'ui_config', 'diagram_config', 'trigger_config', 'post_action_config']) {
   assert.deepEqual(serialized[key], source[key])
 }

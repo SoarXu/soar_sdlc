@@ -1,6 +1,7 @@
 from sqlalchemy.orm import Session
 
-from app.models.workflow_definition import WorkflowDefinition, WorkflowState, WorkflowTransition
+from app.models.role import RoleCapability
+from app.models.workflow_definition import WorkflowDefinition, WorkflowState, WorkflowTransition, WorkflowTransitionRole
 from app.views.workflow_definition_view import (
     WorkflowTemplateGraph as WorkflowGraphSave,
     WorkflowTemplateState as WorkflowStateBase,
@@ -93,10 +94,92 @@ def _create_graph(db: Session, definition: WorkflowDefinition, graph: WorkflowGr
                 "condition_config": condition_config,
             }
         )
-        db.add(WorkflowTransition(definition_id=definition.id, **data))
+        role_refs = _template_role_refs(db, data)
+        transition = WorkflowTransition(definition_id=definition.id, **data)
+        db.add(transition)
+        db.flush()
+        _replace_transition_role_refs(db, transition.id, role_refs)
 
     initial = next((item for item in graph.states if item.category == "start" and item.enabled), None)
     definition.initial_state_id = state_by_ref[initial.ref].id if initial else None
+
+
+def _template_role_refs(db: Session, data: dict) -> dict[str, list[int]]:
+    identities, allowed_role_ids = _template_role_values(db, data.get("allowed_roles"))
+    data["allowed_roles"] = ",".join(identities)
+    handler_rule = dict(data.get("handler_rule") or {})
+    _identities, target_role_ids = _template_role_values(db, handler_rule.pop("target_roles", ""))
+    _identities, fallback_role_ids = _template_role_values(db, handler_rule.pop("fallback_roles", ""))
+    data["handler_rule"] = handler_rule or None
+    condition = data.get("condition_config")
+    if isinstance(condition, dict) and "allow_override_roles" in condition:
+        condition = dict(condition)
+        _identities, override_role_ids = _template_role_values(db, condition.pop("allow_override_roles"))
+        condition["allow_override_role_ids"] = override_role_ids
+        data["condition_config"] = condition
+    return {
+        "allowed": allowed_role_ids,
+        "target": target_role_ids,
+        "fallback": fallback_role_ids,
+    }
+
+
+def _template_role_values(db: Session, value) -> tuple[list[str], list[int]]:
+    identities: list[str] = []
+    role_ids: list[int] = []
+    aliases = {
+        "product_owner": ("product_owner", "product_manager"),
+        "tech_lead": ("tech_lead", "development_lead"),
+        "test_lead": ("test_lead", "tester"),
+    }
+    identity_values = {"system_admin", "project_member", "current_handler", "owner", "creator", "reporter", "proposer"}
+    values = value if isinstance(value, list) else str(value or "").split(",")
+    for raw_value in values:
+        name = str(raw_value).strip()
+        if not name:
+            continue
+        if name in identity_values:
+            identities.append(name)
+            continue
+        role_id = None
+        for capability in aliases.get(name, (name,)):
+            role_id = db.query(RoleCapability.role_id).filter(RoleCapability.capability == capability).scalar()
+            if role_id is not None:
+                break
+        if role_id is None:
+            raise RuntimeError(f"Default workflow role is not configured: {name}")
+        role_ids.append(int(role_id))
+    return list(dict.fromkeys(identities)), list(dict.fromkeys(role_ids))
+
+
+def _replace_transition_role_refs(db: Session, transition_id: int, role_refs: dict[str, list[int]]) -> None:
+    db.query(WorkflowTransitionRole).filter(WorkflowTransitionRole.transition_id == transition_id).delete()
+    for purpose, role_ids in role_refs.items():
+        db.add_all(
+            WorkflowTransitionRole(
+                transition_id=transition_id,
+                role_id=role_id,
+                purpose=purpose,
+                sort_order=index,
+            )
+        for index, role_id in enumerate(role_ids)
+    )
+
+
+def _replace_transition_role_purpose(db: Session, transition_id: int, purpose: str, role_ids: list[int]) -> None:
+    db.query(WorkflowTransitionRole).filter(
+        WorkflowTransitionRole.transition_id == transition_id,
+        WorkflowTransitionRole.purpose == purpose,
+    ).delete()
+    db.add_all(
+        WorkflowTransitionRole(
+            transition_id=transition_id,
+            role_id=role_id,
+            purpose=purpose,
+            sort_order=index,
+        )
+        for index, role_id in enumerate(role_ids)
+    )
 
 
 def reconcile_review_subgraph(db: Session, definition: WorkflowDefinition) -> None:
@@ -124,8 +207,13 @@ def reconcile_review_subgraph(db: Session, definition: WorkflowDefinition) -> No
             **(existing_successor.handler_rule or {}),
             "target_type": "bug_verifier",
             "fallback_type": "project_role",
-            "fallback_roles": "project_owner",
         }
+        _replace_transition_role_purpose(
+            db,
+            existing_successor.id,
+            "fallback",
+            _template_role_values(db, "project_owner")[1],
+        )
     review_state = next((state for state in states.values() if state.status_name == "待评审"), None)
     if review_state is None:
         review_state = WorkflowState(
@@ -153,14 +241,13 @@ def reconcile_review_subgraph(db: Session, definition: WorkflowDefinition) -> No
                 transition.trigger_config = None
                 transition.ui_config = {key: value for key, value in (transition.ui_config or {}).items() if key != "system_action"}
             continue
-        db.add(
-            WorkflowTransition(
+        transition = WorkflowTransition(
                 definition_id=definition.id,
                 action_key=action_key,
                 action_name=action_name,
                 from_state_id=from_state_id,
                 to_state_id=to_state_id,
-                allowed_roles=allowed_roles,
+                allowed_roles="",
                 handler_rule={"target_type": "keep_current"},
                 trigger_config=None,
                 ui_config={
@@ -172,7 +259,11 @@ def reconcile_review_subgraph(db: Session, definition: WorkflowDefinition) -> No
                 enabled=True,
                 sort_order=max((item.sort_order for item in transitions), default=0) + 1,
             )
-        )
+        db.add(transition)
+        db.flush()
+        identities, role_ids = _template_role_values(db, allowed_roles)
+        transition.allowed_roles = ",".join(identities)
+        _replace_transition_role_refs(db, transition.id, {"allowed": role_ids})
 
 
 def _template_condition_config(config: dict | list | None, state_by_ref: dict[str, WorkflowState]):

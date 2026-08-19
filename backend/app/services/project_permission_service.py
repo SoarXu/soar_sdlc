@@ -11,11 +11,12 @@ from app.models.test_case import TestCase
 from app.models.test_run import TestRun
 from app.models.user import User
 from app.services.program_permission_service import is_program_governor
+from app.services.role_capability_service import role_ids_for_capabilities
 
 
 SYSTEM_ADMIN_ROLE_KEYS = {"system_admin"}
-PROJECT_OWNER_PROJECT_ROLES = {"project_owner"}
-TEST_PROJECT_ROLES = {"tester", "test_lead", "qa", "quality_assurance"}
+PROJECT_OWNER_CAPABILITIES = {"project_owner"}
+TEST_CAPABILITIES = {"tester", "test_lead"}
 
 
 def is_system_admin(db: Session, user_id: int | None) -> bool:
@@ -35,7 +36,7 @@ def is_project_owner(db: Session, project_id: int | None, user_id: int | None) -
         .filter(
             ProjectMember.project_id == project_id,
             ProjectMember.user_id == user_id,
-            ProjectMember.project_role.in_(PROJECT_OWNER_PROJECT_ROLES),
+            ProjectMember.role_id.in_(role_ids_for_capabilities(db, PROJECT_OWNER_CAPABILITIES)),
         )
         .first()
     )
@@ -107,7 +108,7 @@ def can_manage_test_case(db: Session, project_id: int | None, actor: User | None
     return (
         is_system_admin(db, actor.id)
         or is_project_owner(db, project_id, actor.id)
-        or _has_project_role(db, project_id, actor.id, TEST_PROJECT_ROLES)
+        or _has_project_capability(db, project_id, actor.id, TEST_CAPABILITIES)
     )
 
 
@@ -379,17 +380,18 @@ def ensure_project_view_permission(db: Session, project_id: int | None, actor: U
     ensure_authenticated(actor)
     if not can_view_project(db, project_id, actor):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="无权查看项目数据")
-
-
-def _has_project_role(db: Session, project_id: int | None, user_id: int, project_roles: set[str]) -> bool:
+def _has_project_capability(db: Session, project_id: int | None, user_id: int, capabilities: set[str]) -> bool:
     if not project_id:
+        return False
+    role_ids = role_ids_for_capabilities(db, capabilities)
+    if not role_ids:
         return False
     return bool(
         db.query(ProjectMember)
         .filter(
             ProjectMember.project_id == project_id,
             ProjectMember.user_id == user_id,
-            ProjectMember.project_role.in_(project_roles),
+            ProjectMember.role_id.in_(role_ids),
         )
         .first()
     )
@@ -399,22 +401,3 @@ def _get_active_project(db: Session, project_id: int | None) -> Project | None:
     if not project_id:
         return None
     return db.query(Project).filter(Project.id == project_id, Project.deleted == 0).first()
-
-
-def actor_role_keys(db: Session, project_id: int | None, user_id: int | None) -> set[str]:
-    if user_id is None:
-        return set()
-    role_keys = global_role_keys(db, user_id)
-    if project_id:
-        role_keys.update(
-            row.project_role
-            for row in db.query(ProjectMember).filter(
-                ProjectMember.project_id == project_id,
-                ProjectMember.user_id == user_id,
-            )
-        )
-    return role_keys
-
-
-def global_role_keys(db: Session, user_id: int | None) -> set[str]:
-    return {"system_admin"} if is_system_admin(db, user_id) else set()

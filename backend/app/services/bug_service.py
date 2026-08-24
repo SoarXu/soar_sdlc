@@ -31,7 +31,7 @@ from app.services.iteration_assignment_service import (
 from app.services.status_operation_service import list_status_operations
 from app.services.task_service import linked_task_summaries
 from app.services.work_item_iteration_history_service import list_iteration_history, move_work_item_to_iteration
-from app.services.workflow_state_service import initial_workflow_values
+from app.services.workflow_state_service import initial_work_item_workflow_values
 from app.services.workflow_state_query_service import is_terminal_state
 from app.views.bug_view import BugCreate, BugFromTestRunCaseRequest, BugUpdate
 
@@ -81,7 +81,14 @@ def create_bug(db: Session, payload: BugCreate, actor_id: int | None = None) -> 
         or project_lifecycle_phase(db, data.get("project_id"))
     )
     primary_component = resolve_primary_component(db, data["project_id"], primary_component_id)
-    data.update(initial_workflow_values(db, "bug", data.get("project_id"), primary_component_id))
+    data.update(initial_work_item_workflow_values(
+        db,
+        "bug",
+        data.get("project_id"),
+        data.get("owner_id"),
+        data.get("iteration_id"),
+        primary_component_id,
+    ))
     bug = Bug(**data)
     db.add(bug)
     db.flush()
@@ -129,7 +136,14 @@ def create_bug_from_test_run_case(
     )
     ensure_iteration_assignment_mutable(db, None, iteration_id)
     _ensure_iteration_can_accept_bug(db, iteration_id, test_run.project_id)
-    workflow_values = initial_workflow_values(db, "bug", test_run.project_id)
+    owner_id = requirement.owner_id if requirement else None
+    workflow_values = initial_work_item_workflow_values(
+        db,
+        "bug",
+        test_run.project_id,
+        owner_id,
+        iteration_id,
+    )
     bug = Bug(
         project_id=test_run.project_id,
         iteration_id=iteration_id,
@@ -139,7 +153,7 @@ def create_bug_from_test_run_case(
         title=payload.title,
         severity=payload.severity,
         priority=payload.priority,
-        owner_id=requirement.owner_id if requirement else None,
+        owner_id=owner_id,
         reporter_id=payload.reporter_id or run_case.tester_id,
         reproduce_steps=payload.reproduce_steps,
         expected_result=payload.expected_result or test_case.expected_result,

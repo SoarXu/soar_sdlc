@@ -14,7 +14,7 @@ from app.services.iteration_assignment_service import resolve_work_item_iteratio
 from app.services.project_team_service import default_tester_id
 from app.services.task_service import linked_task_summaries
 from app.services.work_item_iteration_history_service import move_work_item_to_iteration
-from app.services.workflow_state_service import initial_workflow_values
+from app.services.workflow_state_service import initial_work_item_workflow_values
 from app.services.project_permission_service import visible_project_ids
 from app.views.test_case_view import BugFromTestCaseRequest, TestCaseCreate, TestCaseExecutionCreate, TestCaseUpdate
 
@@ -164,7 +164,13 @@ def create_bug_from_test_case(
     ensure_iteration_assignment_mutable(db, None, inherited_iteration_id)
     _ensure_iteration_can_accept_bug(db, inherited_iteration_id, project_id)
 
-    workflow_values = initial_workflow_values(db, "bug", project_id)
+    workflow_values = initial_work_item_workflow_values(
+        db,
+        "bug",
+        project_id,
+        requirement.owner_id if requirement else None,
+        inherited_iteration_id,
+    )
     bug = Bug(
         project_id=project_id,
         iteration_id=inherited_iteration_id,

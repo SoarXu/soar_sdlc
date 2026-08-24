@@ -214,7 +214,7 @@ assert.doesNotMatch(applyGraphBody, /organize|layoutWorkflow/)
 assert.match(applyGraphBody, /fitToContent\(\)/)
 assert.doesNotMatch(applyGraphBody, /captureSavedGraphSnapshot/)
 
-const clearSelectionBody = functionBody('clearSelection', 'removeSelectedState')
+const clearSelectionBody = functionBody('clearSelection', 'setSelectedStateEnabled')
 assert.match(clearSelectionBody, /closeNodeActionMenu\(\)/)
 
 const handleStateClickBody = functionBody('handleStateClick', 'selectState')

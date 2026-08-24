@@ -44,6 +44,7 @@ class WorkflowStateBase(BaseModel):
     id: int
     status_name: str
     category: str = "normal"
+    state_role: str | None = None
     terminal_kind: str | None = None
     color: str = "#2563eb"
     x: int = 0
@@ -78,6 +79,7 @@ class WorkflowTransitionBase(BaseModel):
     form_config: dict[str, Any] | None = None
     diagram_config: dict[str, Any] | None = None
     enabled: bool = True
+    auto_disabled_by_state: bool = False
     sort_order: int = 100
 
 
@@ -128,6 +130,7 @@ class WorkflowTemplateState(BaseModel):
     ref: str
     status_name: str
     category: str = "normal"
+    state_role: str | None = None
     terminal_kind: str | None = None
     color: str = "#2563eb"
     x: int = 0

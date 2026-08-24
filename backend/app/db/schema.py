@@ -492,6 +492,7 @@ def ensure_runtime_schema(engine: Engine) -> None:
                 "definition_id BIGINT UNSIGNED NOT NULL COMMENT 'workflow definition id',"
                 "status_name VARCHAR(100) NOT NULL COMMENT 'status name',"
                 "category VARCHAR(32) NOT NULL DEFAULT 'normal' COMMENT 'status category',"
+                "state_role VARCHAR(32) NULL COMMENT 'stable system state role',"
                 "color VARCHAR(32) NOT NULL DEFAULT '#2563eb' COMMENT 'node color',"
                 "x INT NOT NULL DEFAULT 0 COMMENT 'canvas x',"
                 "y INT NOT NULL DEFAULT 0 COMMENT 'canvas y',"
@@ -499,9 +500,13 @@ def ensure_runtime_schema(engine: Engine) -> None:
                 "enabled TINYINT(1) NOT NULL DEFAULT 1 COMMENT 'enabled',"
                 "create_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT 'create time',"
                 "update_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT 'update time',"
-                "KEY idx_wfs_definition (definition_id)"
+                "KEY idx_wfs_definition (definition_id),"
+                "KEY idx_wfs_definition_role (definition_id, state_role)"
                 ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='visual workflow states'"
             ))
+    _ensure_column(engine, "workflow_states", "state_role",
+                   "ALTER TABLE workflow_states ADD COLUMN state_role VARCHAR(32) NULL COMMENT 'stable system state role' AFTER category",
+                   "CREATE INDEX ix_workflow_states_definition_state_role ON workflow_states (definition_id, state_role)")
 
     if "workflow_transitions" not in inspector0.get_table_names():
         with engine.begin() as conn:
@@ -523,6 +528,7 @@ def ensure_runtime_schema(engine: Engine) -> None:
                 "form_config JSON NULL COMMENT 'form config',"
                 "diagram_config JSON NULL COMMENT 'diagram routing config',"
                 "enabled TINYINT(1) NOT NULL DEFAULT 1 COMMENT 'enabled',"
+                "auto_disabled_by_state TINYINT(1) NOT NULL DEFAULT 0 COMMENT 'disabled by state availability',"
                 "sort_order INT NOT NULL DEFAULT 100 COMMENT 'sort order',"
                 "create_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT 'create time',"
                 "update_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT 'update time',"
@@ -537,7 +543,9 @@ def ensure_runtime_schema(engine: Engine) -> None:
     _ensure_column(engine, "workflow_transitions", "form_config",
                    "ALTER TABLE workflow_transitions ADD COLUMN form_config JSON NULL COMMENT 'form config' AFTER ui_config")
     _ensure_column(engine, "workflow_transitions", "diagram_config",
-                   "ALTER TABLE workflow_transitions ADD COLUMN diagram_config JSON NULL COMMENT 'diagram routing config' AFTER form_config")
+                    "ALTER TABLE workflow_transitions ADD COLUMN diagram_config JSON NULL COMMENT 'diagram routing config' AFTER form_config")
+    _ensure_column(engine, "workflow_transitions", "auto_disabled_by_state",
+                   "ALTER TABLE workflow_transitions ADD COLUMN auto_disabled_by_state TINYINT(1) NOT NULL DEFAULT 0 COMMENT 'disabled by state availability' AFTER enabled")
 
     _ensure_column(engine, "assignee_rule_configs", "lifecycle_status",
                    "ALTER TABLE assignee_rule_configs ADD COLUMN lifecycle_status VARCHAR(16) NOT NULL DEFAULT 'draft' COMMENT 'draft/enabled/disabled' AFTER description",

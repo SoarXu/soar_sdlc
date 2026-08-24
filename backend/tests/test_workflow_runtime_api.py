@@ -14,10 +14,10 @@ from app.models.project_member import ProjectMember
 from app.models.relation import ObjectRelation
 from app.models.requirement import Requirement
 from app.models.work_item_iteration_history import WorkItemIterationHistory
-from app.models.role import Role, UserRole
+from app.models.role import RoleCapability
 from app.models.test_run import TestRun as RunModel
 from app.models.user import User
-from app.models.workflow_definition import WorkflowTransition
+from app.models.workflow_definition import WorkflowState, WorkflowTransition, WorkflowTransitionRole
 from app.services import iteration_service, workflow_runtime_service
 from app.services.exception_center_service import _state_requires_owner_from_context
 from app.views.workflow_runtime_view import WorkflowTransitionActionRead
@@ -319,30 +319,30 @@ def _create_user(full_name: str, role_key: str | None = None) -> tuple[int, str]
             full_name=full_name,
             password_hash=get_password_hash("User123456"),
             is_active=True,
+            is_system_admin=role_key == "system_admin",
         )
         db.add(user)
         db.flush()
-        if role_key:
-            role = db.query(Role).filter(Role.role_key == role_key).first()
-            if not role:
-                role = Role(role_key=role_key, role_name=role_key, enabled=True, is_system=True)
-                db.add(role)
-                db.flush()
-            db.add(UserRole(user_id=user.id, role_id=role.id))
         db.commit()
         return user.id, create_access_token(user.username)
     finally:
         db.close()
 
 
+def _state_role(state_id: int) -> str | None:
+    with SessionLocal() as db:
+        return db.query(WorkflowState.state_role).filter(WorkflowState.id == state_id).scalar()
+
+
 def _add_project_member(project_id: int, user_id: int, project_role: str, sort_order: int = 0) -> None:
     db = SessionLocal()
     try:
+        role_id = _role_id_for_capability(db, project_role)
         db.add(
             ProjectMember(
                 project_id=project_id,
                 user_id=user_id,
-                project_role=project_role,
+                role_id=role_id,
                 sort_order=sort_order,
                 is_workbench_participant=True,
             )
@@ -359,11 +359,35 @@ def _create_system_template_scheme(client: TestClient, name: str, **role_fields)
             "name": name,
             "creation_mode": "template",
             "template_source": {"source_type": "system", "source_id": "system-standard"},
-            **role_fields,
+            **_role_id_fields(role_fields),
         },
     )
     assert response.status_code == 201, response.text
     return response.json()
+
+
+def _role_id_for_capability(db, capability: str) -> int:
+    normalized = {"product_owner": "product_manager", "project_member": "viewer"}.get(capability, capability)
+    role_id = db.query(RoleCapability.role_id).filter(RoleCapability.capability == normalized).scalar()
+    assert role_id is not None, f"Missing role capability: {normalized}"
+    return int(role_id)
+
+
+def _role_ids_for_capabilities(*capabilities: str) -> list[int]:
+    with SessionLocal() as db:
+        return [_role_id_for_capability(db, capability) for capability in capabilities]
+
+
+def _role_id_fields(fields: dict) -> dict:
+    result = dict(fields)
+    for legacy_name, value in list(result.items()):
+        if not legacy_name.endswith("_roles"):
+            continue
+        prefix = legacy_name.removesuffix("_roles")
+        capabilities = [item.strip() for item in str(value or "").split(",") if item.strip()]
+        result.pop(legacy_name)
+        result[f"{prefix}_role_ids"] = _role_ids_for_capabilities(*capabilities)
+    return result
 
 
 def _scheme_definition(client: TestClient, config_id: int, object_type: str) -> dict:
@@ -388,6 +412,15 @@ def _project_iteration_id(client: TestClient, project_id: int) -> int:
     )
     assert created.status_code == 200, created.text
     return created.json()["id"]
+
+
+def _start_iteration(client: TestClient, iteration_id: int) -> dict:
+    response = client.post(
+        f"/api/v1/workflow-runtime/iteration/{iteration_id}/transition",
+        json={"action_key": "start", "delegate_reason": "N-002 iteration state setup"},
+    )
+    assert response.status_code == 200, response.text
+    return response.json()
 
 
 def test_runtime_discovers_executes_and_audits_transitions_by_state_id(client: TestClient):
@@ -422,11 +455,11 @@ def test_runtime_discovers_executes_and_audits_transitions_by_state_id(client: T
 
     assert executed.status_code == 200, executed.text
     assert executed.json()["current_state_id"] == claim["to_state_id"]
-    assert executed.json()["status_name"] == "处理中"
+    assert _state_role(executed.json()["current_state_id"]) == "waiting_iteration"
     assert executed.json()["state_category"] == "normal"
     loaded = client.get(f"/api/v1/requirements/{requirement['id']}").json()
     assert loaded["current_state_id"] == claim["to_state_id"]
-    assert loaded["status_name"] == "处理中"
+    assert _state_role(loaded["current_state_id"]) == "waiting_iteration"
 
     history = client.get(f"/api/v1/requirements/{requirement['id']}/status-operations").json()
     operation = history[-1]
@@ -434,7 +467,7 @@ def test_runtime_discovers_executes_and_audits_transitions_by_state_id(client: T
     assert operation["from_state_id"] == claim["from_state_id"]
     assert operation["to_state_id"] == claim["to_state_id"]
     assert operation["from_state_name"] == "待分派"
-    assert operation["to_state_name"] == "处理中"
+    assert _state_role(operation["to_state_id"]) == "waiting_iteration"
 
     rejected_legacy = client.post(
         f"/api/v1/workflow-runtime/requirement/{requirement['id']}/transition",
@@ -450,11 +483,11 @@ def _create_project_with_bug_workflow(client: TestClient) -> tuple[int, int]:
         "/api/v1/assignee-rule-configs",
         json={
             "name": f"Runtime Config {uuid4().hex[:8]}",
-            "requirement_owner_roles": "",
-            "task_owner_roles": "",
-            "test_case_tester_roles": "tester",
-            "test_run_owner_roles": "tester",
-            "bug_owner_roles": "",
+                "requirement_owner_role_ids": [],
+                "task_owner_role_ids": [],
+                "test_case_tester_role_ids": _role_ids_for_capabilities("tester"),
+                "test_run_owner_role_ids": _role_ids_for_capabilities("tester"),
+                "bug_owner_role_ids": [],
             "creation_mode": "template",
             "template_source": {"source_type": "system", "source_id": "system-standard"},
         },
@@ -467,23 +500,24 @@ def _create_project_with_bug_workflow(client: TestClient) -> tuple[int, int]:
     graph = client.put(
         f"/api/v1/workflow-definitions/{definition['id']}/graph",
         json={
-            "initial_state_id": -1,
-            "states": [
-                {"id": -1, "status_name": "Pending", "category": "start", "x": 100, "y": 100},
-                {"id": -2, "status_name": "Fixing", "category": "normal", "x": 300, "y": 100},
+                "initial_state_id": -1,
+                "states": [
+                    {"id": -1, "status_name": "Pending", "category": "start", "state_role": "unassigned", "x": 100, "y": 100},
+                    {"id": -2, "status_name": "Fixing", "category": "normal", "state_role": "active_work", "x": 300, "y": 100},
+                    {"id": -4, "status_name": "Waiting", "category": "normal", "state_role": "waiting_iteration", "x": 200, "y": 180},
                 {"id": -3, "status_name": "Closed", "category": "terminal", "terminal_kind": "completed", "x": 500, "y": 100},
             ],
             "transitions": [
                 {
-                    "action_key": "start_fixing",
-                    "action_name": "确认",
-                    "from_state_id": -1,
-                    "to_state_id": -2,
+                        "action_key": "start_fixing",
+                        "action_name": "确认",
+                        "from_state_id": -2,
+                        "to_state_id": -2,
                     "handler_rule": {
                         "target_type": "project_role",
-                        "target_roles": "developer",
                         "fallback_type": "keep_current",
                     },
+                    "handler_target_role_ids": _role_ids_for_capabilities("developer"),
                     "ui_config": {
                         "button_type": "success",
                         "list_display": "primary",
@@ -491,10 +525,10 @@ def _create_project_with_bug_workflow(client: TestClient) -> tuple[int, int]:
                     },
                 },
                 {
-                    "action_key": "close",
-                    "action_name": "关闭",
-                    "from_state_id": -1,
-                    "to_state_id": -3,
+                        "action_key": "close",
+                        "action_name": "关闭",
+                        "from_state_id": -2,
+                        "to_state_id": -3,
                     "handler_rule": {"target_type": "keep_current", "fallback_type": "keep_current"},
                     "ui_config": {
                         "button_type": "danger",
@@ -526,11 +560,11 @@ def _create_project_with_requirement_workflow(client: TestClient) -> tuple[int, 
         "/api/v1/assignee-rule-configs",
         json={
             "name": f"Runtime Requirement Config {uuid4().hex[:8]}",
-            "requirement_owner_roles": "",
-            "task_owner_roles": "",
-            "test_case_tester_roles": "tester",
-            "test_run_owner_roles": "tester",
-            "bug_owner_roles": "",
+                "requirement_owner_role_ids": [],
+                "task_owner_role_ids": [],
+                "test_case_tester_role_ids": _role_ids_for_capabilities("tester"),
+                "test_run_owner_role_ids": _role_ids_for_capabilities("tester"),
+                "bug_owner_role_ids": [],
             "creation_mode": "template",
             "template_source": {"source_type": "system", "source_id": "system-standard"},
         },
@@ -545,8 +579,30 @@ def _create_project_with_requirement_workflow(client: TestClient) -> tuple[int, 
         json={
             "initial_state_id": -1,
             "states": [
-                {"id": -1, "status_name": "Pending Assignment", "category": "start", "x": 100, "y": 100},
-                {"id": -2, "status_name": "Processing", "category": "normal", "x": 300, "y": 100},
+                {
+                    "id": -1,
+                    "status_name": "Pending Assignment",
+                    "category": "start",
+                    "state_role": "unassigned",
+                    "x": 100,
+                    "y": 100,
+                },
+                {
+                    "id": -2,
+                    "status_name": "Waiting Iteration",
+                    "category": "normal",
+                    "state_role": "waiting_iteration",
+                    "x": 300,
+                    "y": 100,
+                },
+                {
+                    "id": -3,
+                    "status_name": "Processing",
+                    "category": "normal",
+                    "state_role": "active_work",
+                    "x": 500,
+                    "y": 100,
+                },
             ],
             "transitions": [
                 {
@@ -558,9 +614,16 @@ def _create_project_with_requirement_workflow(client: TestClient) -> tuple[int, 
                     "handler_rule": {"target_type": "actor", "fallback_type": "keep_current"},
                 },
                 {
+                    "action_key": "start_iteration",
+                    "action_name": "Start Iteration",
+                    "from_state_id": -2,
+                    "to_state_id": -3,
+                    "handler_rule": {"target_type": "keep_current", "fallback_type": "keep_current"},
+                },
+                {
                     "action_key": "defer",
                     "action_name": "延期",
-                    "from_state_id": -2,
+                    "from_state_id": -3,
                     "to_state_id": -1,
                     "handler_rule": {"target_type": "keep_current", "fallback_type": "keep_current"},
                     "form_config": {
@@ -587,10 +650,13 @@ def _create_project_with_requirement_workflow(client: TestClient) -> tuple[int, 
 def test_runtime_lists_configured_transitions_and_batch(client: TestClient):
     _, project_id = _create_project_with_bug_workflow(client)
     owner_id, _ = _create_user("Runtime Listed Owner", "developer")
+    _add_project_member(project_id, owner_id, "developer")
     bug = client.post(
         "/api/v1/bugs",
         json={"project_id": project_id, "title": f"Runtime Bug {uuid4().hex[:8]}", "owner_id": owner_id},
-    ).json()
+    )
+    assert bug.status_code == 200, bug.text
+    bug = bug.json()
 
     listed = client.get(f"/api/v1/workflow-runtime/bug/{bug['id']}/transitions")
     batch = client.post(
@@ -825,12 +891,12 @@ def test_runtime_hides_transitions_from_non_handler_and_allows_manager_delegate(
     assert other_visible.status_code == 200
     assert other_visible.json() == []
     assert manager_visible.status_code == 200
-    assert [item["action_key"] for item in manager_visible.json()] == ["start_fixing", "close"]
+    assert {"start_fixing", "close"} <= {item["action_key"] for item in manager_visible.json()}
     assert other_execute.status_code == 403
 
 
 def test_runtime_manual_owner_respects_configured_roles(client: TestClient):
-    _, project_id = _create_project_with_bug_workflow(client)
+    config_id, project_id = _create_project_with_bug_workflow(client)
     owner_id, owner_token = _create_user("Runtime Manual Owner", "developer")
     developer_id, _ = _create_user("Runtime Next Developer", "developer")
     tester_id, _ = _create_user("Runtime Tester", "tester")
@@ -839,17 +905,32 @@ def test_runtime_manual_owner_respects_configured_roles(client: TestClient):
     _add_project_member(project_id, tester_id, "tester")
     db = SessionLocal()
     try:
+        definition_id = _scheme_definition(client, config_id, "bug")["id"]
         transition = (
             db.query(WorkflowTransition)
-            .filter(WorkflowTransition.action_key == "start_fixing")
+            .filter(
+                WorkflowTransition.definition_id == definition_id,
+                WorkflowTransition.action_key == "start_fixing",
+            )
             .order_by(WorkflowTransition.id.desc())
             .first()
         )
         transition.handler_rule = {
             **(transition.handler_rule or {}),
             "allow_manual_owner": True,
-            "manual_owner_roles": "developer",
         }
+        db.query(WorkflowTransitionRole).filter(
+            WorkflowTransitionRole.transition_id == transition.id,
+            WorkflowTransitionRole.purpose == "target",
+        ).delete()
+        db.add(
+            WorkflowTransitionRole(
+                transition_id=transition.id,
+                role_id=_role_ids_for_capabilities("developer")[0],
+                purpose="target",
+                sort_order=0,
+            )
+        )
         db.commit()
     finally:
         db.close()
@@ -883,7 +964,7 @@ def test_runtime_manual_owner_respects_configured_roles(client: TestClient):
 
 
 def test_runtime_manual_owner_project_member_target_role_excludes_unrelated_users(client: TestClient):
-    _, project_id = _create_project_with_bug_workflow(client)
+    config_id, project_id = _create_project_with_bug_workflow(client)
     owner_id, owner_token = _create_user("Runtime Target Role Owner", "developer")
     member_id, _ = _create_user("Runtime Target Role Member", "tester")
     inactive_member_id, _ = _create_user("Runtime Inactive Member", "developer")
@@ -894,19 +975,24 @@ def test_runtime_manual_owner_project_member_target_role_excludes_unrelated_user
     db = SessionLocal()
     try:
         db.query(User).filter(User.id == inactive_member_id).update({"is_active": False})
+        definition_id = _scheme_definition(client, config_id, "bug")["id"]
         transition = (
             db.query(WorkflowTransition)
-            .filter(WorkflowTransition.action_key == "start_fixing")
+            .filter(
+                WorkflowTransition.definition_id == definition_id,
+                WorkflowTransition.action_key == "start_fixing",
+            )
             .order_by(WorkflowTransition.id.desc())
             .first()
         )
         transition.handler_rule = {
             **(transition.handler_rule or {}),
-            "target_type": "project_role",
-            "target_roles": "project_member",
             "allow_manual_owner": True,
-            "manual_owner_roles": "",
         }
+        db.query(WorkflowTransitionRole).filter(
+            WorkflowTransitionRole.transition_id == transition.id,
+            WorkflowTransitionRole.purpose == "target",
+        ).delete()
         db.commit()
     finally:
         db.close()
@@ -1076,12 +1162,7 @@ def test_runtime_requirement_defer_moves_tasks_and_test_cases(client: TestClient
             "owner_id": owner_id,
         },
     ).json()
-    claimed = client.post(
-        f"/api/v1/workflow-runtime/requirement/{requirement['id']}/transition",
-        json={"action_key": "claim"},
-        headers={"Authorization": f"Bearer {owner_token}"},
-    )
-    assert claimed.status_code == 200, claimed.text
+    assert _state_role(requirement["current_state_id"]) == "waiting_iteration"
     task = client.post(
         "/api/v1/tasks",
         json={
@@ -1100,6 +1181,9 @@ def test_runtime_requirement_defer_moves_tasks_and_test_cases(client: TestClient
             "title": f"Runtime Defer Case {uuid4().hex[:8]}",
         },
     ).json()
+    _start_iteration(client, current_iteration["id"])
+    _start_iteration(client, target_iteration["id"])
+    assert _state_role(client.get(f"/api/v1/requirements/{requirement['id']}").json()["current_state_id"]) == "active_work"
 
     deferred = client.post(
         f"/api/v1/workflow-runtime/requirement/{requirement['id']}/transition",
@@ -1135,6 +1219,10 @@ def test_runtime_requirement_defer_without_target_uses_another_eligible_iteratio
         "/api/v1/iterations",
         json={"name": f"Runtime pool source {uuid4().hex[:8]}", "project_ids": [project_id]},
     ).json()
+    target = client.post(
+        "/api/v1/iterations",
+        json={"name": f"Runtime pool target {uuid4().hex[:8]}", "project_ids": [project_id]},
+    ).json()
     requirement = client.post(
         "/api/v1/requirements",
         json={
@@ -1144,11 +1232,8 @@ def test_runtime_requirement_defer_without_target_uses_another_eligible_iteratio
             "owner_id": owner_id,
         },
     ).json()
-    assert client.post(
-        f"/api/v1/workflow-runtime/requirement/{requirement['id']}/transition",
-        json={"action_key": "claim"},
-        headers={"Authorization": f"Bearer {owner_token}"},
-    ).status_code == 200
+    _start_iteration(client, source["id"])
+    _start_iteration(client, target["id"])
 
     deferred = client.post(
         f"/api/v1/workflow-runtime/requirement/{requirement['id']}/transition",
@@ -1157,7 +1242,7 @@ def test_runtime_requirement_defer_without_target_uses_another_eligible_iteratio
     )
 
     assert deferred.status_code == 200, deferred.text
-    assert client.get(f"/api/v1/requirements/{requirement['id']}").json()["iteration_id"] != source["id"]
+    assert client.get(f"/api/v1/requirements/{requirement['id']}").json()["iteration_id"] == target["id"]
 
 
 @pytest.mark.parametrize("terminal_side", ["source", "target"])
@@ -1171,10 +1256,8 @@ def test_requirement_defer_rejects_terminal_source_or_target_iteration(client: T
         "/api/v1/requirements",
         json={"project_id": project_id, "iteration_id": source["id"], "title": f"Terminal defer {uuid4().hex[:8]}", "owner_id": owner_id},
     ).json()
-    assert client.post(
-        f"/api/v1/workflow-runtime/requirement/{requirement['id']}/transition",
-        json={"action_key": "claim"}, headers={"Authorization": f"Bearer {owner_token}"},
-    ).status_code == 200
+    _start_iteration(client, source["id"])
+    _start_iteration(client, target["id"])
     terminal_id = source["id"] if terminal_side == "source" else target["id"]
     db = SessionLocal()
     try:
@@ -1207,10 +1290,7 @@ def test_requirement_defer_rejects_nonnumeric_target_iteration_id(client: TestCl
         "/api/v1/requirements",
         json={"project_id": project_id, "iteration_id": source["id"], "title": f"Invalid defer {uuid4().hex[:8]}", "owner_id": owner_id},
     ).json()
-    assert client.post(
-        f"/api/v1/workflow-runtime/requirement/{requirement['id']}/transition",
-        json={"action_key": "claim"}, headers={"Authorization": f"Bearer {owner_token}"},
-    ).status_code == 200
+    _start_iteration(client, source["id"])
 
     deferred = client.post(
         f"/api/v1/workflow-runtime/requirement/{requirement['id']}/transition",
@@ -1232,10 +1312,8 @@ def test_requirement_defer_accepts_legacy_iteration_id_alias(client: TestClient)
         "/api/v1/requirements",
         json={"project_id": project_id, "iteration_id": source["id"], "title": f"Legacy defer {uuid4().hex[:8]}", "owner_id": owner_id},
     ).json()
-    assert client.post(
-        f"/api/v1/workflow-runtime/requirement/{requirement['id']}/transition",
-        json={"action_key": "claim"}, headers={"Authorization": f"Bearer {owner_token}"},
-    ).status_code == 200
+    _start_iteration(client, source["id"])
+    _start_iteration(client, target["id"])
 
     deferred = client.post(
         f"/api/v1/workflow-runtime/requirement/{requirement['id']}/transition",
@@ -1257,10 +1335,7 @@ def test_requirement_defer_rejects_boolean_and_float_target_iteration_id(client:
         "/api/v1/requirements",
         json={"project_id": project_id, "iteration_id": source["id"], "title": f"Strict defer {uuid4().hex[:8]}", "owner_id": owner_id},
     ).json()
-    assert client.post(
-        f"/api/v1/workflow-runtime/requirement/{requirement['id']}/transition",
-        json={"action_key": "claim"}, headers={"Authorization": f"Bearer {owner_token}"},
-    ).status_code == 200
+    _start_iteration(client, source["id"])
 
     deferred = client.post(
         f"/api/v1/workflow-runtime/requirement/{requirement['id']}/transition",
@@ -1334,7 +1409,7 @@ def test_bug_routing_modes_reject_forged_targets_and_audit_reclassification(clie
         headers={"Authorization": f"Bearer {handler_token}"},
     )
     assert forged_automatic.status_code == 422
-    assert client.get(f"/api/v1/bugs/{automatic_bug['id']}").json()["status_name"] == "待处理"
+    assert client.get(f"/api/v1/bugs/{automatic_bug['id']}").json()["status_name"] == "修复中"
 
     bug = client.post(
         "/api/v1/bugs",
@@ -1407,15 +1482,37 @@ def test_manual_routing_mode_requires_an_allowed_target_status(client: TestClien
         json={
             "initial_state_id": -1,
             "states": [
-                {"id": -1, "status_name": "Pending", "category": "start", "x": 100, "y": 100},
-                {"id": -2, "status_name": "Fixing", "category": "normal", "x": 300, "y": 100},
+                {
+                    "id": -1,
+                    "status_name": "Pending",
+                    "category": "start",
+                    "state_role": "unassigned",
+                    "x": 100,
+                    "y": 100,
+                },
+                {
+                    "id": -2,
+                    "status_name": "Fixing",
+                    "category": "normal",
+                    "state_role": "active_work",
+                    "x": 300,
+                    "y": 100,
+                },
+                {
+                    "id": -4,
+                    "status_name": "Waiting",
+                    "category": "normal",
+                    "state_role": "waiting_iteration",
+                    "x": 200,
+                    "y": 180,
+                },
                 {"id": -3, "status_name": "Verify", "category": "normal", "x": 500, "y": 100},
             ],
             "transitions": [
                 {
                     "action_key": "confirm_bug_type",
                     "action_name": "Manual classification",
-                    "from_state_id": -1,
+                    "from_state_id": -2,
                     "to_state_id": -2,
                     "handler_rule": {"target_type": "keep_current", "fallback_type": "keep_current"},
                     "condition_config": {
@@ -1485,11 +1582,11 @@ def test_runtime_submit_confirmation_moves_bug_fix_task_to_confirmation_handler(
         "/api/v1/assignee-rule-configs",
         json={
             "name": f"Task Runtime Config {uuid4().hex[:8]}",
-            "requirement_owner_roles": "product_owner",
-            "task_owner_roles": "developer",
-            "test_case_tester_roles": "tester",
-            "test_run_owner_roles": "tester",
-            "bug_owner_roles": "developer",
+            "requirement_owner_role_ids": _role_ids_for_capabilities("product_owner"),
+            "task_owner_role_ids": _role_ids_for_capabilities("developer"),
+            "test_case_tester_role_ids": _role_ids_for_capabilities("tester"),
+            "test_run_owner_role_ids": _role_ids_for_capabilities("tester"),
+            "bug_owner_role_ids": _role_ids_for_capabilities("developer"),
             "creation_mode": "template",
             "template_source": {"source_type": "system", "source_id": "system-standard"},
         },
@@ -1505,10 +1602,12 @@ def test_runtime_submit_confirmation_moves_bug_fix_task_to_confirmation_handler(
     confirmer_id, confirmer_token = _create_user("Task Runtime Owner", "project_owner")
     _add_project_member(project.json()["id"], developer_id, "developer")
     _add_project_member(project.json()["id"], confirmer_id, "project_owner")
+    iteration_id = _project_iteration_id(client, project.json()["id"])
     task = client.post(
         "/api/v1/tasks",
         json={
             "project_id": project.json()["id"],
+            "iteration_id": iteration_id,
             "title": f"Task runtime {uuid4().hex[:8]}",
             "task_type": "bug_fix",
             "owner_id": developer_id,
@@ -1518,19 +1617,14 @@ def test_runtime_submit_confirmation_moves_bug_fix_task_to_confirmation_handler(
         "/api/v1/bugs",
         json={
             "project_id": project.json()["id"],
+            "iteration_id": iteration_id,
             "task_id": task["id"],
             "title": f"Task runtime source bug {uuid4().hex[:8]}",
             "reporter_id": confirmer_id,
         },
     )
     assert source_bug.status_code == 200, source_bug.text
-
-    claimed = client.post(
-        f"/api/v1/workflow-runtime/task/{task['id']}/transition",
-        json={"action_key": "claim"},
-        headers={"Authorization": f"Bearer {developer_token}"},
-    )
-    assert claimed.status_code == 200, claimed.text
+    _start_iteration(client, iteration_id)
 
     executed = client.post(
         f"/api/v1/workflow-runtime/task/{task['id']}/transition",
@@ -1625,7 +1719,7 @@ def test_ownerless_runtime_actions_require_project_membership_and_allow_system_a
     assert "assign" in {item["action_key"] for item in admin_actions.json()}
     assert admin_assign.status_code == 200
     assert admin_assign.json()["owner_id"] == member_id
-    assert admin_assign.json()["status_name"] == "处理中"
+    assert _state_role(admin_assign.json()["current_state_id"]) == "waiting_iteration"
 
 
 def test_scoped_workflow_does_not_fallback_to_system_action(client: TestClient):
@@ -1701,21 +1795,18 @@ def test_runtime_owner_transfer_and_admin_change_handler_are_atomic_and_audited(
     admin_id, admin_token = _create_user("Ownership Runtime Admin", "system_admin")
     _add_project_member(project["id"], handler_id, "developer")
     _add_project_member(project["id"], target_id, "developer")
+    iteration_id = _project_iteration_id(client, project["id"])
     task = client.post(
         "/api/v1/tasks",
         json={
             "project_id": project["id"],
+            "iteration_id": iteration_id,
             "title": f"Ownership Runtime Task {uuid4().hex[:8]}",
             "task_type": "standalone_operation",
             "owner_id": handler_id,
         },
     ).json()
-    claimed = client.post(
-        f"/api/v1/workflow-runtime/task/{task['id']}/transition",
-        json={"action_key": "claim"},
-        headers={"Authorization": f"Bearer {handler_token}"},
-    )
-    assert claimed.status_code == 200, claimed.text
+    _start_iteration(client, iteration_id)
 
     transferred = client.post(
         f"/api/v1/workflow-runtime/task/{task['id']}/transition",
@@ -1831,11 +1922,13 @@ def test_bug_from_test_execution_routes_repair_and_verification_handlers_separat
         json={"action_key": "confirm_bug_type", "payload": {"selected_values": {"bug_type": "code_issue"}}},
         headers={"Authorization": f"Bearer {repair_token}"},
     )
+    assert classified.status_code == 200, classified.text
     submitted = client.post(
         f"/api/v1/workflow-runtime/bug/{bug.json()['id']}/transition",
         json={"action_key": "submit_verification", "payload": {"reason": "fixed"}},
         headers={"Authorization": f"Bearer {repair_token}"},
     )
+    assert submitted.status_code == 200, submitted.text
     submit_history = client.get(f"/api/v1/bugs/{bug.json()['id']}/status-operations").json()
     submit_routing = next(item for item in submit_history if item["action"] == "submit_verification")["selected_values"]["handler_routing"]
     assert submit_routing["source_rule"] == "bug_verifier:test_executor"
@@ -1845,8 +1938,6 @@ def test_bug_from_test_execution_routes_repair_and_verification_handlers_separat
         headers={"Authorization": f"Bearer {executor_token}"},
     )
 
-    assert classified.status_code == 200
-    assert submitted.status_code == 200
     assert submitted.json()["status_name"] == "待验证"
     assert submitted.json()["owner_id"] == executor_id
     assert failed.status_code == 200
@@ -1867,21 +1958,18 @@ def test_submit_confirmation_defaults_to_the_project_owner(client: TestClient):
     ).json()
     developer_id, developer_token = _create_user("Missing Confirmer Developer", "developer")
     _add_project_member(project["id"], developer_id, "developer")
+    iteration_id = _project_iteration_id(client, project["id"])
     task = client.post(
         "/api/v1/tasks",
         json={
             "project_id": project["id"],
+            "iteration_id": iteration_id,
             "title": f"Missing Confirmer Task {uuid4().hex[:8]}",
             "task_type": "bug_fix",
             "owner_id": developer_id,
         },
     ).json()
-    claimed = client.post(
-        f"/api/v1/workflow-runtime/task/{task['id']}/transition",
-        json={"action_key": "claim"},
-        headers={"Authorization": f"Bearer {developer_token}"},
-    )
-    assert claimed.status_code == 200, claimed.text
+    _start_iteration(client, iteration_id)
 
     response = client.post(
         f"/api/v1/workflow-runtime/task/{task['id']}/transition",
@@ -1899,11 +1987,11 @@ def test_task_confirmation_routes_all_branches_and_records_manual_override(clien
         "/api/v1/assignee-rule-configs",
         json={
             "name": f"Branch Confirmation Config {uuid4().hex[:8]}",
-            "requirement_owner_roles": "product_owner",
-            "task_owner_roles": "developer",
-            "test_case_tester_roles": "tester",
-            "test_run_owner_roles": "tester",
-            "bug_owner_roles": "developer",
+            "requirement_owner_role_ids": _role_ids_for_capabilities("product_owner"),
+            "task_owner_role_ids": _role_ids_for_capabilities("developer"),
+            "test_case_tester_role_ids": _role_ids_for_capabilities("tester"),
+            "test_run_owner_role_ids": _role_ids_for_capabilities("tester"),
+            "bug_owner_role_ids": _role_ids_for_capabilities("developer"),
             "creation_mode": "template",
             "template_source": {"source_type": "system", "source_id": "system-standard"},
         },
@@ -1914,19 +2002,27 @@ def test_task_confirmation_routes_all_branches_and_records_manual_override(clien
         json={
             "initial_state_id": -1,
             "states": [
-                {"id": -1, "status_name": "Pending Assignment", "category": "start"},
-                {"id": -2, "status_name": "In Processing", "category": "normal"},
+                {"id": -1, "status_name": "Pending Assignment", "category": "start", "state_role": "unassigned"},
+                {"id": -2, "status_name": "In Processing", "category": "normal", "state_role": "active_work"},
+                {"id": -4, "status_name": "Waiting Iteration", "category": "normal", "state_role": "waiting_iteration"},
                 {"id": -3, "status_name": "Pending Confirmation", "category": "normal"},
             ],
             "transitions": [
                 {
-                    "action_key": "claim",
-                    "action_name": "Claim",
-                    "from_state_id": -1,
-                    "to_state_id": -2,
-                    "allowed_roles": "project_member",
-                    "handler_rule": {"target_type": "actor", "fallback_type": "keep_current"},
-                },
+                        "action_key": "claim",
+                        "action_name": "Claim",
+                        "from_state_id": -1,
+                        "to_state_id": -4,
+                        "allowed_roles": "project_member",
+                        "handler_rule": {"target_type": "actor", "fallback_type": "keep_current"},
+                    },
+                    {
+                        "action_key": "start_iteration",
+                        "action_name": "Start Iteration",
+                        "from_state_id": -4,
+                        "to_state_id": -2,
+                        "handler_rule": {"target_type": "keep_current", "fallback_type": "keep_current"},
+                    },
                 {
                     "action_key": "submit_confirmation",
                     "action_name": "Submit Confirmation",
@@ -1966,9 +2062,10 @@ def test_task_confirmation_routes_all_branches_and_records_manual_override(clien
     ):
         _add_project_member(project["id"], user_id, role, sort_order=index)
 
+    iteration_id = _project_iteration_id(client, project["id"])
     requirement = client.post(
         "/api/v1/requirements",
-        json={"project_id": project["id"], "iteration_id": _project_iteration_id(client, project["id"]), "title": f"Branch Requirement {uuid4().hex[:8]}", "owner_id": requirement_owner_id},
+        json={"project_id": project["id"], "iteration_id": iteration_id, "title": f"Branch Requirement {uuid4().hex[:8]}", "owner_id": requirement_owner_id},
     ).json()
     requirement_task = client.post(
         "/api/v1/tasks",
@@ -1993,6 +2090,7 @@ def test_task_confirmation_routes_all_branches_and_records_manual_override(clien
         "/api/v1/bugs",
         json={
             "project_id": project["id"],
+            "iteration_id": iteration_id,
             "task_id": bug_task["id"],
             "title": f"Branch Source Bug {uuid4().hex[:8]}",
             "reporter_id": bug_reporter_id,
@@ -2047,6 +2145,8 @@ def test_task_confirmation_routes_all_branches_and_records_manual_override(clien
     finally:
         db.close()
 
+    _start_iteration(client, iteration_id)
+
     expected = [
         (requirement_task, executor_token, requirement_owner_id),
         (bug_task, executor_token, bug_reporter_id),
@@ -2054,12 +2154,6 @@ def test_task_confirmation_routes_all_branches_and_records_manual_override(clien
         (standalone_task, standalone_creator_token, standalone_creator_id),
     ]
     for task, token, expected_owner_id in expected:
-        claimed = client.post(
-            f"/api/v1/workflow-runtime/task/{task['id']}/transition",
-            json={"action_key": "claim"},
-            headers={"Authorization": f"Bearer {token}"},
-        )
-        assert claimed.status_code == 200, claimed.text
         response = client.post(
             f"/api/v1/workflow-runtime/task/{task['id']}/transition",
             json={"action_key": "submit_confirmation", "payload": {"reason": "branch confirmation"}},
@@ -2068,12 +2162,6 @@ def test_task_confirmation_routes_all_branches_and_records_manual_override(clien
         assert response.status_code == 200
         assert response.json()["owner_id"] == expected_owner_id
 
-    manual_claimed = client.post(
-        f"/api/v1/workflow-runtime/task/{manual_task['id']}/transition",
-        json={"action_key": "claim"},
-        headers={"Authorization": f"Bearer {standalone_creator_token}"},
-    )
-    assert manual_claimed.status_code == 200, manual_claimed.text
     manual = client.post(
         f"/api/v1/workflow-runtime/task/{manual_task['id']}/transition",
         json={

@@ -32,7 +32,7 @@ from app.services.project_permission_service import (
 from app.services.lifecycle_service import project_lifecycle_phase, requirement_lifecycle_phase
 from app.services.iteration_assignment_service import resolve_work_item_iteration
 from app.services.status_operation_service import list_status_operations
-from app.services.workflow_state_service import initial_workflow_values
+from app.services.workflow_state_service import initial_work_item_workflow_values
 from app.services.workflow_state_query_service import is_terminal_state
 from app.services.work_item_iteration_history_service import move_work_item_to_iteration
 from app.views.task_view import LinkedTaskCreate, TaskCreate, TaskUpdate
@@ -101,7 +101,14 @@ def create_task(db: Session, payload: TaskCreate, actor_id: int | None = None) -
     primary_component = resolve_primary_component(db, data["project_id"], primary_component_id)
     if primary_component:
         data["source_project_id"] = primary_component.source_project_id
-    data.update(initial_workflow_values(db, "task", data.get("project_id"), primary_component_id))
+    data.update(initial_work_item_workflow_values(
+        db,
+        "task",
+        data.get("project_id"),
+        data.get("owner_id"),
+        data.get("iteration_id"),
+        primary_component_id,
+    ))
     task = Task(**data)
     db.add(task)
     db.flush()
@@ -154,7 +161,13 @@ def create_linked_task(db: Session, payload: LinkedTaskCreate, actor: User | Non
         if final_owner_id and not is_project_member(db, project_id, final_owner_id):
             raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Selected handler is not a project member")
 
-    workflow_values = initial_workflow_values(db, "task", project_id)
+    workflow_values = initial_work_item_workflow_values(
+        db,
+        "task",
+        project_id,
+        final_owner_id,
+        inherited_iteration_id,
+    )
     task = Task(
         project_id=project_id,
         source_project_id=getattr(source, "source_project_id", None),

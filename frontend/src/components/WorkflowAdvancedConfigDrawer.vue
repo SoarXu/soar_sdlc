@@ -37,6 +37,15 @@
                 <el-option label="结束" value="terminal" />
               </el-select>
             </el-form-item>
+            <el-form-item v-if="stateRoleOptions(props.objectType).length" label="系统状态角色">
+              <el-select v-model="state.state_role" clearable placeholder="不设置">
+                <el-option
+                  v-for="option in stateRoleOptions(props.objectType)"
+                  :key="option.value"
+                  v-bind="option"
+                />
+              </el-select>
+            </el-form-item>
             <el-form-item v-if="state.category === 'terminal'" label="终态归类" :error="stateErrorFor('terminal_kind')">
               <el-select v-model="state.terminal_kind" :clearable="false" required placeholder="请选择归类">
                 <el-option label="已完成" value="completed" />
@@ -44,10 +53,11 @@
               </el-select>
             </el-form-item>
             <el-form-item label="颜色"><el-color-picker v-model="state.color" /></el-form-item>
-            <el-form-item label="启用"><el-switch v-model="state.enabled" /></el-form-item>
+            <el-form-item label="启用">
+              <el-switch :model-value="state.enabled" @update:model-value="requestStateEnabledChange" />
+            </el-form-item>
           </div>
         </el-form>
-        <el-button type="danger" plain @click="emit('remove-state')">删除状态</el-button>
       </div>
       <section v-for="group in actionGroups" :key="group.key" class="action-group">
         <header class="action-group-header">
@@ -115,7 +125,9 @@
                   <el-option v-for="item in states" :key="item.id" :label="item.status_name" :value="item.id" />
                 </el-select>
               </el-form-item>
-              <el-form-item label="启用"><el-switch v-model="transition.enabled" /></el-form-item>
+              <el-form-item label="启用">
+                <el-switch v-model="transition.enabled" :disabled="!transitionEndpointsEnabled(transition)" />
+              </el-form-item>
             </div>
             <div class="diagram-routing-row">
               <div>
@@ -399,9 +411,11 @@ import {
 } from '../utils/workflowAdvancedConfig'
 import { groupStateTransitions } from '../utils/workflowTransitionOrdering'
 import { isManualDiagramRoute } from '../utils/workflowManualRoute'
+import { stateRoleOptions } from '../utils/workflowStateRoles'
 
 const props = defineProps({
   modelValue: { type: Boolean, default: false },
+  objectType: { type: String, default: '' },
   state: { type: Object, default: null },
   transition: { type: Object, default: null },
   transitions: { type: Array, default: () => [] },
@@ -413,7 +427,7 @@ const props = defineProps({
 
 const emit = defineEmits([
   'update:modelValue', 'apply', 'back', 'select-transition', 'move-transition',
-  'add-transition', 'remove-state', 'remove-transition', 'reset-diagram-route', 'retarget-transition'
+  'add-transition', 'state-enabled-change', 'remove-transition', 'reset-diagram-route', 'retarget-transition'
 ])
 
 const drawerSize = 'clamp(520px, 42vw, 640px)'
@@ -606,6 +620,17 @@ function applyPendingChanges() {
 
 function apply() {
   applyPendingChanges()
+}
+
+function requestStateEnabledChange(enabled) {
+  if (!props.state || props.state.enabled === enabled) return
+  emit('state-enabled-change', enabled)
+}
+
+function transitionEndpointsEnabled(transition) {
+  const fromState = props.states.find((state) => state.id === transition.from_state_id)
+  const toState = props.states.find((state) => state.id === transition.to_state_id)
+  return Boolean(fromState?.enabled && toState?.enabled)
 }
 
 async function requestBack() {

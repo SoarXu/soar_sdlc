@@ -21,10 +21,13 @@ from app.views.workflow_definition_view import (
     WorkflowDefinitionUpdate,
     WorkflowGraphSave,
     WorkflowTemplateGraphSave,
+    WorkflowTransitionSave,
 )
 
 
 OBJECT_TYPES = {"requirement", "task", "bug", "iteration", "project"}
+WORK_ITEM_STATE_ROLE_OBJECT_TYPES = {"requirement", "task", "bug"}
+WORK_ITEM_STATE_ROLES = {"unassigned", "waiting_iteration", "active_work"}
 SCOPE_TYPES = {"system", "project", "assignee_rule_config"}
 STATE_CATEGORIES = {"start", "normal", "terminal"}
 TERMINAL_KINDS = {"completed", "terminated"}
@@ -54,7 +57,7 @@ UI_CONFIG_KEYS = {
 }
 CONDITION_CONFIG_KEYS = {
     "task_types", "field", "routes", "route_dictionary", "routing_mode", "allow_override_role_ids",
-    "target_state_id_by_owner", "target_status_by_owner",
+    "target_state_id_by_owner", "target_status_by_owner", "target_state_role_by_iteration_phase",
 }
 FORM_CONFIG_KEYS = {"title", "submit_text", "fields", "allow_manual_owner", "allow_unassigned"}
 FORM_FIELD_KEYS = {
@@ -139,12 +142,15 @@ def get_graph(db: Session, definition_id: int) -> dict:
 def save_graph(db: Session, definition_id: int, payload: WorkflowGraphSave) -> dict:
     definition = _get_definition(db, definition_id)
     payload = _normalize_legacy_template_references(db, definition, payload)
+    payload = _synchronize_transition_state_availability(db, definition, payload)
     _save_graph(
         db,
         definition,
         payload,
         disable_omitted_transitions=payload.replace_existing_transitions,
     )
+    if definition.scope_type != "system":
+        definition.parent_definition_id = None
     return _graph_response(db, definition)
 
 
@@ -154,8 +160,11 @@ def _normalize_legacy_template_references(
     payload: WorkflowGraphSave,
 ) -> WorkflowGraphSave:
     template = graph_for_object_type(definition.object_type)
+    normalized = payload.model_copy(deep=True)
+    for transition in normalized.transitions:
+        _normalize_legacy_transition_role_references(db, transition)
     submitted_by_identity: dict[tuple[str, str], list[int]] = defaultdict(list)
-    for state in payload.states:
+    for state in normalized.states:
         submitted_by_identity[(state.status_name, state.category)].append(state.id)
 
     ref_to_state_id = {}
@@ -165,7 +174,7 @@ def _normalize_legacy_template_references(
             ref_to_state_id[template_state.ref] = matches[0]
 
     if not ref_to_state_id:
-        return payload
+        return normalized
 
     existing_action_keys = {
         item.id: item.action_key
@@ -177,7 +186,6 @@ def _normalize_legacy_template_references(
     for template_transition in template.transitions:
         templates_by_action_key[template_transition.action_key].append(template_transition)
 
-    normalized = payload.model_copy(deep=True)
     state_ids = {state.id for state in normalized.states}
     for transition in normalized.transitions:
         action_key = transition.action_key or existing_action_keys.get(transition.id)
@@ -306,6 +314,74 @@ def _normalize_legacy_template_form_config(current: dict, expected: dict) -> dic
     return normalized
 
 
+def _normalize_legacy_transition_role_references(
+    db: Session,
+    transition: WorkflowTransitionSave,
+) -> None:
+    identities, role_ids = _template_role_values(db, transition.allowed_roles)
+    transition.allowed_roles = ",".join(identities)
+    if role_ids:
+        transition.allowed_role_ids = list(dict.fromkeys([*transition.allowed_role_ids, *role_ids]))
+
+    handler_rule = dict(transition.handler_rule or {})
+    for legacy_field, role_field in (
+        ("target_roles", "handler_target_role_ids"),
+        ("fallback_roles", "handler_fallback_role_ids"),
+    ):
+        if legacy_field not in handler_rule:
+            continue
+        _identities, role_ids = _template_role_values(db, handler_rule.pop(legacy_field))
+        if role_ids:
+            current_ids = getattr(transition, role_field)
+            setattr(transition, role_field, list(dict.fromkeys([*current_ids, *role_ids])))
+    transition.handler_rule = handler_rule or None
+
+    if not isinstance(transition.condition_config, dict):
+        return
+    condition = dict(transition.condition_config)
+    if "allow_override_roles" not in condition:
+        return
+    _identities, role_ids = _template_role_values(db, condition.pop("allow_override_roles"))
+    if role_ids:
+        current_ids = condition.get("allow_override_role_ids") or []
+        condition["allow_override_role_ids"] = list(dict.fromkeys([*current_ids, *role_ids]))
+    transition.condition_config = condition
+
+
+def _synchronize_transition_state_availability(
+    db: Session,
+    definition: WorkflowDefinition,
+    payload: WorkflowGraphSave,
+) -> WorkflowGraphSave:
+    state_enabled = {state.id: state.enabled for state in payload.states}
+    existing_markers = {
+        transition.id: bool(transition.auto_disabled_by_state)
+        for transition in db.query(WorkflowTransition).filter(
+            WorkflowTransition.definition_id == definition.id
+        ).all()
+    }
+    synchronized = payload.model_copy(deep=True)
+    for transition in synchronized.transitions:
+        marker = (
+            transition.auto_disabled_by_state
+            if "auto_disabled_by_state" in transition.model_fields_set
+            else existing_markers.get(transition.id, False)
+        )
+        from_enabled = state_enabled.get(transition.from_state_id)
+        to_enabled = state_enabled.get(transition.to_state_id)
+        if from_enabled is None or to_enabled is None:
+            continue
+        if not from_enabled or not to_enabled:
+            if transition.enabled:
+                marker = True
+            transition.enabled = False
+        elif marker:
+            transition.enabled = True
+            marker = False
+        transition.auto_disabled_by_state = marker
+    return synchronized
+
+
 def _save_graph(
     db: Session,
     definition: WorkflowDefinition,
@@ -403,6 +479,7 @@ def _validate_graph(db: Session, definition: WorkflowDefinition, payload: Workfl
     if definition.object_type not in OBJECT_TYPES:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Unknown workflow object type")
     state_ids: set[int] = set()
+    state_roles: set[str] = set()
     states_by_id = {}
     for state in payload.states:
         if state.category not in STATE_CATEGORIES:
@@ -416,6 +493,14 @@ def _validate_graph(db: Session, definition: WorkflowDefinition, payload: Workfl
             )
         if state.category != "terminal" and state.terminal_kind is not None:
             raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Terminal kind requires a terminal state")
+        if state.state_role is not None:
+            if definition.object_type not in WORK_ITEM_STATE_ROLE_OBJECT_TYPES:
+                raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="State role is not supported for this workflow type")
+            if state.state_role not in WORK_ITEM_STATE_ROLES:
+                raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Unsupported work-item state role")
+            if state.state_role in state_roles:
+                raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Duplicate work-item state role")
+            state_roles.add(state.state_role)
         if state.id in state_ids:
             raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Duplicate state id")
         state_ids.add(state.id)
@@ -704,6 +789,8 @@ def _persist_graph(
         data = item.model_dump(exclude={"id"})
         if item.id > 0:
             state = existing_states[item.id]
+            if "state_role" not in item.model_fields_set:
+                data.pop("state_role")
             for field, value in data.items():
                 setattr(state, field, value)
         else:

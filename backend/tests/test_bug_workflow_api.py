@@ -10,9 +10,9 @@ from app.models.bug import Bug
 from app.models.iteration import Iteration
 from app.models.project import Project
 from app.models.project_member import ProjectMember
-from app.models.role import Role, UserRole
+from app.models.role import RoleCapability
 from app.models.user import User
-from app.models.workflow_definition import WorkflowTransition
+from app.models.workflow_definition import WorkflowState, WorkflowTransition, WorkflowTransitionRole
 from app.services.exception_center_service import list_exception_refs
 from app.services.workflow_runtime_service import (
     _reactivation_handler_eligibility,
@@ -29,21 +29,16 @@ def _create_project(client: TestClient) -> int:
 def _create_user(role_key: str) -> tuple[int, str]:
     db = SessionLocal()
     try:
-        role = db.query(Role).filter(Role.role_key == role_key).first()
-        if not role:
-            role = Role(role_key=role_key, role_name=role_key, enabled=True, is_system=True)
-            db.add(role)
-            db.flush()
         username = f"bug_reactivate_{uuid4().hex[:8]}"
         user = User(
             username=username,
             full_name=username,
             password_hash=get_password_hash("User123456"),
             is_active=True,
+            is_system_admin=role_key == "system_admin",
         )
         db.add(user)
         db.flush()
-        db.add(UserRole(user_id=user.id, role_id=role.id))
         db.commit()
         return user.id, create_access_token(username)
     finally:
@@ -53,11 +48,14 @@ def _create_user(role_key: str) -> tuple[int, str]:
 def _add_member(project_id: int, user_id: int, project_role: str) -> None:
     db = SessionLocal()
     try:
+        capability = {"product_owner": "product_manager", "project_member": "viewer"}.get(project_role, project_role)
+        role_id = db.query(RoleCapability.role_id).filter(RoleCapability.capability == capability).scalar()
+        assert role_id is not None, f"Missing role capability: {capability}"
         db.add(
             ProjectMember(
                 project_id=project_id,
                 user_id=user_id,
-                project_role=project_role,
+                role_id=role_id,
                 is_workbench_participant=True,
             )
         )
@@ -700,28 +698,83 @@ def test_reactivation_handler_eligibility_uses_target_state_core_action_roles(cl
     db = SessionLocal()
     try:
         row = db.query(Bug).filter(Bug.id == bug["id"]).one()
+        active_state_id = db.query(WorkflowState.id).filter(
+            WorkflowState.definition_id == row.workflow_definition_id,
+            WorkflowState.state_role == "active_work",
+        ).scalar()
+        assert active_state_id is not None
         transitions = db.query(WorkflowTransition).filter(
             WorkflowTransition.definition_id == row.workflow_definition_id,
-            WorkflowTransition.from_state_id == row.current_state_id,
+            WorkflowTransition.from_state_id == active_state_id,
         )
-        original_roles = {transition.id: transition.allowed_roles for transition in transitions.all()}
-        transitions.update({"allowed_roles": "project_owner"}, synchronize_session=False)
+        transition_rows = transitions.all()
+        transition_ids = [transition.id for transition in transition_rows]
+        original_roles = {
+            transition.id: {
+                "allowed_roles": transition.allowed_roles,
+                "role_ids": [
+                    role_id
+                    for (role_id,) in db.query(WorkflowTransitionRole.role_id)
+                    .filter(
+                        WorkflowTransitionRole.transition_id == transition.id,
+                        WorkflowTransitionRole.purpose == "allowed",
+                    )
+                    .order_by(WorkflowTransitionRole.sort_order.asc(), WorkflowTransitionRole.id.asc())
+                    .all()
+                ],
+            }
+            for transition in transition_rows
+        }
+        project_owner_role_id = db.query(RoleCapability.role_id).filter(
+            RoleCapability.capability == "project_owner"
+        ).scalar()
+        assert project_owner_role_id is not None
+        db.query(WorkflowTransitionRole).filter(
+            WorkflowTransitionRole.transition_id.in_(transition_ids),
+            WorkflowTransitionRole.purpose == "allowed",
+        ).delete(synchronize_session=False)
+        db.add_all(
+            WorkflowTransitionRole(
+                transition_id=transition_id,
+                role_id=project_owner_role_id,
+                purpose="allowed",
+                sort_order=0,
+            )
+            for transition_id in transition_ids
+        )
+        db.query(WorkflowTransition).filter(WorkflowTransition.id.in_(transition_ids)).update(
+            {"allowed_roles": ""}, synchronize_session=False
+        )
         db.commit()
 
-        assert _reactivation_handler_is_eligible(db, row, developer_id) is False
-        eligible, reason = _reactivation_handler_eligibility(db, row, developer_id)
+        assert _reactivation_handler_is_eligible(db, row, developer_id, active_state_id) is False
+        eligible, reason = _reactivation_handler_eligibility(db, row, developer_id, active_state_id)
         assert eligible is False
         assert reason == {
             "code": "OWNER_ROLE_NOT_ELIGIBLE",
             "message": "原处理人角色不符合目标状态处理要求",
         }
-        assert _reactivation_handler_is_eligible(db, row, admin_id) is True
-        assert _reactivation_handler_eligibility(db, row, admin_id) == (True, None)
+        assert _reactivation_handler_is_eligible(db, row, admin_id, active_state_id) is True
+        assert _reactivation_handler_eligibility(db, row, admin_id, active_state_id) == (True, None)
     finally:
         if "original_roles" in locals():
-            for transition_id, roles in original_roles.items():
+            transition_ids = list(original_roles)
+            db.query(WorkflowTransitionRole).filter(
+                WorkflowTransitionRole.transition_id.in_(transition_ids),
+                WorkflowTransitionRole.purpose == "allowed",
+            ).delete(synchronize_session=False)
+            for transition_id, role_data in original_roles.items():
                 db.query(WorkflowTransition).filter(WorkflowTransition.id == transition_id).update(
-                    {"allowed_roles": roles}, synchronize_session=False
+                    {"allowed_roles": role_data["allowed_roles"]}, synchronize_session=False
+                )
+                db.add_all(
+                    WorkflowTransitionRole(
+                        transition_id=transition_id,
+                        role_id=role_id,
+                        purpose="allowed",
+                        sort_order=index,
+                    )
+                    for index, role_id in enumerate(role_data["role_ids"])
                 )
             db.commit()
         db.close()

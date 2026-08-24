@@ -34,6 +34,13 @@ def _create_config(client: TestClient, *, clear_initial_definitions: bool = True
     return config_id
 
 
+def _role_id(role_name: str) -> int:
+    with SessionLocal() as db:
+        role_id = db.query(Role.id).filter(Role.role_name == role_name, Role.enabled.is_(True)).scalar()
+    assert role_id is not None, f"Missing enabled role: {role_name}"
+    return int(role_id)
+
+
 def test_create_and_list_workflow_definition(client: TestClient):
     config_id = _create_config(client)
 
@@ -129,6 +136,128 @@ def test_graph_save_generates_private_identity_and_protects_persisted_transition
     assert rejected.json()["detail"]["message"]
 
 
+def test_graph_save_synchronizes_transition_availability_with_state_enablement(client: TestClient):
+    config_id = _create_config(client)
+    definition = client.post(
+        "/api/v1/workflow-definitions",
+        json={
+            "name": f"State availability workflow {uuid4().hex[:8]}",
+            "object_type": "requirement",
+            "scope_type": "assignee_rule_config",
+            "scope_id": config_id,
+        },
+    ).json()
+    created = client.put(
+        f"/api/v1/workflow-definitions/{definition['id']}/graph",
+        json={
+            "initial_state_id": -1,
+            "states": [
+                {"id": -1, "status_name": "开始", "category": "start"},
+                {"id": -2, "status_name": "处理中", "category": "normal"},
+                {"id": -3, "status_name": "待确认", "category": "normal"},
+            ],
+            "transitions": [
+                {"action_name": "进入处理", "from_state_id": -1, "to_state_id": -2},
+                {"action_name": "提交确认", "from_state_id": -2, "to_state_id": -3},
+                {
+                    "action_name": "手工停用",
+                    "from_state_id": -1,
+                    "to_state_id": -3,
+                    "enabled": False,
+                },
+            ],
+        },
+    )
+    assert created.status_code == 200, created.text
+
+    def save(graph: dict) -> dict:
+        payload = {
+            "initial_state_id": graph["definition"]["initial_state_id"],
+            "states": [
+                {key: value for key, value in state.items() if key != "definition_id"}
+                for state in graph["states"]
+            ],
+            "transitions": [
+                {key: value for key, value in transition.items() if key != "definition_id"}
+                for transition in graph["transitions"]
+            ],
+        }
+        response = client.put(f"/api/v1/workflow-definitions/{definition['id']}/graph", json=payload)
+        assert response.status_code == 200, response.text
+        return response.json()
+
+    graph = created.json()
+    state_by_name = {item["status_name"]: item for item in graph["states"]}
+    state_by_name["处理中"]["enabled"] = False
+    graph["transitions"].append(
+        {
+            "action_name": "新增受限流转",
+            "from_state_id": state_by_name["开始"]["id"],
+            "to_state_id": state_by_name["处理中"]["id"],
+            "enabled": True,
+        }
+    )
+    disabled = save(graph)
+    disabled_by_name = {item["action_name"]: item for item in disabled["transitions"]}
+    assert disabled_by_name["进入处理"]["enabled"] is False
+    assert disabled_by_name["进入处理"]["auto_disabled_by_state"] is True
+    assert disabled_by_name["提交确认"]["enabled"] is False
+    assert disabled_by_name["提交确认"]["auto_disabled_by_state"] is True
+    assert disabled_by_name["新增受限流转"]["enabled"] is False
+    assert disabled_by_name["新增受限流转"]["auto_disabled_by_state"] is True
+    assert disabled_by_name["手工停用"]["enabled"] is False
+    assert disabled_by_name["手工停用"]["auto_disabled_by_state"] is False
+
+    with SessionLocal() as db:
+        persisted = {
+            item.action_name: item
+            for item in db.query(WorkflowTransition)
+            .filter(WorkflowTransition.definition_id == definition["id"])
+            .all()
+        }
+        assert persisted["进入处理"].auto_disabled_by_state is True
+        assert persisted["手工停用"].auto_disabled_by_state is False
+
+    state_by_name = {item["status_name"]: item for item in disabled["states"]}
+    state_by_name["处理中"]["enabled"] = True
+    state_by_name["待确认"]["enabled"] = False
+    for transition in disabled["transitions"]:
+        if transition["action_name"] == "提交确认":
+            transition.pop("auto_disabled_by_state")
+    one_endpoint_restored = save(disabled)
+    one_endpoint_by_name = {item["action_name"]: item for item in one_endpoint_restored["transitions"]}
+    assert one_endpoint_by_name["进入处理"]["enabled"] is True
+    assert one_endpoint_by_name["进入处理"]["auto_disabled_by_state"] is False
+    assert one_endpoint_by_name["提交确认"]["enabled"] is False
+    assert one_endpoint_by_name["提交确认"]["auto_disabled_by_state"] is True
+    assert one_endpoint_by_name["手工停用"]["enabled"] is False
+    assert one_endpoint_by_name["手工停用"]["auto_disabled_by_state"] is False
+
+    state_by_name = {item["status_name"]: item for item in one_endpoint_restored["states"]}
+    state_by_name["待确认"]["enabled"] = True
+    for transition in one_endpoint_restored["transitions"]:
+        if transition["action_name"] == "提交确认":
+            transition.pop("auto_disabled_by_state")
+    restored = save(one_endpoint_restored)
+    restored_by_name = {item["action_name"]: item for item in restored["transitions"]}
+    assert restored_by_name["提交确认"]["enabled"] is True
+    assert restored_by_name["提交确认"]["auto_disabled_by_state"] is False
+    assert restored_by_name["手工停用"]["enabled"] is False
+    assert restored_by_name["手工停用"]["auto_disabled_by_state"] is False
+
+    with SessionLocal() as db:
+        persisted = {
+            item.action_name: item
+            for item in db.query(WorkflowTransition)
+            .filter(WorkflowTransition.definition_id == definition["id"])
+            .all()
+        }
+        assert persisted["提交确认"].enabled is True
+        assert persisted["提交确认"].auto_disabled_by_state is False
+        assert persisted["手工停用"].enabled is False
+        assert persisted["手工停用"].auto_disabled_by_state is False
+
+
 def test_graph_rejects_duplicate_enabled_names_and_invalid_button_group(client: TestClient):
     config_id = _create_config(client)
     definition = client.post(
@@ -174,6 +303,89 @@ def test_graph_rejects_duplicate_enabled_names_and_invalid_button_group(client: 
 
     assert duplicate.status_code == 422
     assert invalid_group.status_code == 422
+
+
+def test_graph_validates_and_preserves_work_item_state_roles(client: TestClient):
+    config_id = _create_config(client)
+    definition = client.post(
+        "/api/v1/workflow-definitions",
+        json={
+            "name": f"State role workflow {uuid4().hex[:8]}",
+            "object_type": "task",
+            "scope_type": "assignee_rule_config",
+            "scope_id": config_id,
+        },
+    ).json()
+    payload = {
+        "initial_state_id": -1,
+        "states": [
+            {"id": -1, "status_name": "待分派", "category": "start", "state_role": "unassigned"},
+            {"id": -2, "status_name": "待开始", "category": "normal", "state_role": "waiting_iteration"},
+            {"id": -3, "status_name": "处理中", "category": "normal", "state_role": "active_work"},
+        ],
+        "transitions": [],
+    }
+    saved = client.put(f"/api/v1/workflow-definitions/{definition['id']}/graph", json=payload)
+    assert saved.status_code == 200, saved.text
+    roles = {item["state_role"] for item in saved.json()["states"]}
+    assert roles == {"unassigned", "waiting_iteration", "active_work"}
+
+    legacy_payload = {
+        "initial_state_id": saved.json()["definition"]["initial_state_id"],
+        "states": [
+            {key: value for key, value in item.items() if key not in {"definition_id", "state_role"}}
+            for item in saved.json()["states"]
+        ],
+        "transitions": [],
+    }
+    preserved = client.put(f"/api/v1/workflow-definitions/{definition['id']}/graph", json=legacy_payload)
+    assert preserved.status_code == 200, preserved.text
+    assert {item["state_role"] for item in preserved.json()["states"]} == roles
+
+    duplicate = client.put(
+        f"/api/v1/workflow-definitions/{definition['id']}/graph",
+        json={
+            **payload,
+            "states": [
+                {"id": -1, "status_name": "待分派", "category": "start", "state_role": "unassigned"},
+                {"id": -2, "status_name": "重复角色", "category": "normal", "state_role": "unassigned"},
+            ],
+        },
+    )
+    assert duplicate.status_code == 422
+
+    invalid = client.put(
+        f"/api/v1/workflow-definitions/{definition['id']}/graph",
+        json={
+            **payload,
+            "states": [
+                {"id": -1, "status_name": "待分派", "category": "start", "state_role": "not_a_role"},
+            ],
+        },
+    )
+    assert invalid.status_code == 422
+
+    project_definition = client.post(
+        "/api/v1/workflow-definitions",
+        json={
+            "name": f"Project state role workflow {uuid4().hex[:8]}",
+            "object_type": "project",
+            "scope_type": "assignee_rule_config",
+            "scope_id": config_id,
+            "enabled": False,
+        },
+    ).json()
+    unsupported = client.put(
+        f"/api/v1/workflow-definitions/{project_definition['id']}/graph",
+        json={
+            "initial_state_id": -1,
+            "states": [
+                {"id": -1, "status_name": "规划中", "category": "start", "state_role": "unassigned"},
+            ],
+            "transitions": [],
+        },
+    )
+    assert unsupported.status_code == 422
 
 
 def test_graph_save_remaps_temporary_ids_and_preserves_ids_when_state_is_renamed(client: TestClient):
@@ -358,7 +570,8 @@ def test_apply_template_creates_graph_nodes_and_transitions(client: TestClient):
     assert applied.status_code == 200
     graph = applied.json()
     assert {node["status_name"] for node in graph["states"]} == {
-        "待处理",
+        "待分派",
+        "待开始",
         "修复中",
         "待验证",
         "待评审",
@@ -482,8 +695,8 @@ def test_apply_template_reuses_state_ids_on_repeated_application(client: TestCli
         if item["enabled"]
     }
     assert second_ids == first_ids
-    assert len(second_ids) == 6
-    assert len(second.json()["states"]) == 6
+    assert len(second_ids) == 7
+    assert len(second.json()["states"]) == 7
 
 
 def test_apply_template_reuses_and_enables_unique_disabled_state(client: TestClient):
@@ -545,6 +758,7 @@ def test_apply_template_rejects_ambiguous_semantic_state_matches(client: TestCli
 
 def test_save_graph_preserves_layout_and_validates_duplicates(client: TestClient):
     config_id = _create_config(client)
+    role_id = _role_id("开发")
     definition = client.post(
         "/api/v1/workflow-definitions",
         json={
@@ -565,7 +779,8 @@ def test_save_graph_preserves_layout_and_validates_duplicates(client: TestClient
                 "action_name": "Activate",
                 "from_state_id": -1,
                 "to_state_id": -2,
-                "handler_rule": {"target_type": "project_role", "target_roles": "project_member", "fallback_type": "keep_current"},
+                "handler_rule": {"target_type": "project_role", "fallback_type": "keep_current"},
+                "handler_target_role_ids": [role_id],
             }
         ],
     }
@@ -594,6 +809,7 @@ def test_save_graph_preserves_layout_and_validates_duplicates(client: TestClient
 
 def test_transition_handler_rule_is_persisted_only_on_transition(client: TestClient):
     config_id = _create_config(client)
+    role_id = _role_id("开发")
     definition = client.post(
         "/api/v1/workflow-definitions",
         json={
@@ -620,9 +836,9 @@ def test_transition_handler_rule_is_persisted_only_on_transition(client: TestCli
                     "allowed_roles": "project_member",
                     "handler_rule": {
                         "target_type": "project_role",
-                        "target_roles": "project_member",
                         "fallback_type": "keep_current",
                     },
+                    "handler_target_role_ids": [role_id],
                 }
             ],
         },
@@ -634,12 +850,13 @@ def test_transition_handler_rule_is_persisted_only_on_transition(client: TestCli
     assert transition["from_state_id"] == state_ids["Todo"]
     assert transition["to_state_id"] == state_ids["Doing"]
     assert transition["handler_rule"]["target_type"] == "project_role"
-    assert transition["handler_rule"]["target_roles"] == "project_member"
+    assert transition["handler_target_role_ids"] == [role_id]
     assert client.get(f"/api/v1/handler-transition-rules?config_id={config_id}").status_code == 404
 
 
 def test_save_graph_preserves_transition_ui_and_form_config(client: TestClient):
     config_id = _create_config(client)
+    role_id = _role_id("测试")
     definition = client.post(
         "/api/v1/workflow-definitions",
         json={
@@ -686,9 +903,9 @@ def test_save_graph_preserves_transition_ui_and_form_config(client: TestClient):
                     },
                     "handler_rule": {
                         "target_type": "project_role",
-                        "target_roles": "tester",
                         "fallback_type": "keep_current",
                     },
+                    "handler_target_role_ids": [role_id],
                 }
             ],
         },
@@ -1267,7 +1484,11 @@ def test_default_template_definitions_exist_for_core_objects(client: TestClient)
     listed = client.get("/api/v1/workflow-definitions?scope_type=system")
 
     assert listed.status_code == 200
-    by_object_type = {item["object_type"]: item for item in listed.json()}
+    by_object_type = {
+        item["object_type"]: item
+        for item in listed.json()
+        if item["is_default_template"] is True
+    }
     assert {"requirement", "task", "bug", "iteration", "project"} <= set(by_object_type)
     assert by_object_type["bug"]["is_default_template"] is True
     assert by_object_type["task"]["is_default_template"] is True
@@ -1287,7 +1508,7 @@ def test_bug_default_template_matches_prd_baseline(client: TestClient):
 
     assert graph.status_code == 200
     states = {node["status_name"] for node in graph.json()["states"]}
-    assert states == {"待处理", "修复中", "待评审", "待验证", "已验证", "已关闭"}
+    assert states == {"待分派", "待开始", "修复中", "待评审", "待验证", "已验证", "已关闭"}
     transition_names = {item["action_name"] for item in graph.json()["transitions"]}
     assert {"确认缺陷类型", "提交验证", "验证通过", "验证不通过", "关闭", "激活", "重新判定缺陷类型"} <= transition_names
     assert all("status_key" not in node for node in graph.json()["states"])
@@ -1311,7 +1532,7 @@ def test_requirement_and_project_default_templates_expose_default_metadata(clien
     requirement_graph = client.get(f"/api/v1/workflow-definitions/{requirement_definition['id']}")
     assert requirement_graph.status_code == 200
     requirement_state_names = {node["status_name"] for node in requirement_graph.json()["states"]}
-    assert requirement_state_names == {"待分派", "处理中", "待评审", "待确认", "已完成", "已取消"}
+    assert requirement_state_names == {"待分派", "待开始", "处理中", "待评审", "待确认", "已完成", "已取消"}
     requirement_action_names = {item["action_name"] for item in requirement_graph.json()["transitions"]}
     assert {"认领", "指派", "完成", "取消", "重新激活"} <= requirement_action_names
 

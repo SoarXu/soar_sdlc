@@ -3,13 +3,16 @@ from sqlalchemy.orm import Session
 
 from app.models.assignee_rule_config import AssigneeRuleConfig
 from app.models.business_component import BusinessComponent
+from app.models.iteration import Iteration
 from app.models.project import Project
-from app.models.workflow_definition import WorkflowDefinition, WorkflowState
+from app.models.workflow_definition import WorkflowDefinition, WorkflowState, WorkflowTransition
 from app.services.default_workflow_template_service import ensure_default_workflow_templates
 
 
 CORE_OBJECT_TYPES = {"requirement", "task", "bug", "project"}
 SYSTEM_OBJECT_TYPES = {"project", "iteration"}
+WORK_ITEM_OBJECT_TYPES = {"requirement", "task", "bug"}
+WORK_ITEM_STATE_ROLES = {"unassigned", "waiting_iteration", "active_work"}
 
 
 def initial_workflow_values(
@@ -23,6 +26,77 @@ def initial_workflow_values(
         "workflow_definition_id": definition.id,
         "current_state_id": initial_state.id,
     }
+
+
+def initial_work_item_workflow_values(
+    db: Session,
+    object_type: str,
+    project_id: int | None,
+    owner_id: int | None,
+    iteration_id: int | None,
+    primary_component_id: int | None = None,
+) -> dict:
+    if object_type not in WORK_ITEM_OBJECT_TYPES:
+        return initial_workflow_values(db, object_type, project_id, primary_component_id)
+    definition, _initial_state = resolve_effective_workflow(db, object_type, project_id, primary_component_id)
+    state_role = "unassigned" if owner_id is None else (
+        "active_work" if _iteration_is_active(db, iteration_id) else "waiting_iteration"
+    )
+    state = state_for_role(db, definition.id, state_role)
+    return {
+        "workflow_definition_id": definition.id,
+        "current_state_id": state.id,
+    }
+
+
+def state_for_role(db: Session, definition_id: int, state_role: str) -> WorkflowState:
+    if state_role not in WORK_ITEM_STATE_ROLES:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={
+                "code": "WORKFLOW_STATE_ROLE_INVALID",
+                "message": f"Unsupported work-item state role: {state_role}",
+            },
+        )
+    states = (
+        db.query(WorkflowState)
+        .filter(
+            WorkflowState.definition_id == definition_id,
+            WorkflowState.state_role == state_role,
+            WorkflowState.enabled.is_(True),
+        )
+        .order_by(WorkflowState.id.asc())
+        .all()
+    )
+    if len(states) != 1:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": "WORKFLOW_STATE_ROLE_CONFIGURATION_INVALID",
+                "message": f"Workflow definition {definition_id} must configure one enabled {state_role} state",
+                "definition_id": definition_id,
+                "state_role": state_role,
+            },
+        )
+    return states[0]
+
+
+def _iteration_is_active(db: Session, iteration_id: int | None) -> bool:
+    if iteration_id is None:
+        return False
+    iteration = db.query(Iteration).filter(Iteration.id == iteration_id, Iteration.deleted == 0).first()
+    if not iteration:
+        return False
+    return bool(
+        db.query(WorkflowTransition.id)
+        .filter(
+            WorkflowTransition.definition_id == iteration.workflow_definition_id,
+            WorkflowTransition.from_state_id == iteration.current_state_id,
+            WorkflowTransition.action_key.in_(("complete", "cancel")),
+            WorkflowTransition.enabled.is_(True),
+        )
+        .first()
+    )
 
 
 def initial_system_workflow_values(db: Session, object_type: str) -> dict:

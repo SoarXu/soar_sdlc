@@ -33,6 +33,11 @@ def move_work_item_to_iteration(
     object_type = OBJECT_TYPE_BY_MODEL[type(item)]
     db.refresh(item, with_for_update=True)
     current_iteration_id = getattr(item, "iteration_id", None)
+    if current_iteration_id != target_iteration_id:
+        # Keep every membership entry point subject to the state-matrix direction rule.
+        from app.services.workflow_runtime_service import validate_work_item_iteration_move
+
+        validate_work_item_iteration_move(db, item, target_iteration_id)
     open_rows = (
         db.query(WorkItemIterationHistory)
         .filter(
@@ -72,6 +77,10 @@ def move_work_item_to_iteration(
     item.iteration_id = target_iteration_id
     if target_iteration_id:
         _open_history(db, object_type, item.id, target_iteration_id, actor_id, reason, operation_log_id)
+    if current_iteration_id != target_iteration_id:
+        from app.services.workflow_runtime_service import activate_waiting_work_item_after_iteration_move
+
+        activate_waiting_work_item_after_iteration_move(db, item, actor_id, reason)
 
 
 def move_requirement_dependents_to_iteration(

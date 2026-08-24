@@ -28,7 +28,7 @@ from app.services.work_item_iteration_history_service import (
     move_requirement_dependents_to_iteration,
     move_work_item_to_iteration,
 )
-from app.services.workflow_state_service import initial_workflow_values
+from app.services.workflow_state_service import initial_work_item_workflow_values
 from app.services.workflow_state_query_service import is_terminal_state
 from app.services.iteration_assignment_service import validate_requirement_iteration
 from app.views.requirement_view import RequirementCreate, RequirementUpdate
@@ -63,7 +63,14 @@ def create_requirement(db: Session, payload: RequirementCreate, actor_id: int | 
     primary_component = resolve_primary_component(db, data["project_id"], primary_component_id)
     if primary_component:
         data["source_project_id"] = primary_component.source_project_id
-    data.update(initial_workflow_values(db, "requirement", data.get("project_id"), primary_component_id))
+    data.update(initial_work_item_workflow_values(
+        db,
+        "requirement",
+        data.get("project_id"),
+        data.get("owner_id"),
+        data.get("iteration_id"),
+        primary_component_id,
+    ))
     data["lifecycle_phase"] = project_lifecycle_phase(db, data.get("project_id"))
     requirement = Requirement(**data)
     db.add(requirement)

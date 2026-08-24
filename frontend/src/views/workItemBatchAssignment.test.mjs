@@ -15,7 +15,7 @@ const testsView = await readFile(new URL('./TestsView.vue', import.meta.url), 'u
 assert.doesNotMatch(testsView, /BatchAssignmentBar/)
 
 const projectDetailView = await readFile(new URL('./ProjectDetailView.vue', import.meta.url), 'utf8')
-assert.equal((projectDetailView.match(/type="selection"/g) || []).length, 3)
+assert.equal((projectDetailView.match(/type="selection" width="48" :selectable="\(row\) => canSelectProjectWorkItemForBatchAssignment/g) || []).length, 3)
 assert.equal((projectDetailView.match(/<BatchAssignmentBar/g) || []).length, 3)
 for (const objectType of ['requirement', 'task', 'bug']) {
   assert.match(projectDetailView, new RegExp(`object-type="${objectType}"`))

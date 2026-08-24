@@ -75,7 +75,7 @@ assert.ok(
 
 assert.match(
   workflowActionButtons,
-  /splitListActions\(actions\.value, props\.objectType\)/,
+  /splitListActions\(reviewAwareActions\.value, props\.objectType\)/,
   'workflow action buttons must split list actions by object type'
 )
 

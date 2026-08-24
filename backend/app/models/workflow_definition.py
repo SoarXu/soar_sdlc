@@ -44,6 +44,7 @@ class WorkflowState(Base):
     )
     status_name: Mapped[str] = mapped_column(String(100))
     category: Mapped[str] = mapped_column(String(32), default="normal")
+    state_role: Mapped[str | None] = mapped_column(String(32), nullable=True)
     terminal_kind: Mapped[str | None] = mapped_column(String(32), nullable=True)
     color: Mapped[str] = mapped_column(String(32), default="#2563eb")
     x: Mapped[int] = mapped_column(Integer, default=0)
@@ -91,6 +92,11 @@ class WorkflowTransition(Base):
     form_config: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     diagram_config: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    auto_disabled_by_state: Mapped[bool] = mapped_column(
+        Boolean,
+        default=False,
+        server_default=text("0"),
+    )
     sort_order: Mapped[int] = mapped_column(Integer, default=100)
     create_time: Mapped[datetime] = mapped_column(DateTime, server_default=text("CURRENT_TIMESTAMP"))
     update_time: Mapped[datetime] = mapped_column(

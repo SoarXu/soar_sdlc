@@ -52,4 +52,41 @@ assert.match(
   'the project detail must route workflow edit commands to the existing requirement edit dialog'
 )
 
+const tasksStart = source.indexOf('<template v-else-if="activeTab === \'tasks\'">')
+const tasksEnd = source.indexOf('<template v-else-if="activeTab === \'tests\'">', tasksStart)
+assert.notEqual(tasksStart, -1)
+assert.notEqual(tasksEnd, -1)
+const tasksTemplate = source.slice(tasksStart, tasksEnd)
+assert.doesNotMatch(
+  tasksTemplate,
+  /<el-button v-if="canEditWorkItem\(row\)" link type="primary" @click="openTaskEdit\(row\)">编辑<\/el-button>/,
+  'task edit visibility must come from workflow configuration only'
+)
+assert.match(tasksTemplate, /<WorkflowActionButtons/)
+assert.match(tasksTemplate, /@command="handleTaskWorkflowCommand\(row, \$event\)"/)
+assert.match(tasksTemplate, /@confirm="removeTask\(row\.id\)"/)
+assert.match(
+  source,
+  /function handleTaskWorkflowCommand\(row, \{ commandType \}\) \{\s*if \(commandType === 'edit'\) openTaskEdit\(row\)/,
+  'the project detail must route workflow edit commands to the existing task edit dialog'
+)
+
+const bugsStart = source.indexOf('<template v-else-if="activeTab === \'bugs\'">')
+const bugsEnd = source.indexOf('<template v-else-if="activeTab === \'members\'">', bugsStart)
+assert.notEqual(bugsStart, -1)
+assert.notEqual(bugsEnd, -1)
+const bugsTemplate = source.slice(bugsStart, bugsEnd)
+assert.doesNotMatch(
+  bugsTemplate,
+  /<el-button v-if="canEditWorkItem\(row\)" link type="primary" @click="openBugEdit\(row\)">编辑<\/el-button>/,
+  'bug edit visibility must come from workflow configuration only'
+)
+assert.match(bugsTemplate, /<WorkflowActionButtons/)
+assert.match(bugsTemplate, /@command="handleBugWorkflowCommand\(row, \$event\)"/)
+assert.match(
+  source,
+  /function handleBugWorkflowCommand\(row, \{ commandType \}\) \{\s*if \(commandType === 'edit'\) openBugEdit\(row\)/,
+  'the project detail must route workflow edit commands to the existing Bug edit dialog'
+)
+
 console.log('project detail workflow and iteration layout contract passed')

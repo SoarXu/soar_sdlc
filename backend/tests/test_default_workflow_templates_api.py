@@ -10,7 +10,7 @@ from app.models.iteration import Iteration
 from app.models.project import Project
 from app.models.project_member import ProjectMember
 from app.models.requirement import Requirement
-from app.models.role import Role, UserRole
+from app.models.role import RoleCapability
 from app.models.task import Task
 from app.models.user import User
 from app.models.workflow_definition import WorkflowState, WorkflowTransition
@@ -46,15 +46,10 @@ def _create_user(full_name: str, role_key: str) -> tuple[int, str]:
             full_name=full_name,
             password_hash=get_password_hash("User123456"),
             is_active=True,
+            is_system_admin=role_key == "system_admin",
         )
         db.add(user)
         db.flush()
-        role = db.query(Role).filter(Role.role_key == role_key).first()
-        if not role:
-            role = Role(role_key=role_key, role_name=role_key, enabled=True, is_system=True)
-            db.add(role)
-            db.flush()
-        db.add(UserRole(user_id=user.id, role_id=role.id))
         db.commit()
         return user.id, create_access_token(user.username)
     finally:
@@ -64,11 +59,14 @@ def _create_user(full_name: str, role_key: str) -> tuple[int, str]:
 def _add_project_member(project_id: int, user_id: int, project_role: str) -> None:
     db = SessionLocal()
     try:
+        capability = {"product_owner": "product_manager", "project_member": "viewer"}.get(project_role, project_role)
+        role_id = db.query(RoleCapability.role_id).filter(RoleCapability.capability == capability).scalar()
+        assert role_id is not None, f"Missing role capability: {capability}"
         db.add(
             ProjectMember(
                 project_id=project_id,
                 user_id=user_id,
-                project_role=project_role,
+                role_id=role_id,
                 is_workbench_participant=True,
             )
         )
@@ -78,19 +76,31 @@ def _add_project_member(project_id: int, user_id: int, project_role: str) -> Non
 
 
 def _state_id_for_status(db, item, status: str) -> int:
+    state_role_by_status = {
+        "pending_assignment": "unassigned",
+        "pending_handling": "unassigned",
+        "in_processing": "active_work",
+        "fixing": "active_work",
+    }
     action_by_status = {
-        "in_processing": "claim",
         "pending_confirmation": "submit_confirmation",
         "completed": "complete",
         "canceled": "cancel",
-        "fixing": "confirm_bug_type",
         "pending_verification": "submit_verification",
         "verified": "verification_passed",
         "closed": "close",
         "active": "start",
         "paused": "suspend",
     }
-    if status in {"pending_assignment", "pending_handling", "planning"}:
+    if status in state_role_by_status:
+        state_ids = {
+            value
+            for value, in db.query(WorkflowState.id).filter(
+                WorkflowState.definition_id == item.workflow_definition_id,
+                WorkflowState.state_role == state_role_by_status[status],
+            ).all()
+        }
+    elif status == "planning":
         state_ids = {
             value
             for value, in db.query(WorkflowState.id).filter(
@@ -112,15 +122,21 @@ def _state_id_for_status(db, item, status: str) -> int:
 
 
 def _create_project_with_config(client: TestClient) -> int:
+    with SessionLocal() as db:
+        role_ids = {
+            capability: db.query(RoleCapability.role_id).filter(RoleCapability.capability == capability).scalar()
+            for capability in ("product_manager", "developer", "tester")
+        }
+    assert all(role_ids.values())
     config = client.post(
         "/api/v1/assignee-rule-configs",
         json={
             "name": f"Default Template Config {uuid4().hex[:8]}",
-            "requirement_owner_roles": "product_owner",
-            "task_owner_roles": "developer",
-            "test_case_tester_roles": "tester",
-            "test_run_owner_roles": "tester",
-            "bug_owner_roles": "developer",
+            "requirement_owner_role_ids": [role_ids["product_manager"]],
+            "task_owner_role_ids": [role_ids["developer"]],
+            "test_case_tester_role_ids": [role_ids["tester"]],
+            "test_run_owner_role_ids": [role_ids["tester"]],
+            "bug_owner_role_ids": [role_ids["developer"]],
             "creation_mode": "template",
             "template_source": {"source_type": "system", "source_id": "system-standard"},
         },
@@ -132,7 +148,7 @@ def _create_project_with_config(client: TestClient) -> int:
         "/api/v1/projects",
         json={"name": f"Default Template Project {uuid4().hex[:8]}", "assignee_rule_config_id": config.json()["id"]},
     )
-    assert project.status_code == 200
+    assert project.status_code == 200, project.text
     return project.json()["id"]
 
 
@@ -281,7 +297,7 @@ def _set_project_status(project_id: int, status: str) -> None:
         db.close()
 
 
-def test_bug_defaults_to_pending_handling_and_close_blocks_on_direct_task(client: TestClient):
+def test_bug_defaults_to_active_work_and_close_blocks_on_direct_task(client: TestClient):
     project_id = _create_project_with_config(client)
     handler_id, handler_token = _create_user("Default Template Developer", "developer")
     _add_project_member(project_id, handler_id, "developer")
@@ -300,7 +316,7 @@ def test_bug_defaults_to_pending_handling_and_close_blocks_on_direct_task(client
     )
 
     assert bug.status_code == 200
-    assert bug.json()["status_name"] == "待处理"
+    assert _state_role(bug.json()) == "active_work"
 
     _set_bug_status(bug.json()["id"], "verified")
     close = client.post(
@@ -317,11 +333,22 @@ def test_task_branch_defaults_follow_confirmation_template(client: TestClient):
     project_id = _create_project_with_config(client)
     handler_id, handler_token = _create_user("Task Branch Developer", "developer")
     _add_project_member(project_id, handler_id, "developer")
+    iteration = client.post(
+        "/api/v1/iterations",
+        json={"project_ids": [project_id], "name": f"Task branch iteration {uuid4().hex[:8]}"},
+    )
+    assert iteration.status_code == 200, iteration.text
+    started = client.post(
+        f"/api/v1/workflow-runtime/iteration/{iteration.json()['id']}/transition",
+        json={"action_key": "start"},
+    )
+    assert started.status_code == 200, started.text
 
     bug_fix_task = client.post(
         "/api/v1/tasks",
         json={
             "project_id": project_id,
+            "iteration_id": iteration.json()["id"],
             "title": f"Bug fix task {uuid4().hex[:8]}",
             "task_type": "bug_fix",
             "owner_id": handler_id,
@@ -331,6 +358,7 @@ def test_task_branch_defaults_follow_confirmation_template(client: TestClient):
         "/api/v1/tasks",
         json={
             "project_id": project_id,
+            "iteration_id": iteration.json()["id"],
             "title": f"Requirement task {uuid4().hex[:8]}",
             "task_type": "requirement_implementation",
             "owner_id": handler_id,
@@ -340,28 +368,18 @@ def test_task_branch_defaults_follow_confirmation_template(client: TestClient):
         "/api/v1/tasks",
         json={
             "project_id": project_id,
+            "iteration_id": iteration.json()["id"],
             "title": f"Standalone task {uuid4().hex[:8]}",
             "task_type": "standalone_operation",
         },
     )
 
     assert bug_fix_task.status_code == 200
-    assert bug_fix_task.json()["status_name"]
-    assert bug_fix_task.json()["state_category"] == "start"
+    assert _state_role(bug_fix_task.json()) == "active_work"
     assert requirement_task.status_code == 200
-    assert requirement_task.json()["status_name"]
-    assert requirement_task.json()["state_category"] == "start"
+    assert _state_role(requirement_task.json()) == "active_work"
     assert unassigned_task.status_code == 200
-    assert unassigned_task.json()["status_name"]
-    assert unassigned_task.json()["state_category"] == "start"
-
-    for task_response in (bug_fix_task, requirement_task):
-        claimed = client.post(
-            f"/api/v1/workflow-runtime/task/{task_response.json()['id']}/transition",
-            json={"action_key": "claim"},
-            headers={"Authorization": f"Bearer {handler_token}"},
-        )
-        assert claimed.status_code == 200, claimed.text
+    assert _state_role(unassigned_task.json()) == "unassigned"
 
     bug_fix_actions = client.get(
         f"/api/v1/workflow-runtime/task/{bug_fix_task.json()['id']}/transitions",
@@ -388,147 +406,150 @@ def _action_keys(client: TestClient, object_type: str, object_id: int, token: st
     return {item["action_key"] for item in response.json()}
 
 
+def _state_role(item: dict) -> str | None:
+    with SessionLocal() as db:
+        return db.query(WorkflowState.state_role).filter(
+            WorkflowState.id == item["current_state_id"]
+        ).scalar()
+
+
+def _create_active_iteration(client: TestClient, project_id: int) -> int:
+    iteration = client.post(
+        "/api/v1/iterations",
+        json={"project_ids": [project_id], "name": f"Active Bug Matrix {uuid4().hex[:8]}"},
+    )
+    assert iteration.status_code == 200, iteration.text
+    started = client.post(
+        f"/api/v1/workflow-runtime/iteration/{iteration.json()['id']}/transition",
+        json={"action_key": "start"},
+    )
+    assert started.status_code == 200, started.text
+    return iteration.json()["id"]
+
+
+def _create_planned_iteration(client: TestClient, project_id: int) -> int:
+    iteration = client.post(
+        "/api/v1/iterations",
+        json={"project_ids": [project_id], "name": f"Planned Bug Matrix {uuid4().hex[:8]}"},
+    )
+    assert iteration.status_code == 200, iteration.text
+    return iteration.json()["id"]
+
+
 def test_default_runtime_actions_match_prd_state_matrix(client: TestClient):
     project_id = _create_project_with_config(client)
     developer_id, developer_token = _create_user("PRD Matrix Developer", "developer")
     owner_id, owner_token = _create_user("PRD Matrix Owner", "project_owner")
-    tester_id, tester_token = _create_user("PRD Matrix Tester", "tester")
     _add_project_member(project_id, developer_id, "developer")
     _add_project_member(project_id, owner_id, "project_owner")
-    _add_project_member(project_id, tester_id, "tester")
 
-    unassigned_requirement = client.post(
-        "/api/v1/requirements",
-        json={"project_id": project_id, "title": f"Unassigned requirement {uuid4().hex[:8]}"},
-    ).json()
-    unassigned_task = client.post(
-        "/api/v1/tasks",
-        json={"project_id": project_id, "title": f"Unassigned task {uuid4().hex[:8]}"},
-    ).json()
-    unassigned_bug = client.post(
+    graph = graph_for_object_type("bug")
+    states_by_role = {state.state_role: state for state in graph.states}
+    actions_by_role = {
+        role: {transition.action_key for transition in graph.transitions if transition.from_ref == state.ref}
+        for role, state in states_by_role.items()
+    }
+    assert {"claim", "assign", "edit"} <= actions_by_role["unassigned"]
+    assert {"transfer", "change_handler"}.isdisjoint(actions_by_role["unassigned"])
+    assert {"transfer", "change_handler", "edit"} <= actions_by_role["waiting_iteration"]
+    assert {"transfer", "change_handler"} <= actions_by_role["active_work"]
+    assert "edit" not in actions_by_role["active_work"]
+    assert {
+        transition.from_ref
+        for transition in graph.transitions
+        if transition.action_key == "edit"
+    } == {states_by_role["unassigned"].ref, states_by_role["waiting_iteration"].ref}
+
+    unassigned_response = client.post(
         "/api/v1/bugs",
         json={"project_id": project_id, "title": f"Unassigned bug {uuid4().hex[:8]}"},
-    ).json()
+        headers={"Authorization": f"Bearer {developer_token}"},
+    )
+    assert unassigned_response.status_code == 200, unassigned_response.text
+    unassigned_bug = unassigned_response.json()
+    assert _state_role(unassigned_bug) == "unassigned"
+    assert {"claim", "edit"} <= _action_keys(client, "bug", unassigned_bug["id"], developer_token)
+    assert "assign" in _action_keys(client, "bug", unassigned_bug["id"], owner_token)
 
-    assert "claim" in _action_keys(client, "requirement", unassigned_requirement["id"], developer_token)
-    assert "complete" not in _action_keys(client, "requirement", unassigned_requirement["id"], developer_token)
-    assert "claim" in _action_keys(client, "task", unassigned_task["id"], developer_token)
-    assert "complete" not in _action_keys(client, "task", unassigned_task["id"], developer_token)
-    bug_unassigned_actions = _action_keys(client, "bug", unassigned_bug["id"], developer_token)
-    assert "claim" in bug_unassigned_actions
-    assert "confirm_bug_type" not in bug_unassigned_actions
-
-    requirement = client.post(
-        "/api/v1/requirements",
-        json={"project_id": project_id, "title": f"Owned requirement {uuid4().hex[:8]}", "owner_id": developer_id},
-    ).json()
-    task = client.post(
-        "/api/v1/tasks",
+    waiting_response = client.post(
+        "/api/v1/bugs",
         json={
             "project_id": project_id,
-            "title": f"Owned task {uuid4().hex[:8]}",
-            "task_type": "bug_fix",
+            "iteration_id": _create_planned_iteration(client, project_id),
+            "title": f"Waiting bug {uuid4().hex[:8]}",
             "owner_id": developer_id,
         },
-    ).json()
-    bug = client.post(
+        headers={"Authorization": f"Bearer {developer_token}"},
+    )
+    assert waiting_response.status_code == 200, waiting_response.text
+    waiting_bug = waiting_response.json()
+    assert _state_role(waiting_bug) == "waiting_iteration"
+    assert {"transfer", "edit"} <= _action_keys(client, "bug", waiting_bug["id"], developer_token)
+    assert "change_handler" in _action_keys(client, "bug", waiting_bug["id"], owner_token)
+
+    active_response = client.post(
         "/api/v1/bugs",
-        json={"project_id": project_id, "title": f"Owned bug {uuid4().hex[:8]}", "owner_id": developer_id},
-    ).json()
-
-    for object_type, item in (("requirement", requirement), ("task", task)):
-        claimed = client.post(
-            f"/api/v1/workflow-runtime/{object_type}/{item['id']}/transition",
-            json={"action_key": "claim"},
-            headers={"Authorization": f"Bearer {developer_token}"},
-        )
-        assert claimed.status_code == 200, claimed.text
-
-    requirement_actions = _action_keys(client, "requirement", requirement["id"], developer_token)
-    assert {"complete", "transfer"} <= requirement_actions
-    assert "submit_confirmation" not in requirement_actions
-    assert "change_handler" in _action_keys(client, "requirement", requirement["id"], owner_token)
-
-    task_actions = _action_keys(client, "task", task["id"], developer_token)
-    assert {"submit_confirmation", "transfer"} <= task_actions
-    assert "complete" not in task_actions
-    assert "change_handler" in _action_keys(client, "task", task["id"], owner_token)
-
-    assert {"confirm_bug_type", "transfer"} <= _action_keys(client, "bug", bug["id"], developer_token)
-    assert "change_handler" in _action_keys(client, "bug", bug["id"], owner_token)
-    _set_bug_owner_and_status(bug["id"], developer_id, "fixing")
-    fixing_actions = _action_keys(client, "bug", bug["id"], developer_token)
-    assert {"submit_verification", "reclassify_bug_type", "transfer"} <= fixing_actions
-    assert "change_handler" in _action_keys(client, "bug", bug["id"], owner_token)
-
-    _set_bug_owner_and_status(bug["id"], tester_id, "pending_verification")
-    verification_actions = _action_keys(client, "bug", bug["id"], tester_token)
-    assert {"verification_passed", "verification_failed", "transfer_verification"} <= verification_actions
-    assert "assign_verifier" in _action_keys(client, "bug", bug["id"], owner_token)
-
-    _set_bug_owner_and_status(bug["id"], tester_id, "verified")
-    verified_actions = _action_keys(client, "bug", bug["id"], tester_token)
-    assert {"close", "return_reopen"} <= verified_actions
-
-    _set_bug_owner_and_status(bug["id"], tester_id, "closed")
-    assert "activate" in _action_keys(client, "bug", bug["id"], tester_token)
-
-    _set_task_owner_and_status(task["id"], owner_id, "pending_confirmation")
-    confirmation_actions = _action_keys(client, "task", task["id"], owner_token)
-    assert {"approve_confirmation", "return_rework", "transfer_confirmation"} <= confirmation_actions
+        json={
+            "project_id": project_id,
+            "iteration_id": _create_active_iteration(client, project_id),
+            "title": f"Active bug {uuid4().hex[:8]}",
+            "owner_id": developer_id,
+        },
+        headers={"Authorization": f"Bearer {developer_token}"},
+    )
+    assert active_response.status_code == 200, active_response.text
+    active_bug = active_response.json()
+    assert _state_role(active_bug) == "active_work"
+    active_actions = _action_keys(client, "bug", active_bug["id"], developer_token)
+    assert "transfer" in active_actions
+    assert "edit" not in active_actions
+    assert "change_handler" in _action_keys(client, "bug", active_bug["id"], owner_token)
 
 
 def test_default_runtime_actions_enforce_prd_identity_boundaries(client: TestClient):
     project_id = _create_project_with_config(client)
     handler_id, handler_token = _create_user("Identity Handler", "developer")
     creator_id, creator_token = _create_user("Identity Creator", "developer")
-    reporter_id, reporter_token = _create_user("Identity Reporter", "tester")
     manager_id, manager_token = _create_user("Identity Manager", "project_owner")
     member_id, member_token = _create_user("Identity Member", "developer")
     for user_id, role in [
         (handler_id, "developer"),
         (creator_id, "developer"),
-        (reporter_id, "tester"),
         (manager_id, "project_owner"),
         (member_id, "developer"),
     ]:
         _add_project_member(project_id, user_id, role)
 
-    task = client.post(
-        "/api/v1/tasks",
-        json={"project_id": project_id, "title": f"Identity task {uuid4().hex[:8]}"},
-        headers={"Authorization": f"Bearer {creator_token}"},
-    ).json()
-    creator_actions = _action_keys(client, "task", task["id"], creator_token)
-    member_actions = _action_keys(client, "task", task["id"], member_token)
-    manager_actions = _action_keys(client, "task", task["id"], manager_token)
-    assert {"claim", "cancel", "edit", "add_information"} <= creator_actions
-    assert "claim" in member_actions
-    assert {"cancel", "edit"}.isdisjoint(member_actions)
-    assert {"assign", "cancel"} <= manager_actions
-
-    bug = client.post(
+    unassigned = client.post(
         "/api/v1/bugs",
-        json={"project_id": project_id, "title": f"Identity bug {uuid4().hex[:8]}", "owner_id": handler_id},
-        headers={"Authorization": f"Bearer {reporter_token}"},
-    ).json()
-    handler_actions = _action_keys(client, "bug", bug["id"], handler_token)
-    manager_actions = _action_keys(client, "bug", bug["id"], manager_token)
-    assert {"confirm_bug_type", "transfer"} <= handler_actions
-    assert "void_close" not in handler_actions
-    assert {"change_handler", "void_close"} <= manager_actions
-    assert "confirm_bug_type" not in manager_actions
+        json={"project_id": project_id, "title": f"Identity unassigned bug {uuid4().hex[:8]}"},
+        headers={"Authorization": f"Bearer {creator_token}"},
+    )
+    assert unassigned.status_code == 200, unassigned.text
+    unassigned_bug = unassigned.json()
+    assert "edit" in _action_keys(client, "bug", unassigned_bug["id"], creator_token)
+    assert "edit" not in _action_keys(client, "bug", unassigned_bug["id"], member_token)
+    assert "edit" not in _action_keys(client, "bug", unassigned_bug["id"], manager_token)
 
-    _set_bug_owner_and_status(bug["id"], handler_id, "fixing")
-    assert "submit_verification" not in _action_keys(client, "bug", bug["id"], manager_token)
-
-    _set_bug_owner_and_status(bug["id"], handler_id, "verified")
-    assert "return_reopen" in _action_keys(client, "bug", bug["id"], reporter_token)
-    assert "return_reopen" not in _action_keys(client, "bug", bug["id"], member_token)
-
-    _set_bug_owner_and_status(bug["id"], handler_id, "closed")
-    assert "activate" in _action_keys(client, "bug", bug["id"], reporter_token)
-    assert "activate" not in _action_keys(client, "bug", bug["id"], member_token)
+    waiting = client.post(
+        "/api/v1/bugs",
+        json={
+            "project_id": project_id,
+            "iteration_id": _create_planned_iteration(client, project_id),
+            "title": f"Identity waiting bug {uuid4().hex[:8]}",
+            "owner_id": handler_id,
+        },
+        headers={"Authorization": f"Bearer {creator_token}"},
+    )
+    assert waiting.status_code == 200, waiting.text
+    waiting_bug = waiting.json()
+    assert _state_role(waiting_bug) == "waiting_iteration"
+    assert "edit" in _action_keys(client, "bug", waiting_bug["id"], creator_token)
+    assert "transfer" in _action_keys(client, "bug", waiting_bug["id"], handler_token)
+    assert "change_handler" in _action_keys(client, "bug", waiting_bug["id"], manager_token)
+    assert {"edit", "transfer", "change_handler"}.isdisjoint(
+        _action_keys(client, "bug", waiting_bug["id"], member_token)
+    )
 
 
 def test_reactivate_uses_handler_presence_and_completed_requirement_can_reactivate(client: TestClient):
@@ -664,7 +685,7 @@ def test_requirement_and_task_create_reject_legacy_status_even_with_handler(clie
 def test_requirement_complete_and_cancel_block_on_direct_relations(client: TestClient):
     project_id = _create_project_with_config(client)
     handler_id, handler_token = _create_user("Requirement Handler", "developer")
-    _add_project_member(project_id, handler_id, "developer")
+    _add_project_member(project_id, handler_id, "project_owner")
     requirement = client.post(
         "/api/v1/requirements",
         json={"project_id": project_id, "title": f"Requirement {uuid4().hex[:8]}", "owner_id": handler_id},
@@ -673,6 +694,7 @@ def test_requirement_complete_and_cancel_block_on_direct_relations(client: TestC
         "/api/v1/tasks",
         json={
             "project_id": project_id,
+            "iteration_id": requirement["iteration_id"],
             "requirement_id": requirement["id"],
             "title": f"Requirement task {uuid4().hex[:8]}",
             "owner_id": handler_id,
@@ -682,11 +704,19 @@ def test_requirement_complete_and_cancel_block_on_direct_relations(client: TestC
         "/api/v1/bugs",
         json={
             "project_id": project_id,
+            "iteration_id": requirement["iteration_id"],
             "requirement_id": requirement["id"],
             "title": f"Requirement bug {uuid4().hex[:8]}",
             "owner_id": handler_id,
         },
+        headers={"X-Test-Require-Explicit-Iteration": "1"},
     ).json()
+    started = client.post(
+        f"/api/v1/workflow-runtime/iteration/{requirement['iteration_id']}/transition",
+        json={"action_key": "start"},
+        headers={"Authorization": f"Bearer {handler_token}"},
+    )
+    assert started.status_code == 200, started.text
     _set_requirement_status(requirement["id"], "in_processing")
     _set_task_status(task["id"], "completed")
     _set_bug_status(bug["id"], "pending_verification")

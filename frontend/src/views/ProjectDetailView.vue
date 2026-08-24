@@ -219,7 +219,21 @@
             </template>
           </el-table-column>
           <el-table-column label="操作" width="240" fixed="right">
-            <template #default="{ row }"><el-button v-if="canEditWorkItem(row)" link type="primary" @click="openTaskEdit(row)">编辑</el-button><WorkflowActionButtons object-type="task" :object-id="row.id" mode="list" :transitions="projectWorkflowTransitionsFor('task', row.id)" :auto-load="false" :users="users" @executed="refreshAfterMutation" /><el-popconfirm v-if="canDeleteCurrentWorkItem && !projectClosed" title="确认删除该任务？" @confirm="removeTask(row.id)"><template #reference><el-button link type="danger">删除</el-button></template></el-popconfirm></template>
+            <template #default="{ row }">
+              <WorkflowActionButtons
+                object-type="task"
+                :object-id="row.id"
+                mode="list"
+                :transitions="projectWorkflowTransitionsFor('task', row.id)"
+                :auto-load="false"
+                :users="users"
+                @command="handleTaskWorkflowCommand(row, $event)"
+                @executed="refreshAfterMutation"
+              />
+              <el-popconfirm v-if="canDeleteCurrentWorkItem && !projectClosed" title="确认删除该任务？" @confirm="removeTask(row.id)">
+                <template #reference><el-button link type="danger">删除</el-button></template>
+              </el-popconfirm>
+            </template>
           </el-table-column>
         </el-table>
         <div class="table-pagination batch-assignment-pagination">
@@ -321,7 +335,6 @@
           <el-table-column label="操作" width="380" fixed="right">
             <template #default="{ row }">
               <div class="table-actions">
-                <el-button v-if="canEditWorkItem(row)" link type="primary" @click="openBugEdit(row)">编辑</el-button>
                 <WorkflowActionButtons
                   object-type="bug"
                   :object-id="row.id"
@@ -329,6 +342,7 @@
                   :transitions="projectWorkflowTransitionsFor('bug', row.id)"
                   :auto-load="false"
                   :users="users"
+                  @command="handleBugWorkflowCommand(row, $event)"
                   @executed="refreshAfterMutation"
                 />
                 <el-popconfirm v-if="canDeleteCurrentWorkItem" title="确认删除该 Bug？" @confirm="removeBug(row.id)"><template #reference><el-button link type="danger">删除</el-button></template></el-popconfirm>
@@ -1365,6 +1379,9 @@ function openTaskEdit(row) {
   })
   taskDialogVisible.value = true
 }
+function handleTaskWorkflowCommand(row, { commandType }) {
+  if (commandType === 'edit') openTaskEdit(row)
+}
 
 function taskOwnerForRequirement() { return null }
 function onTaskRequirementChange(requirementId) {
@@ -1402,6 +1419,9 @@ function openRunCreate() { editingRunId.value = null; resetRunForm(); runDialogV
 function openRunEdit(row) { editingRunId.value = row.id; Object.assign(runForm, { ...row, remark: row.remark || '' }); runDialogVisible.value = true }
 function openBugCreate() { editingBugId.value = null; resetBugForm(); bugDialogVisible.value = true }
 function openBugEdit(row) { editingBugId.value = row.id; Object.assign(bugForm, { ...row, reproduce_steps: row.reproduce_steps || '', expected_result: row.expected_result || '', actual_result: row.actual_result || '' }); bugDialogVisible.value = true }
+function handleBugWorkflowCommand(row, { commandType }) {
+  if (commandType === 'edit') openBugEdit(row)
+}
 
 
 async function safeFetchProjectMembers(id) {

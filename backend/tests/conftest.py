@@ -9,6 +9,7 @@ from app.core.security import create_access_token
 from app.db.session import SessionLocal
 from app.main import app
 from app.models.user import User
+from app.services.default_workflow_template_service import ensure_default_workflow_templates
 
 
 TEST_USER_ALLOWLIST = frozenset(
@@ -275,6 +276,10 @@ TRACKED_TABLES = [
 def _snapshot_table_ids() -> dict[str, set[int]]:
     db = SessionLocal()
     try:
+        # State-matrix reconciliation may add nodes to long-lived default definitions.
+        # Establish that baseline before each client snapshot so fixture cleanup only
+        # removes rows introduced by the test itself.
+        ensure_default_workflow_templates(db)
         return {
             table: {row.id for row in db.execute(text(f"select id from {table}")).all()}
             for table in TRACKED_TABLES

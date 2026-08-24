@@ -12,7 +12,7 @@ for (const field of ['precondition', 'steps_content', 'expected_result']) {
 }
 
 const submitCase = source.match(
-  /async function submitCase\(\) \{(?<body>[\s\S]*?)\n\}\nasync function openCaseExecution/u
+  /async function submitCase\(\) \{(?<body>[\s\S]*?)\r?\n\}\r?\nasync function openCaseExecution/u
 )
 assert.ok(submitCase, 'RequirementDetailView should define submitCase before openCaseExecution')
 

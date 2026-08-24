@@ -370,6 +370,7 @@ def _clone_graph(db: Session, source: WorkflowDefinition, target: WorkflowDefini
             definition_id=target.id,
             status_name=item.status_name,
             category=item.category,
+            state_role=item.state_role,
             terminal_kind=item.terminal_kind,
             color=item.color,
             x=item.x,
@@ -382,6 +383,7 @@ def _clone_graph(db: Session, source: WorkflowDefinition, target: WorkflowDefini
         state_id_map[item.id] = cloned.id
 
     target.initial_state_id = state_id_map.get(source.initial_state_id)
+    target.parent_definition_id = source.id
     source_transitions = (
         db.query(WorkflowTransition)
         .filter(WorkflowTransition.definition_id == source.id)

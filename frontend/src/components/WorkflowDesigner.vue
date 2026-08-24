@@ -179,6 +179,7 @@
       ref="advancedDrawer"
       v-model="advancedDrawerVisible"
       :state="drawerState"
+      :object-type="activeObjectType"
       :transition="selectedTransition"
       :transitions="transitions"
       :states="states"
@@ -189,7 +190,7 @@
       @select-transition="selectTransition"
       @move-transition="moveTransition"
       @add-transition="addTransition"
-      @remove-state="removeSelectedState"
+      @state-enabled-change="setSelectedStateEnabled"
       @remove-transition="removeSelectedTransition"
       @reset-diagram-route="resetSelectedDiagramRoute"
       @retarget-transition="retargetSelectedTransition"
@@ -228,6 +229,7 @@ import {
   saveWorkflowDefinitionGraph
 } from '../api/workflowDefinitions'
 import { projectWorkflowCanvas } from '../utils/workflowCanvasProjection'
+import { setWorkflowStateEnabled } from '../utils/workflowStateAvailability'
 import {
   applyGeneratedRoutesFromViews,
   createWorkflowDragFrame
@@ -724,19 +726,11 @@ function clearSelection() {
   advancedDrawerVisible.value = false
 }
 
-function removeSelectedState() {
+function setSelectedStateEnabled(enabled) {
   if (!selectedState.value) return
-  const stateId = selectedState.value.id
-  if (initialStateId.value === stateId) {
-    ElMessage.warning('初始状态不能删除')
-    return
-  }
-  if (transitions.value.some((item) => item.from_state_id === stateId || item.to_state_id === stateId)) {
-    ElMessage.warning('请先处理与该状态关联的流转')
-    return
-  }
-  states.value = states.value.filter((item) => item.id !== stateId)
-  clearSelection()
+  const graph = setWorkflowStateEnabled(states.value, transitions.value, selectedState.value.id, enabled)
+  states.value = graph.states
+  transitions.value = graph.transitions
 }
 
 function removeSelectedTransition() {

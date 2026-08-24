@@ -54,7 +54,7 @@ from app.services.iteration_service import (
 )
 from app.services.work_item_iteration_history_service import move_work_item_to_iteration
 from app.services.workflow_state_query_service import current_state_name, is_terminal_state
-from app.services.workflow_state_service import initial_workflow_values
+from app.services.workflow_state_service import initial_workflow_values, state_for_role
 from app.views.status_operation_view import StatusOperationCreate
 from app.views.workflow_runtime_view import (
     WorkflowBulkAssignmentRead,
@@ -102,7 +102,7 @@ def list_available_transitions(
     transitions = query.order_by(WorkflowTransition.sort_order.asc(), WorkflowTransition.id.asc()).all()
     result = []
     for transition in transitions:
-        if not bug_iteration_active and transition.action_key != "activate":
+        if not bug_iteration_active and not _is_allowed_inactive_bug_transition(current_state, transition):
             continue
         if _is_system_action(transition):
             continue
@@ -256,8 +256,6 @@ def _execute_transition(
                 "resolved_target_status": resolved_target_status,
             }
         )
-    if object_type == "iteration" and transition.action_key == "start":
-        _sync_iteration_start_hierarchy(db, item, request, actor)
     _apply_domain_payload(db, object_type, item, transition, request, actor, selected_values)
     _run_transition_validator(db, object_type, item, transition, resolved_target_state)
     automation_results = _run_transition_automations(
@@ -272,6 +270,9 @@ def _execute_transition(
     )
     item.workflow_definition_id = transition.definition_id
     item.current_state_id = resolved_target_state.id
+    if object_type == "iteration" and transition.action_key == "start":
+        db.flush()
+        _sync_iteration_start_hierarchy(db, item, request, actor)
     handler_routing = _next_owner_resolution(
         db,
         object_type,
@@ -489,6 +490,161 @@ def _sync_iteration_start_hierarchy(
             program.actual_start_date = effective_time.date()
         if program.status != "active":
             program.status = "active"
+
+    _start_waiting_iteration_work_items(db, iteration, sync_payload, actor, request.delegate_reason)
+
+
+def _start_waiting_iteration_work_items(
+    db: Session,
+    iteration: Iteration,
+    payload: dict[str, Any],
+    actor: User | None,
+    delegate_reason: str | None,
+) -> None:
+    for object_type, model in (("requirement", Requirement), ("task", Task), ("bug", Bug)):
+        items = (
+            db.query(model)
+            .join(WorkflowState, WorkflowState.id == model.current_state_id)
+            .filter(
+                model.deleted == 0,
+                model.iteration_id == iteration.id,
+                model.owner_id.isnot(None),
+                WorkflowState.state_role == "waiting_iteration",
+            )
+            .order_by(model.id.asc())
+            .with_for_update()
+            .populate_existing()
+            .all()
+        )
+        for item in items:
+            transition = (
+                db.query(WorkflowTransition)
+                .filter(
+                    WorkflowTransition.definition_id == item.workflow_definition_id,
+                    WorkflowTransition.from_state_id == item.current_state_id,
+                    WorkflowTransition.action_key == "start_iteration",
+                    WorkflowTransition.enabled.is_(True),
+                )
+                .order_by(WorkflowTransition.sort_order.asc(), WorkflowTransition.id.asc())
+                .first()
+            )
+            if not transition:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail={
+                        "code": "WORKFLOW_ITERATION_START_TRANSITION_MISSING",
+                        "message": f"{object_type} workflow has no enabled iteration-start transition",
+                        "workflow_definition_id": item.workflow_definition_id,
+                        "object_id": item.id,
+                    },
+                )
+            _execute_transition(
+                db,
+                object_type,
+                item,
+                WorkflowTransitionExecuteRequest(
+                    transition_id=transition.id,
+                    payload=payload,
+                    delegate_reason=delegate_reason,
+                    selected_values={
+                        "source": "iteration_start_sync",
+                        "source_iteration_id": iteration.id,
+                    },
+                ),
+                actor,
+                commit=False,
+                allow_system_action=True,
+                inherit_parent_permission=True,
+            )
+
+
+def validate_work_item_iteration_move(db: Session, item, target_iteration_id: int | None) -> None:
+    """Reject moving an executing work item back to a not-yet-started iteration."""
+    if target_iteration_id is None:
+        return
+    current_state = db.query(WorkflowState).filter(WorkflowState.id == item.current_state_id).first()
+    if not current_state or current_state.state_role != "active_work":
+        return
+    target_iteration = (
+        db.query(Iteration)
+        .filter(Iteration.id == target_iteration_id, Iteration.deleted == 0)
+        .first()
+    )
+    if target_iteration and not is_iteration_active(db, target_iteration):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": "WORK_ITEM_ACTIVE_STATE_CANNOT_MOVE_TO_INACTIVE_ITERATION",
+                "message": "执行中的工作项不能直接移动到未开始迭代",
+                "object_type": _object_type_for_item(item),
+                "object_id": item.id,
+                "target_iteration_id": target_iteration_id,
+            },
+        )
+
+
+def activate_waiting_work_item_after_iteration_move(
+    db: Session,
+    item,
+    actor_id: int | None,
+    reason: str,
+) -> None:
+    """Use the system transition when a waiting item is moved into an active iteration."""
+    iteration_id = getattr(item, "iteration_id", None)
+    if iteration_id is None:
+        return
+    iteration = (
+        db.query(Iteration)
+        .filter(Iteration.id == iteration_id, Iteration.deleted == 0)
+        .first()
+    )
+    if not iteration or not is_iteration_active(db, iteration):
+        return
+    current_state = db.query(WorkflowState).filter(WorkflowState.id == item.current_state_id).first()
+    if not current_state or current_state.state_role != "waiting_iteration":
+        return
+
+    object_type = _object_type_for_item(item)
+    transition = (
+        db.query(WorkflowTransition)
+        .filter(
+            WorkflowTransition.definition_id == item.workflow_definition_id,
+            WorkflowTransition.from_state_id == item.current_state_id,
+            WorkflowTransition.action_key == "start_iteration",
+            WorkflowTransition.enabled.is_(True),
+        )
+        .order_by(WorkflowTransition.sort_order.asc(), WorkflowTransition.id.asc())
+        .first()
+    )
+    if not transition:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": "WORKFLOW_ITERATION_START_TRANSITION_MISSING",
+                "message": f"{object_type} workflow has no enabled iteration-start transition",
+                "workflow_definition_id": item.workflow_definition_id,
+                "object_id": item.id,
+            },
+        )
+
+    actor = _owner_user(db, actor_id)
+    _execute_transition(
+        db,
+        object_type,
+        item,
+        WorkflowTransitionExecuteRequest(
+            transition_id=transition.id,
+            selected_values={
+                "source": "iteration_move_sync",
+                "source_iteration_move_reason": reason,
+                "target_iteration_id": iteration.id,
+            },
+        ),
+        actor,
+        commit=False,
+        allow_system_action=True,
+        inherit_parent_permission=True,
+    )
 
 
 def _lock_iteration_program_ancestors(db: Session, projects: list[Project]) -> list[Program]:
@@ -923,7 +1079,9 @@ def _eligible_transition_assignee_ids(
             return sorted({member.user_id for member in component_members})
         return sorted({member.user_id for member in component_members if member.role_id in role_ids})
     return _eligible_manual_assignee_ids(
-        db, project_id=_project_id_for_item(db, _object_type_for_item(item), item), rule=rule
+        db,
+        project_id=_project_id_for_item(db, _object_type_for_item(item), item),
+        rule={**rule, "_transition_id": transition.id},
     )
 
 
@@ -936,7 +1094,11 @@ def _matches_transition_condition(item, transition: WorkflowTransition) -> bool:
 
 
 def _bug_iteration_is_active(db: Session, bug: Bug) -> bool:
-    iteration_id = getattr(bug, "iteration_id", None)
+    return _item_iteration_is_active(db, bug)
+
+
+def _item_iteration_is_active(db: Session, item) -> bool:
+    iteration_id = getattr(item, "iteration_id", None)
     if iteration_id is None:
         return False
     iteration = (
@@ -999,8 +1161,11 @@ def _ensure_can_execute(
 ) -> None:
     if (
         object_type == "bug"
-        and transition.action_key != "activate"
         and not _bug_iteration_is_active(db, item)
+        and not _is_allowed_inactive_bug_transition(
+            db.query(WorkflowState).filter(WorkflowState.id == item.current_state_id).first(),
+            transition,
+        )
     ):
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -1022,6 +1187,21 @@ def _ensure_can_execute(
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Transition role not allowed")
     if (transition.handler_rule or {}).get("target_type") == "explicit_owner" and not request.next_owner_id:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Next handler is required")
+
+
+def _is_allowed_inactive_bug_transition(
+    current_state: WorkflowState | None,
+    transition: WorkflowTransition,
+) -> bool:
+    if transition.action_key in {"activate", "claim", "assign", "unassign"}:
+        return True
+    if current_state is None:
+        return False
+    if current_state.state_role == "unassigned":
+        return transition.action_key == "edit"
+    if current_state.state_role == "waiting_iteration":
+        return transition.action_key in {"transfer", "change_handler", "edit"}
+    return False
 
 def _handler_allowed(
     db: Session,
@@ -1074,6 +1254,8 @@ def _role_allowed(db: Session, object_type: str, item, transition: WorkflowTrans
         return False
     project_id = _project_id_for_item(db, object_type, item)
     if not project_id:
+        return True
+    if is_system_admin(db, actor.id):
         return True
     business_role_ids = {
         role_id for (role_id,) in db.query(WorkflowTransitionRole.role_id).filter(
@@ -1173,6 +1355,16 @@ def _resolve_target_states(
             transition.to_state_id,
         )
         resolved_target_state_id = default_target_state_id
+
+    iteration_phase_targets = condition_config.get("target_state_role_by_iteration_phase") or {}
+    if iteration_phase_targets:
+        phase = "active" if _item_iteration_is_active(db, item) else "inactive"
+        state_role = iteration_phase_targets.get(phase)
+        if state_role is None:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Workflow iteration-phase route is incomplete")
+        state = state_for_role(db, transition.definition_id, str(state_role))
+        default_target_state_id = state.id
+        resolved_target_state_id = state.id
 
     routes = condition_config.get("routes") or {}
     route_dictionary = condition_config.get("route_dictionary")

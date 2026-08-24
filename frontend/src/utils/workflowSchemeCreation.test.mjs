@@ -56,9 +56,10 @@ assert.deepEqual(lifecycleStatusMeta('draft'), { label: '草稿', type: 'warning
 assert.deepEqual(lifecycleStatusMeta('enabled'), { label: '已启用', type: 'success' })
 assert.deepEqual(lifecycleStatusMeta('disabled'), { label: '已停用', type: 'info' })
 
-const workflowView = readFileSync('frontend/src/views/WorkflowView.vue', 'utf8')
-const projectDetailView = readFileSync('frontend/src/views/ProjectDetailView.vue', 'utf8')
-const projectsView = readFileSync('frontend/src/views/ProjectsView.vue', 'utf8')
+const workflowView = readFileSync(new URL('../views/WorkflowView.vue', import.meta.url), 'utf8')
+const projectDetailView = readFileSync(new URL('../views/ProjectDetailView.vue', import.meta.url), 'utf8')
+const projectsView = readFileSync(new URL('../views/ProjectsView.vue', import.meta.url), 'utf8')
+const workflowDesigner = readFileSync(new URL('../components/WorkflowDesigner.vue', import.meta.url), 'utf8')
 
 assert.match(workflowView, /creation_mode/)
 assert.match(workflowView, /template_source_value/)
@@ -68,13 +69,13 @@ assert.match(workflowView, /disableAssigneeRuleConfig/)
 assert.doesNotMatch(workflowView, /form\.enabled|deleteAssigneeRuleConfig/)
 assert.match(workflowView, /:role-options="workflowExecutionRoleOptions"/)
 for (const [label, value] of [
+  ['当前操作人', 'actor'],
   ['创建人', 'creator'],
-  ['项目负责人', 'project_owner'],
   ['当前处理人', 'current_handler'],
   ['系统管理员', 'system_admin']
 ]) {
   assert.match(
-    workflowView,
+    workflowDesigner,
     new RegExp(`\\{ label: '${label}', value: '${value}' \\}`),
     `workflow role ${value} must have a Chinese label`
   )

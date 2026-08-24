@@ -77,7 +77,7 @@ MODEL_BY_TYPE = {
 }
 
 SUPPORTED_VALIDATOR_TYPES = {
-    "bug_close_gate", "requirement_terminal_gate", "iteration_terminal_gate", "project_close_gate",
+    "bug_close_gate", "requirement_terminal_gate", "task_descendants_terminal_gate", "iteration_terminal_gate", "project_close_gate",
 }
 SUPPORTED_AUTOMATION_TYPES = {"notification", "system_action"}
 TRANSITION_LOCK_RETRY_LIMIT = 3
@@ -1887,6 +1887,8 @@ def _run_single_transition_validator(
         _require_bug_close_tasks_complete(db, item, validator)
     elif validator_type == "requirement_terminal_gate":
         _require_requirement_relations_complete(db, item, resolved_target_state)
+    elif validator_type == "task_descendants_terminal_gate":
+        _require_task_descendants_terminal(db, item, resolved_target_state)
     elif validator_type == "iteration_terminal_gate":
         ensure_iteration_items_complete(db, item.id)
     elif validator_type == "project_close_gate":
@@ -2043,6 +2045,40 @@ def _require_requirement_relations_complete(
             detail={
                 "code": "REQUIREMENT_HAS_UNCLOSED_BUGS",
                 "message": "关联缺陷未关闭，不能结束需求",
+            },
+        )
+
+
+def _require_task_descendants_terminal(
+    db: Session,
+    task: Task,
+    resolved_target_state: WorkflowState | None,
+) -> None:
+    if not resolved_target_state or resolved_target_state.category != "terminal":
+        return
+    from app.services.task_hierarchy_service import list_descendants
+
+    blockers = [
+        descendant
+        for descendant in list_descendants(db, task.id, for_update=True)
+        if not is_terminal_state(descendant)
+    ]
+    if blockers:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": "TASK_DESCENDANTS_NOT_TERMINAL",
+                "message": "存在未结束子任务，当前任务无法完成或取消。",
+                "counts": {"task": len(blockers)},
+                "blockers": [
+                    {
+                        "id": blocker.id,
+                        "title": blocker.title,
+                        "status_name": blocker.status_name,
+                        "parent_task_id": blocker.parent_task_id,
+                    }
+                    for blocker in blockers
+                ],
             },
         )
 

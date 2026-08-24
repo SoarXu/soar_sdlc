@@ -26,6 +26,7 @@ class TaskBase(BaseModel):
 class TaskCreate(TaskBase):
     model_config = ConfigDict(extra="forbid")
 
+    parent_task_id: int | None = None
     primary_component_id: int | None = None
     related_component_ids: list[int] = Field(default_factory=list)
 
@@ -58,6 +59,15 @@ class TaskSourceRead(BaseModel):
     source_type: str
     source_id: int
     relation_type: str = "linked_task"
+
+
+class TaskParentSummary(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    title: str
+    status_name: str
+    owner_id: int | None = None
 
 
 class LinkedTaskSummary(BaseModel):
@@ -101,6 +111,9 @@ class TaskRead(TaskBase):
     current_state_id: int
     status_name: str
     state_category: str
+    parent_task_id: int | None = None
+    parent_task: TaskParentSummary | None = None
+    direct_child_count: int = 0
     creator_id: int | None = None
     updater_id: int | None = None
     create_time: datetime | None = None
@@ -113,3 +126,10 @@ class TaskRead(TaskBase):
     @field_serializer("estimated_hours", "actual_hours")
     def serialize_decimal(self, value: Decimal | None):
         return float(value) if value is not None else None
+
+
+class TaskPageRead(BaseModel):
+    items: list[TaskRead]
+    total: int
+    page: int
+    page_size: int

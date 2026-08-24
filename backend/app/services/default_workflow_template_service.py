@@ -56,6 +56,7 @@ def ensure_default_workflow_templates(db: Session) -> list[WorkflowDefinition]:
         if definition not in definitions:
             reconcile_work_item_state_matrix(db, definition)
     reconcile_managed_bug_action_matrices(db)
+    reconcile_managed_task_terminal_gates(db)
     db.commit()
     for definition in definitions:
         db.refresh(definition)
@@ -460,6 +461,111 @@ def reconcile_managed_bug_action_matrices(db: Session) -> int:
         if _is_managed_bug_workflow(db, definition)
         and reconcile_bug_action_matrix(db, definition)
     )
+
+
+def reconcile_managed_task_terminal_gates(db: Session) -> int:
+    definitions = (
+        db.query(WorkflowDefinition)
+        .filter(WorkflowDefinition.object_type == "task")
+        .order_by(WorkflowDefinition.id.asc())
+        .all()
+    )
+    return sum(
+        reconcile_task_terminal_gates(db, definition)
+        for definition in definitions
+        if _is_managed_task_workflow(db, definition)
+    )
+
+
+def reconcile_task_terminal_gates(db: Session, definition: WorkflowDefinition) -> bool:
+    terminal_state_ids = {
+        state_id
+        for (state_id,) in db.query(WorkflowState.id)
+        .filter(
+            WorkflowState.definition_id == definition.id,
+            WorkflowState.category == "terminal",
+            WorkflowState.enabled.is_(True),
+        )
+        .all()
+    }
+    if not terminal_state_ids:
+        return False
+    changed = False
+    transitions = (
+        db.query(WorkflowTransition)
+        .filter(
+            WorkflowTransition.definition_id == definition.id,
+            WorkflowTransition.to_state_id.in_(terminal_state_ids),
+            WorkflowTransition.from_state_id != WorkflowTransition.to_state_id,
+            WorkflowTransition.enabled.is_(True),
+        )
+        .order_by(WorkflowTransition.id.asc())
+        .all()
+    )
+    for transition in transitions:
+        validators = transition.validator_config if isinstance(transition.validator_config, list) else [transition.validator_config]
+        validators = [validator for validator in validators if validator]
+        if any(validator.get("type") == "task_descendants_terminal_gate" for validator in validators):
+            continue
+        validators.append({"type": "task_descendants_terminal_gate"})
+        transition.validator_config = validators[0] if len(validators) == 1 else validators
+        changed = True
+    if changed:
+        definition.version = (definition.version or 1) + 1
+    return changed
+
+
+def _is_managed_task_workflow(db: Session, definition: WorkflowDefinition) -> bool:
+    if (
+        definition.scope_type == "system"
+        and definition.template_key == "task.default"
+        and definition.is_default_template
+    ):
+        return True
+    if definition.parent_definition_id:
+        parent = db.query(WorkflowDefinition).filter(
+            WorkflowDefinition.id == definition.parent_definition_id
+        ).first()
+        return bool(
+            parent
+            and parent.scope_type == "system"
+            and parent.template_key == "task.default"
+            and parent.is_default_template
+            and _matches_legacy_default_task_fingerprint(db, definition)
+        )
+    return _matches_legacy_default_task_fingerprint(db, definition)
+
+
+def _matches_legacy_default_task_fingerprint(db: Session, definition: WorkflowDefinition) -> bool:
+    if definition.scope_type != "assignee_rule_config":
+        return False
+    state_roles = {
+        state_role
+        for (state_role,) in db.query(WorkflowState.state_role)
+        .filter(WorkflowState.definition_id == definition.id)
+        .all()
+        if state_role
+    }
+    if not {"unassigned", "waiting_iteration", "active_work"} <= state_roles:
+        return False
+    action_keys = {
+        action_key
+        for (action_key,) in db.query(WorkflowTransition.action_key)
+        .filter(WorkflowTransition.definition_id == definition.id)
+        .all()
+    }
+    return {
+        "claim",
+        "assign",
+        "start_iteration",
+        "unassign",
+        "complete",
+        "submit_confirmation",
+        "approve_confirmation",
+        "return_rework",
+        "cancel",
+        "reactivate",
+    } <= action_keys
 
 
 def reconcile_bug_action_matrix(db: Session, definition: WorkflowDefinition) -> bool:
@@ -962,6 +1068,7 @@ def _task_graph() -> WorkflowGraphSave:
                 "completed",
                 target_type="keep_current",
                 condition_config={"task_types": ["requirement_implementation", "standalone_operation"]},
+                validator_config={"type": "task_descendants_terminal_gate"},
                 handler_scope="current_handler",
                 ui_config={"list_display": "primary", "list_priority": 10, "requires_owner": True},
             ),
@@ -992,6 +1099,7 @@ def _task_graph() -> WorkflowGraphSave:
                 "pending_confirmation",
                 "completed",
                 target_type="keep_current",
+                validator_config={"type": "task_descendants_terminal_gate"},
                 handler_scope="current_handler",
                 ui_config={"list_display": "primary", "list_priority": 10, "requires_owner": True},
             ),
@@ -1026,6 +1134,7 @@ def _task_graph() -> WorkflowGraphSave:
                 "canceled",
                 allowed_roles="creator,project_owner",
                 target_type="keep_current",
+                validator_config={"type": "task_descendants_terminal_gate"},
                 handler_scope="allowed_identity",
                 ui_config={"button_type": "danger", "list_display": "more", "list_priority": 90},
             ),
@@ -1036,6 +1145,7 @@ def _task_graph() -> WorkflowGraphSave:
                 "canceled",
                 allowed_roles="current_handler,project_owner",
                 target_type="keep_current",
+                validator_config={"type": "task_descendants_terminal_gate"},
                 handler_scope="allowed_identity",
                 ui_config={"button_type": "danger", "list_display": "more", "list_priority": 90, "requires_owner": True},
             ),
@@ -1046,6 +1156,7 @@ def _task_graph() -> WorkflowGraphSave:
                 "canceled",
                 allowed_roles="project_owner",
                 target_type="keep_current",
+                validator_config={"type": "task_descendants_terminal_gate"},
                 handler_scope="allowed_identity",
                 ui_config={"button_type": "danger", "list_display": "more", "list_priority": 90, "requires_owner": True},
             ),

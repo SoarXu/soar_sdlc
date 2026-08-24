@@ -47,7 +47,7 @@ HANDLER_SOURCE_TYPES = {
     "bug_verifier_if_pending_verification", "task_confirmation",
 }
 VALIDATOR_TYPES = {
-    "bug_close_gate", "requirement_terminal_gate", "iteration_terminal_gate", "project_close_gate",
+    "bug_close_gate", "requirement_terminal_gate", "task_descendants_terminal_gate", "iteration_terminal_gate", "project_close_gate",
 }
 FORM_FIELD_TYPES = {"text", "textarea", "select", "number", "date", "datetime"}
 UI_CONFIG_KEYS = {

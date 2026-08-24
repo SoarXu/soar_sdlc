@@ -15,6 +15,12 @@ class Task(Base):
     source_project_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     iteration_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     requirement_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    parent_task_id: Mapped[int | None] = mapped_column(
+        BigInteger,
+        ForeignKey("tasks.id", ondelete="RESTRICT"),
+        nullable=True,
+        index=True,
+    )
     title: Mapped[str] = mapped_column(String(255))
     task_type: Mapped[str | None] = mapped_column(String(64), nullable=True)
     priority: Mapped[str] = mapped_column(String(32), default="medium")
@@ -49,6 +55,12 @@ class Task(Base):
     delete_time: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
     current_state: Mapped["WorkflowState | None"] = relationship(foreign_keys=[current_state_id], lazy="joined")
+    parent_task: Mapped["Task | None"] = relationship(
+        "Task",
+        remote_side=[id],
+        foreign_keys=[parent_task_id],
+        lazy="joined",
+    )
 
     @property
     def status_name(self) -> str | None:

@@ -9,6 +9,10 @@ export function fetchTask(id) {
   return http.get(`/tasks/${id}`)
 }
 
+export function fetchTaskChildren(id, params = {}) {
+  return http.get(`/tasks/${id}/children`, { params })
+}
+
 export function createTask(payload) {
   return http.post('/tasks', payload)
 }

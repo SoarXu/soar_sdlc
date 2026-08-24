@@ -114,15 +114,20 @@ def update_requirement(db: Session, requirement_id: int, payload: RequirementUpd
     if target_iteration_id != requirement.iteration_id:
         data["iteration_id"] = target_iteration_id
     before_data, after_data = _requirement_change_data(requirement, data)
-    if target_iteration_id != requirement.iteration_id:
+    scope_changed = (
+        target_iteration_id != requirement.iteration_id
+        or target_project_id != requirement.project_id
+    )
+    if scope_changed:
         source_iteration_id = requirement.iteration_id
-        move_work_item_to_iteration(
-            db,
-            requirement,
-            target_iteration_id,
-            actor_id=actor_id,
-            reason="updated",
-        )
+        if target_iteration_id != requirement.iteration_id:
+            move_work_item_to_iteration(
+                db,
+                requirement,
+                target_iteration_id,
+                actor_id=actor_id,
+                reason="updated",
+            )
         move_requirement_dependents_to_iteration(
             db,
             requirement.id,
@@ -130,6 +135,7 @@ def update_requirement(db: Session, requirement_id: int, payload: RequirementUpd
             target_iteration_id,
             actor_id=actor_id,
             reason="requirement_updated",
+            target_project_id=target_project_id,
         )
     data.pop("iteration_id", None)
     for field, value in data.items():

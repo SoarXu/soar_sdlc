@@ -374,6 +374,7 @@ def available_tasks(db: Session, iteration_id: int) -> list[Task]:
         db.query(Task)
         .filter(
             Task.deleted == 0,
+            Task.parent_task_id.is_(None),
             Task.project_id.in_(scoped_project_ids),
             Task.iteration_id.in_(source_iteration_ids),
             Task.requirement_id.is_(None),
@@ -397,6 +398,14 @@ def link_tasks(
     if len(tasks) != len(set(task_ids)):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="任务不存在")
     for task in tasks:
+        if task.parent_task_id is not None:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={
+                    "code": "CHILD_TASK_SCOPE_IMMUTABLE",
+                    "message": "子任务的项目、需求和迭代由父任务统一管理。",
+                },
+            )
         if task.project_id not in scoped_project_ids:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="任务不在迭代项目范围内")
         if task.requirement_id is not None:
@@ -418,6 +427,14 @@ def unlink_task(
     ensure_iteration_mutable(iteration)
     task = db.query(Task).filter(Task.id == task_id, Task.deleted == 0).first()
     if task and task.iteration_id == iteration_id:
+        if task.parent_task_id is not None:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={
+                    "code": "CHILD_TASK_SCOPE_IMMUTABLE",
+                    "message": "子任务的项目、需求和迭代由父任务统一管理。",
+                },
+            )
         target = fallback_iteration_for_project(db, task.project_id, exclude_iteration_id=iteration_id)
         move_work_item_to_iteration(db, task, target.id, actor_id=actor_id, reason="unlinked")
         db.commit()

@@ -489,10 +489,9 @@ def test_requirement_iteration_change_atomically_moves_linked_tasks_and_followin
         db.close()
 
 
-def test_requirement_iteration_change_rejects_linked_task_in_terminal_source_iteration(client: TestClient):
+def test_linked_task_scope_cannot_diverge_from_requirement_iteration(client: TestClient):
     project = _create_project(client, "Terminal dependent task")
     requirement_source = _create_iteration(client, project["id"], "Requirement source")
-    task_source = _create_iteration(client, project["id"], "Task terminal source")
     target = _create_iteration(client, project["id"], "Requirement target")
     requirement = client.post(
         "/api/v1/requirements",
@@ -507,34 +506,17 @@ def test_requirement_iteration_change_rejects_linked_task_in_terminal_source_ite
         json={
             "project_id": project["id"],
             "requirement_id": requirement["id"],
-            "iteration_id": task_source["id"],
+            "iteration_id": target["id"],
             "title": "Divergent linked task",
         },
     ).json()
     assert task["iteration_id"] == requirement_source["id"]
-    moved_task = client.patch(
-        f"/api/v1/tasks/{task['id']}", json={"iteration_id": task_source["id"]}
-    )
-    assert moved_task.status_code == 200, moved_task.text
-    _set_iteration_category(task_source["id"], "terminal")
-
     rejected = client.patch(
-        f"/api/v1/requirements/{requirement['id']}", json={"iteration_id": target["id"]}
+        f"/api/v1/tasks/{task['id']}", json={"iteration_id": target["id"]}
     )
-
     assert rejected.status_code == 409, rejected.text
-    assert client.get(f"/api/v1/requirements/{requirement['id']}").json()["iteration_id"] == requirement_source["id"]
-    assert client.get(f"/api/v1/tasks/{task['id']}").json()["iteration_id"] == task_source["id"]
-    db = SessionLocal()
-    try:
-        open_task_history = db.query(WorkItemIterationHistory).filter(
-            WorkItemIterationHistory.object_type == "task",
-            WorkItemIterationHistory.object_id == task["id"],
-            WorkItemIterationHistory.left_at.is_(None),
-        ).one()
-        assert open_task_history.iteration_id == task_source["id"]
-    finally:
-        db.close()
+    assert rejected.json()["detail"]["code"] == "TASK_REQUIREMENT_SCOPE_MISMATCH"
+    assert client.get(f"/api/v1/tasks/{task['id']}").json()["iteration_id"] == requirement_source["id"]
 
 
 def test_project_unfinished_work_items_excludes_terminal_items(client: TestClient):

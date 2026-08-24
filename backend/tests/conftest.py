@@ -304,6 +304,11 @@ def _cleanup_created_rows(before: dict[str, set[int]]) -> None:
             rows = db.execute(text(f"select id from {table}")).all()
             created_ids = [row.id for row in rows if row.id not in before[table]]
             if created_ids:
+                if table == "tasks":
+                    db.execute(
+                        text("update tasks set parent_task_id = null where parent_task_id in :ids"),
+                        {"ids": tuple(created_ids)},
+                    )
                 db.execute(text(f"delete from {table} where id in :ids"), {"ids": tuple(created_ids)})
         db.commit()
     finally:

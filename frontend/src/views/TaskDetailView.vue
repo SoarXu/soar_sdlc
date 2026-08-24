@@ -6,6 +6,7 @@
       <h1>{{ task.title || '任务详情' }}</h1>
       <router-link v-if="task.project_id" class="detail-link" :to="`/projects/${task.project_id}`">进入项目</router-link>
       <WatchToggleButton v-if="task.id" object-type="task" :object-id="taskId" />
+      <el-button v-if="!editing && canCreateChildTask" type="primary" :icon="CirclePlus" @click="openChildTaskDialog">新增子任务</el-button>
       <WorkflowActionButtons
         v-if="!editing && task.id"
         object-type="task"
@@ -40,6 +41,12 @@
           <router-link v-if="task.requirement_id" class="table-link" :to="`/requirements/${task.requirement_id}`">{{ labelById(requirements, task.requirement_id, 'title') }}</router-link>
           <span v-else>-</span>
         </el-descriptions-item>
+        <el-descriptions-item label="父任务">
+          <router-link v-if="task.parent_task" class="table-link" :to="`/tasks/${task.parent_task.id}`">
+            #{{ task.parent_task.id }} {{ task.parent_task.title }}
+          </router-link>
+          <span v-else>-</span>
+        </el-descriptions-item>
         <el-descriptions-item label="任务来源">
           <template v-if="task.source_relations?.length">
             <router-link
@@ -63,9 +70,50 @@
           <h2>任务描述</h2>
           <div class="rich-text">{{ task.description || '-' }}</div>
         </section>
+        <section class="detail-section task-child-section">
+          <div class="task-child-heading">
+            <div>
+              <h2>子任务</h2>
+              <span class="task-child-summary">共 {{ childTaskTotal }} 项</span>
+            </div>
+            <el-button v-if="canCreateChildTask" type="primary" plain :icon="CirclePlus" @click="openChildTaskDialog">新增子任务</el-button>
+          </div>
+          <el-table v-if="childTasks.length" v-loading="childTasksLoading" :data="childTasks" size="small" class="task-child-table">
+            <el-table-column label="任务" min-width="240" show-overflow-tooltip>
+              <template #default="{ row }"><router-link class="table-link" :to="`/tasks/${row.id}`">{{ row.title }}</router-link></template>
+            </el-table-column>
+            <el-table-column label="当前处理人" width="150"><template #default="{ row }">{{ userLabel(users, row.owner_id) }}</template></el-table-column>
+            <el-table-column prop="status_name" label="状态" width="120" />
+            <el-table-column label="迭代" width="180"><template #default="{ row }">{{ iterationLabel(row.iteration_id) }}</template></el-table-column>
+          </el-table>
+          <el-empty v-else-if="!childTasksLoading" description="暂无子任务" :image-size="56" />
+          <div v-if="childTaskTotal > childTaskPageSize" class="task-child-pagination">
+            <el-pagination v-model:current-page="childTaskPage" :page-size="childTaskPageSize" :total="childTaskTotal" layout="total, prev, pager, next" />
+          </div>
+        </section>
       </div>
       </template>
     </el-card>
+
+    <el-dialog v-model="childTaskDialogVisible" title="新增子任务" width="620px" destroy-on-close>
+      <el-form label-position="top">
+        <el-form-item label="任务标题" required><el-input v-model="childTaskForm.title" /></el-form-item>
+        <div class="form-grid child-scope-grid">
+          <el-form-item label="所属项目"><el-input :model-value="labelById(projects, task.project_id)" readonly /></el-form-item>
+          <el-form-item label="关联需求"><el-input :model-value="task.requirement_id ? labelById(requirements, task.requirement_id, 'title') : '未关联需求'" readonly /></el-form-item>
+          <el-form-item label="所属迭代"><el-input :model-value="iterationLabel(task.iteration_id)" readonly /></el-form-item>
+          <el-form-item label="任务分支"><el-select v-model="childTaskForm.task_type" :disabled="Boolean(task.requirement_id)"><el-option v-for="option in TASK_BRANCH_OPTIONS" :key="option.value" :label="option.label" :value="option.value" /></el-select></el-form-item>
+          <el-form-item label="当前处理人"><el-select v-model="childTaskForm.owner_id" clearable filterable><el-option v-for="user in users" :key="user.id" :label="user.full_name" :value="user.id" /></el-select></el-form-item>
+          <el-form-item label="优先级"><el-select v-model="childTaskForm.priority"><el-option label="高" value="high" /><el-option label="中" value="medium" /><el-option label="低" value="low" /></el-select></el-form-item>
+          <el-form-item label="截止日期"><el-date-picker v-model="childTaskForm.due_date" value-format="YYYY-MM-DD" type="date" /></el-form-item>
+        </div>
+        <el-form-item label="描述"><el-input v-model="childTaskForm.description" type="textarea" :rows="3" /></el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="childTaskDialogVisible = false">取消</el-button>
+        <el-button type="primary" :loading="savingChildTask" @click="submitChildTask">保存</el-button>
+      </template>
+    </el-dialog>
 
     <WorkItemCommentPanel
       v-if="task.id"
@@ -114,13 +162,15 @@
 </template>
 
 <script setup>
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
+import { CirclePlus } from '@element-plus/icons-vue'
 
-import { fetchProjects } from '../api/projects'
+import { fetchProjectMembers, fetchProjects } from '../api/projects'
+import { fetchIterations } from '../api/iterations'
 import { fetchRequirements } from '../api/requirements'
-import { fetchTask, fetchTaskAuditLogs, fetchTaskStatusOperations, updateTask } from '../api/tasks'
+import { createTask, fetchTask, fetchTaskAuditLogs, fetchTaskChildren, fetchTaskStatusOperations, updateTask } from '../api/tasks'
 import { fetchUsers } from '../api/users'
 import CommitRecordsPanel from '../components/CommitRecordsPanel.vue'
 import WatchToggleButton from '../components/WatchToggleButton.vue'
@@ -129,6 +179,8 @@ import WorkflowActionButtons from '../components/WorkflowActionButtons.vue'
 import { labelById, userLabel } from '../utils/referenceLabels'
 import { formatAuditValue } from '../utils/auditHistoryLabels'
 import { deriveTaskBranch, TASK_BRANCH_OPTIONS, taskBranchLabel } from '../utils/taskBranchRules'
+import { canCreateWorkItem, currentUserFromStorage } from '../utils/permissions'
+import { showActionError } from '../utils/actionFeedback'
 
 const route = useRoute()
 const router = useRouter()
@@ -139,11 +191,28 @@ const editing = ref(false)
 const task = ref({})
 const projects = ref([])
 const requirements = ref([])
+const iterations = ref([])
 const users = ref([])
+const projectMembers = ref([])
 const statusOperations = ref([])
 const auditLogs = ref([])
 const expandedHistory = reactive({})
 const taskForm = reactive({ requirement_id: null, title: '', task_type: 'standalone_operation', priority: 'medium', owner_id: null, due_date: null, description: '' })
+const childTasks = ref([])
+const childTasksLoading = ref(false)
+const childTaskTotal = ref(0)
+const childTaskPage = ref(1)
+const childTaskPageSize = 10
+const childTaskDialogVisible = ref(false)
+const savingChildTask = ref(false)
+const childTaskForm = reactive({ title: '', task_type: 'standalone_operation', priority: 'medium', owner_id: null, due_date: null, description: '' })
+const currentUser = computed(() => currentUserFromStorage(users.value))
+const taskProject = computed(() => projects.value.find((item) => item.id === task.value.project_id) || null)
+const canCreateChildTask = computed(() => (
+  Boolean(task.value.id)
+  && task.value.state_category !== 'terminal'
+  && canCreateWorkItem(taskProject.value, currentUser.value, projectMembers.value)
+))
 const taskHistory = computed(() => {
   const statusItems = statusOperations.value.map((item) => ({
     key: `status-${item.id}`,
@@ -172,6 +241,7 @@ const taskHistory = computed(() => {
 })
 
 function optionLabel(options, value) { return options.find((option) => option.value === value)?.label || value || '-' }
+function iterationLabel(iterationId) { return iterations.value.find((item) => item.id === iterationId)?.name || (iterationId ? `迭代 #${iterationId}` : '未关联迭代') }
 function operationActionLabel(value) { return optionLabel([{ label: '激活', value: 'activate' }, { label: '关闭', value: 'close' }], value) }
 function toggleHistory(key) { expandedHistory[key] = !expandedHistory[key] }
 function formatDateTime(value) { return value ? new Date(value).toLocaleString('zh-CN', { hour12: false }) : '-' }
@@ -222,6 +292,22 @@ function fillTaskForm() {
     due_date: task.value.due_date || null,
     description: task.value.description || ''
   })
+}
+
+function resetChildTaskForm() {
+  Object.assign(childTaskForm, {
+    title: '',
+    task_type: deriveTaskBranch({ requirementId: task.value.requirement_id, currentType: task.value.task_type }),
+    priority: 'medium',
+    owner_id: null,
+    due_date: null,
+    description: ''
+  })
+}
+
+function openChildTaskDialog() {
+  resetChildTaskForm()
+  childTaskDialogVisible.value = true
 }
 
 function sourceRoute(source) {
@@ -277,13 +363,56 @@ async function saveTask() {
   }
 }
 
+async function submitChildTask() {
+  if (!childTaskForm.title.trim()) return ElMessage.warning('请填写任务标题')
+  savingChildTask.value = true
+  try {
+    await createTask({
+      project_id: task.value.project_id,
+      requirement_id: task.value.requirement_id || null,
+      iteration_id: task.value.iteration_id || null,
+      parent_task_id: task.value.id,
+      title: childTaskForm.title.trim(),
+      task_type: deriveTaskBranch({ requirementId: task.value.requirement_id, currentType: childTaskForm.task_type }),
+      priority: childTaskForm.priority,
+      owner_id: childTaskForm.owner_id || null,
+      due_date: childTaskForm.due_date || null,
+      description: childTaskForm.description || null
+    })
+    childTaskDialogVisible.value = false
+    childTaskPage.value = 1
+    await loadData()
+    ElMessage.success('子任务已创建')
+  } catch (error) {
+    showActionError(error, '子任务创建失败')
+  } finally {
+    savingChildTask.value = false
+  }
+}
+
+async function loadTaskChildren() {
+  if (!task.value.id) return
+  childTasksLoading.value = true
+  try {
+    const { data } = await fetchTaskChildren(taskId.value, { page: childTaskPage.value, page_size: childTaskPageSize })
+    childTasks.value = data.items || []
+    childTaskTotal.value = data.total || 0
+  } catch {
+    childTasks.value = []
+    childTaskTotal.value = 0
+  } finally {
+    childTasksLoading.value = false
+  }
+}
+
 async function loadData() {
   loading.value = true
   try {
-    const [taskRes, projectRes, requirementRes, userRes, operationRes, auditRes] = await Promise.all([
+    const [taskRes, projectRes, requirementRes, iterationRes, userRes, operationRes, auditRes] = await Promise.all([
       fetchTask(taskId.value),
       fetchProjects(),
       fetchRequirements(),
+      fetchIterations(),
       fetchUsers(),
       fetchTaskStatusOperations(taskId.value),
       fetchTaskAuditLogs(taskId.value)
@@ -292,9 +421,15 @@ async function loadData() {
     fillTaskForm()
     projects.value = projectRes.data
     requirements.value = requirementRes.data
+    iterations.value = iterationRes.data
     users.value = userRes.data
     statusOperations.value = operationRes.data
     auditLogs.value = auditRes.data
+    if (task.value.project_id) {
+      const { data } = await fetchProjectMembers(task.value.project_id)
+      projectMembers.value = data || []
+    }
+    await loadTaskChildren()
   } catch {
     ElMessage.error('任务详情加载失败')
   } finally {
@@ -302,5 +437,45 @@ async function loadData() {
   }
 }
 
+watch(childTaskPage, loadTaskChildren)
 onMounted(loadData)
 </script>
+
+<style scoped>
+.task-child-section {
+  border-top: 1px solid var(--el-border-color-lighter);
+  margin-top: 24px;
+  padding-top: 20px;
+}
+
+.task-child-heading {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.task-child-heading h2 { margin: 0; }
+
+.task-child-summary {
+  color: var(--el-text-color-secondary);
+  display: inline-block;
+  font-size: 13px;
+  margin-top: 4px;
+}
+
+.task-child-table { width: 100%; }
+
+.task-child-pagination {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 12px;
+}
+
+.child-scope-grid :deep(.el-input__wrapper) { background: var(--el-fill-color-light); }
+
+@media (max-width: 720px) {
+  .task-child-heading { align-items: flex-start; gap: 12px; }
+  .task-child-heading .el-button { flex: 0 0 auto; }
+}
+</style>

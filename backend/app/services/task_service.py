@@ -2,6 +2,7 @@
 from decimal import Decimal
 
 from fastapi import HTTPException, status
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.models.audit_log import AuditLog
@@ -35,6 +36,12 @@ from app.services.status_operation_service import list_status_operations
 from app.services.workflow_state_service import initial_work_item_workflow_values
 from app.services.workflow_state_query_service import is_terminal_state
 from app.services.work_item_iteration_history_service import move_work_item_to_iteration
+from app.services.task_hierarchy_service import (
+    get_locked_active_task,
+    list_direct_children,
+    synchronize_task_tree_scope,
+    validate_child_parent,
+)
 from app.views.task_view import LinkedTaskCreate, TaskCreate, TaskUpdate
 
 
@@ -59,6 +66,7 @@ def list_tasks(db: Session, actor) -> list[Task]:
     for task in tasks:
         _attach_task_sources(db, task)
         attach_work_item_components(db, "task", task)
+    _attach_task_hierarchy_metadata(db, tasks)
     return tasks
 
 
@@ -66,13 +74,37 @@ def get_task(db: Session, task_id: int) -> Task:
     task = _get_active_task(db, task_id)
     _attach_task_sources(db, task)
     attach_work_item_components(db, "task", task)
+    _attach_task_hierarchy_metadata(db, [task])
     return task
+
+
+def list_task_children(db: Session, task_id: int, page: int, page_size: int) -> dict:
+    parent = _get_active_task(db, task_id)
+    children_query = (
+        db.query(Task)
+        .filter(Task.parent_task_id == parent.id, Task.deleted == 0)
+        .order_by(Task.id.asc())
+    )
+    total = children_query.count()
+    children = children_query.offset((page - 1) * page_size).limit(page_size).all()
+    for child in children:
+        _attach_task_sources(db, child)
+        attach_work_item_components(db, "task", child)
+    _attach_task_hierarchy_metadata(db, children)
+    return {"items": children, "total": total, "page": page, "page_size": page_size}
 
 
 def create_task(db: Session, payload: TaskCreate, actor_id: int | None = None) -> Task:
     data = payload.model_dump()
     primary_component_id = data.pop("primary_component_id", None)
     related_component_ids = data.pop("related_component_ids", [])
+    parent = None
+    if data.get("parent_task_id") is not None:
+        parent = get_locked_active_task(db, data["parent_task_id"])
+        validate_child_parent(parent)
+        data["project_id"] = parent.project_id
+        data["requirement_id"] = parent.requirement_id
+        data["iteration_id"] = parent.iteration_id
     requirement = None
     if data.get("requirement_id"):
         requirement = db.query(Requirement).filter(
@@ -80,7 +112,7 @@ def create_task(db: Session, payload: TaskCreate, actor_id: int | None = None) -
         ).first()
         if requirement:
             data["iteration_id"] = requirement.iteration_id
-    if not requirement:
+    if not requirement and parent is None:
         data["iteration_id"] = resolve_work_item_iteration(
             db, data["project_id"], data.get("iteration_id")
         )
@@ -120,6 +152,7 @@ def create_task(db: Session, payload: TaskCreate, actor_id: int | None = None) -
     db.commit()
     db.refresh(task)
     attach_work_item_components(db, "task", task)
+    _attach_task_hierarchy_metadata(db, [task])
     return task
 
 
@@ -258,18 +291,35 @@ def update_task(db: Session, task_id: int, payload: TaskUpdate, actor_id: int | 
     _ensure_project_editable_for_task(db, task)
     data = payload.model_dump(exclude_unset=True)
     data.pop("status", None)
+    _ensure_child_task_scope_immutable(task, data)
     target_project_id = data.get("project_id", task.project_id)
     should_resolve_iteration = "iteration_id" in data or (
         "requirement_id" in data and data.get("requirement_id") is not None
     )
+    target_requirement_id = data.get("requirement_id", task.requirement_id)
+    requirement = None
+    if target_requirement_id:
+        requirement = db.query(Requirement).filter(
+            Requirement.id == target_requirement_id, Requirement.deleted == 0
+        ).first()
+        if not requirement:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Requirement not found")
+        target_project_id = requirement.project_id
+        data["project_id"] = target_project_id
+        if "iteration_id" in data and data["iteration_id"] != requirement.iteration_id:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={
+                    "code": "TASK_REQUIREMENT_SCOPE_MISMATCH",
+                    "message": "关联需求的任务必须与需求保持同项目、同迭代。",
+                },
+            )
+        data["iteration_id"] = requirement.iteration_id
+        should_resolve_iteration = True
     if should_resolve_iteration:
-        target_requirement_id = data.get("requirement_id", task.requirement_id)
         source_iteration_id = None
-        if target_requirement_id:
-            requirement = db.query(Requirement).filter(
-                Requirement.id == target_requirement_id, Requirement.deleted == 0
-            ).first()
-            source_iteration_id = requirement.iteration_id if requirement else None
+        if requirement:
+            source_iteration_id = requirement.iteration_id
         data["iteration_id"] = resolve_work_item_iteration(
             db,
             target_project_id,
@@ -280,14 +330,24 @@ def update_task(db: Session, task_id: int, payload: TaskUpdate, actor_id: int | 
     ensure_iteration_assignment_mutable(db, task.iteration_id, target_iteration_id)
     _ensure_task_iteration_scope(db, target_project_id, target_iteration_id)
     before_data, after_data = _task_change_data(task, data)
-    if "iteration_id" in data:
-        move_work_item_to_iteration(
+    scope_changed = any(
+        (field == "project_id" and target_project_id != task.project_id)
+        or (field == "requirement_id" and target_requirement_id != task.requirement_id)
+        or (field == "iteration_id" and target_iteration_id != task.iteration_id)
+        for field in ("project_id", "requirement_id", "iteration_id")
+    )
+    if scope_changed:
+        synchronize_task_tree_scope(
             db,
             task,
-            data.pop("iteration_id"),
+            project_id=target_project_id,
+            requirement_id=target_requirement_id,
+            iteration_id=target_iteration_id,
             actor_id=actor_id,
             reason="updated",
         )
+        for field in ("project_id", "requirement_id", "iteration_id"):
+            data.pop(field, None)
     for field, value in data.items():
         setattr(task, field, value)
     if before_data:
@@ -326,6 +386,14 @@ def delete_task(db: Session, task_id: int) -> None:
     task = _get_active_task(db, task_id)
     ensure_iteration_assignment_mutable(db, task.iteration_id, task.iteration_id)
     _ensure_project_editable_for_task(db, task)
+    if list_direct_children(db, task.id):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": "TASK_HAS_ACTIVE_CHILDREN",
+                "message": "存在未删除的子任务，当前任务无法删除。",
+            },
+        )
     task.deleted = 1
     task.delete_time = datetime.now()
     db.commit()
@@ -336,6 +404,20 @@ def _get_active_task(db: Session, task_id: int) -> Task:
     if not task:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
     return task
+
+
+def _ensure_child_task_scope_immutable(task: Task, data: dict) -> None:
+    if not task.parent_task_id:
+        return
+    scope_fields = ("project_id", "requirement_id", "iteration_id")
+    if any(field in data and data[field] != getattr(task, field) for field in scope_fields):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": "CHILD_TASK_SCOPE_IMMUTABLE",
+                "message": "子任务的项目、需求和迭代由父任务统一管理。",
+            },
+        )
 
 
 def _ensure_task_iteration_scope(db: Session, project_id: int | None, iteration_id: int | None) -> None:
@@ -405,6 +487,20 @@ def _attach_task_sources(db: Session, task: Task) -> None:
         }
         for relation in relations
     ]
+
+
+def _attach_task_hierarchy_metadata(db: Session, tasks: list[Task]) -> None:
+    task_ids = [task.id for task in tasks]
+    if not task_ids:
+        return
+    child_counts = dict(
+        db.query(Task.parent_task_id, func.count(Task.id))
+        .filter(Task.parent_task_id.in_(task_ids), Task.deleted == 0)
+        .group_by(Task.parent_task_id)
+        .all()
+    )
+    for task in tasks:
+        task.direct_child_count = int(child_counts.get(task.id, 0))
 
 
 def _initial_task_status(owner_id: int | None) -> str:

@@ -92,6 +92,7 @@ def move_requirement_dependents_to_iteration(
     actor_id: int | None,
     reason: str,
     remark: str | None = None,
+    target_project_id: int | None = None,
 ) -> None:
     tasks = (
         db.query(Task)
@@ -110,10 +111,27 @@ def move_requirement_dependents_to_iteration(
         .all()
     )
     _ensure_dependency_sources_mutable(db, [*tasks, *following_bugs], target_iteration_id)
-    for task in tasks:
-        move_work_item_to_iteration(
-            db, task, target_iteration_id, actor_id=actor_id, reason=reason, remark=remark
-        )
+    root_tasks = [task for task in tasks if task.parent_task_id is None]
+    if root_tasks:
+        from app.services.task_hierarchy_service import synchronize_task_tree_scope
+
+        for root in root_tasks:
+            synchronize_task_tree_scope(
+                db,
+                root,
+                project_id=target_project_id if target_project_id is not None else root.project_id,
+                requirement_id=requirement_id,
+                iteration_id=target_iteration_id,
+                actor_id=actor_id,
+                reason=reason,
+            )
+    else:
+        for task in tasks:
+            move_work_item_to_iteration(
+                db, task, target_iteration_id, actor_id=actor_id, reason=reason, remark=remark
+            )
+            if target_project_id is not None:
+                task.project_id = target_project_id
     for bug in following_bugs:
         move_work_item_to_iteration(
             db, bug, target_iteration_id, actor_id=actor_id, reason=reason, remark=remark

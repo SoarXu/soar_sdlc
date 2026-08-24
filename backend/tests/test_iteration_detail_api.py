@@ -1111,8 +1111,8 @@ def test_iteration_finish_is_blocked_by_open_bug_without_other_work_items(client
 def test_terminal_iteration_detail_uses_persisted_completion_snapshot(client: TestClient):
     project_id = _create_project(client)
     iteration_id = _create_iteration(client, [project_id], status="active")
-    requirement_id = _create_requirement(client, project_id, "Snapshot requirement", owner_id=1)
-    task_id = _create_task(client, project_id, "Snapshot task", owner_id=1)
+    requirement_id = _create_requirement(client, project_id, "Snapshot requirement")
+    task_id = _create_task(client, project_id, "Snapshot task")
     assert client.post(
         f"/api/v1/iterations/{iteration_id}/requirements",
         json={"requirement_ids": [requirement_id]},
@@ -1140,7 +1140,7 @@ def test_terminal_iteration_detail_uses_persisted_completion_snapshot(client: Te
         "title": "Snapshot requirement",
         "state_id": detail["requirements"][0]["current_state_id"],
         "status_name": detail["requirements"][0]["status_name"],
-        "owner_id": 1,
+        "owner_id": None,
     }]
     assert detail["metrics"]["requirement_total"] == 1
 

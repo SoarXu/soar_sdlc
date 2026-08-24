@@ -160,7 +160,7 @@
       </template>
     </el-dialog>
 
-    <el-dialog v-model="blockerDialogVisible" title="存在未完成事项，无法结束迭代" width="760px" append-to-body>
+    <el-dialog v-model="blockerDialogVisible" :title="blockerDialogTitle" width="760px" append-to-body>
       <el-alert :title="blockerCountsText" type="warning" :closable="false" show-icon />
       <div class="workflow-blocker-filter">
         <el-segmented v-model="blockerTypeFilter" :options="blockerTypeOptions" />
@@ -287,10 +287,22 @@ const targetStatePlaceholder = computed(() => (
 const users = computed(() => props.users.length ? props.users : loadedUsers.value)
 const blockerCountsText = computed(() => {
   const counts = blockerDetail.value?.counts || {}
+  if (blockerDetail.value?.code === 'TASK_DESCENDANTS_NOT_TERMINAL') {
+    return `有 ${counts.task || 0} 个未结束子任务，完成或取消当前任务前请逐项处理。`
+  }
   return `需求 ${counts.requirement || 0} 项，任务 ${counts.task || 0} 项，Bug ${counts.bug || 0} 项，测试单 ${counts.test_run || 0} 项`
 })
+const blockerDialogTitle = computed(() => (
+  blockerDetail.value?.code === 'TASK_DESCENDANTS_NOT_TERMINAL'
+    ? '存在未结束子任务，无法结束任务'
+    : '存在未完成事项，无法结束迭代'
+))
+const normalizedBlockerItems = computed(() => (blockerDetail.value?.blockers || blockerDetail.value?.items || []).map((row) => ({
+  ...row,
+  object_type: row.object_type || (blockerDetail.value?.code === 'TASK_DESCENDANTS_NOT_TERMINAL' ? 'task' : row.object_type)
+})))
 const blockerTypeOptions = computed(() => {
-  const rows = blockerDetail.value?.items || []
+  const rows = normalizedBlockerItems.value
   return [
     { label: `全部 ${rows.length}`, value: 'all' },
     ...['requirement', 'task', 'bug', 'test_run']
@@ -302,7 +314,7 @@ const blockerTypeOptions = computed(() => {
   ]
 })
 const blockerRows = computed(() => {
-  const rows = blockerDetail.value?.items || []
+  const rows = normalizedBlockerItems.value
   return blockerTypeFilter.value === 'all'
     ? rows
     : rows.filter((row) => row.object_type === blockerTypeFilter.value)
@@ -505,7 +517,7 @@ async function submitAction(action) {
       ElMessage.warning('项目存在未结束迭代，无法关闭。')
       return
     }
-    if (detail?.code === 'ITERATION_HAS_OPEN_ITEMS') {
+    if (detail?.code === 'ITERATION_HAS_OPEN_ITEMS' || detail?.code === 'TASK_DESCENDANTS_NOT_TERMINAL') {
       blockerDetail.value = detail
       blockerTypeFilter.value = 'all'
       dialogVisible.value = false

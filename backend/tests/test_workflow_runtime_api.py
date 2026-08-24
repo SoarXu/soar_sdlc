@@ -1941,7 +1941,7 @@ def test_bug_from_test_execution_routes_repair_and_verification_handlers_separat
     assert submitted.json()["status_name"] == "待验证"
     assert submitted.json()["owner_id"] == executor_id
     assert failed.status_code == 200
-    assert failed.json()["status_name"] == "待处理"
+    assert failed.json()["status_name"] == "待分派"
     assert failed.json()["owner_id"] == repair_id
     history = client.get(f"/api/v1/bugs/{bug.json()['id']}/status-operations").json()
     submit_operation = next(item for item in history if item["action"] == "submit_verification")

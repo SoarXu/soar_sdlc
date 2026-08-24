@@ -80,3 +80,12 @@ class WorkbenchResponse(BaseModel):
     work_item_reviews: list[dict] = Field(default_factory=list)
     role_ids: list[int] = Field(default_factory=list)
     view_mode: str = "all"
+
+
+class WorkbenchItemPage(BaseModel):
+    items: list[WorkbenchItem] = Field(default_factory=list)
+    total: int = 0
+    page: int = 1
+    page_size: int = 20
+    page_count: int = 1
+    filter_options: dict[str, list[dict]] = Field(default_factory=dict)

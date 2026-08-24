@@ -69,7 +69,7 @@
             <h2>进行中迭代工作项</h2>
             <p>当前用户可见项目中的需求、任务和 Bug。</p>
           </div>
-          <el-tag>{{ filteredListItems.length }} 项</el-tag>
+          <el-tag>{{ pagedListPage.total }} 项</el-tag>
         </header>
 
         <el-empty v-if="!filteredListItems.length" class="workbench-section-empty" description="暂无符合筛选条件的工作项" />
@@ -251,7 +251,7 @@ import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 
-import { fetchWorkbench } from '../api/dashboard'
+import { fetchWorkbenchItems } from '../api/dashboard'
 import { createBugFromTestCase, executeTestCase } from '../api/testCases'
 import { fetchUsers } from '../api/users'
 import { fetchWorkflowTransitionsBatch } from '../api/workflowRuntime'
@@ -266,16 +266,12 @@ import RequirementEditDialog from '../components/work-items/RequirementEditDialo
 import TaskEditDialog from '../components/work-items/TaskEditDialog.vue'
 import { showActionError } from '../utils/actionFeedback'
 import {
-  buildWorkbenchFilterOptions,
   executionResultLabel,
-  filterWorkbenchItems,
   formatWorkbenchDateTime,
   isTerminalWorkItem,
   itemStatusLabel,
   itemStatusTag,
-  paginateWorkbenchItems,
   shouldShowWorkbenchWorkflowActions,
-  sortWorkbenchItems,
   typeLabel,
   typeTag,
   workbenchInlineActions
@@ -289,6 +285,7 @@ const router = useRouter()
 const loading = ref(false)
 const saving = ref(false)
 const workbenchData = ref({})
+const workbenchPage = ref({ items: [], total: 0, page: 1, page_size: 20, page_count: 1, filter_options: {} })
 const users = ref([])
 const workflowTransitions = ref({})
 const workbenchTable = ref(null)
@@ -333,10 +330,16 @@ const priorityLevelOptions = [
   { label: '5级', value: '5' }
 ]
 
-const activeIterationItems = computed(() => workbenchData.value.active_iteration_items || [])
-const filterOptions = computed(() => buildWorkbenchFilterOptions(activeIterationItems.value, users.value))
-const filteredListItems = computed(() => sortWorkbenchItems(filterWorkbenchItems(activeIterationItems.value, activeFilters.value)))
-const pagedListPage = computed(() => paginateWorkbenchItems(filteredListItems.value, currentPage.value, pageSize.value))
+const activeIterationItems = computed(() => workbenchPage.value.items || [])
+const filterOptions = computed(() => workbenchPage.value.filter_options || {})
+const filteredListItems = computed(() => activeIterationItems.value)
+const pagedListPage = computed(() => ({
+  items: activeIterationItems.value,
+  total: Number(workbenchPage.value.total || 0),
+  page: Number(workbenchPage.value.page || 1),
+  pageSize: Number(workbenchPage.value.page_size || pageSize.value),
+  pageCount: Number(workbenchPage.value.page_count || 1)
+}))
 const pagedListItems = computed(() => pagedListPage.value.items)
 const workflowOperationWidth = computed(() => workflowActionColumnWidth(
   filteredListItems.value.map((row) => workflowTransitionsFor(row)),
@@ -415,12 +418,14 @@ function resetWorkbenchPagination() {
 function handleWorkbenchCurrentPageChange(page) {
   clearWorkbenchSelection()
   currentPage.value = page
+  void loadWorkbench()
 }
 
 function handleWorkbenchPageSizeChange(size) {
   clearWorkbenchSelection()
   pageSize.value = size
   currentPage.value = 1
+  void loadWorkbench()
 }
 
 async function onWorkbenchBatchAssignmentCompleted() {
@@ -549,7 +554,7 @@ function buildCaseReproduceText(item) {
 }
 
 async function loadWorkflowTransitions(data) {
-  const runtimeItems = (data.active_iteration_items || []).filter((item) => shouldShowWorkflowActions(item))
+  const runtimeItems = (data.items || []).filter((item) => shouldShowWorkflowActions(item))
   const uniqueItems = [...new Map(runtimeItems.map((item) => [`${item.object_type}:${item.id}`, item])).values()]
   if (!uniqueItems.length) {
     workflowTransitions.value = {}
@@ -572,17 +577,39 @@ async function loadWorkbench() {
   loading.value = true
   try {
     const [workbenchResponse, usersResponse] = await Promise.all([
-      fetchWorkbench(),
+      fetchWorkbenchItems({
+        page: currentPage.value,
+        page_size: pageSize.value,
+        keyword: keywordFilter.value || undefined,
+        project_ids: projectFilter.value,
+        iteration_ids: iterationFilter.value,
+        object_types: typeFilter.value,
+        state_ids: stateFilter.value,
+        priorities: priorityFilter.value,
+        handler_ids: handlerFilter.value
+      }),
       fetchUsers()
     ])
-    workbenchData.value = workbenchResponse.data || {}
+    workbenchPage.value = workbenchResponse.data || { items: [], total: 0, filter_options: {} }
+    workbenchData.value = { active_iteration_items: workbenchPage.value.items || [] }
     users.value = usersResponse.data || []
-    await loadWorkflowTransitions(workbenchResponse.data || {})
+    if (currentPage.value !== workbenchPage.value.page) currentPage.value = workbenchPage.value.page
+    await loadWorkflowTransitions(workbenchPage.value)
   } catch (error) {
     showActionError(error, '工作台加载失败')
   } finally {
     loading.value = false
   }
+}
+
+let filterReloadTimer = null
+
+function scheduleWorkbenchReload() {
+  if (filterReloadTimer) clearTimeout(filterReloadTimer)
+  filterReloadTimer = setTimeout(() => {
+    filterReloadTimer = null
+    void loadWorkbench()
+  }, 250)
 }
 
 onMounted(loadWorkbench)
@@ -594,12 +621,10 @@ watch([
   stateFilter,
   priorityFilter,
   handlerFilter
-], resetWorkbenchPagination, { deep: true })
-watch(() => pagedListPage.value.page, (correctedPage) => {
-  if (currentPage.value === correctedPage) return
-  clearWorkbenchSelection()
-  currentPage.value = correctedPage
-})
+], () => {
+  resetWorkbenchPagination()
+  scheduleWorkbenchReload()
+}, { deep: true })
 </script>
 
 <style scoped>

@@ -176,18 +176,18 @@ def delete_requirement(db: Session, requirement_id: int, actor_id: int | None = 
     requirement = _get_active_requirement(db, requirement_id)
     ensure_iteration_assignment_mutable(db, requirement.iteration_id, requirement.iteration_id)
     _ensure_project_editable_for_requirement(db, requirement)
-    linked_tasks = db.query(Task).filter(Task.requirement_id == requirement.id, Task.deleted == 0).all()
-    for task in linked_tasks:
-        task.requirement_id = None
-        db.add(
-            AuditLog(
-                actor_id=actor_id,
-                action="update",
-                object_type="task",
-                object_id=task.id,
-                before_data={"requirement_id": requirement.id},
-                after_data={"requirement_id": None},
-            )
+    linked_task_count = db.query(Task).filter(
+        Task.requirement_id == requirement.id,
+        Task.deleted == 0,
+    ).count()
+    if linked_task_count:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": "REQUIREMENT_HAS_LINKED_TASKS",
+                "message": "该需求已关联任务，请先处理关联任务后再删除。",
+                "linked_task_count": linked_task_count,
+            },
         )
     linked_test_cases = db.query(TestCase).filter(TestCase.requirement_id == requirement.id, TestCase.deleted == 0).all()
     for test_case in linked_test_cases:

@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 
 const source = await readFile(new URL('./WorkflowActionButtons.vue', import.meta.url), 'utf8')
+const advancedConfigSource = await readFile(new URL('./WorkflowAdvancedConfigDrawer.vue', import.meta.url), 'utf8')
 
 assert.match(source, /actionNeedsConfirmation/)
 assert.match(source, /workflowConfirmationMessage/)
@@ -79,6 +80,22 @@ const workflowSubmitBlock = source.slice(
   source.indexOf('async function submitAction'),
   source.indexOf('async function loadTransitions')
 )
+
+assert.match(source, /import WorkItemCommentComposer from '\.\/WorkItemCommentComposer\.vue'/)
+assert.match(source, /const isCommentAction = computed\(\(\) => workflowCommandType\(activeAction\.value\) === 'add_information'\)/)
+assert.match(
+  source,
+  /<WorkItemCommentComposer[\s\S]*?ref="commentComposer"[\s\S]*?v-if="isCommentAction"[\s\S]*?@submit="submitCommentAction"/,
+  'workflow comment actions must use the shared mention-capable composer'
+)
+assert.match(source, /async function submitCommentAction\(\{ body, mentionedUserIds \}\)/)
+assert.match(workflowSubmitBlock, /body,\s*mentioned_user_ids: mentionedUserIds/)
+assert.match(workflowSubmitBlock, /commentComposer\.value\?\.clear\(\)/)
+assert.doesNotMatch(workflowSubmitBlock, /mentioned_user_ids: \[\]/)
+assert.match(workflowSubmitBlock, /ElMessage\.success\('评论成功'\)/)
+assert.doesNotMatch(workflowSubmitBlock, /补充信息成功/)
+assert.match(advancedConfigSource, /\{ label: '评论', value: 'information' \}/)
+assert.doesNotMatch(advancedConfigSource, /补充信息/)
 
 assert.match(
   source,

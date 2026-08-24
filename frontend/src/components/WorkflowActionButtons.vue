@@ -32,7 +32,19 @@
     />
 
     <el-dialog v-model="dialogVisible" :title="dialogTitle" width="640px" append-to-body>
-      <el-form label-position="top">
+      <WorkItemCommentComposer
+        ref="commentComposer"
+        v-if="isCommentAction"
+        :object-type="objectType"
+        :object-id="objectId"
+        :users="users"
+        :loading="Boolean(submittingAction)"
+        placeholder="请输入评论内容"
+        submit-label="发表评论"
+        @submit="submitCommentAction"
+      />
+
+      <el-form v-else label-position="top">
         <el-form-item
           v-for="field in formFields"
           :key="field.field"
@@ -154,7 +166,7 @@
       </el-form>
       <template #footer>
         <el-button @click="dialogVisible = false">取消</el-button>
-        <el-button :type="buttonType(activeAction)" :loading="Boolean(submittingAction)" :disabled="submitDisabled" @click="submitActiveAction">
+        <el-button v-if="!isCommentAction" :type="buttonType(activeAction)" :loading="Boolean(submittingAction)" :disabled="submitDisabled" @click="submitActiveAction">
           {{ submitText }}
         </el-button>
       </template>
@@ -197,6 +209,7 @@ import { fetchUsers } from '../api/users'
 import { createWorkItemComment } from '../api/workItemComments'
 import { showActionError } from '../utils/actionFeedback'
 import { submitWorkItemReview } from '../api/devops'
+import WorkItemCommentComposer from './WorkItemCommentComposer.vue'
 import WorkItemReviewDialog from './WorkItemReviewDialog.vue'
 import { isDelegateReasonRequiredError } from '../utils/permissions'
 import {
@@ -232,6 +245,7 @@ const selectedTargetStateId = ref(null)
 const overrideReason = ref('')
 const delegateReasonRequired = ref(false)
 const loadedUsers = ref([])
+const commentComposer = ref(null)
 const blockerDialogVisible = ref(false)
 const blockerDetail = ref({ counts: {}, items: [] })
 const blockerTypeFilter = ref('all')
@@ -244,6 +258,7 @@ const primaryActions = computed(() => listSplit.value.primaryActions)
 const moreActions = computed(() => listSplit.value.moreActions)
 const visibleActions = computed(() => [...primaryActions.value, ...moreActions.value])
 const formFields = computed(() => activeAction.value?.form_config?.fields || [])
+const isCommentAction = computed(() => workflowCommandType(activeAction.value) === 'add_information')
 const noActiveTargetIteration = computed(() => {
   const field = formFields.value.find((item) => item.field === 'target_iteration_id')
   return Boolean(field?.required && fieldOptions(field).length === 0)
@@ -388,7 +403,7 @@ function resetForm(action) {
 }
 
 async function ensureUsersLoaded() {
-  if (props.users.length || loadedUsers.value.length || !allowManualOwner.value) return
+  if (props.users.length || loadedUsers.value.length || (!allowManualOwner.value && !isCommentAction.value)) return
   const { data } = await fetchUsers()
   loadedUsers.value = data
 }
@@ -410,6 +425,10 @@ async function openAction(action) {
     return
   }
   await ensureUsersLoaded()
+  if (commandType === 'add_information') {
+    dialogVisible.value = true
+    return
+  }
   if (actionNeedsDialog(action)) {
     dialogVisible.value = true
     return
@@ -477,22 +496,29 @@ async function submitActiveAction() {
   await submitAction(activeAction.value)
 }
 
+async function submitCommentAction({ body, mentionedUserIds }) {
+  if (!activeAction.value) return
+  await submitAction(activeAction.value, { body, mentionedUserIds })
+}
+
 function isUnfinishedProjectIterationBlocker(error) {
   return props.objectType === 'project' && error?.response?.data?.detail?.code === 'PROJECT_HAS_UNFINISHED_ITEMS'
 }
 
-async function submitAction(action) {
+async function submitAction(action, commentPayload = null) {
   submittingAction.value = action.transition_id
   try {
     if (workflowCommandType(action) === 'add_information') {
+      const { body, mentionedUserIds } = commentPayload || {}
       await createWorkItemComment({
         object_type: props.objectType,
         object_id: props.objectId,
-        body: String(formPayload.content || '').trim(),
-        mentioned_user_ids: []
+        body,
+        mentioned_user_ids: mentionedUserIds
       })
+      commentComposer.value?.clear()
       dialogVisible.value = false
-      ElMessage.success('补充信息成功')
+      ElMessage.success('评论成功')
       emit('executed', { command_type: 'add_information' })
       return
     }

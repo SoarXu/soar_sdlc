@@ -456,7 +456,7 @@ const formPresetOptions = [
   { label: '可选原因', value: 'optional_reason' },
   { label: 'Bug 类型选择', value: 'bug_type' },
   { label: 'Bug 类型重分类及原因', value: 'bug_reclassify' },
-  { label: '补充信息', value: 'information' },
+  { label: '评论', value: 'information' },
   { label: '实际开始日期', value: 'actual_start_date' },
   { label: '实际完成日期', value: 'actual_end_date' }
 ]

@@ -4,8 +4,13 @@ from sqlalchemy.orm import Session
 from app.core.auth_dependencies import get_current_user
 from app.db.session import get_db
 from app.models.user import User
-from app.services.work_item_comment_service import create_comment, list_comments
-from app.views.work_item_comment_view import WorkItemCommentCreate, WorkItemCommentListRead, WorkItemCommentRead
+from app.services.work_item_comment_service import create_comment, list_comments, list_mention_users
+from app.views.work_item_comment_view import (
+    WorkItemCommentCreate,
+    WorkItemCommentListRead,
+    WorkItemCommentMentionUserRead,
+    WorkItemCommentRead,
+)
 
 
 router = APIRouter()
@@ -19,6 +24,16 @@ def get_work_item_comments(
     current_user: User = Depends(get_current_user),
 ):
     return list_comments(db, object_type, object_id, current_user)
+
+
+@router.get("/mention-users", response_model=list[WorkItemCommentMentionUserRead])
+def get_work_item_comment_mention_users(
+    object_type: str,
+    object_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    return list_mention_users(db, object_type, object_id, current_user)
 
 
 @router.post("", response_model=WorkItemCommentRead, status_code=status.HTTP_201_CREATED)

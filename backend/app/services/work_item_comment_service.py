@@ -12,7 +12,12 @@ from app.models.work_item_comment import WorkItemComment
 from app.services.notification_service import create_mention_notifications
 from app.services.object_watch_service import upsert_watch_source
 from app.services.project_permission_service import ensure_audit_view_permission, ensure_authenticated
-from app.views.work_item_comment_view import WorkItemCommentCreate, WorkItemCommentListRead, WorkItemCommentRead
+from app.views.work_item_comment_view import (
+    WorkItemCommentCreate,
+    WorkItemCommentListRead,
+    WorkItemCommentMentionUserRead,
+    WorkItemCommentRead,
+)
 
 
 MODEL_BY_TYPE = {
@@ -34,6 +39,35 @@ def list_comments(db: Session, object_type: str, object_id: int, actor: User | N
         .all()
     )
     return WorkItemCommentListRead(items=_comment_reads(db, comments))
+
+
+def list_mention_users(
+    db: Session,
+    object_type: str,
+    object_id: int,
+    actor: User | None,
+) -> list[WorkItemCommentMentionUserRead]:
+    item = _get_item(db, object_type, object_id)
+    project_id = getattr(item, "project_id", None)
+    ensure_audit_view_permission(db, project_id, actor)
+    if not project_id:
+        return []
+    users = (
+        db.query(User)
+        .join(ProjectMember, ProjectMember.user_id == User.id)
+        .filter(
+            ProjectMember.project_id == project_id,
+            User.deleted == 0,
+            User.is_active.is_(True),
+        )
+        .distinct()
+        .order_by(User.full_name.asc(), User.id.asc())
+        .all()
+    )
+    return [
+        WorkItemCommentMentionUserRead(id=user.id, username=user.username, full_name=user.full_name)
+        for user in users
+    ]
 
 
 def create_comment(db: Session, payload: WorkItemCommentCreate, actor: User | None) -> WorkItemCommentRead:

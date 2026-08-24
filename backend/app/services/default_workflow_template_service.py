@@ -907,7 +907,7 @@ def _requirement_graph() -> WorkflowGraphSave:
             _command_transition("edit", "编辑", "pending_assignment", allowed_roles="creator", command_type="edit"),
             _command_transition(
                 "add_information",
-                "补充信息",
+                "评论",
                 "pending_assignment",
                 allowed_roles="project_member,creator",
                 command_type="add_information",
@@ -960,14 +960,14 @@ def _requirement_graph() -> WorkflowGraphSave:
             ),
             _command_transition(
                 "add_information",
-                "补充信息",
+                "评论",
                 "in_processing",
                 allowed_roles="project_member,creator",
                 command_type="add_information",
             ),
             _command_transition(
                 "add_information",
-                "补充信息",
+                "评论",
                 "pending_confirmation",
                 allowed_roles="project_member,creator",
                 command_type="add_information",
@@ -1016,7 +1016,7 @@ def _requirement_graph() -> WorkflowGraphSave:
             ),
             _command_transition(
                 "add_information",
-                "补充信息",
+                "评论",
                 "canceled",
                 allowed_roles="project_member,creator",
                 command_type="add_information",
@@ -1064,7 +1064,7 @@ def _task_graph() -> WorkflowGraphSave:
             _command_transition("edit", "编辑", "pending_assignment", allowed_roles="creator", command_type="edit"),
             _command_transition(
                 "add_information",
-                "补充信息",
+                "评论",
                 "pending_assignment",
                 allowed_roles="project_member,creator",
                 command_type="add_information",
@@ -1123,7 +1123,7 @@ def _task_graph() -> WorkflowGraphSave:
             _ownership_transition("change_handler", "变更处理人", "in_processing", management=True),
             _command_transition(
                 "add_information",
-                "补充信息",
+                "评论",
                 "in_processing",
                 allowed_roles="project_member,creator",
                 command_type="add_information",
@@ -1157,7 +1157,7 @@ def _task_graph() -> WorkflowGraphSave:
             ),
             _command_transition(
                 "add_information",
-                "补充信息",
+                "评论",
                 "pending_confirmation",
                 allowed_roles="project_member,creator",
                 command_type="add_information",
@@ -1205,7 +1205,7 @@ def _task_graph() -> WorkflowGraphSave:
             ),
             _command_transition(
                 "add_information",
-                "补充信息",
+                "评论",
                 "canceled",
                 allowed_roles="project_member,creator",
                 command_type="add_information",
@@ -1259,7 +1259,7 @@ def _bug_graph() -> WorkflowGraphSave:
             _bug_void_transition("pending_handling"),
             _command_transition(
                 "add_information",
-                "补充信息",
+                "评论",
                 "pending_handling",
                 allowed_roles="reporter,tester",
                 command_type="add_information",
@@ -1328,7 +1328,7 @@ def _bug_graph() -> WorkflowGraphSave:
             _bug_void_transition("fixing"),
             _command_transition(
                 "add_information",
-                "补充信息",
+                "评论",
                 "fixing",
                 allowed_roles="reporter,tester",
                 command_type="add_information",
@@ -1356,7 +1356,7 @@ def _bug_graph() -> WorkflowGraphSave:
             _bug_void_transition("pending_verification"),
             _command_transition(
                 "add_information",
-                "补充信息",
+                "评论",
                 "pending_verification",
                 allowed_roles="reporter,tester",
                 command_type="add_information",
@@ -1386,7 +1386,7 @@ def _bug_graph() -> WorkflowGraphSave:
             ),
             _command_transition(
                 "add_information",
-                "补充信息",
+                "评论",
                 "verified",
                 allowed_roles="project_member,reporter,tester",
                 command_type="add_information",
@@ -1412,7 +1412,7 @@ def _bug_graph() -> WorkflowGraphSave:
             ),
             _command_transition(
                 "add_information",
-                "补充信息",
+                "评论",
                 "closed",
                 allowed_roles="project_member,reporter,tester",
                 command_type="add_information",

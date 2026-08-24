@@ -38,6 +38,19 @@ def test_project_start_is_a_primary_list_action():
     assert start.ui_config["list_display"] == "primary"
 
 
+def test_work_item_add_information_actions_are_named_comment():
+    for object_type in ("requirement", "task", "bug"):
+        graph = graph_for_object_type(object_type)
+        comment_actions = [
+            transition
+            for transition in graph.transitions
+            if transition.action_key == "add_information"
+        ]
+
+        assert comment_actions
+        assert {transition.action_name for transition in comment_actions} == {"评论"}
+
+
 def _create_user(full_name: str, role_key: str) -> tuple[int, str]:
     db = SessionLocal()
     try:

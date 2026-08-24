@@ -10,6 +10,12 @@ class WorkItemCommentCreate(BaseModel):
     mentioned_user_ids: list[int] = Field(default_factory=list)
 
 
+class WorkItemCommentMentionUserRead(BaseModel):
+    id: int
+    username: str
+    full_name: str
+
+
 class WorkItemCommentRead(BaseModel):
     id: int
     object_type: str

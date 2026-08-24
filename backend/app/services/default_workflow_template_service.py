@@ -619,8 +619,11 @@ def reconcile_bug_action_matrix(db: Session, definition: WorkflowDefinition) -> 
     confirmation_changed = _move_bug_confirmation_to_active_state(
         db, definition, unassigned, active
     )
-    changed = confirmation_changed or changed
-    if confirmation_changed or not has_active_confirmation:
+    confirmation_deduplicated = _disable_duplicate_bug_confirmation_transitions(
+        db, definition, active
+    )
+    changed = confirmation_changed or confirmation_deduplicated or changed
+    if confirmation_changed or confirmation_deduplicated or not has_active_confirmation:
         changed = _upsert_bug_matrix_transition(
             db, definition, _bug_confirmation_transition(), active
         ) or changed
@@ -668,6 +671,7 @@ def _move_bug_confirmation_to_active_state(
         if legacy_transition is not None:
             legacy_transition.from_state_id = active.id
             legacy_transition.to_state_id = active.id
+            db.flush()
             active_transition = legacy_transition
             changed = True
     for transition in transitions:
@@ -675,6 +679,32 @@ def _move_bug_confirmation_to_active_state(
             continue
         if transition.enabled:
             transition.enabled = False
+            changed = True
+    return changed
+
+
+def _disable_duplicate_bug_confirmation_transitions(
+    db: Session,
+    definition: WorkflowDefinition,
+    active: WorkflowState,
+) -> bool:
+    confirmations = (
+        db.query(WorkflowTransition)
+        .filter(
+            WorkflowTransition.definition_id == definition.id,
+            WorkflowTransition.from_state_id == active.id,
+            WorkflowTransition.action_key == "confirm_bug_type",
+        )
+        .order_by(WorkflowTransition.id.asc())
+        .all()
+    )
+    changed = False
+    for transition in confirmations[1:]:
+        if transition.enabled:
+            transition.enabled = False
+            changed = True
+        if transition.auto_disabled_by_state:
+            transition.auto_disabled_by_state = False
             changed = True
     return changed
 

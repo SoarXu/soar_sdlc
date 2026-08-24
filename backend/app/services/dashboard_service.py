@@ -1,6 +1,6 @@
-from datetime import datetime, time
+from datetime import date, datetime, time
 
-from sqlalchemy import func, select
+from sqlalchemy import Integer, and_, case, cast, func, literal, or_, select, union_all
 from sqlalchemy.orm import Session
 
 from app.models.bug import Bug
@@ -28,6 +28,7 @@ from app.services.workflow_state_query_service import (
 from app.views.dashboard_view import (
     DashboardSummary,
     WorkbenchItem,
+    WorkbenchItemPage,
     WorkbenchResponse,
     WorkbenchSection,
 )
@@ -124,6 +125,261 @@ def get_workbench(db: Session, user_id: int | None = None) -> WorkbenchResponse:
         work_item_reviews=work_item_reviews,
         role_ids=role_ids,
         view_mode=view_mode,
+    )
+
+
+def get_workbench_items(
+    db: Session,
+    user_id: int,
+    page: int = 1,
+    page_size: int = 20,
+    keyword: str | None = None,
+    project_ids: list[int] | None = None,
+    iteration_ids: list[int] | None = None,
+    object_types: list[str] | None = None,
+    state_ids: list[int] | None = None,
+    priorities: list[str] | None = None,
+    handler_ids: list[int] | None = None,
+) -> WorkbenchItemPage:
+    team_project_ids = workbench_project_ids_for_user(db, user_id)
+    role_ids = _role_ids_for_user(db, user_id, team_project_ids)
+    scoped_project_ids = None if _workbench_view_mode(db, user_id, role_ids) == "all" else team_project_ids
+    if scoped_project_ids == set():
+        return WorkbenchItemPage(page=1, page_size=page_size, filter_options=_empty_workbench_filter_options())
+
+    active_iteration_ids = _in_progress_iteration_ids(db)
+    if not active_iteration_ids:
+        return WorkbenchItemPage(page=1, page_size=page_size, filter_options=_empty_workbench_filter_options())
+
+    base_query = _workbench_items_query(active_iteration_ids, scoped_project_ids)
+    filter_options = _workbench_filter_options(db, base_query)
+    filtered_query = _filter_workbench_items_query(
+        base_query,
+        keyword=keyword,
+        project_ids=project_ids,
+        iteration_ids=iteration_ids,
+        object_types=object_types,
+        state_ids=state_ids,
+        priorities=priorities,
+        handler_ids=handler_ids,
+    )
+    total = db.execute(select(func.count()).select_from(filtered_query.subquery())).scalar_one()
+    page_count = max(1, (total + page_size - 1) // page_size)
+    normalized_page = min(page, page_count)
+    rows = db.execute(
+        filtered_query
+        .order_by(*_workbench_sort_columns(filtered_query))
+        .offset((normalized_page - 1) * page_size)
+        .limit(page_size)
+    ).mappings().all()
+    return WorkbenchItemPage(
+        items=[_workbench_page_item(row) for row in rows],
+        total=total,
+        page=normalized_page,
+        page_size=page_size,
+        page_count=page_count,
+        filter_options=filter_options,
+    )
+
+
+def _workbench_items_query(active_iteration_ids: set[int], scoped_project_ids: set[int] | None):
+    items = _workbench_item_union(active_iteration_ids).subquery("active_workbench_items")
+    query = (
+        select(
+            items,
+            Project.name.label("project_name"),
+            Iteration.name.label("iteration_name"),
+            WorkflowState.status_name.label("status_name"),
+            WorkflowState.category.label("state_category"),
+            WorkflowState.terminal_kind.label("terminal_kind"),
+        )
+        .select_from(items)
+        .join(Project, (Project.id == items.c.project_id) & (Project.deleted == 0))
+        .join(Iteration, (Iteration.id == items.c.iteration_id) & (Iteration.deleted == 0))
+        .join(WorkflowState, WorkflowState.id == items.c.current_state_id)
+    )
+    if scoped_project_ids is not None:
+        query = query.where(items.c.project_id.in_(scoped_project_ids))
+    return query
+
+
+def _workbench_item_union(active_iteration_ids: set[int]):
+    task_iteration_id = func.coalesce(Task.iteration_id, Requirement.iteration_id)
+    requirement_rows = select(
+        literal("requirement").label("object_type"),
+        Requirement.id.label("id"),
+        Requirement.project_id.label("project_id"),
+        Requirement.iteration_id.label("iteration_id"),
+        Requirement.title.label("title"),
+        Requirement.owner_id.label("owner_id"),
+        Requirement.current_state_id.label("current_state_id"),
+        Requirement.priority.label("priority"),
+        literal(None).label("due_date"),
+        Requirement.create_time.label("create_time"),
+        Requirement.update_time.label("update_time"),
+        Requirement.creator_id.label("creator_id"),
+        Requirement.proposer_id.label("proposer_id"),
+        literal(None).label("reporter_id"),
+        Requirement.id.label("requirement_id"),
+        literal(None).label("task_id"),
+        literal(None).label("bug_type"),
+        literal(None).label("severity"),
+    ).where(Requirement.deleted == 0, Requirement.iteration_id.in_(active_iteration_ids))
+    task_rows = (
+        select(
+            literal("task").label("object_type"),
+            Task.id.label("id"),
+            Task.project_id.label("project_id"),
+            task_iteration_id.label("iteration_id"),
+            Task.title.label("title"),
+            Task.owner_id.label("owner_id"),
+            Task.current_state_id.label("current_state_id"),
+            Task.priority.label("priority"),
+            Task.due_date.label("due_date"),
+            Task.create_time.label("create_time"),
+            Task.update_time.label("update_time"),
+            Task.creator_id.label("creator_id"),
+            literal(None).label("proposer_id"),
+            literal(None).label("reporter_id"),
+            Task.requirement_id.label("requirement_id"),
+            Task.id.label("task_id"),
+            literal(None).label("bug_type"),
+            literal(None).label("severity"),
+        )
+        .select_from(Task)
+        .outerjoin(Requirement, (Requirement.id == Task.requirement_id) & (Requirement.deleted == 0))
+        .where(Task.deleted == 0, task_iteration_id.in_(active_iteration_ids))
+    )
+    bug_rows = select(
+        literal("bug").label("object_type"),
+        Bug.id.label("id"),
+        Bug.project_id.label("project_id"),
+        Bug.iteration_id.label("iteration_id"),
+        Bug.title.label("title"),
+        Bug.owner_id.label("owner_id"),
+        Bug.current_state_id.label("current_state_id"),
+        Bug.priority.label("priority"),
+        literal(None).label("due_date"),
+        Bug.create_time.label("create_time"),
+        Bug.update_time.label("update_time"),
+        Bug.creator_id.label("creator_id"),
+        literal(None).label("proposer_id"),
+        Bug.reporter_id.label("reporter_id"),
+        Bug.requirement_id.label("requirement_id"),
+        Bug.task_id.label("task_id"),
+        Bug.bug_type.label("bug_type"),
+        Bug.severity.label("severity"),
+    ).where(Bug.deleted == 0, Bug.iteration_id.in_(active_iteration_ids))
+    return union_all(requirement_rows, task_rows, bug_rows)
+
+
+def _filter_workbench_items_query(query, **filters):
+    items = query.selected_columns
+    if filters["project_ids"]:
+        query = query.where(items.project_id.in_(filters["project_ids"]))
+    if filters["iteration_ids"]:
+        query = query.where(items.iteration_id.in_(filters["iteration_ids"]))
+    if filters["object_types"]:
+        query = query.where(items.object_type.in_(set(filters["object_types"]) & WORKBENCH_OBJECT_TYPES))
+    if filters["state_ids"]:
+        query = query.where(items.current_state_id.in_(filters["state_ids"]))
+    if filters["priorities"]:
+        query = query.where(items.priority.in_(filters["priorities"]))
+    if filters["handler_ids"]:
+        query = query.where(items.owner_id.in_(filters["handler_ids"]))
+    normalized_keyword = (filters["keyword"] or "").strip().lower()
+    if normalized_keyword:
+        pattern = f"%{normalized_keyword}%"
+        query = query.where(
+            or_(
+                func.lower(items.title).like(pattern),
+                func.lower(items.project_name).like(pattern),
+                func.lower(items.iteration_name).like(pattern),
+            )
+        )
+    return query
+
+
+def _workbench_filter_options(db: Session, query) -> dict[str, list[dict]]:
+    items = query.subquery("workbench_filter_items")
+    def distinct_options(value, label):
+        return [
+            {"value": row.value, "label": row.label}
+            for row in db.execute(
+                select(value.label("value"), label.label("label"))
+                .where(value.is_not(None))
+                .distinct()
+                .order_by(label.asc(), value.asc())
+            ).mappings().all()
+        ]
+    return {
+        "projects": distinct_options(items.c.project_id, items.c.project_name),
+        "iterations": distinct_options(items.c.iteration_id, items.c.iteration_name),
+        "statuses": distinct_options(items.c.current_state_id, items.c.status_name),
+        "priorities": distinct_options(items.c.priority, items.c.priority),
+        "handlers": distinct_options(items.c.owner_id, select(User.full_name).where(User.id == items.c.owner_id).scalar_subquery()),
+    }
+
+
+def _empty_workbench_filter_options() -> dict[str, list[dict]]:
+    return {key: [] for key in ("projects", "iterations", "statuses", "priorities", "handlers")}
+
+
+def _workbench_sort_columns(query):
+    items = query.selected_columns
+    terminal_order = case((items.state_category == "terminal", 1), else_=0)
+    overdue_order = case(
+        (and_(items.due_date.is_not(None), items.due_date < date.today()), 1),
+        else_=0,
+    )
+    priority_order = case(
+        (items.priority == "high", 1),
+        (items.priority == "medium", 3),
+        (items.priority == "low", 5),
+        (items.priority.in_(("1", "2", "3", "4", "5")), cast(items.priority, Integer)),
+        else_=99,
+    )
+    return (
+        terminal_order.asc(),
+        overdue_order.desc(),
+        priority_order.asc(),
+        items.due_date.is_(None).asc(),
+        items.due_date.asc(),
+        items.update_time.desc(),
+        items.object_type.asc(),
+        items.id.asc(),
+    )
+
+
+def _workbench_page_item(row) -> WorkbenchItem:
+    return WorkbenchItem(
+        id=row["id"],
+        object_type=row["object_type"],
+        title=row["title"],
+        project_id=row["project_id"],
+        project_name=row["project_name"],
+        iteration_id=row["iteration_id"],
+        iteration_name=row["iteration_name"],
+        owner_id=row["owner_id"],
+        handler_id=row["owner_id"],
+        iteration_group_key=str(row["iteration_id"]),
+        status=row["status_name"],
+        current_state_id=row["current_state_id"],
+        status_name=row["status_name"],
+        state_category=row["state_category"],
+        terminal_kind=row["terminal_kind"],
+        priority=row["priority"],
+        due_date=_date_value(row["due_date"]),
+        overdue_hours=_overdue_hours(row["due_date"]),
+        create_time=_datetime_value(row["create_time"]),
+        update_time=_datetime_value(row["update_time"]),
+        creator_id=row["creator_id"],
+        proposer_id=row["proposer_id"],
+        reporter_id=row["reporter_id"],
+        requirement_id=row["requirement_id"],
+        task_id=row["task_id"],
+        bug_type=row["bug_type"],
+        severity=row["severity"],
     )
 
 

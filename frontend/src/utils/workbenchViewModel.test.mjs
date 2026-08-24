@@ -15,6 +15,17 @@ import {
   workbenchMetaText
 } from './workbenchViewModel.js'
 
+const dashboardApiSource = readFileSync(new URL('../api/dashboard.js', import.meta.url), 'utf8')
+const dashboardPageSource = readFileSync(new URL('../views/DashboardView.vue', import.meta.url), 'utf8')
+
+assert.match(dashboardApiSource, /fetchWorkbenchItems/, '工作台应提供服务端分页请求')
+assert.match(dashboardApiSource, /\/dashboard\/workbench\/items/, '工作台分页请求应使用专用接口')
+assert.match(dashboardPageSource, /fetchWorkbenchItems\(/, '工作台页面应加载服务端分页数据')
+assert.match(dashboardPageSource, /page:\s*currentPage\.value/, '工作台请求应携带当前页')
+assert.match(dashboardPageSource, /page_size:\s*pageSize\.value/, '工作台请求应携带每页条数')
+assert.match(dashboardPageSource, /const runtimeItems = \(data\.items \|\| \[\]\)/, '工作流动作只能按当前页数据加载')
+assert.doesNotMatch(dashboardPageSource, /paginateWorkbenchItems\(filteredListItems/, '工作台不得在前端对完整活动集合切片分页')
+
 {
   const items = Array.from({ length: 45 }, (_, index) => ({ id: index + 1 }))
   const originalItems = [...items]
@@ -89,15 +100,19 @@ import {
 
   assert.match(dashboardSource, /const currentPage = ref\(1\)/)
   assert.match(dashboardSource, /const pageSize = ref\(20\)/)
-  assert.match(dashboardSource, /const pagedListPage = computed\(\(\) => paginateWorkbenchItems\(/)
+  assert.match(dashboardSource, /const workbenchPage = ref\(\{ items: \[\], total: 0/)
+  assert.match(dashboardSource, /const activeIterationItems = computed\(\(\) => workbenchPage\.value\.items/)
+  assert.match(dashboardSource, /const pagedListPage = computed\(\(\) => \(\{[\s\S]*?total: Number\(workbenchPage\.value\.total/)
   assert.match(dashboardSource, /const pagedListItems = computed\(\(\) => pagedListPage\.value\.items\)/)
   assert.match(dashboardSource, /<el-table[^>]*:data="pagedListItems"/)
+  assert.match(dashboardSource, /<el-tag>\{\{ pagedListPage\.total \}\} 项<\/el-tag>/, '工作台表头应显示服务端返回的总数')
   assert.match(dashboardSource, /<el-pagination[\s\S]*?v-model:current-page="currentPage"/)
   assert.match(dashboardSource, /<el-pagination[\s\S]*?v-model:page-size="pageSize"/)
   assert.match(dashboardSource, /:page-sizes="\[10, 20, 50, 100\]"/)
   assert.match(dashboardSource, /function resetWorkbenchPagination\(\)[\s\S]*?clearWorkbenchSelection\(\)[\s\S]*?currentPage\.value = 1/)
-  assert.match(dashboardSource, /watch\(\[[\s\S]*?handlerFilter[\s\S]*?\], resetWorkbenchPagination, \{ deep: true \}\)/)
-  assert.match(dashboardSource, /watch\(\(\) => pagedListPage\.value\.page, \(correctedPage\) =>[\s\S]*?currentPage\.value = correctedPage/)
+  assert.match(dashboardSource, /function scheduleWorkbenchReload\(\)[\s\S]*?setTimeout\([\s\S]*?loadWorkbench\(\)/)
+  assert.match(dashboardSource, /watch\(\[[\s\S]*?handlerFilter[\s\S]*?\], \(\) => \{[\s\S]*?resetWorkbenchPagination\(\)[\s\S]*?scheduleWorkbenchReload\(\)/)
+  assert.doesNotMatch(dashboardSource, /paginateWorkbenchItems\(/)
   assert.match(dashboardSource, /class="workbench-list-table"[\s\S]*?<\/div>\s*<footer class="workbench-pagination-footer"/)
   const emptyStateIndex = dashboardSource.indexOf('<el-empty v-if="!filteredListItems.length"')
   const paginationFooterIndex = dashboardSource.indexOf('<footer class="workbench-pagination-footer">')

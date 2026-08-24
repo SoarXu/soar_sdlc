@@ -7,15 +7,20 @@
       <router-link v-if="task.project_id" class="detail-link" :to="`/projects/${task.project_id}`">进入项目</router-link>
       <WatchToggleButton v-if="task.id" object-type="task" :object-id="taskId" />
       <el-button v-if="!editing && canCreateChildTask" type="primary" :icon="CirclePlus" @click="openChildTaskDialog">新增子任务</el-button>
-      <WorkflowActionButtons
-        v-if="!editing && task.id"
-        object-type="task"
-        :object-id="taskId"
-        mode="detail"
-        :users="users"
-        @command="handleWorkflowCommand"
-        @executed="loadData"
-      />
+      <template v-if="!editing">
+        <WorkflowActionButtons
+          v-if="task.id"
+          object-type="task"
+          :object-id="taskId"
+          mode="detail"
+          :users="users"
+          @command="handleWorkflowCommand"
+          @executed="loadData"
+        />
+        <el-popconfirm v-if="canDeleteTask" title="确认删除该任务？" @confirm="removeTask">
+          <template #reference><el-button link type="danger">删除</el-button></template>
+        </el-popconfirm>
+      </template>
       <template v-else>
         <el-button @click="cancelEdit">取消</el-button>
         <el-button type="primary" :loading="saving" @click="saveTask">保存</el-button>
@@ -170,7 +175,7 @@ import { CirclePlus } from '@element-plus/icons-vue'
 import { fetchProjectMembers, fetchProjects } from '../api/projects'
 import { fetchIterations } from '../api/iterations'
 import { fetchRequirements } from '../api/requirements'
-import { createTask, fetchTask, fetchTaskAuditLogs, fetchTaskChildren, fetchTaskStatusOperations, updateTask } from '../api/tasks'
+import { createTask, deleteTask, fetchTask, fetchTaskAuditLogs, fetchTaskChildren, fetchTaskStatusOperations, updateTask } from '../api/tasks'
 import { fetchUsers } from '../api/users'
 import CommitRecordsPanel from '../components/CommitRecordsPanel.vue'
 import WatchToggleButton from '../components/WatchToggleButton.vue'
@@ -179,7 +184,7 @@ import WorkflowActionButtons from '../components/WorkflowActionButtons.vue'
 import { labelById, userLabel } from '../utils/referenceLabels'
 import { formatAuditValue } from '../utils/auditHistoryLabels'
 import { deriveTaskBranch, TASK_BRANCH_OPTIONS, taskBranchLabel } from '../utils/taskBranchRules'
-import { canCreateWorkItem, currentUserFromStorage } from '../utils/permissions'
+import { canCreateWorkItem, canDeleteWorkItem, currentUserFromStorage } from '../utils/permissions'
 import { showActionError } from '../utils/actionFeedback'
 
 const route = useRoute()
@@ -208,6 +213,11 @@ const savingChildTask = ref(false)
 const childTaskForm = reactive({ title: '', task_type: 'standalone_operation', priority: 'medium', owner_id: null, due_date: null, description: '' })
 const currentUser = computed(() => currentUserFromStorage(users.value))
 const taskProject = computed(() => projects.value.find((item) => item.id === task.value.project_id) || null)
+const canDeleteTask = computed(() => (
+  Boolean(task.value.id)
+  && taskProject.value?.state_category !== 'terminal'
+  && canDeleteWorkItem(taskProject.value, currentUser.value, projectMembers.value)
+))
 const canCreateChildTask = computed(() => (
   Boolean(task.value.id)
   && task.value.state_category !== 'terminal'
@@ -360,6 +370,16 @@ async function saveTask() {
     ElMessage.success('任务已保存')
   } finally {
     saving.value = false
+  }
+}
+
+async function removeTask() {
+  try {
+    await deleteTask(taskId.value)
+    ElMessage.success('任务已删除')
+    goBackToProjectTasks()
+  } catch (error) {
+    showActionError(error, '任务删除失败')
   }
 }
 

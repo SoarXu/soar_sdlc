@@ -10,9 +10,11 @@ def test_default_workflows_define_a_development_lead_review_gate():
     for object_type, successor in expected_successors.items():
         graph = graph_for_object_type(object_type)
         state_refs = {state.ref for state in graph.states}
+        states_by_ref = {state.ref: state for state in graph.states}
         review_transitions = {transition.action_key: transition for transition in graph.transitions}
 
         assert "pending_review" in state_refs
+        assert states_by_ref["pending_review"].status_name == "Code Review"
         assert review_transitions["submit_review"].to_ref == "pending_review"
         assert review_transitions["approve_review"].from_ref == "pending_review"
         assert review_transitions["approve_review"].to_ref == successor

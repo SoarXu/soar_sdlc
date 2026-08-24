@@ -574,7 +574,7 @@ def test_apply_template_creates_graph_nodes_and_transitions(client: TestClient):
         "待开始",
         "修复中",
         "待验证",
-        "待评审",
+        "Code Review",
         "已验证",
         "已关闭",
     }
@@ -1508,7 +1508,7 @@ def test_bug_default_template_matches_prd_baseline(client: TestClient):
 
     assert graph.status_code == 200
     states = {node["status_name"] for node in graph.json()["states"]}
-    assert states == {"待分派", "待开始", "修复中", "待评审", "待验证", "已验证", "已关闭"}
+    assert states == {"待分派", "待开始", "修复中", "Code Review", "待验证", "已验证", "已关闭"}
     transition_names = {item["action_name"] for item in graph.json()["transitions"]}
     assert {"确认缺陷类型", "提交验证", "验证通过", "验证不通过", "关闭", "激活", "重新判定缺陷类型"} <= transition_names
     assert all("status_key" not in node for node in graph.json()["states"])
@@ -1532,7 +1532,7 @@ def test_requirement_and_project_default_templates_expose_default_metadata(clien
     requirement_graph = client.get(f"/api/v1/workflow-definitions/{requirement_definition['id']}")
     assert requirement_graph.status_code == 200
     requirement_state_names = {node["status_name"] for node in requirement_graph.json()["states"]}
-    assert requirement_state_names == {"待分派", "待开始", "处理中", "待评审", "待确认", "已完成", "已取消"}
+    assert requirement_state_names == {"待分派", "待开始", "处理中", "Code Review", "待确认", "已完成", "已取消"}
     requirement_action_names = {item["action_name"] for item in requirement_graph.json()["transitions"]}
     assert {"认领", "指派", "完成", "取消", "重新激活"} <= requirement_action_names
 

@@ -232,11 +232,14 @@ def reconcile_review_subgraph(db: Session, definition: WorkflowDefinition) -> No
             "fallback",
             _template_role_values(db, "project_owner")[1],
         )
-    review_state = next((state for state in states.values() if state.status_name == "待评审"), None)
+    review_state = next((
+        state for state in states.values()
+        if state.status_name in {"待评审", "Code Review"}
+    ), None)
     if review_state is None:
         review_state = WorkflowState(
             definition_id=definition.id,
-            status_name="待评审",
+            status_name="Code Review",
             category="normal",
             color="#d97706",
             x=development_state.x + 180,
@@ -246,6 +249,8 @@ def reconcile_review_subgraph(db: Session, definition: WorkflowDefinition) -> No
         )
         db.add(review_state)
         db.flush()
+    elif review_state.status_name != "Code Review":
+        review_state.status_name = "Code Review"
     transitions_by_key = {transition.action_key: transition for transition in transitions}
     review_transition_specs = (
         ("submit_review", "提交评审", development_state.id, review_state.id, "current_handler"),
@@ -877,7 +882,7 @@ def _requirement_graph() -> WorkflowGraphSave:
             _state("waiting_iteration", "待开始", "normal", "#7c3aed", 280, 100, state_role="waiting_iteration"),
             _state("in_processing", "处理中", "normal", "#2563eb", 480, 100, state_role="active_work"),
             _state("pending_confirmation", "待确认", "normal", "#7c3aed", 480, 100),
-            _state("pending_review", "待评审", "normal", "#d97706", 400, 220),
+            _state("pending_review", "Code Review", "normal", "#d97706", 400, 220),
             _state("completed", "已完成", "terminal", "#059669", 680, 100, terminal_kind="completed"),
             _state("canceled", "已取消", "terminal", "#94a3b8", 480, 240, terminal_kind="terminated"),
         ],
@@ -1034,7 +1039,7 @@ def _task_graph() -> WorkflowGraphSave:
             _state("waiting_iteration", "待开始", "normal", "#7c3aed", 280, 120, state_role="waiting_iteration"),
             _state("in_processing", "处理中", "normal", "#2563eb", 480, 120, state_role="active_work"),
             _state("pending_confirmation", "待确认", "normal", "#7c3aed", 480, 120),
-            _state("pending_review", "待评审", "normal", "#d97706", 400, 240),
+            _state("pending_review", "Code Review", "normal", "#d97706", 400, 240),
             _state("completed", "已完成", "terminal", "#059669", 680, 120, terminal_kind="completed"),
             _state("canceled", "已取消", "terminal", "#94a3b8", 480, 260, terminal_kind="terminated"),
         ],
@@ -1216,7 +1221,7 @@ def _bug_graph() -> WorkflowGraphSave:
             _state("waiting_iteration", "待开始", "normal", "#7c3aed", 280, 100, state_role="waiting_iteration"),
             _state("fixing", "修复中", "normal", "#2563eb", 480, 100, state_role="active_work"),
             _state("pending_verification", "待验证", "normal", "#7c3aed", 480, 100),
-            _state("pending_review", "待评审", "normal", "#d97706", 400, 220),
+            _state("pending_review", "Code Review", "normal", "#d97706", 400, 220),
             _state("verified", "已验证", "normal", "#0f766e", 680, 100),
             _state("closed", "已关闭", "terminal", "#059669", 880, 100, terminal_kind="completed"),
         ],

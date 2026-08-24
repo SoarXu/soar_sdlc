@@ -11,7 +11,7 @@ const transitions = [
   { id: 11, from_state_id: 1, to_state_id: 2, action_name: 'Claim', sort_order: 10 },
   { id: 13, from_state_id: 1, to_state_id: 1, action_name: 'Add info', sort_order: 30 },
   { id: 12, from_state_id: 1, to_state_id: 1, action_name: 'Edit', sort_order: 20 },
-  { id: 15, from_state_id: 3, to_state_id: 1, action_name: 'Retired route', sort_order: 35 },
+  { id: 15, from_state_id: 3, to_state_id: 1, action_name: 'Retired route', enabled: false, sort_order: 35 },
   { id: 14, from_state_id: 99, to_state_id: 1, action_name: 'Invalid', sort_order: 40 }
 ]
 
@@ -22,7 +22,7 @@ const transitions = [
 
   assert.deepEqual(result.activeStates.map((item) => item.id), [1, 2])
   assert.deepEqual(result.inactiveStates.map((item) => item.id), [3])
-  assert.deepEqual(result.routedTransitions.map((item) => item.id), [11])
+  assert.deepEqual(result.routedTransitions.map((item) => item.id), [11, 15])
   assert.deepEqual(result.stateActionsByStateId.get(1).map((item) => item.id), [12, 13])
   assert.deepEqual(result.stateActionsByStateId.get(2), [])
   assert.equal(result.stateActionsByStateId.has(99), false)

@@ -4,7 +4,7 @@ import { readFile } from 'node:fs/promises'
 const source = await readFile(new URL('./ProgramsView.vue', import.meta.url), 'utf8')
 
 assert.match(source, /deleteProject,/)
-assert.match(source, /fetchProjectMembers,/)
+assert.match(source, /fetchProjectMembersBatch,/)
 assert.match(source, /const projectMembersById = ref\(\{\}\)/)
 assert.match(source, /const currentUser = computed\(\(\) => currentUserFromStorage\(users\.value\)\)/)
 assert.match(source, /<el-button v-if="canManageProjectRow\(row\)" link type="danger" @click="confirmRemoveProject\(row\.id\)">删除<\/el-button>/)

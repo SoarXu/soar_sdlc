@@ -12,6 +12,7 @@ from app.models.test_run import TestRun
 from app.models.user import User
 from app.services.program_permission_service import is_program_governor
 from app.services.role_capability_service import role_ids_for_capabilities
+from app.services.workflow_runtime_cache import cached_runtime_value
 
 
 SYSTEM_ADMIN_ROLE_KEYS = {"system_admin"}
@@ -22,12 +23,26 @@ TEST_CAPABILITIES = {"tester", "test_lead"}
 def is_system_admin(db: Session, user_id: int | None) -> bool:
     if user_id is None:
         return False
-    return bool(db.query(User.is_system_admin).filter(User.id == user_id, User.deleted == 0).scalar())
+    return cached_runtime_value(
+        db,
+        "system_admin",
+        user_id,
+        lambda: bool(db.query(User.is_system_admin).filter(User.id == user_id, User.deleted == 0).scalar()),
+    )
 
 
 def is_project_owner(db: Session, project_id: int | None, user_id: int | None) -> bool:
     if not project_id or user_id is None:
         return False
+    return cached_runtime_value(
+        db,
+        "project_owner",
+        (project_id, user_id),
+        lambda: _is_project_owner_uncached(db, project_id, user_id),
+    )
+
+
+def _is_project_owner_uncached(db: Session, project_id: int, user_id: int) -> bool:
     project = db.query(Project).filter(Project.id == project_id, Project.deleted == 0).first()
     if project and project.owner_id == user_id:
         return True
@@ -45,10 +60,31 @@ def is_project_owner(db: Session, project_id: int | None, user_id: int | None) -
 def is_project_member(db: Session, project_id: int | None, user_id: int | None) -> bool:
     if not project_id or user_id is None:
         return False
-    return bool(
-        db.query(ProjectMember)
-        .filter(ProjectMember.project_id == project_id, ProjectMember.user_id == user_id)
-        .first()
+    return cached_runtime_value(
+        db,
+        "project_member",
+        (project_id, user_id),
+        lambda: bool(
+            db.query(ProjectMember)
+            .filter(ProjectMember.project_id == project_id, ProjectMember.user_id == user_id)
+            .first()
+        ),
+    )
+
+
+def project_member_role_ids(db: Session, project_id: int | None, user_id: int | None) -> set[int]:
+    if not project_id or user_id is None:
+        return set()
+    return cached_runtime_value(
+        db,
+        "project_member_role_ids",
+        (project_id, user_id),
+        lambda: {
+            role_id
+            for (role_id,) in db.query(ProjectMember.role_id)
+            .filter(ProjectMember.project_id == project_id, ProjectMember.user_id == user_id)
+            .all()
+        },
     )
 
 
@@ -64,6 +100,15 @@ def can_manage_project(db: Session, project_id: int | None, actor: User | None) 
 def can_govern_project(db: Session, project_id: int | None, actor: User | None) -> bool:
     if actor is None:
         return False
+    return cached_runtime_value(
+        db,
+        "can_govern_project",
+        (project_id, actor.id),
+        lambda: _can_govern_project_uncached(db, project_id, actor),
+    )
+
+
+def _can_govern_project_uncached(db: Session, project_id: int | None, actor: User) -> bool:
     project = _get_active_project(db, project_id)
     return (
         can_manage_project(db, project_id, actor)
@@ -162,6 +207,15 @@ def can_admin_action(db: Session, project_id: int | None, actor_id: int | None) 
 
 
 def iteration_project_ids(db: Session, iteration_id: int) -> list[int]:
+    return cached_runtime_value(
+        db,
+        "iteration_project_ids",
+        iteration_id,
+        lambda: _iteration_project_ids_uncached(db, iteration_id),
+    )
+
+
+def _iteration_project_ids_uncached(db: Session, iteration_id: int) -> list[int]:
     project_ids = [
         row.project_id
         for row in db.query(IterationProject).filter(IterationProject.iteration_id == iteration_id).all()
@@ -176,7 +230,12 @@ def iteration_project_ids(db: Session, iteration_id: int) -> list[int]:
 def is_iteration_owner(db: Session, iteration_id: int, actor: User | None) -> bool:
     if actor is None:
         return False
-    iteration = db.query(Iteration).filter(Iteration.id == iteration_id, Iteration.deleted == 0).first()
+    iteration = cached_runtime_value(
+        db,
+        "iterations",
+        iteration_id,
+        lambda: db.query(Iteration).filter(Iteration.id == iteration_id, Iteration.deleted == 0).first(),
+    )
     if not iteration or iteration.owner_id != actor.id:
         return False
     project_ids = iteration_project_ids(db, iteration_id)
@@ -195,7 +254,13 @@ def can_govern_iteration(db: Session, iteration_id: int, actor: User | None) -> 
 
 
 def can_manage_iteration(db: Session, iteration_id: int, actor: User | None) -> bool:
-    return is_iteration_owner(db, iteration_id, actor) or can_govern_iteration(db, iteration_id, actor)
+    actor_id = actor.id if actor else None
+    return cached_runtime_value(
+        db,
+        "can_manage_iteration",
+        (iteration_id, actor_id),
+        lambda: is_iteration_owner(db, iteration_id, actor) or can_govern_iteration(db, iteration_id, actor),
+    )
 
 
 def can_directly_manage_iteration_scope(db: Session, iteration_id: int, actor: User | None) -> bool:
@@ -400,4 +465,9 @@ def _has_project_capability(db: Session, project_id: int | None, user_id: int, c
 def _get_active_project(db: Session, project_id: int | None) -> Project | None:
     if not project_id:
         return None
-    return db.query(Project).filter(Project.id == project_id, Project.deleted == 0).first()
+    return cached_runtime_value(
+        db,
+        "projects",
+        project_id,
+        lambda: db.query(Project).filter(Project.id == project_id, Project.deleted == 0).first(),
+    )

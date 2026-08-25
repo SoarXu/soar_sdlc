@@ -4,6 +4,7 @@ from sqlalchemy import BigInteger, Boolean, DateTime, ForeignKey, Integer, Strin
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.session import Base
+from app.db.types import UnsignedBigInteger
 
 
 class Requirement(Base):
@@ -23,13 +24,13 @@ class Requirement(Base):
     owner_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     proposer_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     workflow_definition_id: Mapped[int] = mapped_column(
-        BigInteger,
+        UnsignedBigInteger,
         ForeignKey("workflow_definitions.id", ondelete="RESTRICT"),
         nullable=False,
         index=True,
     )
     current_state_id: Mapped[int] = mapped_column(
-        BigInteger,
+        UnsignedBigInteger,
         ForeignKey("workflow_states.id", ondelete="RESTRICT"),
         nullable=False,
         index=True,

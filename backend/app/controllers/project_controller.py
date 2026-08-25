@@ -23,6 +23,7 @@ from app.services.project_service import (
     list_project_bugs_page,
     list_project_iterations_page,
     list_project_members,
+    list_project_members_batch,
     list_project_requirements_page,
     list_project_status_operations,
     list_project_tasks_page,
@@ -42,6 +43,8 @@ from app.views.project_view import (
     ProjectIterationPage,
     ProjectMemberCreate,
     ProjectMemberRead,
+    ProjectMembersBatchRead,
+    ProjectMembersBatchRequest,
     ProjectRead,
     ProjectRequirementPage,
     ProjectTaskPage,
@@ -63,6 +66,18 @@ def get_projects(
     current_user: User | None = Depends(get_optional_current_user),
 ):
     return list_projects(db, current_user, assignee_rule_config_id=assignee_rule_config_id)
+
+
+@router.post("/members/batch", response_model=ProjectMembersBatchRead)
+def post_project_members_batch(
+    payload: ProjectMembersBatchRequest,
+    db: Session = Depends(get_db),
+    current_user: User | None = Depends(get_optional_current_user),
+):
+    ensure_authenticated(current_user)
+    for project_id in dict.fromkeys(payload.project_ids):
+        ensure_project_view_permission(db, project_id, current_user)
+    return {"items": list_project_members_batch(db, payload.project_ids)}
 
 
 @router.get("/{project_id}", response_model=ProjectRead)

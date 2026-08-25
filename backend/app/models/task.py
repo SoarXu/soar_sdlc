@@ -5,6 +5,7 @@ from sqlalchemy import BigInteger, Date, DateTime, DECIMAL, ForeignKey, Integer,
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.session import Base
+from app.db.types import UnsignedBigInteger
 
 
 class Task(Base):
@@ -26,13 +27,13 @@ class Task(Base):
     priority: Mapped[str] = mapped_column(String(32), default="medium")
     owner_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     workflow_definition_id: Mapped[int] = mapped_column(
-        BigInteger,
+        UnsignedBigInteger,
         ForeignKey("workflow_definitions.id", ondelete="RESTRICT"),
         nullable=False,
         index=True,
     )
     current_state_id: Mapped[int] = mapped_column(
-        BigInteger,
+        UnsignedBigInteger,
         ForeignKey("workflow_states.id", ondelete="RESTRICT"),
         nullable=False,
         index=True,

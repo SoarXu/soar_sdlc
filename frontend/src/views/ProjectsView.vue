@@ -157,7 +157,7 @@
 </template>
 
 <script setup>
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 
 import { fetchPrograms } from '../api/programs'
@@ -167,7 +167,7 @@ import {
   closeProject,
   createProject,
   deleteProject,
-  fetchProjectMembers,
+  fetchProjectMembersBatch,
   fetchProjectStatusOperations,
   fetchProjects,
   startProject,
@@ -194,10 +194,12 @@ const statusAction = ref('')
 const statusHistory = ref([])
 const projects = ref([])
 const projectMembersById = ref({})
+const memberRequestVersion = ref(0)
 const programs = ref([])
 const users = ref([])
 const workflowSchemes = ref([])
 const workflowTransitions = ref({})
+const transitionRequestVersion = ref(0)
 const currentUser = computed(() => currentUserFromStorage(users.value))
 const canCreateProject = computed(() => Boolean(currentUser.value))
 const PROJECT_TREE_INDENT = 24
@@ -230,8 +232,10 @@ const {
   total: projectTotal,
   pagedItems: pagedProjectTree
 } = usePagination(projectTree)
+const visibleProjects = computed(() => flattenProjectTree(pagedProjectTree.value))
+const visibleProjectIds = computed(() => visibleProjects.value.map((item) => item.id))
 const projectOperationWidth = computed(() => workflowActionColumnWidth(
-  projects.value.map((row) => (canManageProjectRow(row) ? workflowTransitions.value[row.id] || [] : [])),
+  visibleProjects.value.map((row) => (canManageProjectRow(row) ? workflowTransitions.value[row.id] || [] : [])),
   { minWidth: 520, extraWidth: 190 }
 ))
 const form = reactive({ parent_id: null, program_id: null, name: '', owner_id: null, assignee_rule_config_id: null, start_date: null, end_date: null, is_long_term: false, description: '' })
@@ -319,6 +323,10 @@ function buildProjectTree(items) {
   return roots
 }
 
+function flattenProjectTree(items) {
+  return items.flatMap((item) => [item, ...flattenProjectTree(item.children || [])])
+}
+
 function assignProjectTreeDepth(nodes, depth = 0) {
   nodes.forEach((node) => {
     node.tree_depth = depth
@@ -394,27 +402,34 @@ async function loadData() {
 }
 
 async function loadProjectWorkflowTransitions() {
+  const requestVersion = ++transitionRequestVersion.value
   try {
-    await replaceWorkflowTransitionMap(
+    const transitions = await replaceWorkflowTransitionMap(
       fetchWorkflowTransitionsBatch,
-      projects.value.map((item) => item.id),
-      (value) => { workflowTransitions.value = value }
+      visibleProjectIds.value,
+      () => {}
     )
+    if (requestVersion === transitionRequestVersion.value) workflowTransitions.value = transitions
   } catch {
-    ElMessage.error('项目动作加载失败')
+    if (requestVersion === transitionRequestVersion.value) {
+      workflowTransitions.value = {}
+      ElMessage.error('项目动作加载失败')
+    }
   }
 }
 
 async function loadProjectMembers() {
-  const entries = await Promise.all(projects.value.map(async (project) => {
-    try {
-      const { data } = await fetchProjectMembers(project.id)
-      return [project.id, data]
-    } catch {
-      return [project.id, []]
+  const requestVersion = ++memberRequestVersion.value
+  try {
+    const { data } = await fetchProjectMembersBatch(visibleProjectIds.value)
+    if (requestVersion === memberRequestVersion.value) {
+      projectMembersById.value = Object.fromEntries(
+        (data.items || []).map((item) => [item.project_id, item.members || []])
+      )
     }
-  }))
-  projectMembersById.value = Object.fromEntries(entries)
+  } catch {
+    if (requestVersion === memberRequestVersion.value) projectMembersById.value = {}
+  }
 }
 
 async function submitProject() {
@@ -487,5 +502,9 @@ async function confirmRemoveProject(id) {
     // The confirmation dialog rejects when the user cancels.
   }
 }
+watch([projectPage, projectPageSize], () => {
+  void Promise.all([loadProjectMembers(), loadProjectWorkflowTransitions()])
+})
+
 onMounted(loadData)
 </script>

@@ -1,6 +1,7 @@
 from app.db.session import Base
 from pathlib import Path
 import app.models  # noqa: F401
+from sqlalchemy.dialects import mysql
 
 
 EXPECTED_TABLES = {
@@ -154,3 +155,32 @@ def test_business_component_tables_preserve_workflow_and_work_item_identity():
     assert {"component_id", "object_type", "transition_id", "eligible_member_mode"} <= set(routes.columns.keys())
     assert {"object_type", "object_id", "component_id", "relation_type"} <= set(associations.columns.keys())
     assert {"object_type", "object_id", "old_definition_id", "new_definition_id"} <= set(migrations.columns.keys())
+
+
+def test_workflow_foreign_key_types_match_referenced_columns_on_mysql():
+    dialect = mysql.dialect()
+    workflow_tables = {
+        "workflow_definitions",
+        "workflow_states",
+        "workflow_transitions",
+    }
+
+    mismatches = []
+    for table in Base.metadata.tables.values():
+        for column in table.columns:
+            for foreign_key in column.foreign_keys:
+                if foreign_key.column.table.name not in workflow_tables:
+                    continue
+                local_type = column.type.compile(dialect=dialect)
+                target_type = foreign_key.column.type.compile(dialect=dialect)
+                if target_type != "BIGINT UNSIGNED":
+                    mismatches.append(
+                        f"{foreign_key.target_fullname} uses {target_type}, expected BIGINT UNSIGNED"
+                    )
+                if local_type != target_type:
+                    mismatches.append(
+                        f"{table.name}.{column.name} ({local_type}) -> "
+                        f"{foreign_key.target_fullname} ({target_type})"
+                    )
+
+    assert mismatches == []

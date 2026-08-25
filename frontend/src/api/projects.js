@@ -36,6 +36,10 @@ export function fetchProjectMembers(id) {
   return http.get(`/projects/${id}/members`)
 }
 
+export function fetchProjectMembersBatch(projectIds) {
+  return http.post('/projects/members/batch', { project_ids: projectIds })
+}
+
 export function saveProjectMembers(id, payload) {
   return http.put(`/projects/${id}/members`, payload)
 }

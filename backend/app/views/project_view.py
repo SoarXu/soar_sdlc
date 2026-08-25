@@ -1,6 +1,6 @@
 from datetime import date, datetime
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from app.views.bug_view import BugRead
 from app.views.iteration_view import IterationRead
@@ -82,6 +82,19 @@ class ProjectMemberRead(ProjectMemberBase):
     join_time: datetime | None = None
     create_time: datetime | None = None
     update_time: datetime | None = None
+
+
+class ProjectMembersBatchRequest(BaseModel):
+    project_ids: list[int] = Field(default_factory=list)
+
+
+class ProjectMembersBatchItem(BaseModel):
+    project_id: int
+    members: list[ProjectMemberRead] = Field(default_factory=list)
+
+
+class ProjectMembersBatchRead(BaseModel):
+    items: list[ProjectMembersBatchItem] = Field(default_factory=list)
 
 
 class ProjectUnfinishedWorkItemsSummary(BaseModel):

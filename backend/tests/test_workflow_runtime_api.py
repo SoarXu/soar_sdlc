@@ -4,9 +4,10 @@ from types import SimpleNamespace
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 import pytest
+from sqlalchemy import event
 
 from app.core.security import create_access_token, get_password_hash
-from app.db.session import SessionLocal
+from app.db.session import SessionLocal, engine
 from app.models.bug import Bug
 from app.models.iteration import Iteration
 from app.models.notification import Notification
@@ -20,7 +21,11 @@ from app.models.user import User
 from app.models.workflow_definition import WorkflowState, WorkflowTransition, WorkflowTransitionRole
 from app.services import iteration_service, workflow_runtime_service
 from app.services.exception_center_service import _state_requires_owner_from_context
-from app.views.workflow_runtime_view import WorkflowTransitionActionRead
+from app.views.workflow_runtime_view import (
+    WorkflowTransitionActionRead,
+    WorkflowTransitionBatchItem,
+    WorkflowTransitionBatchRequest,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -264,6 +269,243 @@ def test_list_available_transitions_uses_nonlocking_item_loader(monkeypatch):
     monkeypatch.setattr(workflow_runtime_service, "_resolve_definition_context", lambda *args: None)
 
     assert workflow_runtime_service.list_available_transitions(object(), "bug", 1, None) == []
+
+
+def test_batch_available_transitions_prepares_default_templates_once(monkeypatch):
+    template_preparations = []
+    monkeypatch.setattr(
+        workflow_runtime_service,
+        "ensure_default_workflow_templates",
+        lambda db: template_preparations.append(db),
+    )
+    monkeypatch.setattr(
+        workflow_runtime_service,
+        "_get_item",
+        lambda db, object_type, object_id: SimpleNamespace(id=object_id),
+    )
+    monkeypatch.setattr(workflow_runtime_service, "_resolve_definition_context", lambda *args: None)
+    db = object()
+
+    result = workflow_runtime_service.batch_available_transitions(
+        db,
+        WorkflowTransitionBatchRequest(
+            items=[
+                WorkflowTransitionBatchItem(object_type="project", id=11),
+                WorkflowTransitionBatchItem(object_type="project", id=12),
+            ]
+        ),
+        SimpleNamespace(id=7),
+    )
+
+    assert [item.id for item in result.items] == [11, 12]
+    assert template_preparations == [db]
+
+
+def test_batch_available_transitions_has_bounded_query_growth(client: TestClient):
+    project = client.post("/api/v1/projects", json={"name": f"Batch query project {uuid4().hex[:8]}"})
+    assert project.status_code == 200, project.text
+    project_id = project.json()["id"]
+    requirement_ids = []
+    for index in range(8):
+        response = client.post(
+            "/api/v1/requirements",
+            json={"project_id": project_id, "title": f"Batch query requirement {index}"},
+        )
+        assert response.status_code == 200, response.text
+        requirement_ids.append(response.json()["id"])
+
+    query_count = 0
+
+    def count_query(*_args, **_kwargs):
+        nonlocal query_count
+        query_count += 1
+
+    db = SessionLocal()
+    event.listen(engine, "before_cursor_execute", count_query)
+    try:
+        actor = db.query(User).filter(User.username == "shuwan.yang", User.deleted == 0).first()
+
+        def measured_count(ids):
+            nonlocal query_count
+            query_count = 0
+            workflow_runtime_service.batch_available_transitions(
+                db,
+                WorkflowTransitionBatchRequest(
+                    items=[WorkflowTransitionBatchItem(object_type="requirement", id=item_id) for item_id in ids]
+                ),
+                actor,
+            )
+            return query_count
+
+        single_count = measured_count(requirement_ids[:1])
+        batch_count = measured_count(requirement_ids)
+    finally:
+        event.remove(engine, "before_cursor_execute", count_query)
+        db.close()
+
+    assert batch_count <= single_count + 20
+
+
+def test_batch_available_transitions_has_bounded_query_growth_for_project_member(client: TestClient):
+    project = client.post("/api/v1/projects", json={"name": f"Member batch project {uuid4().hex[:8]}"}).json()
+    member_id, _token = _create_user("Batch member")
+    _add_project_member(project["id"], member_id, "developer")
+    requirement_ids = [
+        client.post(
+            "/api/v1/requirements",
+            json={"project_id": project["id"], "title": f"Member batch requirement {index}"},
+        ).json()["id"]
+        for index in range(8)
+    ]
+    query_count = 0
+
+    def count_query(*_args, **_kwargs):
+        nonlocal query_count
+        query_count += 1
+
+    db = SessionLocal()
+    event.listen(engine, "before_cursor_execute", count_query)
+    try:
+        actor = db.query(User).filter(User.id == member_id).one()
+
+        def measured_count(ids):
+            nonlocal query_count
+            query_count = 0
+            workflow_runtime_service.batch_available_transitions(
+                db,
+                WorkflowTransitionBatchRequest(
+                    items=[WorkflowTransitionBatchItem(object_type="requirement", id=item_id) for item_id in ids]
+                ),
+                actor,
+            )
+            return query_count
+
+        single_count = measured_count(requirement_ids[:1])
+        batch_count = measured_count(requirement_ids)
+    finally:
+        event.remove(engine, "before_cursor_execute", count_query)
+        db.close()
+
+    assert batch_count <= single_count + 5
+
+
+def test_batch_available_transitions_preserves_all_project_member_roles(client: TestClient):
+    project = client.post("/api/v1/projects", json={"name": f"Multi-role batch project {uuid4().hex[:8]}"}).json()
+    member_id, _token = _create_user("Multi-role batch member")
+    _add_project_member(project["id"], member_id, "developer")
+    _add_project_member(project["id"], member_id, "project_owner")
+    requirement = client.post(
+        "/api/v1/requirements",
+        json={"project_id": project["id"], "title": "Multi-role batch requirement"},
+    ).json()
+    request = WorkflowTransitionBatchRequest(
+        items=[WorkflowTransitionBatchItem(object_type="requirement", id=requirement["id"])]
+    )
+
+    db = SessionLocal()
+    try:
+        actor = db.query(User).filter(User.id == member_id).one()
+        expected = [
+            action.model_dump()
+            for action in workflow_runtime_service.list_available_transitions(
+                db, "requirement", requirement["id"], actor
+            )
+        ]
+        with workflow_runtime_service.workflow_runtime_batch_cache(db):
+            workflow_runtime_service._prime_batch_available_transitions(db, request, actor)
+            cached_role_ids = workflow_runtime_service.project_member_role_ids(db, project["id"], actor.id)
+        batch = workflow_runtime_service.batch_available_transitions(db, request, actor)
+    finally:
+        db.close()
+
+    assert cached_role_ids == set(_role_ids_for_capabilities("developer", "project_owner"))
+    assert [action.model_dump() for action in batch.items[0].transitions] == expected
+
+
+def test_batch_available_transitions_has_bounded_query_growth_for_iterations(client: TestClient):
+    project = client.post("/api/v1/projects", json={"name": f"Iteration batch project {uuid4().hex[:8]}"}).json()
+    owner_id, _token = _create_user("Iteration batch owner")
+    _add_project_member(project["id"], owner_id, "project_owner")
+    iteration_ids = [
+        client.post(
+            "/api/v1/iterations",
+            json={"project_ids": [project["id"]], "name": f"Batch iteration {index} {uuid4().hex[:6]}"},
+        ).json()["id"]
+        for index in range(8)
+    ]
+    query_count = 0
+
+    def count_query(*_args, **_kwargs):
+        nonlocal query_count
+        query_count += 1
+
+    db = SessionLocal()
+    event.listen(engine, "before_cursor_execute", count_query)
+    try:
+        actor = db.query(User).filter(User.id == owner_id).one()
+
+        def measured_count(ids):
+            nonlocal query_count
+            query_count = 0
+            workflow_runtime_service.batch_available_transitions(
+                db,
+                WorkflowTransitionBatchRequest(
+                    items=[WorkflowTransitionBatchItem(object_type="iteration", id=item_id) for item_id in ids]
+                ),
+                actor,
+            )
+            return query_count
+
+        single_count = measured_count(iteration_ids[:1])
+        batch_count = measured_count(iteration_ids)
+    finally:
+        event.remove(engine, "before_cursor_execute", count_query)
+        db.close()
+
+    assert batch_count <= single_count + 20
+
+
+def test_batch_available_transitions_matches_single_results_for_core_types(client: TestClient):
+    project = client.post("/api/v1/projects", json={"name": f"Batch parity project {uuid4().hex[:8]}"}).json()
+    requirement = client.post(
+        "/api/v1/requirements",
+        json={"project_id": project["id"], "title": "Batch parity requirement"},
+    ).json()
+    task = client.post(
+        "/api/v1/tasks",
+        json={"project_id": project["id"], "title": "Batch parity task", "task_type": "standalone_operation"},
+    ).json()
+    bug = client.post(
+        "/api/v1/bugs",
+        json={"project_id": project["id"], "title": "Batch parity bug"},
+    ).json()
+    refs = [
+        ("project", project["id"]),
+        ("requirement", requirement["id"]),
+        ("task", task["id"]),
+        ("bug", bug["id"]),
+    ]
+    db = SessionLocal()
+    try:
+        actor = db.query(User).filter(User.username == "shuwan.yang", User.deleted == 0).first()
+        singles = {
+            ref: [action.model_dump() for action in workflow_runtime_service.list_available_transitions(db, *ref, actor)]
+            for ref in refs
+        }
+        batch = workflow_runtime_service.batch_available_transitions(
+            db,
+            WorkflowTransitionBatchRequest(
+                items=[WorkflowTransitionBatchItem(object_type=object_type, id=object_id) for object_type, object_id in refs]
+            ),
+            actor,
+        )
+    finally:
+        db.close()
+
+    assert {
+        (item.object_type, item.id): [action.model_dump() for action in item.transitions]
+        for item in batch.items
+    } == singles
 
 
 def test_workflow_transition_action_response_preserves_action_key():

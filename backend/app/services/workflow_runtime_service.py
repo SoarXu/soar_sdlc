@@ -8,6 +8,7 @@ from app.models.audit_log import AuditLog
 from app.services.business_component_service import (
     active_primary_component_members,
     active_primary_component_member_roles,
+    prime_component_runtime_cache,
     replace_work_item_components,
     resolve_component_transition_route,
 )
@@ -40,6 +41,7 @@ from app.services.project_permission_service import (
     is_project_member,
     is_project_owner,
     is_system_admin,
+    project_member_role_ids,
 )
 from app.services.iteration_assignment_service import fallback_iteration_for_project
 from app.services.role_capability_service import role_ids_for_capabilities
@@ -55,6 +57,7 @@ from app.services.iteration_service import (
 from app.services.work_item_iteration_history_service import move_work_item_to_iteration
 from app.services.workflow_state_query_service import current_state_name, is_terminal_state
 from app.services.workflow_state_service import initial_workflow_values, state_for_role
+from app.services.workflow_runtime_cache import cached_runtime_value, prime_runtime_values, workflow_runtime_batch_cache
 from app.views.status_operation_view import StatusOperationCreate
 from app.views.workflow_runtime_view import (
     WorkflowBulkAssignmentRead,
@@ -86,8 +89,11 @@ def list_available_transitions(
     object_type: str,
     object_id: int,
     actor: User | None,
+    *,
+    prepare_templates: bool = True,
 ) -> list[WorkflowTransitionActionRead]:
-    ensure_default_workflow_templates(db)
+    if prepare_templates:
+        ensure_default_workflow_templates(db)
     item = _get_item(db, object_type, object_id)
     bug_iteration_active = object_type != "bug" or _bug_iteration_is_active(db, item)
     definition_context = _resolve_definition_context(db, object_type, item)
@@ -99,7 +105,12 @@ def list_available_transitions(
         WorkflowTransition.enabled == True,  # noqa: E712
     )
     query = query.filter(WorkflowTransition.from_state_id == current_state.id)
-    transitions = query.order_by(WorkflowTransition.sort_order.asc(), WorkflowTransition.id.asc()).all()
+    transitions = cached_runtime_value(
+        db,
+        "available_transitions",
+        (definition.id, current_state.id),
+        lambda: query.order_by(WorkflowTransition.sort_order.asc(), WorkflowTransition.id.asc()).all(),
+    )
     result = []
     for transition in transitions:
         if not bug_iteration_active and not _is_allowed_inactive_bug_transition(current_state, transition):
@@ -122,16 +133,126 @@ def batch_available_transitions(
     payload: WorkflowTransitionBatchRequest,
     actor: User | None,
 ) -> WorkflowTransitionBatchRead:
-    return WorkflowTransitionBatchRead(
-        items=[
-            WorkflowTransitionBatchResultItem(
-                object_type=item.object_type,
-                id=item.id,
-                transitions=list_available_transitions(db, item.object_type, item.id, actor),
+    ensure_default_workflow_templates(db)
+    with workflow_runtime_batch_cache(db):
+        _prime_batch_available_transitions(db, payload, actor)
+        return WorkflowTransitionBatchRead(
+            items=[
+                WorkflowTransitionBatchResultItem(
+                    object_type=item.object_type,
+                    id=item.id,
+                    transitions=list_available_transitions(
+                        db,
+                        item.object_type,
+                        item.id,
+                        actor,
+                        prepare_templates=False,
+                    ),
+                )
+                for item in payload.items
+            ]
+        )
+
+
+def _prime_batch_available_transitions(
+    db: Session,
+    payload: WorkflowTransitionBatchRequest,
+    actor: User | None,
+) -> None:
+    if not hasattr(db, "query"):
+        return
+    grouped_ids: dict[str, list[int]] = {}
+    for request_item in payload.items:
+        if request_item.object_type not in MODEL_BY_TYPE:
+            continue
+        grouped_ids.setdefault(request_item.object_type, []).append(request_item.id)
+    items: list[tuple[str, object]] = []
+    for object_type, object_ids in grouped_ids.items():
+        model = MODEL_BY_TYPE[object_type]
+        loaded = db.query(model).filter(model.id.in_(set(object_ids)), getattr(model, "deleted", 0) == 0).all()
+        loaded_by_id = {item.id: item for item in loaded}
+        prime_runtime_values(db, "items", {(object_type, item_id): loaded_by_id.get(item_id) for item_id in set(object_ids)})
+        items.extend((object_type, item) for item in loaded)
+    definition_keys = {(object_type, item.workflow_definition_id) for object_type, item in items}
+    definition_ids = {definition_id for _object_type, definition_id in definition_keys}
+    definitions = db.query(WorkflowDefinition).filter(WorkflowDefinition.id.in_(definition_ids)).all() if definition_ids else []
+    definition_by_id = {definition.id: definition for definition in definitions}
+    prime_runtime_values(db, "definitions", {
+        key: definition_by_id.get(key[1]) if definition_by_id.get(key[1]) and definition_by_id[key[1]].object_type == key[0] else None
+        for key in definition_keys
+    })
+    state_keys = {(item.workflow_definition_id, item.current_state_id) for _object_type, item in items}
+    state_ids = {state_id for _definition_id, state_id in state_keys}
+    states = db.query(WorkflowState).filter(WorkflowState.id.in_(state_ids)).all() if state_ids else []
+    state_by_id = {state.id: state for state in states}
+    prime_runtime_values(db, "states", {
+        key: state_by_id.get(key[1]) if state_by_id.get(key[1]) and state_by_id[key[1]].definition_id == key[0] else None
+        for key in state_keys
+    })
+    transitions = db.query(WorkflowTransition).filter(
+        WorkflowTransition.definition_id.in_(definition_ids),
+        WorkflowTransition.from_state_id.in_(state_ids),
+        WorkflowTransition.enabled.is_(True),
+    ).order_by(WorkflowTransition.sort_order.asc(), WorkflowTransition.id.asc()).all() if definition_ids and state_ids else []
+    transitions_by_state = {key: [] for key in state_keys}
+    for transition in transitions:
+        transitions_by_state.setdefault((transition.definition_id, transition.from_state_id), []).append(transition)
+    prime_runtime_values(db, "available_transitions", transitions_by_state)
+    iteration_items = {item.id: item for object_type, item in items if object_type == "iteration"}
+    iteration_project_rows = db.query(IterationProject).filter(
+        IterationProject.iteration_id.in_(iteration_items)
+    ).order_by(IterationProject.iteration_id.asc(), IterationProject.id.asc()).all() if iteration_items else []
+    iteration_projects = {iteration_id: [] for iteration_id in iteration_items}
+    for row in iteration_project_rows:
+        iteration_projects.setdefault(row.iteration_id, []).append(row.project_id)
+    prime_runtime_values(db, "iterations", iteration_items)
+    prime_runtime_values(db, "iteration_project_ids", iteration_projects)
+    prime_runtime_values(db, "item_project_id", {
+        ("iteration", iteration_id): project_ids[0] if project_ids else None
+        for iteration_id, project_ids in iteration_projects.items()
+    })
+    project_ids = {
+        getattr(item, "source_project_id", None) or getattr(item, "project_id", None) or (item.id if object_type == "project" else None)
+        for object_type, item in items
+    } | {project_id for project_ids in iteration_projects.values() for project_id in project_ids}
+    project_ids.discard(None)
+    projects = db.query(Project).filter(Project.id.in_(project_ids), Project.deleted == 0).all() if project_ids else []
+    project_by_id = {project.id: project for project in projects}
+    prime_runtime_values(db, "projects", project_by_id)
+    if actor:
+        prime_runtime_values(db, "system_admin", {actor.id: bool(actor.is_system_admin)})
+        memberships = db.query(ProjectMember).filter(
+            ProjectMember.project_id.in_(project_ids),
+            ProjectMember.user_id == actor.id,
+        ).all() if project_ids else []
+        membership_roles_by_project = {project_id: set() for project_id in project_ids}
+        for member in memberships:
+            membership_roles_by_project.setdefault(member.project_id, set()).add(member.role_id)
+        owner_role_ids = role_ids_for_capabilities(db, {"project_owner"})
+        prime_runtime_values(db, "project_member", {
+            (project_id, actor.id): bool(membership_roles_by_project.get(project_id))
+            for project_id in project_ids
+        })
+        prime_runtime_values(db, "project_member_role_ids", {
+            (project_id, actor.id): membership_roles_by_project.get(project_id, set())
+            for project_id in project_ids
+        })
+        prime_runtime_values(db, "project_owner", {
+            (project_id, actor.id): bool(
+                project_by_id.get(project_id) and project_by_id[project_id].owner_id == actor.id
+                or membership_roles_by_project.get(project_id, set()) & owner_role_ids
             )
-            for item in payload.items
-        ]
-    )
+            for project_id in project_ids
+        })
+    transition_ids = {transition.id for transition in transitions}
+    role_rows = db.query(WorkflowTransitionRole).filter(WorkflowTransitionRole.transition_id.in_(transition_ids)).order_by(
+        WorkflowTransitionRole.sort_order.asc(), WorkflowTransitionRole.id.asc()
+    ).all() if transition_ids else []
+    transition_roles = {(transition_id, purpose): [] for transition_id in transition_ids for purpose in ("allowed", "target", "fallback")}
+    for role_row in role_rows:
+        transition_roles.setdefault((role_row.transition_id, role_row.purpose), []).append(role_row.role_id)
+    prime_runtime_values(db, "transition_role_ids", transition_roles)
+    prime_component_runtime_cache(db, items, transitions, actor.id if actor else None)
 
 
 def execute_transition(
@@ -674,7 +795,12 @@ def _get_item(db: Session, object_type: str, object_id: int):
     model = MODEL_BY_TYPE.get(object_type)
     if not model:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unsupported workflow object type")
-    item = db.query(model).filter(model.id == object_id, getattr(model, "deleted", 0) == 0).first()
+    item = cached_runtime_value(
+        db,
+        "items",
+        (object_type, object_id),
+        lambda: db.query(model).filter(model.id == object_id, getattr(model, "deleted", 0) == 0).first(),
+    )
     if not item:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Workflow object not found")
     return item
@@ -865,14 +991,24 @@ def _link_reactivation_history_to_operation(
 
 
 def _resolve_definition_context(db: Session, object_type: str, item):
-    definition = db.query(WorkflowDefinition).filter(
-        WorkflowDefinition.id == item.workflow_definition_id,
-        WorkflowDefinition.object_type == object_type,
-    ).first()
-    state_record = db.query(WorkflowState).filter(
-        WorkflowState.id == item.current_state_id,
-        WorkflowState.definition_id == item.workflow_definition_id,
-    ).first()
+    definition = cached_runtime_value(
+        db,
+        "definitions",
+        (object_type, item.workflow_definition_id),
+        lambda: db.query(WorkflowDefinition).filter(
+            WorkflowDefinition.id == item.workflow_definition_id,
+            WorkflowDefinition.object_type == object_type,
+        ).first(),
+    )
+    state_record = cached_runtime_value(
+        db,
+        "states",
+        (item.workflow_definition_id, item.current_state_id),
+        lambda: db.query(WorkflowState).filter(
+            WorkflowState.id == item.current_state_id,
+            WorkflowState.definition_id == item.workflow_definition_id,
+        ).first(),
+    )
     if not definition or not state_record:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -1005,7 +1141,15 @@ def _bulk_assignment_metadata(
     ]
     routing_mode = (transition.condition_config or {}).get("routing_mode")
     project_id = _project_id_for_item(db, _object_type_for_item(item), item)
-    project = db.query(Project).filter(Project.id == project_id, Project.deleted == 0).first() if project_id else None
+    project = (
+        cached_runtime_value(
+            db,
+            "projects",
+            project_id,
+            lambda: db.query(Project).filter(Project.id == project_id, Project.deleted == 0).first(),
+        )
+        if project_id else None
+    )
     component_route = resolve_component_transition_route(db, _object_type_for_item(item), item, transition)
     allows_manual_owner = handler_rule.get("allow_manual_owner") or bool(
         component_route and component_route["next_owner_mode"] == "manual"
@@ -1033,13 +1177,18 @@ def _bulk_assignment_metadata(
 def _transition_role_ids(db: Session, transition_id: int | None, purpose: str) -> list[int]:
     if not transition_id:
         return []
-    return [
-        role_id
-        for (role_id,) in db.query(WorkflowTransitionRole.role_id)
-        .filter(WorkflowTransitionRole.transition_id == transition_id, WorkflowTransitionRole.purpose == purpose)
-        .order_by(WorkflowTransitionRole.sort_order.asc(), WorkflowTransitionRole.id.asc())
-        .all()
-    ]
+    return cached_runtime_value(
+        db,
+        "transition_role_ids",
+        (transition_id, purpose),
+        lambda: [
+            role_id
+            for (role_id,) in db.query(WorkflowTransitionRole.role_id)
+            .filter(WorkflowTransitionRole.transition_id == transition_id, WorkflowTransitionRole.purpose == purpose)
+            .order_by(WorkflowTransitionRole.sort_order.asc(), WorkflowTransitionRole.id.asc())
+            .all()
+        ],
+    )
 
 
 def _eligible_manual_assignee_ids(db: Session, project_id: int | None, rule: dict[str, Any]) -> list[int]:
@@ -1257,17 +1406,8 @@ def _role_allowed(db: Session, object_type: str, item, transition: WorkflowTrans
         return True
     if is_system_admin(db, actor.id):
         return True
-    business_role_ids = {
-        role_id for (role_id,) in db.query(WorkflowTransitionRole.role_id).filter(
-            WorkflowTransitionRole.transition_id == transition.id,
-            WorkflowTransitionRole.purpose == "allowed",
-        ).all()
-    }
-    if business_role_ids and db.query(ProjectMember.id).filter(
-        ProjectMember.project_id == project_id,
-        ProjectMember.user_id == actor.id,
-        ProjectMember.role_id.in_(business_role_ids),
-    ).first():
+    business_role_ids = set(_transition_role_ids(db, transition.id, "allowed"))
+    if business_role_ids & project_member_role_ids(db, project_id, actor.id):
         return True
     allowed_identities = _split_csv(transition.allowed_roles)
     if not allowed_identities:
@@ -2727,6 +2867,15 @@ def _ensure_iteration_scope(db: Session, project_id: int | None, iteration_id: i
 
 
 def _project_id_for_item(db: Session, object_type: str, item) -> int | None:
+    return cached_runtime_value(
+        db,
+        "item_project_id",
+        (object_type, item.id),
+        lambda: _project_id_for_item_uncached(db, object_type, item),
+    )
+
+
+def _project_id_for_item_uncached(db: Session, object_type: str, item) -> int | None:
     if object_type == "project":
         return item.id
     if object_type == "iteration":

@@ -14,6 +14,7 @@ from app.models.role import RoleCapability
 from app.models.task import Task
 from app.models.user import User
 from app.models.workflow_definition import WorkflowState, WorkflowTransition
+from app.services import default_workflow_template_service
 from app.services.default_workflow_template_service import graph_for_object_type
 from app.views.workflow_definition_view import WorkflowTemplateState, WorkflowTemplateTransition
 
@@ -49,6 +50,36 @@ def test_work_item_add_information_actions_are_named_comment():
 
         assert comment_actions
         assert {transition.action_name for transition in comment_actions} == {"评论"}
+
+
+def test_template_initialization_does_not_reconcile_existing_workflows_by_default(monkeypatch):
+    calls = []
+
+    monkeypatch.setattr(
+        default_workflow_template_service,
+        "reconcile_review_subgraph",
+        lambda *_args: calls.append("review"),
+    )
+    monkeypatch.setattr(
+        default_workflow_template_service,
+        "reconcile_work_item_state_matrix",
+        lambda *_args: calls.append("state_matrix"),
+    )
+    monkeypatch.setattr(
+        default_workflow_template_service,
+        "reconcile_managed_bug_action_matrices",
+        lambda *_args: calls.append("bug_actions"),
+    )
+    monkeypatch.setattr(
+        default_workflow_template_service,
+        "reconcile_managed_task_terminal_gates",
+        lambda *_args: calls.append("task_gates"),
+    )
+
+    with SessionLocal() as db:
+        default_workflow_template_service.ensure_default_workflow_templates(db)
+
+    assert calls == []
 
 
 def _create_user(full_name: str, role_key: str) -> tuple[int, str]:
@@ -121,6 +152,16 @@ def _state_id_for_status(db, item, status: str) -> int:
                 WorkflowState.category == "start",
             ).all()
         }
+    elif status in {"completed", "canceled"}:
+        terminal_kind = "completed" if status == "completed" else "terminated"
+        state_ids = {
+            value
+            for value, in db.query(WorkflowState.id).filter(
+                WorkflowState.definition_id == item.workflow_definition_id,
+                WorkflowState.category == "terminal",
+                WorkflowState.terminal_kind == terminal_kind,
+            ).all()
+        }
     else:
         action_key = action_by_status[status]
         state_ids = {
@@ -132,6 +173,46 @@ def _state_id_for_status(db, item, status: str) -> int:
         }
     assert len(state_ids) == 1
     return next(iter(state_ids))
+
+
+def _set_requirement_to_terminal_gate_source(requirement_id: int) -> str:
+    db = SessionLocal()
+    try:
+        requirement = db.query(Requirement).filter(Requirement.id == requirement_id).one()
+        states = {
+            state.id: state
+            for state in db.query(WorkflowState)
+            .filter(WorkflowState.definition_id == requirement.workflow_definition_id)
+            .all()
+        }
+        transitions = (
+            db.query(WorkflowTransition)
+            .filter(
+                WorkflowTransition.definition_id == requirement.workflow_definition_id,
+                WorkflowTransition.enabled.is_(True),
+            )
+            .order_by(WorkflowTransition.sort_order.asc(), WorkflowTransition.id.asc())
+            .all()
+        )
+        transition = next(
+            item
+            for item in transitions
+            if states[item.to_state_id].category == "terminal"
+            and any(
+                validator.get("type") == "requirement_terminal_gate"
+                for validator in (
+                    item.validator_config
+                    if isinstance(item.validator_config, list)
+                    else [item.validator_config]
+                )
+                if validator
+            )
+        )
+        requirement.current_state_id = transition.from_state_id
+        db.commit()
+        return transition.action_key
+    finally:
+        db.close()
 
 
 def _create_project_with_config(client: TestClient) -> int:
@@ -208,6 +289,33 @@ def test_default_template_initialization_does_not_overwrite_persisted_state_edit
         state.status_name = original_name
         db.commit()
     finally:
+        db.close()
+
+
+def test_bug_system_template_initialization_preserves_persisted_unassigned_name(client: TestClient):
+    definitions = client.get(
+        "/api/v1/workflow-definitions?object_type=bug&scope_type=system"
+    ).json()
+    definition = next(item for item in definitions if item["is_default_template"] is True)
+    graph = client.get(f"/api/v1/workflow-definitions/{definition['id']}").json()
+    state_id = next(item["id"] for item in graph["states"] if item["state_role"] == "unassigned")
+    custom_name = f"待处理 {uuid4().hex[:8]}"
+
+    db = SessionLocal()
+    try:
+        state = db.query(WorkflowState).filter(WorkflowState.id == state_id).one()
+        original_name = state.status_name
+        state.status_name = custom_name
+        db.commit()
+
+        client.get("/api/v1/workflow-definitions?object_type=bug&scope_type=system")
+        refreshed = client.get(f"/api/v1/workflow-definitions/{definition['id']}").json()
+
+        assert next(item for item in refreshed["states"] if item["id"] == state_id)["status_name"] == custom_name
+    finally:
+        state = db.query(WorkflowState).filter(WorkflowState.id == state_id).one()
+        state.status_name = original_name
+        db.commit()
         db.close()
 
 
@@ -730,13 +838,13 @@ def test_requirement_complete_and_cancel_block_on_direct_relations(client: TestC
         headers={"Authorization": f"Bearer {handler_token}"},
     )
     assert started.status_code == 200, started.text
-    _set_requirement_status(requirement["id"], "in_processing")
+    terminal_action_key = _set_requirement_to_terminal_gate_source(requirement["id"])
     _set_task_status(task["id"], "completed")
     _set_bug_status(bug["id"], "pending_verification")
 
     complete = client.post(
         f"/api/v1/workflow-runtime/requirement/{requirement['id']}/transition",
-        json={"action_key": "complete", "payload": {}},
+        json={"action_key": terminal_action_key, "payload": {}},
         headers={"Authorization": f"Bearer {handler_token}"},
     )
 
@@ -747,7 +855,7 @@ def test_requirement_complete_and_cancel_block_on_direct_relations(client: TestC
     _set_task_status(task["id"], "in_processing")
     cancel = client.post(
         f"/api/v1/workflow-runtime/requirement/{requirement['id']}/transition",
-        json={"action_key": "cancel", "payload": {"reason": "scope removed"}},
+        json={"action_key": terminal_action_key, "payload": {"reason": "scope removed"}},
         headers={"Authorization": f"Bearer {handler_token}"},
     )
 

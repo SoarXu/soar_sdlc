@@ -16,7 +16,12 @@ ASSIGNMENT_TARGET_STATE_ROLES = {
 }
 
 
-def ensure_default_workflow_templates(db: Session) -> list[WorkflowDefinition]:
+def ensure_default_workflow_templates(
+    db: Session,
+    *,
+    reconcile_existing: bool = False,
+    commit: bool = True,
+) -> list[WorkflowDefinition]:
     definitions: list[WorkflowDefinition] = []
     for spec in _default_template_specs():
         definition = (
@@ -43,21 +48,25 @@ def ensure_default_workflow_templates(db: Session) -> list[WorkflowDefinition]:
             db.add(definition)
             db.flush()
             _create_graph(db, definition, spec["graph"])
-        else:
+        elif reconcile_existing:
             reconcile_review_subgraph(db, definition)
             reconcile_work_item_state_matrix(db, definition)
         definitions.append(definition)
-    configured_workflows = (
-        db.query(WorkflowDefinition)
-        .filter(WorkflowDefinition.object_type.in_(WORK_ITEM_STATE_MATRIX_OBJECT_TYPES))
-        .all()
-    )
-    for definition in configured_workflows:
-        if definition not in definitions:
-            reconcile_work_item_state_matrix(db, definition)
-    reconcile_managed_bug_action_matrices(db)
-    reconcile_managed_task_terminal_gates(db)
-    db.commit()
+    if reconcile_existing:
+        configured_workflows = (
+            db.query(WorkflowDefinition)
+            .filter(WorkflowDefinition.object_type.in_(WORK_ITEM_STATE_MATRIX_OBJECT_TYPES))
+            .all()
+        )
+        for definition in configured_workflows:
+            if definition not in definitions:
+                reconcile_work_item_state_matrix(db, definition)
+        reconcile_managed_bug_action_matrices(db)
+        reconcile_managed_task_terminal_gates(db)
+    if commit:
+        db.commit()
+    else:
+        db.flush()
     for definition in definitions:
         db.refresh(definition)
     return definitions
@@ -346,14 +355,6 @@ def reconcile_work_item_state_matrix(db: Session, definition: WorkflowDefinition
         if state.state_role != role:
             state.state_role = role
             changed = True
-    if (
-        definition.object_type == "bug"
-        and definition.template_key == "bug.default"
-        and unassigned.status_name != "待分派"
-    ):
-        unassigned.status_name = "待分派"
-        changed = True
-
     waiting = states_by_role.get("waiting_iteration")
     if waiting is None:
         waiting = WorkflowState(

@@ -79,7 +79,7 @@ def list_definitions(
     scope_type: str | None = None,
     scope_id: int | None = None,
 ) -> list[WorkflowDefinition]:
-    ensure_default_workflow_templates(db)
+    ensure_default_workflow_templates(db, reconcile_existing=False)
     query = db.query(WorkflowDefinition)
     if object_type:
         query = query.filter(WorkflowDefinition.object_type == object_type)
@@ -134,7 +134,7 @@ def disable_definition(db: Session, definition_id: int) -> None:
 
 
 def get_graph(db: Session, definition_id: int) -> dict:
-    ensure_default_workflow_templates(db)
+    ensure_default_workflow_templates(db, reconcile_existing=False)
     definition = _get_definition(db, definition_id)
     return _graph_response(db, definition)
 
@@ -399,22 +399,21 @@ def _save_graph(
 
 def apply_template(db: Session, definition_id: int) -> dict:
     definition = _get_definition(db, definition_id)
-    payload = _template_graph_payload(
-        db,
-        definition,
-        graph_for_object_type(definition.object_type),
-    )
+    template_definition = _system_template_definition(db, definition.object_type)
+    if template_definition.id == definition.id:
+        return _graph_response(db, definition)
+    payload = _template_graph_payload_from_definition(db, definition, template_definition)
+    payload = _synchronize_transition_state_availability(db, definition, payload)
     _save_graph(db, definition, payload, disable_omitted_transitions=True)
     return _graph_response(db, definition)
 
 
 def preview_template(db: Session, definition_id: int) -> dict:
     definition = _get_definition(db, definition_id)
-    payload = _template_graph_payload(
-        db,
-        definition,
-        graph_for_object_type(definition.object_type),
-    )
+    template_definition = _system_template_definition(db, definition.object_type)
+    if template_definition.id == definition.id:
+        return _graph_response(db, definition)
+    payload = _template_graph_payload_from_definition(db, definition, template_definition)
     return {
         "definition": WorkflowDefinitionRead.model_validate(definition).model_copy(
             update={"initial_state_id": payload.initial_state_id}
@@ -422,6 +421,218 @@ def preview_template(db: Session, definition_id: int) -> dict:
         "states": [item.model_dump() for item in payload.states],
         "transitions": [item.model_dump() for item in payload.transitions],
     }
+
+
+def _system_template_definition(db: Session, object_type: str) -> WorkflowDefinition:
+    ensure_default_workflow_templates(db, reconcile_existing=False)
+    definitions = (
+        db.query(WorkflowDefinition)
+        .filter(
+            WorkflowDefinition.object_type == object_type,
+            WorkflowDefinition.scope_type == "system",
+            WorkflowDefinition.is_default_template.is_(True),
+            WorkflowDefinition.enabled.is_(True),
+        )
+        .order_by(WorkflowDefinition.id.asc())
+        .all()
+    )
+    if len(definitions) != 1:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Expected exactly one system workflow template for {object_type}",
+        )
+    return definitions[0]
+
+
+def _template_graph_payload_from_definition(
+    db: Session,
+    definition: WorkflowDefinition,
+    template_definition: WorkflowDefinition,
+) -> WorkflowTemplateGraphSave:
+    template_states = (
+        db.query(WorkflowState)
+        .filter(WorkflowState.definition_id == template_definition.id)
+        .order_by(WorkflowState.sort_order.asc(), WorkflowState.id.asc())
+        .all()
+    )
+    existing_states = (
+        db.query(WorkflowState)
+        .filter(WorkflowState.definition_id == definition.id)
+        .order_by(WorkflowState.id.asc())
+        .all()
+    )
+    existing_by_role: dict[str, list[WorkflowState]] = defaultdict(list)
+    existing_by_name: dict[tuple[str, str], list[WorkflowState]] = defaultdict(list)
+    for state in existing_states:
+        if state.state_role:
+            existing_by_role[state.state_role].append(state)
+        existing_by_name[(state.status_name, state.category)].append(state)
+
+    source_to_input_id: dict[int, int] = {}
+    states = []
+    next_temp_id = -1
+    for source_state in template_states:
+        matches = existing_by_role[source_state.state_role] if source_state.state_role else []
+        if not matches:
+            matches = existing_by_name[(source_state.status_name, source_state.category)]
+        if len(matches) > 1:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"Ambiguous template state: {source_state.status_name}",
+            )
+        input_id = matches[0].id if matches else next_temp_id
+        if not matches:
+            next_temp_id -= 1
+        source_to_input_id[source_state.id] = input_id
+        states.append(
+            {
+                "id": input_id,
+                "status_name": source_state.status_name,
+                "category": source_state.category,
+                "state_role": source_state.state_role,
+                "terminal_kind": source_state.terminal_kind,
+                "color": source_state.color,
+                "x": source_state.x,
+                "y": source_state.y,
+                "sort_order": source_state.sort_order,
+                "enabled": source_state.enabled,
+            }
+        )
+
+    template_transitions = (
+        db.query(WorkflowTransition)
+        .filter(WorkflowTransition.definition_id == template_definition.id)
+        .order_by(WorkflowTransition.sort_order.asc(), WorkflowTransition.id.asc())
+        .all()
+    )
+    existing_transitions = (
+        db.query(WorkflowTransition)
+        .filter(WorkflowTransition.definition_id == definition.id)
+        .order_by(WorkflowTransition.sort_order.asc(), WorkflowTransition.id.asc())
+        .all()
+    )
+    existing_transition_ids = _match_template_transition_ids(
+        template_transitions,
+        existing_transitions,
+        source_to_input_id,
+    )
+    role_refs_by_transition: dict[int, dict[str, list[int]]] = defaultdict(lambda: defaultdict(list))
+    if template_transitions:
+        for role_ref in (
+            db.query(WorkflowTransitionRole)
+            .filter(WorkflowTransitionRole.transition_id.in_([item.id for item in template_transitions]))
+            .order_by(WorkflowTransitionRole.sort_order.asc(), WorkflowTransitionRole.id.asc())
+            .all()
+        ):
+            role_refs_by_transition[role_ref.transition_id][role_ref.purpose].append(role_ref.role_id)
+
+    transitions = []
+    for source_transition in template_transitions:
+        ui_config = deepcopy(source_transition.ui_config)
+        if isinstance(ui_config, dict):
+            ui_config.pop("list_priority", None)
+        role_refs = role_refs_by_transition[source_transition.id]
+        transitions.append(
+            {
+                "id": existing_transition_ids.get(source_transition.id),
+                "action_key": source_transition.action_key,
+                "action_name": source_transition.action_name,
+                "from_state_id": source_to_input_id[source_transition.from_state_id],
+                "to_state_id": source_to_input_id[source_transition.to_state_id],
+                "allowed_roles": source_transition.allowed_roles,
+                "allowed_role_ids": list(role_refs.get("allowed", [])),
+                "handler_target_role_ids": list(role_refs.get("target", [])),
+                "handler_fallback_role_ids": list(role_refs.get("fallback", [])),
+                "handler_rule": deepcopy(source_transition.handler_rule),
+                "trigger_config": deepcopy(source_transition.trigger_config),
+                "condition_config": _remap_condition_state_ids(
+                    source_transition.condition_config,
+                    source_to_input_id,
+                ),
+                "validator_config": deepcopy(source_transition.validator_config),
+                "post_action_config": deepcopy(source_transition.post_action_config),
+                "ui_config": ui_config,
+                "form_config": deepcopy(source_transition.form_config),
+                "diagram_config": deepcopy(source_transition.diagram_config),
+                "enabled": source_transition.enabled,
+                "auto_disabled_by_state": source_transition.auto_disabled_by_state,
+                "sort_order": source_transition.sort_order,
+            }
+        )
+    payload = WorkflowTemplateGraphSave.model_validate(
+        {
+            "initial_state_id": source_to_input_id.get(template_definition.initial_state_id),
+            "states": states,
+            "transitions": transitions,
+        }
+    )
+    for transition in payload.transitions:
+        _normalize_legacy_transition_role_references(db, transition)
+    return payload
+
+
+def _match_template_transition_ids(
+    template_transitions: list[WorkflowTransition],
+    existing_transitions: list[WorkflowTransition],
+    source_to_input_id: dict[int, int],
+) -> dict[int, int]:
+    source_groups = _workflow_transition_groups_for_template(
+        template_transitions,
+        lambda item: (item.action_key, source_to_input_id[item.from_state_id]),
+    )
+    target_groups = _workflow_transition_groups_for_template(
+        existing_transitions,
+        lambda item: (item.action_key, item.from_state_id),
+    )
+    matches: dict[int, int] = {}
+    for key, source_group in source_groups.items():
+        target_group = target_groups.get(key, [])
+        for source_transition, target_transition in _pair_transitions_by_target_state(
+            source_group,
+            target_group,
+            source_to_input_id,
+        ):
+            matches[source_transition.id] = target_transition.id
+    return matches
+
+
+def _workflow_transition_groups_for_template(items, identity) -> dict[tuple, list[WorkflowTransition]]:
+    grouped: dict[tuple, list[WorkflowTransition]] = defaultdict(list)
+    for item in items:
+        grouped[identity(item)].append(item)
+    for group in grouped.values():
+        group.sort(key=lambda item: (not item.enabled, item.sort_order, item.id))
+    return dict(grouped)
+
+
+def _pair_transitions_by_target_state(
+    source_group: list[WorkflowTransition],
+    target_group: list[WorkflowTransition],
+    source_to_target_state_id: dict[int, int],
+) -> list[tuple[WorkflowTransition, WorkflowTransition]]:
+    target_by_state_id: dict[int, list[WorkflowTransition]] = defaultdict(list)
+    for transition in target_group:
+        target_by_state_id[transition.to_state_id].append(transition)
+    matched_target_ids: set[int] = set()
+    matched_source_ids: set[int] = set()
+    matches = []
+    for source_transition in source_group:
+        target_candidates = target_by_state_id.get(
+            source_to_target_state_id[source_transition.to_state_id],
+            [],
+        )
+        target_transition = next(
+            (item for item in target_candidates if item.id not in matched_target_ids),
+            None,
+        )
+        if target_transition is not None:
+            matches.append((source_transition, target_transition))
+            matched_source_ids.add(source_transition.id)
+            matched_target_ids.add(target_transition.id)
+    remaining_sources = [item for item in source_group if item.id not in matched_source_ids]
+    remaining_targets = [item for item in target_group if item.id not in matched_target_ids]
+    matches.extend(zip(remaining_sources, remaining_targets))
+    return matches
 
 
 def _get_definition(db: Session, definition_id: int) -> WorkflowDefinition:

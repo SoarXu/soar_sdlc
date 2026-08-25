@@ -1,3 +1,4 @@
+from copy import deepcopy
 from datetime import datetime
 from uuid import uuid4
 
@@ -8,6 +9,7 @@ from app.db.session import SessionLocal
 from app.models.role import Role
 from app.models.status_operation import StatusOperationLog
 from app.models.workflow_definition import WorkflowState, WorkflowTransition
+from app.services import workflow_definition_service
 
 
 @pytest.fixture(autouse=True)
@@ -96,7 +98,7 @@ def test_assignee_rule_scheme_rejects_duplicate_enabled_object_workflows(client:
 
 def test_graph_save_generates_private_identity_and_protects_persisted_transition(client: TestClient):
     config_id = _create_config(client)
-    definition = client.post(
+    created_definition = client.post(
         "/api/v1/workflow-definitions",
         json={
             "name": f"Protected transition workflow {uuid4().hex[:8]}",
@@ -104,7 +106,9 @@ def test_graph_save_generates_private_identity_and_protects_persisted_transition
             "scope_type": "assignee_rule_config",
             "scope_id": config_id,
         },
-    ).json()
+    )
+    assert created_definition.status_code == 201, created_definition.text
+    definition = created_definition.json()
     payload = {
         "initial_state_id": -1,
         "states": [
@@ -554,6 +558,14 @@ def test_graph_save_rejects_cross_definition_and_disabled_initial_state_ids(clie
 
 
 def test_apply_template_creates_graph_nodes_and_transitions(client: TestClient):
+    system_definition = next(
+        item
+        for item in client.get(
+            "/api/v1/workflow-definitions?object_type=bug&scope_type=system"
+        ).json()
+        if item["is_default_template"]
+    )
+    system_graph = client.get(f"/api/v1/workflow-definitions/{system_definition['id']}").json()
     config_id = _create_config(client)
     definition = client.post(
         "/api/v1/workflow-definitions",
@@ -570,18 +582,44 @@ def test_apply_template_creates_graph_nodes_and_transitions(client: TestClient):
     assert applied.status_code == 200
     graph = applied.json()
     assert {node["status_name"] for node in graph["states"]} == {
-        "待分派",
-        "待开始",
-        "修复中",
-        "待验证",
-        "Code Review",
-        "已验证",
-        "已关闭",
+        node["status_name"] for node in system_graph["states"]
     }
     names_by_id = {node["id"]: node["status_name"] for node in graph["states"]}
     assert any(edge["action_name"] == "提交验证" and names_by_id[edge["to_state_id"]] == "待验证" for edge in graph["transitions"])
     assert any(edge["action_name"] == "验证通过" and names_by_id[edge["to_state_id"]] == "已验证" for edge in graph["transitions"])
     assert any(edge["action_name"] == "关闭" and names_by_id[edge["to_state_id"]] == "已关闭" for edge in graph["transitions"])
+
+
+def test_workflow_designer_reads_do_not_reconcile_system_templates(client: TestClient, monkeypatch):
+    config_id = _create_config(client)
+    definition = client.post(
+        "/api/v1/workflow-definitions",
+        json={
+            "name": f"Independent system template target {uuid4().hex[:8]}",
+            "object_type": "requirement",
+            "scope_type": "assignee_rule_config",
+            "scope_id": config_id,
+        },
+    ).json()
+    calls = []
+
+    def ensure(_db, *, reconcile_existing=True, commit=True):
+        calls.append((reconcile_existing, commit))
+        return []
+
+    monkeypatch.setattr(workflow_definition_service, "ensure_default_workflow_templates", ensure)
+    monkeypatch.setattr(workflow_definition_service, "_save_graph", lambda *_args, **_kwargs: None)
+
+    listed = client.get("/api/v1/workflow-definitions?object_type=requirement&scope_type=system")
+    assert listed.status_code == 200, listed.text
+    graph = client.get(f"/api/v1/workflow-definitions/{definition['id']}")
+    assert graph.status_code == 200, graph.text
+    preview = client.get(f"/api/v1/workflow-definitions/{definition['id']}/template-preview")
+    assert preview.status_code == 200, preview.text
+    applied = client.post(f"/api/v1/workflow-definitions/{definition['id']}/apply-template")
+    assert applied.status_code == 200, applied.text
+
+    assert calls == [(False, True)] * 4
 
 
 def test_template_preview_does_not_persist_graph_changes(client: TestClient):
@@ -662,9 +700,99 @@ def test_template_preview_does_not_persist_graph_changes(client: TestClient):
             .all()
         )
         assert {item.action_key for item in enabled_transitions} == {
-            item["action_key"] for item in preview_graph["transitions"]
+            item["action_key"]
+            for item in preview_graph["transitions"]
+            if item["enabled"]
         }
         assert all(not item.action_key.startswith("custom_") for item in enabled_transitions)
+
+
+def test_template_preview_and_apply_copy_persisted_system_layout_and_route(client: TestClient):
+    system_definition = next(
+        item
+        for item in client.get(
+            "/api/v1/workflow-definitions?object_type=requirement&scope_type=system"
+        ).json()
+        if item["is_default_template"]
+    )
+    source_graph = client.get(f"/api/v1/workflow-definitions/{system_definition['id']}").json()
+    source_start = next(item for item in source_graph["states"] if item["category"] == "start")
+    source_waiting = next(item for item in source_graph["states"] if item["state_role"] == "waiting_iteration")
+    source_transition = next(
+        item
+        for item in source_graph["transitions"]
+        if item["from_state_id"] == source_start["id"] and item["to_state_id"] == source_waiting["id"]
+    )
+    source_route = {
+        "version": 1,
+        "routing_mode": "manual",
+        "source_anchor": {"side": "bottom", "ratio": 0.5},
+        "target_anchor": {"side": "top", "ratio": 0.5},
+        "waypoints": [{"x": 159, "y": 180}, {"x": 379, "y": 180}],
+    }
+    with SessionLocal() as db:
+        start_state = db.get(WorkflowState, source_start["id"])
+        waiting_state = db.get(WorkflowState, source_waiting["id"])
+        transition = db.get(WorkflowTransition, source_transition["id"])
+        original_layout = (start_state.x, start_state.y, waiting_state.x, waiting_state.y)
+        original_route = deepcopy(transition.diagram_config)
+        start_state.x, start_state.y = 100, 100
+        waiting_state.x, waiting_state.y = 320, 240
+        transition.diagram_config = source_route
+        db.commit()
+    try:
+        config_id = _create_config(client)
+        target_definition = client.post(
+            "/api/v1/workflow-definitions",
+            json={
+                "name": f"Persisted system template target {uuid4().hex[:8]}",
+                "object_type": "requirement",
+                "scope_type": "assignee_rule_config",
+                "scope_id": config_id,
+            },
+        ).json()
+
+        preview = client.get(f"/api/v1/workflow-definitions/{target_definition['id']}/template-preview")
+        assert preview.status_code == 200, preview.text
+        preview_graph = preview.json()
+        preview_start = next(item for item in preview_graph["states"] if item["category"] == "start")
+        preview_waiting = next(
+            item for item in preview_graph["states"] if item["state_role"] == "waiting_iteration"
+        )
+        preview_transition = next(
+            item
+            for item in preview_graph["transitions"]
+            if item["from_state_id"] == preview_start["id"]
+            and item["to_state_id"] == preview_waiting["id"]
+        )
+        assert (preview_start["x"], preview_start["y"]) == (100, 100)
+        assert (preview_waiting["x"], preview_waiting["y"]) == (320, 240)
+        assert preview_transition["diagram_config"] == source_route
+
+        applied = client.post(f"/api/v1/workflow-definitions/{target_definition['id']}/apply-template")
+        assert applied.status_code == 200, applied.text
+        applied_graph = applied.json()
+        applied_start = next(item for item in applied_graph["states"] if item["category"] == "start")
+        applied_waiting = next(
+            item for item in applied_graph["states"] if item["state_role"] == "waiting_iteration"
+        )
+        applied_transition = next(
+            item
+            for item in applied_graph["transitions"]
+            if item["from_state_id"] == applied_start["id"]
+            and item["to_state_id"] == applied_waiting["id"]
+        )
+        assert (applied_start["x"], applied_start["y"]) == (100, 100)
+        assert (applied_waiting["x"], applied_waiting["y"]) == (320, 240)
+        assert applied_transition["diagram_config"] == source_route
+    finally:
+        with SessionLocal() as db:
+            start_state = db.get(WorkflowState, source_start["id"])
+            waiting_state = db.get(WorkflowState, source_waiting["id"])
+            transition = db.get(WorkflowTransition, source_transition["id"])
+            start_state.x, start_state.y, waiting_state.x, waiting_state.y = original_layout
+            transition.diagram_config = original_route
+            db.commit()
 
 
 def test_apply_template_reuses_state_ids_on_repeated_application(client: TestClient):
@@ -697,6 +825,10 @@ def test_apply_template_reuses_state_ids_on_repeated_application(client: TestCli
     assert second_ids == first_ids
     assert len(second_ids) == 7
     assert len(second.json()["states"]) == 7
+    assert {item["id"] for item in second.json()["transitions"]} == {
+        item["id"] for item in first.json()["transitions"]
+    }
+    assert len(second.json()["transitions"]) == len(first.json()["transitions"])
 
 
 def test_apply_template_reuses_and_enables_unique_disabled_state(client: TestClient):
@@ -725,6 +857,38 @@ def test_apply_template_reuses_and_enables_unique_disabled_state(client: TestCli
     assert reused["enabled"] is True
 
 
+def test_apply_template_reuses_legacy_state_when_role_is_missing(client: TestClient, monkeypatch):
+    config_id = _create_config(client)
+    definition = client.post(
+        "/api/v1/workflow-definitions",
+        json={
+            "name": f"Legacy state template workflow {uuid4().hex[:8]}",
+            "object_type": "bug",
+            "scope_type": "assignee_rule_config",
+            "scope_id": config_id,
+        },
+    ).json()
+    first = client.post(f"/api/v1/workflow-definitions/{definition['id']}/apply-template").json()
+    legacy_state = next(item for item in first["states"] if item["state_role"] == "active_work")
+    with SessionLocal() as db:
+        state = db.get(WorkflowState, legacy_state["id"])
+        state.state_role = None
+        db.commit()
+
+    monkeypatch.setattr(
+        workflow_definition_service,
+        "ensure_default_workflow_templates",
+        lambda _db, **_kwargs: None,
+    )
+    applied = client.post(f"/api/v1/workflow-definitions/{definition['id']}/apply-template")
+
+    assert applied.status_code == 200, applied.text
+    graph = applied.json()
+    reused = next(item for item in graph["states"] if item["id"] == legacy_state["id"])
+    assert reused["state_role"] == "active_work"
+    assert len(graph["states"]) == len(first["states"])
+
+
 def test_apply_template_rejects_ambiguous_semantic_state_matches(client: TestClient):
     config_id = _create_config(client)
     definition = client.post(
@@ -744,6 +908,7 @@ def test_apply_template_rejects_ambiguous_semantic_state_matches(client: TestCli
                 definition_id=definition["id"],
                 status_name=existing["status_name"],
                 category=existing["category"],
+                state_role=existing["state_role"],
                 color=existing["color"],
                 enabled=True,
             )
@@ -1292,6 +1457,7 @@ def test_save_graph_migrates_legacy_template_route_references(client: TestClient
             .filter(
                 WorkflowTransition.definition_id == definition["id"],
                 WorkflowTransition.action_key == "confirm_bug_type",
+                WorkflowTransition.enabled.is_(True),
             )
             .one()
         )
@@ -1507,8 +1673,13 @@ def test_bug_default_template_matches_prd_baseline(client: TestClient):
     graph = client.get(f"/api/v1/workflow-definitions/{definition['id']}")
 
     assert graph.status_code == 200
-    states = {node["status_name"] for node in graph.json()["states"]}
-    assert states == {"待分派", "待开始", "修复中", "Code Review", "待验证", "已验证", "已关闭"}
+    states_by_role = {
+        node["state_role"]: node
+        for node in graph.json()["states"]
+        if node["state_role"]
+    }
+    assert {"unassigned", "waiting_iteration", "active_work"} <= set(states_by_role)
+    assert states_by_role["unassigned"]["category"] == "start"
     transition_names = {item["action_name"] for item in graph.json()["transitions"]}
     assert {"确认缺陷类型", "提交验证", "验证通过", "验证不通过", "关闭", "激活", "重新判定缺陷类型"} <= transition_names
     assert all("status_key" not in node for node in graph.json()["states"])

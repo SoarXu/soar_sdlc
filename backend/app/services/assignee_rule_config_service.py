@@ -1,3 +1,4 @@
+from collections import defaultdict
 from copy import deepcopy
 from datetime import datetime
 from types import SimpleNamespace
@@ -383,7 +384,7 @@ def _clone_graph(db: Session, source: WorkflowDefinition, target: WorkflowDefini
         state_id_map[item.id] = cloned.id
 
     target.initial_state_id = state_id_map.get(source.initial_state_id)
-    target.parent_definition_id = source.id
+    target.parent_definition_id = None
     source_transitions = (
         db.query(WorkflowTransition)
         .filter(WorkflowTransition.definition_id == source.id)
@@ -443,6 +444,276 @@ def _clone_graph(db: Session, source: WorkflowDefinition, target: WorkflowDefini
                 list(role_ids_for_capabilities(db, {"project_owner"})),
             )
     db.flush()
+
+
+def synchronize_workflow_definition_graph(
+    db: Session,
+    source: WorkflowDefinition,
+    target: WorkflowDefinition,
+) -> None:
+    if source.object_type != target.object_type:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Workflow object types do not match")
+    source_states = (
+        db.query(WorkflowState)
+        .filter(WorkflowState.definition_id == source.id)
+        .order_by(WorkflowState.sort_order.asc(), WorkflowState.id.asc())
+        .all()
+    )
+    target_states = (
+        db.query(WorkflowState)
+        .filter(WorkflowState.definition_id == target.id)
+        .order_by(WorkflowState.sort_order.asc(), WorkflowState.id.asc())
+        .all()
+    )
+    state_matches = _match_workflow_states(source_states, target_states)
+    state_id_map: dict[int, int] = {}
+    matched_target_state_ids = set()
+    for source_state in source_states:
+        target_state = state_matches.get(source_state.id)
+        if target_state is None:
+            target_state = WorkflowState(definition_id=target.id)
+            db.add(target_state)
+        else:
+            matched_target_state_ids.add(target_state.id)
+        for field in (
+            "status_name", "category", "state_role", "terminal_kind", "color", "x", "y", "sort_order", "enabled",
+        ):
+            setattr(target_state, field, getattr(source_state, field))
+        db.flush()
+        state_id_map[source_state.id] = target_state.id
+    for target_state in target_states:
+        if target_state.id not in matched_target_state_ids:
+            target_state.enabled = False
+    db.flush()
+    source_transitions = (
+        db.query(WorkflowTransition)
+        .filter(WorkflowTransition.definition_id == source.id)
+        .order_by(WorkflowTransition.sort_order.asc(), WorkflowTransition.id.asc())
+        .all()
+    )
+    target_transitions = (
+        db.query(WorkflowTransition)
+        .filter(WorkflowTransition.definition_id == target.id)
+        .order_by(WorkflowTransition.sort_order.asc(), WorkflowTransition.id.asc())
+        .all()
+    )
+    transition_matches = _match_workflow_transitions(source_transitions, target_transitions, state_id_map)
+
+    source_role_refs: dict[int, list[WorkflowTransitionRole]] = defaultdict(list)
+    if source_transitions:
+        for role_ref in (
+            db.query(WorkflowTransitionRole)
+            .filter(WorkflowTransitionRole.transition_id.in_([item.id for item in source_transitions]))
+            .order_by(WorkflowTransitionRole.sort_order.asc(), WorkflowTransitionRole.id.asc())
+            .all()
+        ):
+            source_role_refs[role_ref.transition_id].append(role_ref)
+    matched_target_transition_ids = set()
+    for source_transition in source_transitions:
+        target_transition = transition_matches.get(source_transition.id)
+        if target_transition is None:
+            target_transition = WorkflowTransition(
+                definition_id=target.id,
+                action_key=source_transition.action_key,
+                action_name=source_transition.action_name,
+                from_state_id=state_id_map[source_transition.from_state_id],
+                to_state_id=state_id_map[source_transition.to_state_id],
+            )
+            db.add(target_transition)
+        else:
+            matched_target_transition_ids.add(target_transition.id)
+        for field in (
+            "action_key", "action_name", "allowed_roles", "handler_rule", "trigger_config", "validator_config",
+            "post_action_config", "ui_config", "form_config", "diagram_config", "enabled", "auto_disabled_by_state", "sort_order",
+        ):
+            setattr(target_transition, field, deepcopy(getattr(source_transition, field)))
+        target_transition.from_state_id = state_id_map[source_transition.from_state_id]
+        target_transition.to_state_id = state_id_map[source_transition.to_state_id]
+        target_transition.condition_config = _remap_state_ids(source_transition.condition_config, state_id_map)
+        db.flush()
+        db.query(WorkflowTransitionRole).filter(
+            WorkflowTransitionRole.transition_id == target_transition.id
+        ).delete(synchronize_session=False)
+        db.add_all(
+            WorkflowTransitionRole(
+                transition_id=target_transition.id,
+                role_id=role_ref.role_id,
+                purpose=role_ref.purpose,
+                sort_order=role_ref.sort_order,
+            )
+            for role_ref in source_role_refs.get(source_transition.id, [])
+        )
+    for target_transition in target_transitions:
+        if target_transition.id not in matched_target_transition_ids:
+            target_transition.enabled = False
+    target.initial_state_id = state_id_map.get(source.initial_state_id)
+    target.version = (target.version or 1) + 1
+    target.update_time = datetime.now()
+    db.flush()
+
+
+def synchronize_default_scheme_graphs_to_system_templates(db: Session) -> int:
+    ensure_default_workflow_templates(db, reconcile_existing=False, commit=False)
+    default_config = (
+        db.query(AssigneeRuleConfig)
+        .filter(AssigneeRuleConfig.name == DEFAULT_ASSIGNEE_RULE_CONFIG["name"])
+        .first()
+    )
+    if default_config is None:
+        return 0
+    source_definitions = _workflow_definitions_by_type(
+        db,
+        db.query(WorkflowDefinition).filter(
+            WorkflowDefinition.scope_type == "assignee_rule_config",
+            WorkflowDefinition.scope_id == default_config.id,
+            WorkflowDefinition.object_type.in_(SCHEME_WORKFLOW_OBJECT_TYPES),
+            WorkflowDefinition.enabled.is_(True),
+        ),
+        "default workflow scheme",
+    )
+    target_definitions = _workflow_definitions_by_type(
+        db,
+        db.query(WorkflowDefinition).filter(
+            WorkflowDefinition.scope_type == "system",
+            WorkflowDefinition.is_default_template.is_(True),
+            WorkflowDefinition.object_type.in_(SCHEME_WORKFLOW_OBJECT_TYPES),
+            WorkflowDefinition.enabled.is_(True),
+        ),
+        "system workflow template",
+    )
+    for object_type in SCHEME_WORKFLOW_OBJECT_TYPES:
+        synchronize_workflow_definition_graph(
+            db,
+            source_definitions[object_type],
+            target_definitions[object_type],
+        )
+    return len(SCHEME_WORKFLOW_OBJECT_TYPES)
+
+
+def _workflow_definitions_by_type(db: Session, query, label: str) -> dict[str, WorkflowDefinition]:
+    definitions: dict[str, list[WorkflowDefinition]] = defaultdict(list)
+    for definition in query.order_by(WorkflowDefinition.id.asc()).all():
+        definitions[definition.object_type].append(definition)
+    missing = set(SCHEME_WORKFLOW_OBJECT_TYPES) - set(definitions)
+    duplicates = [object_type for object_type, items in definitions.items() if len(items) != 1]
+    if missing or duplicates:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"{label} is incomplete or ambiguous",
+        )
+    return {object_type: definitions[object_type][0] for object_type in SCHEME_WORKFLOW_OBJECT_TYPES}
+
+
+def _match_workflow_states(
+    source_states: list[WorkflowState],
+    target_states: list[WorkflowState],
+) -> dict[int, WorkflowState]:
+    matches: dict[int, WorkflowState] = {}
+    unmatched_source = {item.id: item for item in source_states}
+    unmatched_target = {item.id: item for item in target_states}
+    _match_unique_state_groups(
+        unmatched_source,
+        unmatched_target,
+        matches,
+        lambda item: ("role", item.state_role) if item.state_role else None,
+    )
+    _match_unique_state_groups(
+        unmatched_source,
+        unmatched_target,
+        matches,
+        lambda item: ("name", item.status_name, item.category),
+    )
+    _match_unique_state_groups(
+        unmatched_source,
+        unmatched_target,
+        matches,
+        lambda item: ("shape", item.category, item.terminal_kind, item.sort_order),
+    )
+    return matches
+
+
+def _match_unique_state_groups(unmatched_source, unmatched_target, matches, identity) -> None:
+    source_groups: dict[tuple, list[WorkflowState]] = defaultdict(list)
+    target_groups: dict[tuple, list[WorkflowState]] = defaultdict(list)
+    for state in unmatched_source.values():
+        key = identity(state)
+        if key is not None:
+            source_groups[key].append(state)
+    for state in unmatched_target.values():
+        key = identity(state)
+        if key is not None:
+            target_groups[key].append(state)
+    for key, source_group in source_groups.items():
+        target_group = target_groups.get(key, [])
+        if len(source_group) == len(target_group) == 1:
+            source_state, target_state = source_group[0], target_group[0]
+            matches[source_state.id] = target_state
+            unmatched_source.pop(source_state.id)
+            unmatched_target.pop(target_state.id)
+
+
+def _match_workflow_transitions(
+    source_transitions: list[WorkflowTransition],
+    target_transitions: list[WorkflowTransition],
+    state_id_map: dict[int, int],
+) -> dict[int, WorkflowTransition]:
+    source_groups = _workflow_transition_groups(
+        source_transitions,
+        lambda item: (item.action_key, state_id_map[item.from_state_id]),
+    )
+    target_groups = _workflow_transition_groups(
+        target_transitions,
+        lambda item: (item.action_key, item.from_state_id),
+    )
+    matches: dict[int, WorkflowTransition] = {}
+    for identity, source_group in source_groups.items():
+        target_group = target_groups.get(identity, [])
+        for source_transition, target_transition in _pair_transitions_by_target_state(
+            source_group,
+            target_group,
+            state_id_map,
+        ):
+            matches[source_transition.id] = target_transition
+    return matches
+
+
+def _workflow_transition_groups(items, identity) -> dict[tuple, list[WorkflowTransition]]:
+    grouped: dict[tuple, list[WorkflowTransition]] = defaultdict(list)
+    for item in items:
+        grouped[identity(item)].append(item)
+    for group in grouped.values():
+        group.sort(key=lambda item: (not item.enabled, item.sort_order, item.id))
+    return dict(grouped)
+
+
+def _pair_transitions_by_target_state(
+    source_group: list[WorkflowTransition],
+    target_group: list[WorkflowTransition],
+    state_id_map: dict[int, int],
+) -> list[tuple[WorkflowTransition, WorkflowTransition]]:
+    target_by_state_id: dict[int, list[WorkflowTransition]] = defaultdict(list)
+    for transition in target_group:
+        target_by_state_id[transition.to_state_id].append(transition)
+    matched_source_ids: set[int] = set()
+    matched_target_ids: set[int] = set()
+    matches = []
+    for source_transition in source_group:
+        target_transition = next(
+            (
+                item
+                for item in target_by_state_id.get(state_id_map[source_transition.to_state_id], [])
+                if item.id not in matched_target_ids
+            ),
+            None,
+        )
+        if target_transition is not None:
+            matches.append((source_transition, target_transition))
+            matched_source_ids.add(source_transition.id)
+            matched_target_ids.add(target_transition.id)
+    remaining_sources = [item for item in source_group if item.id not in matched_source_ids]
+    remaining_targets = [item for item in target_group if item.id not in matched_target_ids]
+    matches.extend(zip(remaining_sources, remaining_targets))
+    return matches
 
 
 def _remap_state_ids(config, state_id_map: dict[int, int]):

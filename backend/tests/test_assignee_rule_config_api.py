@@ -1,8 +1,19 @@
+from pathlib import Path
 from uuid import uuid4
 
 from fastapi.testclient import TestClient
 
+from app.db.session import SessionLocal
+from app.models.workflow_definition import WorkflowDefinition, WorkflowState, WorkflowTransition, WorkflowTransitionRole
 from app.services import assignee_rule_config_service
+
+
+MIGRATION_PATH = (
+    Path(__file__).parents[1]
+    / "alembic"
+    / "versions"
+    / "20260825_001_sync_default_scheme_graphs_to_system_templates.py"
+)
 
 
 def _definitions_for_config(client: TestClient, config_id: int) -> dict[str, dict]:
@@ -17,11 +28,6 @@ def _create_draft_config(client: TestClient) -> dict:
         json={
             "name": f"工作流方案-{uuid4().hex[:8]}",
             "description": "lifecycle test",
-            "requirement_owner_roles": "tester",
-            "task_owner_roles": "product_manager",
-            "test_case_tester_roles": "tester",
-            "test_run_owner_roles": "test_lead",
-            "bug_owner_roles": "development_lead",
             "creation_mode": "blank",
         },
     )
@@ -34,6 +40,320 @@ def _configure_core_workflows(client: TestClient, config_id: int) -> None:
     for object_type in ("requirement", "task", "bug", "project"):
         applied = client.post(f"/api/v1/workflow-definitions/{definitions[object_type]['id']}/apply-template")
         assert applied.status_code == 200
+
+
+def test_system_template_sync_migration_declares_current_revision():
+    assert MIGRATION_PATH.exists()
+    source = MIGRATION_PATH.read_text(encoding="utf-8")
+
+    assert 'revision = "20260825_001"' in source
+    assert 'down_revision = "20260824_004"' in source
+    assert "synchronize_default_scheme_graphs_to_system_templates" in source
+
+
+def test_synchronize_workflow_graph_updates_target_in_place():
+    with SessionLocal() as db:
+        source = WorkflowDefinition(
+            name=f"Sync source {uuid4().hex[:8]}",
+            object_type="requirement",
+            scope_type="sync_source",
+            enabled=True,
+        )
+        target = WorkflowDefinition(
+            name=f"Sync target {uuid4().hex[:8]}",
+            object_type="requirement",
+            scope_type="sync_target",
+            enabled=True,
+        )
+        db.add_all([source, target])
+        db.flush()
+        source_start = WorkflowState(
+            definition_id=source.id,
+            status_name="待分派",
+            category="start",
+            state_role="unassigned",
+            color="#111111",
+            x=100,
+            y=120,
+            sort_order=10,
+            enabled=True,
+        )
+        source_done = WorkflowState(
+            definition_id=source.id,
+            status_name="已完成",
+            category="terminal",
+            terminal_kind="completed",
+            color="#222222",
+            x=420,
+            y=260,
+            sort_order=20,
+            enabled=True,
+        )
+        target_start = WorkflowState(
+            definition_id=target.id,
+            status_name="旧待分派",
+            category="start",
+            state_role="unassigned",
+            color="#ffffff",
+            x=0,
+            y=0,
+            sort_order=100,
+            enabled=True,
+        )
+        target_done = WorkflowState(
+            definition_id=target.id,
+            status_name="已完成",
+            category="terminal",
+            terminal_kind="completed",
+            color="#ffffff",
+            x=0,
+            y=0,
+            sort_order=200,
+            enabled=True,
+        )
+        db.add_all([source_start, source_done, target_start, target_done])
+        db.flush()
+        source.initial_state_id = source_start.id
+        target.initial_state_id = target_start.id
+        source_transition = WorkflowTransition(
+            definition_id=source.id,
+            action_key="complete",
+            action_name="完成",
+            from_state_id=source_start.id,
+            to_state_id=source_done.id,
+            handler_rule={"target_type": "keep_current"},
+            condition_config={"field": "result", "routes": {"passed": source_done.id}},
+            diagram_config={
+                "version": 1,
+                "routing_mode": "manual",
+                "source_anchor": {"side": "bottom", "ratio": 0.5},
+                "target_anchor": {"side": "top", "ratio": 0.5},
+                "waypoints": [{"x": 159, "y": 180}, {"x": 479, "y": 180}],
+            },
+            enabled=True,
+            sort_order=10,
+        )
+        target_transition = WorkflowTransition(
+            definition_id=target.id,
+            action_key="complete",
+            action_name="旧完成",
+            from_state_id=target_start.id,
+            to_state_id=target_start.id,
+            handler_rule=None,
+            enabled=True,
+            sort_order=99,
+        )
+        db.add_all([source_transition, target_transition])
+        db.flush()
+        db.add_all([
+            WorkflowTransitionRole(transition_id=source_transition.id, role_id=101, purpose="allowed", sort_order=0),
+            WorkflowTransitionRole(transition_id=target_transition.id, role_id=202, purpose="allowed", sort_order=0),
+        ])
+        db.commit()
+        target_state_ids = {target_start.id, target_done.id}
+        target_transition_id = target_transition.id
+        try:
+            assignee_rule_config_service.synchronize_workflow_definition_graph(db, source, target)
+            db.commit()
+
+            db.refresh(target_start)
+            db.refresh(target_done)
+            db.refresh(target_transition)
+            assert {target_start.id, target_done.id} == target_state_ids
+            assert target.initial_state_id == target_start.id
+            assert (target_start.status_name, target_start.color, target_start.x, target_start.y, target_start.sort_order) == (
+                "待分派", "#111111", 100, 120, 10
+            )
+            assert (target_done.color, target_done.x, target_done.y, target_done.sort_order) == (
+                "#222222", 420, 260, 20
+            )
+            assert target_transition.id == target_transition_id
+            assert target_transition.action_name == "完成"
+            assert target_transition.to_state_id == target_done.id
+            assert target_transition.condition_config == {
+                "field": "result", "routes": {"passed": target_done.id}
+            }
+            assert target_transition.diagram_config == source_transition.diagram_config
+            assert [
+                (item.role_id, item.purpose, item.sort_order)
+                for item in db.query(WorkflowTransitionRole)
+                .filter(WorkflowTransitionRole.transition_id == target_transition.id)
+                .order_by(WorkflowTransitionRole.id)
+            ] == [(101, "allowed", 0)]
+        finally:
+            target.initial_state_id = None
+            source.initial_state_id = None
+            db.flush()
+            db.query(WorkflowTransitionRole).filter(
+                WorkflowTransitionRole.transition_id.in_([source_transition.id, target_transition.id])
+            ).delete(synchronize_session=False)
+            db.query(WorkflowTransition).filter(
+                WorkflowTransition.id.in_([source_transition.id, target_transition.id])
+            ).delete(synchronize_session=False)
+            db.query(WorkflowState).filter(
+                WorkflowState.id.in_([source_start.id, source_done.id, target_start.id, target_done.id])
+            ).delete(synchronize_session=False)
+            db.query(WorkflowDefinition).filter(
+                WorkflowDefinition.id.in_([source.id, target.id])
+            ).delete(synchronize_session=False)
+            db.commit()
+
+
+def test_synchronize_workflow_graph_adds_source_items_and_disables_removed_items():
+    with SessionLocal() as db:
+        source = WorkflowDefinition(
+            name=f"Extensible source {uuid4().hex[:8]}",
+            object_type="requirement",
+            scope_type="sync_source",
+            enabled=True,
+        )
+        target = WorkflowDefinition(
+            name=f"Extensible target {uuid4().hex[:8]}",
+            object_type="requirement",
+            scope_type="sync_target",
+            enabled=True,
+        )
+        db.add_all([source, target])
+        db.flush()
+        source_start = WorkflowState(definition_id=source.id, status_name="待分派", category="start", state_role="unassigned")
+        source_done = WorkflowState(definition_id=source.id, status_name="已完成", category="terminal", terminal_kind="completed")
+        source_added = WorkflowState(definition_id=source.id, status_name="待评估", category="normal", sort_order=40)
+        target_start = WorkflowState(definition_id=target.id, status_name="旧待分派", category="start", state_role="unassigned")
+        target_done = WorkflowState(definition_id=target.id, status_name="已完成", category="terminal", terminal_kind="completed")
+        target_removed = WorkflowState(definition_id=target.id, status_name="旧状态", category="normal", sort_order=30)
+        db.add_all([source_start, source_done, source_added, target_start, target_done, target_removed])
+        db.flush()
+        source.initial_state_id = source_start.id
+        target.initial_state_id = target_start.id
+        source_complete = WorkflowTransition(
+            definition_id=source.id,
+            action_key="complete",
+            action_name="完成",
+            from_state_id=source_start.id,
+            to_state_id=source_done.id,
+        )
+        source_assess = WorkflowTransition(
+            definition_id=source.id,
+            action_key="assess",
+            action_name="评估",
+            from_state_id=source_start.id,
+            to_state_id=source_added.id,
+        )
+        target_complete = WorkflowTransition(
+            definition_id=target.id,
+            action_key="complete",
+            action_name="旧完成",
+            from_state_id=target_start.id,
+            to_state_id=target_done.id,
+        )
+        target_removed_transition = WorkflowTransition(
+            definition_id=target.id,
+            action_key="obsolete",
+            action_name="旧动作",
+            from_state_id=target_start.id,
+            to_state_id=target_removed.id,
+        )
+        db.add_all([source_complete, source_assess, target_complete, target_removed_transition])
+        db.commit()
+        target_complete_id = target_complete.id
+        try:
+            assignee_rule_config_service.synchronize_workflow_definition_graph(db, source, target)
+            db.commit()
+
+            db.refresh(target_complete)
+            db.refresh(target_removed)
+            db.refresh(target_removed_transition)
+            added_state = db.query(WorkflowState).filter(
+                WorkflowState.definition_id == target.id,
+                WorkflowState.status_name == "待评估",
+            ).one()
+            added_transition = db.query(WorkflowTransition).filter(
+                WorkflowTransition.definition_id == target.id,
+                WorkflowTransition.action_key == "assess",
+            ).one()
+            assert target_complete.id == target_complete_id
+            assert target_complete.action_name == "完成"
+            assert added_transition.to_state_id == added_state.id
+            assert target_removed.enabled is False
+            assert target_removed_transition.enabled is False
+        finally:
+            target.initial_state_id = None
+            source.initial_state_id = None
+            db.flush()
+            db.query(WorkflowTransition).filter(
+                WorkflowTransition.definition_id.in_([source.id, target.id])
+            ).delete(synchronize_session=False)
+            db.query(WorkflowState).filter(
+                WorkflowState.definition_id.in_([source.id, target.id])
+            ).delete(synchronize_session=False)
+            db.query(WorkflowDefinition).filter(
+                WorkflowDefinition.id.in_([source.id, target.id])
+            ).delete(synchronize_session=False)
+            db.commit()
+
+
+def test_synchronize_workflow_graph_matches_duplicate_actions_by_target_state():
+    with SessionLocal() as db:
+        source = WorkflowDefinition(name=f"Duplicate source {uuid4().hex[:8]}", object_type="requirement", scope_type="sync_source", enabled=True)
+        target = WorkflowDefinition(name=f"Duplicate target {uuid4().hex[:8]}", object_type="requirement", scope_type="sync_target", enabled=True)
+        db.add_all([source, target])
+        db.flush()
+        source_start = WorkflowState(definition_id=source.id, status_name="待分派", category="start", state_role="unassigned")
+        source_done = WorkflowState(definition_id=source.id, status_name="已完成", category="terminal", terminal_kind="completed")
+        source_canceled = WorkflowState(definition_id=source.id, status_name="已取消", category="terminal", terminal_kind="terminated")
+        target_start = WorkflowState(definition_id=target.id, status_name="旧待分派", category="start", state_role="unassigned")
+        target_done = WorkflowState(definition_id=target.id, status_name="已完成", category="terminal", terminal_kind="completed")
+        target_canceled = WorkflowState(definition_id=target.id, status_name="已取消", category="terminal", terminal_kind="terminated")
+        db.add_all([source_start, source_done, source_canceled, target_start, target_done, target_canceled])
+        db.flush()
+        source.initial_state_id = source_start.id
+        target.initial_state_id = target_start.id
+        db.add_all([
+            WorkflowTransition(definition_id=source.id, action_key="finish", action_name="完成", from_state_id=source_start.id, to_state_id=source_done.id, sort_order=10),
+            WorkflowTransition(definition_id=source.id, action_key="finish", action_name="取消", from_state_id=source_start.id, to_state_id=source_canceled.id, sort_order=20),
+        ])
+        target_canceled_transition = WorkflowTransition(definition_id=target.id, action_key="finish", action_name="旧取消", from_state_id=target_start.id, to_state_id=target_canceled.id, sort_order=10)
+        target_done_transition = WorkflowTransition(definition_id=target.id, action_key="finish", action_name="旧完成", from_state_id=target_start.id, to_state_id=target_done.id, sort_order=20)
+        db.add_all([target_canceled_transition, target_done_transition])
+        db.commit()
+        try:
+            assignee_rule_config_service.synchronize_workflow_definition_graph(db, source, target)
+            db.commit()
+
+            db.refresh(target_done_transition)
+            db.refresh(target_canceled_transition)
+            assert (target_done_transition.action_name, target_done_transition.to_state_id) == ("完成", target_done.id)
+            assert (target_canceled_transition.action_name, target_canceled_transition.to_state_id) == ("取消", target_canceled.id)
+        finally:
+            target.initial_state_id = None
+            source.initial_state_id = None
+            db.flush()
+            db.query(WorkflowTransition).filter(
+                WorkflowTransition.definition_id.in_([source.id, target.id])
+            ).delete(synchronize_session=False)
+            db.query(WorkflowState).filter(
+                WorkflowState.definition_id.in_([source.id, target.id])
+            ).delete(synchronize_session=False)
+            db.query(WorkflowDefinition).filter(
+                WorkflowDefinition.id.in_([source.id, target.id])
+            ).delete(synchronize_session=False)
+            db.commit()
+
+
+def test_synchronize_default_scheme_does_not_commit_template_initialization(monkeypatch):
+    calls = []
+
+    def ensure(db, *, reconcile_existing=True, commit=True):
+        calls.append((reconcile_existing, commit))
+        return []
+
+    monkeypatch.setattr(assignee_rule_config_service, "ensure_default_workflow_templates", ensure)
+    with SessionLocal() as db:
+        try:
+            assignee_rule_config_service.synchronize_default_scheme_graphs_to_system_templates(db)
+            assert calls == [(False, False)]
+        finally:
+            db.rollback()
 
 
 def test_blank_creation_builds_project_and_work_item_draft_definitions(client: TestClient):

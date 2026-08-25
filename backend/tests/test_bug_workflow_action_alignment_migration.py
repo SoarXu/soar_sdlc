@@ -303,6 +303,56 @@ def test_reconcile_bug_action_matrix_moves_legacy_confirmation_without_creating_
             _delete_definition(db, definition.id)
 
 
+def test_reconcile_managed_bug_action_matrices_repairs_system_template_import():
+    with SessionLocal() as db:
+        parent = _create_definition(db, template_key="bug.default")
+        parent_unassigned = _add_state(db, parent, "unassigned")
+        parent_waiting = _add_state(db, parent, "waiting_iteration")
+        parent_active = _add_state(db, parent, "active_work")
+        parent.initial_state_id = parent_unassigned.id
+
+        definition = _create_definition(db, template_key=None, scope_type="assignee_rule_config")
+        definition.parent_definition_id = parent.id
+        unassigned = _add_state(db, definition, "unassigned")
+        waiting = _add_state(db, definition, "waiting_iteration")
+        active = _add_state(db, definition, "active_work")
+        definition.initial_state_id = unassigned.id
+        for action_key, state in (
+            ("claim", unassigned),
+            ("assign", unassigned),
+            ("transfer", unassigned),
+            ("change_handler", unassigned),
+            ("start_iteration", waiting),
+            ("unassign", waiting),
+            ("transfer", waiting),
+            ("change_handler", waiting),
+            ("transfer", active),
+            ("change_handler", active),
+            ("unassign", active),
+        ):
+            _add_transition(db, definition, action_key, state)
+        db.commit()
+        try:
+            assert reconcile_managed_bug_action_matrices(db) >= 1
+            db.commit()
+
+            transitions = {
+                (transition.from_state_id, transition.action_key): transition
+                for transition in db.query(WorkflowTransition).filter(
+                    WorkflowTransition.definition_id == definition.id
+                ).all()
+            }
+            assert transitions[(unassigned.id, "transfer")].enabled is False
+            assert transitions[(unassigned.id, "change_handler")].enabled is False
+            assert transitions[(waiting.id, "transfer")].enabled is True
+            assert transitions[(waiting.id, "change_handler")].enabled is True
+            assert transitions[(active.id, "transfer")].enabled is True
+            assert transitions[(active.id, "change_handler")].enabled is True
+        finally:
+            _delete_definition(db, definition.id)
+            _delete_definition(db, parent.id)
+
+
 def test_reconcile_managed_bug_action_matrices_skips_custom_workflow():
     with SessionLocal() as db:
         definition = _create_definition(db, template_key=None, scope_type="assignee_rule_config")

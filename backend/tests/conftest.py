@@ -1,15 +1,57 @@
-from fastapi.testclient import TestClient
 from datetime import datetime
 import json
 import pytest
 import re
 from sqlalchemy import text
 
+from app.testing.database import prepare_test_database_from_environment
+
+
+prepare_test_database_from_environment()
+
+from fastapi.testclient import TestClient
+
 from app.core.security import create_access_token
+from app.core.security import get_password_hash
 from app.db.session import SessionLocal
 from app.main import app
 from app.models.user import User
 from app.services.default_workflow_template_service import ensure_default_workflow_templates
+from app.services.role_service import seed_default_roles
+
+
+def _prepare_test_reference_data() -> None:
+    db = SessionLocal()
+    try:
+        password_hash = get_password_hash("test-only-password")
+        for username in TEST_USER_ALLOWLIST:
+            if db.query(User).filter(User.username == username).first() is None:
+                db.add(
+                    User(
+                        username=username,
+                        full_name=username,
+                        password_hash=password_hash,
+                        department="Test",
+                        is_active=True,
+                        is_system_admin=username == TEST_ADMIN_USERNAME,
+                        must_change_password=False,
+                        deleted=0,
+                    )
+                )
+        db.flush()
+        db.query(User).filter(User.username.in_(TEST_USER_ALLOWLIST)).update(
+            {User.deleted: 0, User.is_active: True, User.delete_time: None},
+            synchronize_session=False,
+        )
+        db.query(User).filter(User.username == TEST_ADMIN_USERNAME).update(
+            {User.is_system_admin: True},
+            synchronize_session=False,
+        )
+        db.commit()
+        seed_default_roles(db)
+        ensure_default_workflow_templates(db, reconcile_existing=True)
+    finally:
+        db.close()
 
 
 TEST_USER_ALLOWLIST = frozenset(
@@ -25,6 +67,9 @@ TEST_USER_ALLOWLIST = frozenset(
     }
 )
 TEST_ADMIN_USERNAME = "shuwan.yang"
+
+
+_prepare_test_reference_data()
 
 
 class AuthenticatedTestClient(TestClient):

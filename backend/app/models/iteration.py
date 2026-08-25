@@ -4,6 +4,7 @@ from sqlalchemy import BigInteger, Date, DateTime, ForeignKey, Integer, String, 
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.session import Base
+from app.db.types import UnsignedBigInteger
 
 
 class Iteration(Base):
@@ -17,13 +18,13 @@ class Iteration(Base):
     actual_start_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     actual_end_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     workflow_definition_id: Mapped[int] = mapped_column(
-        BigInteger,
+        UnsignedBigInteger,
         ForeignKey("workflow_definitions.id", ondelete="RESTRICT"),
         nullable=False,
         index=True,
     )
     current_state_id: Mapped[int] = mapped_column(
-        BigInteger,
+        UnsignedBigInteger,
         ForeignKey("workflow_states.id", ondelete="RESTRICT"),
         nullable=False,
         index=True,

@@ -232,7 +232,7 @@ import {
   createProject,
   deleteProject,
   fetchProject,
-  fetchProjectMembers,
+  fetchProjectMembersBatch,
   fetchProjectStatusOperations,
   startProject,
   suspendProject,
@@ -591,15 +591,14 @@ async function loadProjectWorkflowTransitions() {
 }
 
 async function loadProjectMembers() {
-  const entries = await Promise.all(allProjects.value.map(async (project) => {
-    try {
-      const { data } = await fetchProjectMembers(project.id)
-      return [project.id, data]
-    } catch {
-      return [project.id, []]
-    }
-  }))
-  projectMembersById.value = Object.fromEntries(entries)
+  try {
+    const { data } = await fetchProjectMembersBatch(allProjects.value.map((project) => project.id))
+    projectMembersById.value = Object.fromEntries(
+      (data.items || []).map((item) => [item.project_id, item.members || []])
+    )
+  } catch {
+    projectMembersById.value = {}
+  }
 }
 
 async function submitProgram() {

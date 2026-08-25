@@ -1,4 +1,5 @@
 from fastapi import HTTPException, status
+from sqlalchemy import and_, or_
 from sqlalchemy.orm import Session
 
 from app.models.business_component import BusinessComponent, BusinessComponentMember, BusinessComponentTransitionRoute
@@ -12,6 +13,7 @@ from app.models.workflow_definition import WorkflowDefinition, WorkflowState, Wo
 from app.models.assignee_rule_config import AssigneeRuleConfig
 from app.models.business_component import WorkflowMigrationLog
 from app.services.assignee_rule_config_service import clone_enabled_config
+from app.services.workflow_runtime_cache import cached_runtime_value, prime_runtime_values
 from app.services.workflow_state_query_service import is_terminal_state
 from app.views.business_component_view import (
     BusinessComponentCreateFromProject,
@@ -22,6 +24,76 @@ from app.views.business_component_view import (
 
 
 WORK_ITEM_MODELS = {"requirement": Requirement, "task": Task, "bug": Bug}
+
+
+def prime_component_runtime_cache(db: Session, items: list[tuple[str, object]], transitions: list[WorkflowTransition], actor_id: int | None) -> None:
+    work_items = [(object_type, item) for object_type, item in items if object_type in WORK_ITEM_MODELS]
+    if not work_items:
+        return
+    conditions = [
+        and_(WorkItemComponent.object_type == object_type, WorkItemComponent.object_id.in_([item.id for kind, item in work_items if kind == object_type]))
+        for object_type in {object_type for object_type, _item in work_items}
+    ]
+    links = db.query(WorkItemComponent).filter(or_(*conditions)).order_by(WorkItemComponent.id.asc()).all()
+    links_by_item = {(object_type, item.id): [] for object_type, item in work_items}
+    for link in links:
+        links_by_item.setdefault((link.object_type, link.object_id), []).append(link)
+    component_ids_by_item = {}
+    for key, item_links in links_by_item.items():
+        primary_id = next((link.component_id for link in item_links if link.relation_type == "primary"), None)
+        component_ids_by_item[key] = primary_id
+    prime_runtime_values(db, "work_item_component_ids", {
+        key: (primary_id, [link.component_id for link in links_by_item[key] if link.relation_type == "related"])
+        for key, primary_id in component_ids_by_item.items()
+    })
+    component_ids = {component_id for component_id in component_ids_by_item.values() if component_id is not None}
+    if not component_ids:
+        return
+    members = db.query(BusinessComponentMember).filter(
+        BusinessComponentMember.component_id.in_(component_ids),
+        BusinessComponentMember.enabled.is_(True),
+    ).order_by(BusinessComponentMember.id.asc()).all()
+    members_by_component = {component_id: [] for component_id in component_ids}
+    for member in members:
+        members_by_component[member.component_id].append(member)
+    prime_runtime_values(db, "component_members", members_by_component)
+    if actor_id is not None:
+        prime_runtime_values(db, "component_member_roles", {
+            (component_id, actor_id): {member.role_id for member in component_members if member.user_id == actor_id}
+            for component_id, component_members in members_by_component.items()
+        })
+    transition_ids = {transition.id for transition in transitions}
+    routes = db.query(BusinessComponentTransitionRoute).filter(
+        BusinessComponentTransitionRoute.component_id.in_(component_ids),
+        BusinessComponentTransitionRoute.transition_id.in_(transition_ids),
+        BusinessComponentTransitionRoute.enabled.is_(True),
+    ).all()
+    route_by_key = {(route.component_id, route.object_type, route.transition_id): route for route in routes}
+    route_values = {}
+    for object_type, item in work_items:
+        component_id = component_ids_by_item[(object_type, item.id)]
+        if component_id is None:
+            continue
+        for transition in transitions:
+            key = (component_id, object_type, transition.id)
+            route = route_by_key.get(key)
+            if not route:
+                route_values[key] = None
+                continue
+            component_members = members_by_component[component_id]
+            eligible_ids = _member_ids_for_route(component_members, route.eligible_member_mode, route.eligible_role_ids, route.eligible_user_ids)
+            next_owner_ids = _member_ids_for_route(component_members, route.next_owner_mode, route.next_owner_role_ids, None)
+            if route.next_owner_mode == "user":
+                next_owner_ids = [route.next_owner_user_id] if route.next_owner_user_id in {member.user_id for member in component_members} else []
+            route_values[key] = {
+                "route_id": route.id,
+                "eligible_executor_ids": eligible_ids,
+                "eligible_manual_owner_ids": eligible_ids if route.next_owner_mode == "manual" else next_owner_ids,
+                "next_owner_id": next_owner_ids[0] if next_owner_ids else None,
+                "next_owner_mode": route.next_owner_mode,
+                "fallback_mode": route.fallback_mode,
+            }
+    prime_runtime_values(db, "component_transition_routes", route_values)
 
 
 def list_business_components(db: Session, project_id: int) -> list[BusinessComponent]:
@@ -286,32 +358,40 @@ def attach_work_item_components(db: Session, object_type: str, item) -> None:
 
 
 def work_item_component_ids(db: Session, object_type: str, object_id: int) -> tuple[int | None, list[int]]:
-    links = (
-        db.query(WorkItemComponent)
-        .filter(WorkItemComponent.object_type == object_type, WorkItemComponent.object_id == object_id)
-        .order_by(WorkItemComponent.id.asc())
-        .all()
-    )
-    primary_id = next((link.component_id for link in links if link.relation_type == "primary"), None)
-    related_ids = [link.component_id for link in links if link.relation_type == "related"]
-    return primary_id, related_ids
+    def load():
+        links = (
+            db.query(WorkItemComponent)
+            .filter(WorkItemComponent.object_type == object_type, WorkItemComponent.object_id == object_id)
+            .order_by(WorkItemComponent.id.asc())
+            .all()
+        )
+        primary_id = next((link.component_id for link in links if link.relation_type == "primary"), None)
+        related_ids = [link.component_id for link in links if link.relation_type == "related"]
+        return primary_id, related_ids
+
+    return cached_runtime_value(db, "work_item_component_ids", (object_type, object_id), load)
 
 
 def active_primary_component_member_roles(db: Session, object_type: str, item, user_id: int) -> set[int] | None:
     primary_component_id, _ = work_item_component_ids(db, object_type, item.id)
     if primary_component_id is None:
         return None
-    return {
-        row.role_id
-        for row in db.query(BusinessComponentMember)
-        .filter(
-            BusinessComponentMember.component_id == primary_component_id,
-            BusinessComponentMember.user_id == user_id,
-            BusinessComponentMember.enabled.is_(True),
-        )
-        .all()
-        if row.role_id is not None
-    }
+    return cached_runtime_value(
+        db,
+        "component_member_roles",
+        (primary_component_id, user_id),
+        lambda: {
+            row.role_id
+            for row in db.query(BusinessComponentMember)
+            .filter(
+                BusinessComponentMember.component_id == primary_component_id,
+                BusinessComponentMember.user_id == user_id,
+                BusinessComponentMember.enabled.is_(True),
+            )
+            .all()
+            if row.role_id is not None
+        },
+    )
 
 
 def active_primary_component_members(
@@ -320,14 +400,19 @@ def active_primary_component_members(
     primary_component_id, _ = work_item_component_ids(db, object_type, item.id)
     if primary_component_id is None:
         return None
-    return (
-        db.query(BusinessComponentMember)
-        .filter(
-            BusinessComponentMember.component_id == primary_component_id,
-            BusinessComponentMember.enabled.is_(True),
-        )
-        .order_by(BusinessComponentMember.id.asc())
-        .all()
+    return cached_runtime_value(
+        db,
+        "component_members",
+        primary_component_id,
+        lambda: (
+            db.query(BusinessComponentMember)
+            .filter(
+                BusinessComponentMember.component_id == primary_component_id,
+                BusinessComponentMember.enabled.is_(True),
+            )
+            .order_by(BusinessComponentMember.id.asc())
+            .all()
+        ),
     )
 
 
@@ -336,6 +421,20 @@ def resolve_component_transition_route(db: Session, object_type: str, item, tran
     primary_component_id, _ = work_item_component_ids(db, object_type, item.id)
     if primary_component_id is None:
         return None
+    return cached_runtime_value(
+        db,
+        "component_transition_routes",
+        (primary_component_id, object_type, transition.id),
+        lambda: _resolve_component_transition_route(db, primary_component_id, object_type, transition),
+    )
+
+
+def _resolve_component_transition_route(
+    db: Session,
+    primary_component_id: int,
+    object_type: str,
+    transition: WorkflowTransition,
+) -> dict | None:
     route = (
         db.query(BusinessComponentTransitionRoute)
         .filter(

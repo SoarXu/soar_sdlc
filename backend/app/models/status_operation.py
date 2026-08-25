@@ -4,6 +4,7 @@ from sqlalchemy import BigInteger, Boolean, DateTime, ForeignKey, JSON, String, 
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.session import Base
+from app.db.types import UnsignedBigInteger
 
 
 class StatusOperationLog(Base):
@@ -15,19 +16,19 @@ class StatusOperationLog(Base):
     action: Mapped[str] = mapped_column(String(32))
     operation_kind: Mapped[str] = mapped_column(String(16), default="state", server_default=text("'state'"))
     workflow_definition_id: Mapped[int | None] = mapped_column(
-        BigInteger,
+        UnsignedBigInteger,
         ForeignKey("workflow_definitions.id", ondelete="SET NULL"),
         nullable=True,
         index=True,
     )
     from_state_id: Mapped[int | None] = mapped_column(
-        BigInteger,
+        UnsignedBigInteger,
         ForeignKey("workflow_states.id", ondelete="SET NULL"),
         nullable=True,
         index=True,
     )
     to_state_id: Mapped[int | None] = mapped_column(
-        BigInteger,
+        UnsignedBigInteger,
         ForeignKey("workflow_states.id", ondelete="SET NULL"),
         nullable=True,
         index=True,

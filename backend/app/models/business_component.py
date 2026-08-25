@@ -1,10 +1,10 @@
 from datetime import datetime
 
 from sqlalchemy import BigInteger, Boolean, DateTime, ForeignKey, Integer, JSON, String, Text, UniqueConstraint, text
-from sqlalchemy.dialects.mysql import BIGINT as MySQLBigInteger
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.session import Base
+from app.db.types import UnsignedBigInteger
 
 
 class BusinessComponent(Base):
@@ -75,7 +75,7 @@ class BusinessComponentTransitionRoute(Base):
     )
     object_type: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
     transition_id: Mapped[int] = mapped_column(
-        MySQLBigInteger(unsigned=True),
+        UnsignedBigInteger,
         ForeignKey("workflow_transitions.id", ondelete="RESTRICT"),
         nullable=False,
         index=True,
@@ -118,25 +118,25 @@ class WorkflowMigrationLog(Base):
     object_type: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
     object_id: Mapped[int] = mapped_column(BigInteger, nullable=False, index=True)
     old_definition_id: Mapped[int] = mapped_column(
-        MySQLBigInteger(unsigned=True),
+        UnsignedBigInteger,
         ForeignKey("workflow_definitions.id", ondelete="RESTRICT"),
         nullable=False,
         index=True,
     )
     old_state_id: Mapped[int] = mapped_column(
-        MySQLBigInteger(unsigned=True),
+        UnsignedBigInteger,
         ForeignKey("workflow_states.id", ondelete="RESTRICT"),
         nullable=False,
         index=True,
     )
     new_definition_id: Mapped[int] = mapped_column(
-        MySQLBigInteger(unsigned=True),
+        UnsignedBigInteger,
         ForeignKey("workflow_definitions.id", ondelete="RESTRICT"),
         nullable=False,
         index=True,
     )
     new_state_id: Mapped[int] = mapped_column(
-        MySQLBigInteger(unsigned=True),
+        UnsignedBigInteger,
         ForeignKey("workflow_states.id", ondelete="RESTRICT"),
         nullable=False,
         index=True,

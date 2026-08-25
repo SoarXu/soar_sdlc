@@ -411,6 +411,37 @@ def list_project_members(db: Session, project_id: int) -> list[dict]:
     } for member, role_name in rows]
 
 
+def list_project_members_batch(db: Session, project_ids: list[int]) -> list[dict]:
+    normalized_ids = list(dict.fromkeys(project_ids))
+    if not normalized_ids:
+        return []
+    existing_ids = {
+        project_id
+        for (project_id,) in db.query(Project.id)
+        .filter(Project.id.in_(normalized_ids), Project.deleted == 0)
+        .all()
+    }
+    if existing_ids != set(normalized_ids):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
+    grouped = {project_id: [] for project_id in normalized_ids}
+    rows = (
+        db.query(ProjectMember, Role.role_name)
+        .outerjoin(Role, Role.id == ProjectMember.role_id)
+        .filter(ProjectMember.project_id.in_(normalized_ids))
+        .order_by(ProjectMember.project_id.asc(), ProjectMember.sort_order.asc(), ProjectMember.id.asc())
+        .all()
+    )
+    for member, role_name in rows:
+        grouped[member.project_id].append({
+            "id": member.id, "project_id": member.project_id, "user_id": member.user_id,
+            "role_id": member.role_id, "role_name": role_name or f"角色 #{member.role_id}",
+            "is_default_assignee": member.is_default_assignee,
+            "is_workbench_participant": member.is_workbench_participant, "sort_order": member.sort_order,
+            "join_time": member.join_time, "create_time": member.create_time, "update_time": member.update_time,
+        })
+    return [{"project_id": project_id, "members": grouped[project_id]} for project_id in normalized_ids]
+
+
 def replace_project_members(db: Session, project_id: int, payload: list[ProjectMemberCreate]) -> list[ProjectMember]:
     _get_active_project(db, project_id)
     db.query(ProjectMember).filter(ProjectMember.project_id == project_id).delete(synchronize_session=False)

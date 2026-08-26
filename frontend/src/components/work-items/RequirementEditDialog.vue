@@ -19,9 +19,7 @@
           </el-select>
         </el-form-item>
         <el-form-item label="提出人">
-          <el-select v-model="form.proposer_id" clearable filterable placeholder="请选择提出人">
-            <el-option v-for="user in users" :key="user.id" :label="user.full_name || user.username" :value="user.id" />
-          </el-select>
+          <el-input v-model="form.proposer" clearable placeholder="请输入提出人" />
         </el-form-item>
       </div>
       <div class="form-grid">
@@ -56,7 +54,6 @@ import { ElMessage } from 'element-plus'
 import { fetchIterations } from '../../api/iterations'
 import { fetchProjects } from '../../api/projects'
 import { fetchRequirement, updateRequirement } from '../../api/requirements'
-import { fetchUsers } from '../../api/users'
 import { showActionError } from '../../utils/actionFeedback'
 import { requirementIterationLabel, requirementIterationOptions } from '../../utils/requirementIterations'
 import RequirementPriorityBadge from '../RequirementPriorityBadge.vue'
@@ -75,7 +72,6 @@ const loading = ref(false)
 const saving = ref(false)
 const projects = ref([])
 const iterations = ref([])
-const users = ref([])
 const form = reactive({})
 const priorityOptions = ['1', '2', '3', '4', '5']
 const requirementTypeOptions = ['功能', '接口', '性能', '安全', '体验', '改进', '其他']
@@ -91,15 +87,13 @@ async function load() {
   if (!props.modelValue || !props.itemId) return
   loading.value = true
   try {
-    const [itemResponse, projectResponse, iterationResponse, userResponse] = await Promise.all([
+    const [itemResponse, projectResponse, iterationResponse] = await Promise.all([
       fetchRequirement(props.itemId),
       fetchProjects(),
-      fetchIterations(),
-      fetchUsers()
+      fetchIterations()
     ])
     projects.value = projectResponse.data || []
     iterations.value = iterationResponse.data || []
-    users.value = userResponse.data || []
     const item = itemResponse.data || {}
     Object.assign(form, {
       project_id: item.project_id || null,
@@ -108,7 +102,7 @@ async function load() {
       title: item.title || '',
       requirement_type: item.requirement_type || '',
       priority: legacyPriorities[item.priority] || item.priority || '3',
-      proposer_id: item.proposer_id || null,
+      proposer: item.proposer || '',
       description: item.description || '',
       acceptance_criteria: item.acceptance_criteria || ''
     })
@@ -138,7 +132,7 @@ async function save() {
     await updateRequirement(props.itemId, {
       ...form,
       iteration_id: form.iteration_id,
-      proposer_id: form.proposer_id || null
+      proposer: form.proposer || null
     })
     visible.value = false
     ElMessage.success('保存成功')

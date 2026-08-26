@@ -92,6 +92,15 @@ def list_users(db: Session, user_id: int | None = None) -> list[dict]:
     ]
 
 
+def user_display_name(db: Session, user_id: int | None) -> str | None:
+    if user_id is None:
+        return None
+    user = db.query(User).filter(User.id == user_id, User.deleted == 0).first()
+    if not user:
+        return None
+    return (user.full_name or user.username).strip() or None
+
+
 def register_user(db: Session, payload: RegisterRequest) -> User:
     username = payload.username.strip()
     full_name = payload.full_name.strip()

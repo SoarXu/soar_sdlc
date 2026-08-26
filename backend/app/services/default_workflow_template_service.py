@@ -159,7 +159,7 @@ def _template_role_values(db: Session, value) -> tuple[list[str], list[int]]:
         "tech_lead": ("tech_lead", "development_lead"),
         "test_lead": ("test_lead", "tester"),
     }
-    identity_values = {"system_admin", "project_member", "current_handler", "owner", "creator", "reporter", "proposer"}
+    identity_values = {"system_admin", "project_member", "current_handler", "owner", "creator"}
     values = value if isinstance(value, list) else str(value or "").split(",")
     for raw_value in values:
         name = str(raw_value).strip()
@@ -1262,7 +1262,7 @@ def _bug_graph() -> WorkflowGraphSave:
                 "add_information",
                 "评论",
                 "pending_handling",
-                allowed_roles="reporter,tester",
+                allowed_roles="tester",
                 command_type="add_information",
             ),
             _transition(
@@ -1331,7 +1331,7 @@ def _bug_graph() -> WorkflowGraphSave:
                 "add_information",
                 "评论",
                 "fixing",
-                allowed_roles="reporter,tester",
+                allowed_roles="tester",
                 command_type="add_information",
             ),
             _transition(
@@ -1359,7 +1359,7 @@ def _bug_graph() -> WorkflowGraphSave:
                 "add_information",
                 "评论",
                 "pending_verification",
-                allowed_roles="reporter,tester",
+                allowed_roles="tester",
                 command_type="add_information",
             ),
             _transition(
@@ -1367,7 +1367,7 @@ def _bug_graph() -> WorkflowGraphSave:
                 "退回打开",
                 "verified",
                 "pending_handling",
-                allowed_roles="reporter,tester,project_owner",
+                allowed_roles="tester,project_owner",
                 target_type="keep_current",
                 allow_manual_owner=True,
                 handler_scope="allowed_identity",
@@ -1389,14 +1389,14 @@ def _bug_graph() -> WorkflowGraphSave:
                 "add_information",
                 "评论",
                 "verified",
-                allowed_roles="project_member,reporter,tester",
+                allowed_roles="project_member,tester",
                 command_type="add_information",
             ),
             _command_transition(
                 "view_history",
                 "查看历史",
                 "verified",
-                allowed_roles="project_member,reporter,tester",
+                allowed_roles="project_member,tester",
                 command_type="view_history",
             ),
             _transition(
@@ -1404,7 +1404,7 @@ def _bug_graph() -> WorkflowGraphSave:
                 "激活",
                 "closed",
                 "pending_handling",
-                allowed_roles="reporter,tester,project_owner",
+                allowed_roles="tester,project_owner",
                 target_type="previous_handler",
                 allow_unassigned=True,
                 handler_scope="allowed_identity",
@@ -1415,14 +1415,14 @@ def _bug_graph() -> WorkflowGraphSave:
                 "add_information",
                 "评论",
                 "closed",
-                allowed_roles="project_member,reporter,tester",
+                allowed_roles="project_member,tester",
                 command_type="add_information",
             ),
             _command_transition(
                 "view_history",
                 "查看历史",
                 "closed",
-                allowed_roles="project_member,reporter,tester",
+                allowed_roles="project_member,tester",
                 command_type="view_history",
             ),
         ],

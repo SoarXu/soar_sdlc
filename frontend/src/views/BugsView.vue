@@ -70,7 +70,7 @@
           <el-form-item label="来源测试单"><el-select v-model="form.test_run_id" clearable filterable placeholder="请选择测试单"><el-option v-for="run in testRuns" :key="run.id" :label="run.name" :value="run.id" /></el-select></el-form-item>
           <el-form-item label="所属迭代" required><el-select v-model="form.iteration_id" clearable filterable placeholder="请选择规划中或进行中的迭代"><el-option v-for="iteration in editableIterationDisplayOptions" :key="iteration.id" :label="iteration.name" :value="iteration.id" :disabled="iteration.disabled" /></el-select></el-form-item>
           <el-form-item v-if="!editingId" label="当前处理人"><el-select v-model="form.owner_id" clearable filterable placeholder="请选择当前处理人"><el-option v-for="user in users" :key="user.id" :label="user.full_name" :value="user.id" /></el-select></el-form-item>
-          <el-form-item label="提出人"><el-select v-model="form.reporter_id" clearable filterable placeholder="请选择提出人"><el-option v-for="user in users" :key="user.id" :label="user.full_name" :value="user.id" /></el-select></el-form-item>
+          <el-form-item label="提出人"><el-input v-model="form.proposer" clearable placeholder="请输入提出人" /></el-form-item>
         </div>
         <div class="form-grid">
           <el-form-item label="严重程度"><el-select v-model="form.severity"><el-option v-for="option in priorityLevelOptions" :key="option.value" :label="option.label" :value="option.value"><RequirementPriorityBadge :value="option.value" /></el-option></el-select></el-form-item>
@@ -149,7 +149,7 @@ const priorityLevelOptions = [
   { label: '⑤ 最低', value: '5' }
 ]
 const bugStatusOptions = computed(() => [...new Set(bugs.value.map((bug) => bug.status_name).filter(Boolean))])
-const form = reactive({ project_id: null, primary_component_id: null, iteration_id: null, requirement_id: null, task_id: null, test_case_id: null, test_run_id: null, title: '', severity: '3', priority: '3', owner_id: null, reporter_id: null, reproduce_steps: '', expected_result: '', actual_result: '' })
+const form = reactive({ project_id: null, primary_component_id: null, iteration_id: null, requirement_id: null, task_id: null, test_case_id: null, test_run_id: null, title: '', severity: '3', priority: '3', owner_id: null, proposer: '', reproduce_steps: '', expected_result: '', actual_result: '' })
 const currentUser = computed(() => currentUserFromStorage(users.value))
 const canCreateAnyBug = computed(() => projects.value.some((project) => canCreateWorkItem(project, currentUser.value, membersForProject(project.id))))
 const editableIterationOptions = computed(() => bugIterationOptions(iterations.value, projects.value, form.project_id))
@@ -181,7 +181,7 @@ function canDeleteBugRow(row) {
   const project = projectForBug(row)
   return canDeleteWorkItem(project, currentUser.value, membersForProject(project?.id))
 }
-function resetForm() { Object.assign(form, { project_id: null, primary_component_id: null, iteration_id: null, requirement_id: null, task_id: null, test_case_id: null, test_run_id: null, title: '', severity: '3', priority: '3', owner_id: null, reporter_id: null, reproduce_steps: '', expected_result: '', actual_result: '' }) }
+function resetForm() { Object.assign(form, { project_id: null, primary_component_id: null, iteration_id: null, requirement_id: null, task_id: null, test_case_id: null, test_run_id: null, title: '', severity: '3', priority: '3', owner_id: null, proposer: '', reproduce_steps: '', expected_result: '', actual_result: '' }) }
 function resetBugFilters() { Object.assign(bugFilters, { projectId: null, severity: '', status: '' }) }
 function openCreate() { editingId.value = null; resetForm(); dialogVisible.value = true }
 function openEdit(row) { editingId.value = row.id; editDialogVisible.value = true }
@@ -230,7 +230,7 @@ async function submitBug() {
   if (!form.iteration_id) return ElMessage.warning('请选择规划中或进行中的迭代')
   saving.value = true
   try {
-    const payload = { ...form, iteration_id: form.iteration_id || null, requirement_id: form.requirement_id || null, task_id: form.task_id || null, test_case_id: form.test_case_id || null, test_run_id: form.test_run_id || null, owner_id: form.owner_id || null, reporter_id: form.reporter_id || null }
+    const payload = { ...form, iteration_id: form.iteration_id || null, requirement_id: form.requirement_id || null, task_id: form.task_id || null, test_case_id: form.test_case_id || null, test_run_id: form.test_run_id || null, owner_id: form.owner_id || null, proposer: form.proposer || null }
     delete payload.status
     if (editingId.value) await updateBug(editingId.value, payload); else await createBug(payload)
     dialogVisible.value = false; await loadData()

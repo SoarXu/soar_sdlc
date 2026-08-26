@@ -30,6 +30,7 @@ from app.services.iteration_assignment_service import (
 )
 from app.services.status_operation_service import list_status_operations
 from app.services.task_service import linked_task_summaries
+from app.services.user_service import user_display_name
 from app.services.work_item_iteration_history_service import list_iteration_history, move_work_item_to_iteration
 from app.services.workflow_state_service import initial_work_item_workflow_values
 from app.services.workflow_state_query_service import is_terminal_state
@@ -154,7 +155,7 @@ def create_bug_from_test_run_case(
         severity=payload.severity,
         priority=payload.priority,
         owner_id=owner_id,
-        reporter_id=payload.reporter_id or run_case.tester_id,
+        proposer=payload.proposer or user_display_name(db, run_case.tester_id),
         reproduce_steps=payload.reproduce_steps,
         expected_result=payload.expected_result or test_case.expected_result,
         actual_result=payload.actual_result,

@@ -97,8 +97,8 @@ def post_bug_from_test_case(
 ):
     test_case = get_test_case(db, test_case_id)
     ensure_test_case_execute_permission(db, test_case.project_id, current_user)
-    if current_user and payload.reporter_id is None:
-        payload.reporter_id = current_user.id
+    if current_user and payload.proposer is None:
+        payload.proposer = (current_user.full_name or current_user.username).strip()
     return create_bug_from_test_case(
         db,
         test_case_id,

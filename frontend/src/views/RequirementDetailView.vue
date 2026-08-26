@@ -26,7 +26,7 @@
         <el-form-item label="需求标题" required><el-input v-model="requirementForm.title" /></el-form-item>
         <div class="form-grid">
           <el-form-item label="迭代" required><el-select v-model="requirementForm.iteration_id" filterable><el-option v-for="iteration in requirementSelectableIterations" :key="iteration.id" :label="requirementIterationLabel(iteration)" :value="iteration.id" /></el-select></el-form-item>
-          <el-form-item label="提出人"><el-select v-model="requirementForm.proposer_id" clearable filterable><el-option v-for="user in users" :key="user.id" :label="user.full_name" :value="user.id" /></el-select></el-form-item>
+          <el-form-item label="提出人"><el-input v-model="requirementForm.proposer" clearable placeholder="请输入提出人" /></el-form-item>
           <el-form-item label="类型"><el-select v-model="requirementForm.requirement_type"><el-option v-for="option in requirementTypeOptions" :key="option" :label="option" :value="option" /></el-select></el-form-item>
           <el-form-item label="优先级"><el-select v-model="requirementForm.priority"><el-option v-for="option in requirementPriorityOptions" :key="option.value" :label="option.label" :value="option.value"><RequirementPriorityBadge :value="option.value" /></el-option></el-select></el-form-item>
         </div>
@@ -39,7 +39,7 @@
         <el-descriptions-item label="所属项目">{{ labelById(projects, requirement.project_id) }}</el-descriptions-item>
         <el-descriptions-item label="迭代">{{ requirementIterationLabel(iterations.find((item) => item.id === requirement.iteration_id)) }}</el-descriptions-item>
         <el-descriptions-item label="负责人">{{ userLabel(users, requirement.owner_id) }}</el-descriptions-item>
-        <el-descriptions-item label="提出人">{{ userLabel(users, requirement.proposer_id) }}</el-descriptions-item>
+        <el-descriptions-item label="提出人">{{ requirement.proposer || '-' }}</el-descriptions-item>
         <el-descriptions-item label="优先级"><RequirementPriorityBadge :value="requirement.priority" /></el-descriptions-item>
         <el-descriptions-item label="状态">{{ requirement.status_name || '-' }}</el-descriptions-item>
         <el-descriptions-item label="类型">{{ requirement.requirement_type || '-' }}</el-descriptions-item>
@@ -266,7 +266,7 @@ const caseExecutionForm = ref({ execute_time: '', steps_result_json: [] })
 const caseForm = reactive({ project_id: null, requirement_id: null, title: '', case_type: 'functional', test_scope: 'functional_test', test_scopes: ['functional_test'], default_tester_id: null, precondition: '', steps_content: '', expected_result: '' })
 const caseBugForm = reactive({ title: '', bug_type: DEFAULT_BUG_TYPE_KEY, severity: '3', priority: '3', reproduce_steps: '', actual_result: '' })
 const expandedHistory = reactive({})
-const requirementForm = reactive({ iteration_id: null, title: '', requirement_type: '功能', priority: '3', owner_id: null, proposer_id: null, description: '', acceptance_criteria: '' })
+const requirementForm = reactive({ iteration_id: null, title: '', requirement_type: '功能', priority: '3', owner_id: null, proposer: '', description: '', acceptance_criteria: '' })
 const requirementProject = computed(() => projects.value.find((project) => project.id === requirement.value.project_id) || null)
 const requirementSelectableIterations = computed(() => requirementIterationOptions(
   requirementProject.value,
@@ -378,7 +378,7 @@ function requirementFieldLabel(field) {
     { label: '需求类型', value: 'requirement_type' },
     { label: '优先级', value: 'priority' },
     { label: '负责人', value: 'owner_id' },
-    { label: '提出人', value: 'proposer_id' },
+    { label: '提出人', value: 'proposer' },
     { label: '需求描述', value: 'description' },
     { label: '验收标准', value: 'acceptance_criteria' }
   ], field)
@@ -406,7 +406,7 @@ function fillRequirementForm() {
     requirement_type: requirement.value.requirement_type || '功能',
     priority: String(requirement.value.priority || '3'),
     owner_id: requirement.value.owner_id || null,
-    proposer_id: requirement.value.proposer_id || null,
+    proposer: requirement.value.proposer || '',
     description: requirement.value.description || '',
     acceptance_criteria: requirement.value.acceptance_criteria || ''
   })
@@ -543,7 +543,7 @@ async function saveRequirement() {
       project_id: requirement.value.project_id,
       iteration_id: requirementForm.iteration_id,
       owner_id: requirementForm.owner_id || null,
-      proposer_id: requirementForm.proposer_id || null
+      proposer: requirementForm.proposer || null
     })
     editing.value = false
     await loadData()

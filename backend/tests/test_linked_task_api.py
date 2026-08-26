@@ -316,7 +316,7 @@ def test_bug_close_checks_every_linked_task_without_mutating_blockers(client: Te
             "iteration_id": iteration.json()["id"],
             "title": f"Multi Task Bug {uuid4().hex[:8]}",
             "owner_id": handler_id,
-            "reporter_id": handler_id,
+            "proposer": "Multi Task Bug Reporter",
         },
     ).json()
     first = client.post(

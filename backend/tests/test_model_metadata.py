@@ -1,6 +1,7 @@
 from app.db.session import Base
 from pathlib import Path
 import app.models  # noqa: F401
+from sqlalchemy import Text
 from sqlalchemy.dialects import mysql
 
 
@@ -50,6 +51,26 @@ def test_prd_core_columns_keep_mysql_dictionary_names():
     assert "creator_id" in Base.metadata.tables["projects"].columns
     assert "create_time" in Base.metadata.tables["requirements"].columns
     assert "delete_time" in Base.metadata.tables["bugs"].columns
+
+
+def test_requirement_and_bug_proposer_are_plain_text_columns():
+    requirements = Base.metadata.tables["requirements"]
+    bugs = Base.metadata.tables["bugs"]
+
+    assert isinstance(requirements.c.proposer.type, Text)
+    assert requirements.c.proposer.nullable is True
+    assert isinstance(bugs.c.proposer.type, Text)
+    assert bugs.c.proposer.nullable is True
+    assert "proposer_id" not in requirements.c
+    assert "reporter_id" not in bugs.c
+
+
+def test_mysql_bootstrap_schema_uses_proposer_text_columns():
+    schema = (Path(__file__).parents[2] / "docs/database/init_mysql.sql").read_text(encoding="utf-8")
+
+    assert "proposer TEXT NULL COMMENT '提出人'" in schema
+    assert "proposer_id" not in schema
+    assert "reporter_id" not in schema
 
 
 def test_workflow_state_identity_columns_are_registered_in_metadata():

@@ -1862,10 +1862,16 @@ def test_runtime_submit_confirmation_moves_bug_fix_task_to_confirmation_handler(
             "iteration_id": iteration_id,
             "task_id": task["id"],
             "title": f"Task runtime source bug {uuid4().hex[:8]}",
-            "reporter_id": confirmer_id,
+            "proposer": "External Reporter",
         },
     )
     assert source_bug.status_code == 200, source_bug.text
+    db = SessionLocal()
+    try:
+        db.query(Bug).filter(Bug.id == source_bug.json()["id"]).update({"verified_by": confirmer_id})
+        db.commit()
+    finally:
+        db.close()
     _start_iteration(client, iteration_id)
 
     executed = client.post(
@@ -2141,7 +2147,7 @@ def test_bug_from_test_execution_routes_repair_and_verification_handlers_separat
     )
     assert bug.status_code == 200
     assert bug.json()["owner_id"] == repair_id
-    assert bug.json()["reporter_id"] == executor_id
+    assert bug.json()["proposer"] == "Test Source Executor"
     assert bug.json()["primary_component"] is None
     db = SessionLocal()
     try:
@@ -2288,7 +2294,7 @@ def test_task_confirmation_routes_all_branches_and_records_manual_override(clien
     ).json()
     executor_id, executor_token = _create_user("Branch Executor", "developer")
     requirement_owner_id, _ = _create_user("Branch Requirement Owner", "product_owner")
-    bug_reporter_id, _ = _create_user("Branch Bug Reporter", "tester")
+    bug_verifier_id, _ = _create_user("Branch Bug Verifier", "tester")
     test_owner_id, _ = _create_user("Branch Test Owner", "tester")
     standalone_creator_id, standalone_creator_token = _create_user("Branch Standalone Creator", "developer")
     manual_owner_id, _ = _create_user("Branch Manual Confirmer", "tester")
@@ -2296,7 +2302,7 @@ def test_task_confirmation_routes_all_branches_and_records_manual_override(clien
         [
             (executor_id, "developer"),
             (requirement_owner_id, "product_owner"),
-            (bug_reporter_id, "tester"),
+            (bug_verifier_id, "tester"),
             (test_owner_id, "tester"),
             (standalone_creator_id, "developer"),
             (manual_owner_id, "tester"),
@@ -2328,17 +2334,18 @@ def test_task_confirmation_routes_all_branches_and_records_manual_override(clien
             "owner_id": executor_id,
         },
     ).json()
-    client.post(
+    source_bug = client.post(
         "/api/v1/bugs",
         json={
             "project_id": project["id"],
             "iteration_id": iteration_id,
             "task_id": bug_task["id"],
             "title": f"Branch Source Bug {uuid4().hex[:8]}",
-            "reporter_id": bug_reporter_id,
+            "proposer": "External Reporter",
             "owner_id": executor_id,
         },
     )
+    assert source_bug.status_code == 200, source_bug.text
     test_task = client.post(
         "/api/v1/tasks",
         json={
@@ -2370,6 +2377,7 @@ def test_task_confirmation_routes_all_branches_and_records_manual_override(clien
     ).json()
     db = SessionLocal()
     try:
+        db.query(Bug).filter(Bug.id == source_bug.json()["id"]).update({"verified_by": bug_verifier_id})
         test_run = RunModel(project_id=project["id"], name=f"Branch Test Run {uuid4().hex[:8]}", test_owner_id=test_owner_id)
         db.add(test_run)
         db.flush()
@@ -2391,7 +2399,7 @@ def test_task_confirmation_routes_all_branches_and_records_manual_override(clien
 
     expected = [
         (requirement_task, executor_token, requirement_owner_id),
-        (bug_task, executor_token, bug_reporter_id),
+        (bug_task, executor_token, bug_verifier_id),
         (test_task, executor_token, test_owner_id),
         (standalone_task, standalone_creator_token, standalone_creator_id),
     ]

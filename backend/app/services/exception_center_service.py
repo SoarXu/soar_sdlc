@@ -440,10 +440,6 @@ def _owner_is_eligible_from_context(context: _ScanContext, object_type: str, ite
     identities.update({"current_handler", "owner", "project_member"})
     if getattr(item, "creator_id", None) == owner.id:
         identities.add("creator")
-    if getattr(item, "reporter_id", None) == owner.id:
-        identities.add("reporter")
-    if getattr(item, "proposer_id", None) == owner.id:
-        identities.add("proposer")
     project = context.projects.get(item.project_id)
     if project and project.owner_id == owner.id:
         identities.add("project_owner")

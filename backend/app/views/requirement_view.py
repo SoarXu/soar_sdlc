@@ -3,6 +3,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from app.views.task_view import LinkedTaskSummary
 from app.views.business_component_view import BusinessComponentReferenceRead
+from app.views.work_item_view import ProposerText
 
 
 class RequirementBase(BaseModel):
@@ -13,7 +14,7 @@ class RequirementBase(BaseModel):
     requirement_type: str | None = None
     priority: str = "3"
     owner_id: int | None = None
-    proposer_id: int | None = None
+    proposer: ProposerText = None
     lifecycle_phase: str | None = None
     review_status: str = "not_required"
     description: str | None = None
@@ -39,7 +40,7 @@ class RequirementUpdate(BaseModel):
     requirement_type: str | None = None
     priority: str | None = None
     owner_id: int | None = None
-    proposer_id: int | None = None
+    proposer: ProposerText = None
     lifecycle_phase: str | None = None
     review_status: str | None = None
     description: str | None = None

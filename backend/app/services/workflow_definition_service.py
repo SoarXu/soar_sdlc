@@ -32,7 +32,7 @@ SCOPE_TYPES = {"system", "project", "assignee_rule_config"}
 STATE_CATEGORIES = {"start", "normal", "terminal"}
 TERMINAL_KINDS = {"completed", "terminated"}
 IDENTITY_ROLES = {
-    "system_admin", "project_member", "current_handler", "owner", "creator", "reporter", "proposer",
+    "system_admin", "project_member", "current_handler", "owner", "creator",
 }
 TEMPLATE_CAPABILITY_ALIASES = {
     "product_owner": ("product_owner", "product_manager"),
@@ -40,8 +40,8 @@ TEMPLATE_CAPABILITY_ALIASES = {
     "test_lead": ("test_lead", "tester"),
 }
 HANDLER_SOURCE_TYPES = {
-    "keep_current", "none", "actor", "explicit_owner", "creator", "proposer",
-    "reporter", "bug_reporter", "last_resolver", "previous_handler", "project_role",
+    "keep_current", "none", "actor", "explicit_owner", "creator",
+    "last_resolver", "previous_handler", "project_role",
     "fixed_role", "project_owner", "fixed_user", "requirement_owner", "source_owner",
     "test_executor", "test_case_default_tester", "bug_verifier",
     "bug_verifier_if_pending_verification", "task_confirmation",

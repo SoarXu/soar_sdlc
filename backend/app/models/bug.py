@@ -23,7 +23,7 @@ class Bug(Base):
     severity: Mapped[str] = mapped_column(String(32), default="3")
     priority: Mapped[str] = mapped_column(String(32), default="3")
     owner_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
-    reporter_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    proposer: Mapped[str | None] = mapped_column(Text, nullable=True)
     workflow_definition_id: Mapped[int] = mapped_column(
         UnsignedBigInteger,
         ForeignKey("workflow_definitions.id", ondelete="RESTRICT"),

@@ -1431,10 +1431,6 @@ def _actor_identities(db: Session, object_type: str, item, actor: User | None) -
         identities.update({"current_handler", "owner"})
     if getattr(item, "creator_id", None) == actor.id:
         identities.add("creator")
-    if getattr(item, "reporter_id", None) == actor.id:
-        identities.add("reporter")
-    if getattr(item, "proposer_id", None) == actor.id:
-        identities.add("proposer")
     if object_type == "bug" and _is_bug_tester(db, item, actor.id):
         identities.add("tester")
     return identities
@@ -2487,10 +2483,6 @@ def _resolve_handler_source(
         return (request.next_owner_id or original_owner_id), source_type
     if source_type == "creator":
         return getattr(item, "creator_id", None), source_type
-    if source_type == "proposer":
-        return getattr(item, "proposer_id", None), source_type
-    if source_type in {"reporter", "bug_reporter"}:
-        return getattr(item, "reporter_id", None), source_type
     if source_type == "last_resolver" and object_type == "bug":
         return _last_bug_resolver_id(db, item), source_type
     if source_type == "previous_handler":
@@ -2569,8 +2561,6 @@ def _task_confirmation_owner(db: Session, task: Task) -> tuple[int | None, str]:
             return requirement.owner_id, "task_confirmation:requirement_owner"
     if task.task_type == "bug_fix":
         bug = _task_source_bug(db, task)
-        if bug and bug.reporter_id:
-            return bug.reporter_id, "task_confirmation:bug_reporter"
         if bug and bug.verified_by:
             return bug.verified_by, "task_confirmation:bug_verifier"
     if task.task_type == "test_support":
@@ -2591,8 +2581,6 @@ def _bug_verifier_owner(db: Session, bug: Bug, rule: dict[str, Any]) -> tuple[in
     test_case = _bug_test_case(db, bug)
     if test_case and test_case.default_tester_id:
         return test_case.default_tester_id, "bug_verifier:test_case_default_tester"
-    if bug.reporter_id:
-        return bug.reporter_id, "bug_verifier:reporter"
     project_tester_id = _project_default_tester_id(db, bug.project_id)
     if project_tester_id:
         return project_tester_id, "bug_verifier:project_tester"

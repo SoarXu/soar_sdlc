@@ -287,8 +287,6 @@ const targetTypes = [
   { label: '测试用例默认测试人', value: 'test_case_default_tester' },
   { label: '项目角色', value: 'project_role' },
   { label: '保持当前处理人', value: 'keep_current' },
-  { label: '需求提出人', value: 'proposer' },
-  { label: '缺陷报告人', value: 'reporter' },
   { label: '上次修复人', value: 'last_resolver' },
   { label: '无处理人', value: 'none' }
 ]
@@ -297,9 +295,7 @@ const identityOptions = [
   { label: '项目成员', value: 'project_member' },
   { label: '当前处理人', value: 'current_handler' },
   { label: '当前负责人', value: 'owner' },
-  { label: '创建人', value: 'creator' },
-  { label: '需求提出人', value: 'proposer' },
-  { label: '缺陷报告人', value: 'reporter' }
+  { label: '创建人', value: 'creator' }
 ]
 const minimumCanvas = { width: 2400, height: 1400 }
 const viewportSize = { width: 980, height: 540 }

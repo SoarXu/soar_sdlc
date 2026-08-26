@@ -84,9 +84,7 @@
             </el-select>
           </el-form-item>
           <el-form-item label="提出人">
-            <el-select v-model="form.proposer_id" clearable filterable placeholder="请选择提出人">
-              <el-option v-for="user in users" :key="user.id" :label="user.full_name" :value="user.id" />
-            </el-select>
+            <el-input v-model="form.proposer" clearable placeholder="请输入提出人" />
           </el-form-item>
         </div>
         <div class="form-grid">
@@ -205,7 +203,6 @@ import BatchAssignmentBar from '../components/BatchAssignmentBar.vue'
 import RequirementEditDialog from '../components/work-items/RequirementEditDialog.vue'
 import BusinessComponentSelect from '../components/work-items/BusinessComponentSelect.vue'
 import { showActionError } from '../utils/actionFeedback'
-import { currentUserId } from '../utils/currentUser'
 import { loadCloseReasonMap } from '../utils/closeReasonTooltip'
 import { canCreateWorkItem, canDeleteWorkItem, canExecuteWorkItem, currentUserFromStorage } from '../utils/permissions'
 import { labelById, userLabel } from '../utils/referenceLabels'
@@ -247,7 +244,7 @@ const workflowOperationWidth = computed(() => workflowActionColumnWidth(
   pagedRequirements.value.map((row) => workflowTransitionsFor(row)),
   { minWidth: 220, extraWidth: 150 }
 ))
-const form = reactive({ project_id: null, primary_component_id: null, source_project_id: null, iteration_id: null, title: '', requirement_type: '功能', priority: '3', owner_id: null, proposer_id: null, description: '', acceptance_criteria: '' })
+const form = reactive({ project_id: null, primary_component_id: null, source_project_id: null, iteration_id: null, title: '', requirement_type: '功能', priority: '3', owner_id: null, proposer: '', description: '', acceptance_criteria: '' })
 const ownerManuallySet = ref(false)
 const generateForm = reactive({ title: '', task_type: 'requirement_implementation', description: '' })
 const importFile = ref(null)
@@ -300,7 +297,7 @@ function canDeleteRequirement(row) {
   const project = projectForRequirement(row)
   return !isRequirementProjectClosed(row) && canDeleteWorkItem(project, currentUser.value, membersForProject(project?.id))
 }
-function resetForm() { Object.assign(form, { project_id: null, primary_component_id: null, source_project_id: null, iteration_id: null, title: '', requirement_type: '功能', priority: '3', owner_id: null, proposer_id: currentUserId(users.value), description: '', acceptance_criteria: '' }); ownerManuallySet.value = false }
+function resetForm() { Object.assign(form, { project_id: null, primary_component_id: null, source_project_id: null, iteration_id: null, title: '', requirement_type: '功能', priority: '3', owner_id: null, proposer: '', description: '', acceptance_criteria: '' }); ownerManuallySet.value = false }
 function openCreate() { editingId.value = null; resetForm(); dialogVisible.value = true }
 function onSourceProjectChange() {}
 function onOwnerChange() { ownerManuallySet.value = true }
@@ -393,7 +390,7 @@ async function submitRequirement() {
   saving.value = true
   try {
     const { status: _status, ...formData } = form
-    const payload = { ...formData, iteration_id: form.iteration_id, owner_id: form.owner_id || null, proposer_id: form.proposer_id || null }
+    const payload = { ...formData, iteration_id: form.iteration_id, owner_id: form.owner_id || null, proposer: form.proposer || null }
     if (editingId.value) await updateRequirement(editingId.value, payload); else await createRequirement(payload)
     dialogVisible.value = false
     await loadData()

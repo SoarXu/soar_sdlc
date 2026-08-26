@@ -3,6 +3,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from app.views.task_view import LinkedTaskSummary
 from app.views.business_component_view import BusinessComponentReferenceRead
+from app.views.work_item_view import ProposerText
 
 
 class BugBase(BaseModel):
@@ -17,7 +18,7 @@ class BugBase(BaseModel):
     severity: str = "3"
     priority: str = "3"
     owner_id: int | None = None
-    reporter_id: int | None = None
+    proposer: ProposerText = None
     reproduce_steps: str | None = None
     expected_result: str | None = None
     actual_result: str | None = None
@@ -53,7 +54,7 @@ class BugUpdate(BaseModel):
     severity: str | None = None
     priority: str | None = None
     owner_id: int | None = None
-    reporter_id: int | None = None
+    proposer: ProposerText = None
     reproduce_steps: str | None = None
     expected_result: str | None = None
     actual_result: str | None = None
@@ -69,7 +70,7 @@ class BugFromTestRunCaseRequest(BaseModel):
     bug_type: str | None = None
     severity: str = "3"
     priority: str = "3"
-    reporter_id: int | None = None
+    proposer: ProposerText = None
     reproduce_steps: str | None = None
     expected_result: str | None = None
     actual_result: str | None = None

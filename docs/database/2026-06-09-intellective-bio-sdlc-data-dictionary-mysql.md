@@ -194,7 +194,7 @@
 | requirement_type | VARCHAR(64) | NULL | 需求类型 |
 | priority | VARCHAR(32) | NOT NULL DEFAULT '3' | 优先级：1 最高，5 最低 |
 | owner_id | BIGINT UNSIGNED | NULL | 负责人 ID |
-| proposer_id | BIGINT UNSIGNED | NULL | 提出人 ID |
+| proposer | TEXT | NULL | 提出人文本 |
 | status | VARCHAR(32) | NOT NULL DEFAULT 'draft' | 状态：draft、active、done、closed |
 | lifecycle_phase | VARCHAR(32) | NOT NULL DEFAULT 'development' | 生命周期阶段：development、maintenance |
 | review_status | VARCHAR(32) | NOT NULL DEFAULT 'not_required' | 评审状态 |
@@ -354,7 +354,7 @@
 | severity | VARCHAR(32) | NOT NULL DEFAULT '3' | 严重程度：1 最高，5 最低 |
 | priority | VARCHAR(32) | NOT NULL DEFAULT '3' | 优先级：1 最高，5 最低 |
 | owner_id | BIGINT UNSIGNED | NULL | 负责人 ID |
-| reporter_id | BIGINT UNSIGNED | NULL | 提出人 ID |
+| proposer | TEXT | NULL | 提出人文本 |
 | reproduce_steps | TEXT | NULL | 复现步骤 |
 | expected_result | TEXT | NULL | 期望结果 |
 | actual_result | TEXT | NULL | 实际结果 |

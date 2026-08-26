@@ -41,8 +41,6 @@ class WorkbenchItem(BaseModel):
     create_time: str | None = None
     update_time: str | None = None
     creator_id: int | None = None
-    proposer_id: int | None = None
-    reporter_id: int | None = None
     watch_source: str | None = None
     mentioned_in_comment_id: int | None = None
     mentioned_comment_id: int | None = None

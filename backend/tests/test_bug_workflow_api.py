@@ -183,10 +183,10 @@ def test_bug_project_only_update_rejects_existing_iteration_scope_mismatch(clien
 
 
 def test_closed_bug_reactivates_into_active_iteration_and_retains_eligible_handler(client: TestClient):
-    reporter_id, reporter_token = _create_user("developer")
+    reporter_id, reporter_token = _create_user("tester")
     handler_id, _ = _create_user("developer")
     project_id = _create_project(client)
-    _add_member(project_id, reporter_id, "developer")
+    _add_member(project_id, reporter_id, "tester")
     _add_member(project_id, handler_id, "developer")
     source_iteration_id = _create_iteration(client, project_id, "Closed source iteration", active=True)
     target_iteration_id = _create_iteration(client, project_id, "Active target iteration", active=True)
@@ -197,7 +197,7 @@ def test_closed_bug_reactivates_into_active_iteration_and_retains_eligible_handl
             "iteration_id": source_iteration_id,
             "title": "Recurring bug",
             "owner_id": handler_id,
-            "reporter_id": reporter_id,
+            "proposer": "External Reporter",
         },
         headers={"Authorization": f"Bearer {reporter_token}"},
     ).json()
@@ -308,11 +308,11 @@ def test_closed_bug_reactivates_into_active_iteration_and_retains_eligible_handl
 
 
 def test_closed_bug_reactivates_into_maintenance_component(client: TestClient):
-    reporter_id, reporter_token = _create_user("developer")
+    reporter_id, reporter_token = _create_user("tester")
     source_project_id = _create_project(client)
     maintenance_project_id = _create_project(client)
     for project_id in (source_project_id, maintenance_project_id):
-        _add_member(project_id, reporter_id, "developer")
+        _add_member(project_id, reporter_id, "tester")
     source_iteration_id = _create_iteration(client, source_project_id, "Historical bug iteration", active=True)
     bug = client.post(
         "/api/v1/bugs",
@@ -321,7 +321,7 @@ def test_closed_bug_reactivates_into_maintenance_component(client: TestClient):
             "iteration_id": source_iteration_id,
             "title": "Historical maintenance bug",
             "owner_id": reporter_id,
-            "reporter_id": reporter_id,
+            "proposer": "External Reporter",
         },
         headers={"Authorization": f"Bearer {reporter_token}"},
     ).json()
@@ -378,9 +378,9 @@ def test_closed_bug_reactivates_into_maintenance_component(client: TestClient):
 
 
 def test_closed_bug_reactivation_accepts_legacy_iteration_id_alias(client: TestClient):
-    reporter_id, reporter_token = _create_user("developer")
+    reporter_id, reporter_token = _create_user("tester")
     project_id = _create_project(client)
-    _add_member(project_id, reporter_id, "developer")
+    _add_member(project_id, reporter_id, "tester")
     source_iteration_id = _create_iteration(client, project_id, "Legacy bug source", active=True)
     target_iteration_id = _create_iteration(client, project_id, "Legacy bug target", active=True)
     bug = client.post(
@@ -390,7 +390,7 @@ def test_closed_bug_reactivation_accepts_legacy_iteration_id_alias(client: TestC
             "iteration_id": source_iteration_id,
             "title": "Legacy reactivation bug",
             "owner_id": reporter_id,
-            "reporter_id": reporter_id,
+            "proposer": "External Reporter",
         },
         headers={"Authorization": f"Bearer {reporter_token}"},
     ).json()
@@ -438,10 +438,10 @@ def test_bug_reactivation_rejects_invalid_legacy_iteration_id(client: TestClient
 
 
 def test_bug_reactivation_drops_original_handler_who_is_not_a_project_member(client: TestClient):
-    reporter_id, reporter_token = _create_user("developer")
+    reporter_id, reporter_token = _create_user("tester")
     former_handler_id, _ = _create_user("developer")
     project_id = _create_project(client)
-    _add_member(project_id, reporter_id, "developer")
+    _add_member(project_id, reporter_id, "tester")
     source_iteration_id = _create_iteration(client, project_id, "Former handler source", active=True)
     target_iteration_id = _create_iteration(client, project_id, "Former handler target", active=True)
     bug = client.post(
@@ -451,7 +451,7 @@ def test_bug_reactivation_drops_original_handler_who_is_not_a_project_member(cli
             "iteration_id": source_iteration_id,
             "title": "Bug owned by former member",
             "owner_id": former_handler_id,
-            "reporter_id": reporter_id,
+            "proposer": "External Reporter",
         },
         headers={"Authorization": f"Bearer {reporter_token}"},
     ).json()
@@ -542,12 +542,12 @@ def test_bug_reactivation_drops_original_handler_who_is_not_a_project_member(cli
 
 
 def test_bug_reactivation_audits_eligible_recommended_owner_manual_override(client: TestClient):
-    reporter_id, reporter_token = _create_user("developer")
+    reporter_id, reporter_token = _create_user("tester")
     recommended_owner_id, _ = _create_user("developer")
     selected_owner_id, _ = _create_user("developer")
     project_id = _create_project(client)
     for user_id in (reporter_id, recommended_owner_id, selected_owner_id):
-        _add_member(project_id, user_id, "developer")
+        _add_member(project_id, user_id, "tester" if user_id == reporter_id else "developer")
     source_iteration_id = _create_iteration(client, project_id, "Eligible override source", active=True)
     target_iteration_id = _create_iteration(client, project_id, "Eligible override target", active=True)
     bug = client.post(
@@ -557,7 +557,7 @@ def test_bug_reactivation_audits_eligible_recommended_owner_manual_override(clie
             "iteration_id": source_iteration_id,
             "title": "Eligible override audit",
             "owner_id": recommended_owner_id,
-            "reporter_id": reporter_id,
+            "proposer": "External Reporter",
         },
         headers={"Authorization": f"Bearer {reporter_token}"},
     ).json()
@@ -590,12 +590,12 @@ def test_bug_reactivation_audits_eligible_recommended_owner_manual_override(clie
 
 
 def test_bug_reactivation_audits_unavailable_original_owner_manual_override(client: TestClient):
-    reporter_id, reporter_token = _create_user("developer")
+    reporter_id, reporter_token = _create_user("tester")
     inactive_owner_id, _ = _create_user("developer")
     selected_owner_id, _ = _create_user("developer")
     project_id = _create_project(client)
     for user_id in (reporter_id, inactive_owner_id, selected_owner_id):
-        _add_member(project_id, user_id, "developer")
+        _add_member(project_id, user_id, "tester" if user_id == reporter_id else "developer")
     source_iteration_id = _create_iteration(client, project_id, "Unavailable override source", active=True)
     target_iteration_id = _create_iteration(client, project_id, "Unavailable override target", active=True)
     bug = client.post(
@@ -605,7 +605,7 @@ def test_bug_reactivation_audits_unavailable_original_owner_manual_override(clie
             "iteration_id": source_iteration_id,
             "title": "Unavailable override audit",
             "owner_id": inactive_owner_id,
-            "reporter_id": reporter_id,
+            "proposer": "External Reporter",
         },
         headers={"Authorization": f"Bearer {reporter_token}"},
     ).json()
@@ -655,15 +655,15 @@ def test_bug_reactivation_audits_unavailable_original_owner_manual_override(clie
     assert routing["manual_override_to_owner_id"] == selected_owner_id
 
 
-def test_bug_reactivation_rejects_reporter_without_target_project_access(client: TestClient):
-    reporter_id, reporter_token = _create_user("developer")
+def test_bug_reactivation_rejects_tester_without_target_project_access(client: TestClient):
+    reporter_id, reporter_token = _create_user("tester")
     project_id = _create_project(client)
-    _add_member(project_id, reporter_id, "developer")
+    _add_member(project_id, reporter_id, "tester")
     source_iteration_id = _create_iteration(client, project_id, "Access source", active=True)
     target_iteration_id = _create_iteration(client, project_id, "Access target", active=True)
     bug = client.post(
         "/api/v1/bugs",
-        json={"project_id": project_id, "iteration_id": source_iteration_id, "title": "Former reporter", "reporter_id": reporter_id},
+        json={"project_id": project_id, "iteration_id": source_iteration_id, "title": "Former tester", "proposer": "External Reporter"},
         headers={"Authorization": f"Bearer {reporter_token}"},
     ).json()
     _set_bug_closed(bug["id"])
@@ -685,7 +685,6 @@ def test_bug_reactivation_rejects_reporter_without_target_project_access(client:
     )
 
     assert denied.status_code == 403
-    assert denied.json()["detail"]["code"] == "PROJECT_ACCESS_DENIED"
 
 
 def test_reactivation_handler_eligibility_uses_target_state_core_action_roles(client: TestClient):

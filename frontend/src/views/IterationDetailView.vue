@@ -265,9 +265,7 @@
         <el-form-item label="需求标题" required><el-input v-model="requirementForm.title" /></el-form-item>
         <div class="form-grid">
           <el-form-item label="提出人">
-            <el-select v-model="requirementForm.proposer_id" clearable filterable>
-              <el-option v-for="user in users" :key="user.id" :label="user.full_name" :value="user.id" />
-            </el-select>
+            <el-input v-model="requirementForm.proposer" clearable placeholder="请输入提出人" />
           </el-form-item>
           <el-form-item label="类型">
             <el-select v-model="requirementForm.requirement_type">
@@ -524,7 +522,7 @@ const priorityLevelOptions = [
 ]
 const caseBugForm = ref({ title: '', bug_type: DEFAULT_BUG_TYPE_KEY, severity: '3', priority: '3', reproduce_steps: '', actual_result: '' })
 const editingRequirementId = ref(null)
-const requirementForm = reactive({ project_id: null, iteration_id: null, title: '', requirement_type: '功能', priority: '3', owner_id: null, proposer_id: null, description: '', acceptance_criteria: '' })
+const requirementForm = reactive({ project_id: null, iteration_id: null, title: '', requirement_type: '功能', priority: '3', owner_id: null, proposer: '', description: '', acceptance_criteria: '' })
 const taskEditForm = reactive({ project_id: null, requirement_id: null, title: '', task_type: 'standalone_operation', priority: 'medium', owner_id: null, due_date: null, description: '' })
 const generateTaskForm = reactive({ title: '', task_type: 'requirement_implementation', priority: 'medium', due_date: null, description: '' })
 const flatProjects = computed(() => flattenProjects(projects.value))
@@ -668,7 +666,7 @@ function openRequirementEdit(row) {
     priority: normalizeRequirementPriority(row.priority),
     requirement_type: row.requirement_type || '功能',
     owner_id: row.owner_id || null,
-    proposer_id: row.proposer_id || null,
+    proposer: row.proposer || '',
     description: row.description || '',
     acceptance_criteria: row.acceptance_criteria || '',
   })
@@ -684,7 +682,7 @@ async function submitRequirementEdit() {
       project_id: requirementForm.project_id,
       iteration_id: requirementForm.iteration_id || null,
       owner_id: requirementForm.owner_id || null,
-      proposer_id: requirementForm.proposer_id || null
+      proposer: requirementForm.proposer || null
     })
     requirementEditVisible.value = false
     await loadData()

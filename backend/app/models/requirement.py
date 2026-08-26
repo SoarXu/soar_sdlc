@@ -22,7 +22,7 @@ class Requirement(Base):
     requirement_type: Mapped[str | None] = mapped_column(String(64), nullable=True)
     priority: Mapped[str] = mapped_column(String(32), default="3")
     owner_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
-    proposer_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    proposer: Mapped[str | None] = mapped_column(Text, nullable=True)
     workflow_definition_id: Mapped[int] = mapped_column(
         UnsignedBigInteger,
         ForeignKey("workflow_definitions.id", ondelete="RESTRICT"),

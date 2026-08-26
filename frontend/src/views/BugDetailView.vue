@@ -30,7 +30,7 @@
           <el-form-item label="关联需求"><el-select v-model="bugForm.requirement_id" clearable filterable><el-option v-for="requirement in requirements" :key="requirement.id" :label="requirement.title" :value="requirement.id" /></el-select></el-form-item>
           <el-form-item label="关联任务"><el-select v-model="bugForm.task_id" clearable filterable><el-option v-for="task in tasks" :key="task.id" :label="task.title" :value="task.id" /></el-select></el-form-item>
           <el-form-item label="来源用例"><el-select v-model="bugForm.test_case_id" clearable filterable><el-option v-for="item in testCases" :key="item.id" :label="item.title" :value="item.id" /></el-select></el-form-item>
-          <el-form-item label="提出人"><el-select v-model="bugForm.reporter_id" clearable filterable><el-option v-for="user in users" :key="user.id" :label="user.full_name" :value="user.id" /></el-select></el-form-item>
+          <el-form-item label="提出人"><el-input v-model="bugForm.proposer" clearable placeholder="请输入提出人" /></el-form-item>
           <el-form-item label="Bug 类型"><el-select v-model="bugForm.bug_type"><el-option v-for="option in bugTypeOptions" :key="option.value" :label="option.label" :value="option.value" /></el-select></el-form-item>
           <el-form-item label="严重程度"><el-select v-model="bugForm.severity"><el-option v-for="option in priorityLevelOptions" :key="option.value" :label="option.label" :value="option.value"><RequirementPriorityBadge :value="option.value" /></el-option></el-select></el-form-item>
           <el-form-item label="优先级"><el-select v-model="bugForm.priority"><el-option v-for="option in priorityLevelOptions" :key="option.value" :label="option.label" :value="option.value"><RequirementPriorityBadge :value="option.value" /></el-option></el-select></el-form-item>
@@ -52,7 +52,7 @@
           <span v-else>-</span>
         </el-descriptions-item>
         <el-descriptions-item label="负责人">{{ userLabel(users, bug.owner_id) }}</el-descriptions-item>
-        <el-descriptions-item label="提出人">{{ userLabel(users, bug.reporter_id) }}</el-descriptions-item>
+        <el-descriptions-item label="提出人">{{ bug.proposer || '-' }}</el-descriptions-item>
         <el-descriptions-item label="状态">{{ bug.status_name || '-' }}</el-descriptions-item>
         <el-descriptions-item label="Bug 类型">{{ bugTypeLabel(bug.bug_type) }}</el-descriptions-item>
         <el-descriptions-item label="严重程度"><RequirementPriorityBadge :value="bug.severity" /></el-descriptions-item>
@@ -323,7 +323,7 @@ function fillBugForm() {
     severity: String(bug.value.severity || '3'),
     priority: String(bug.value.priority || '3'),
     owner_id: bug.value.owner_id || null,
-    reporter_id: bug.value.reporter_id || null,
+    proposer: bug.value.proposer || '',
     reproduce_steps: bug.value.reproduce_steps || '',
     expected_result: bug.value.expected_result || '',
     actual_result: bug.value.actual_result || ''
@@ -426,7 +426,7 @@ async function saveBug() {
       test_case_id: bugForm.value.test_case_id || null,
       test_run_id: bugForm.value.test_run_id || null,
       owner_id: bugForm.value.owner_id || null,
-      reporter_id: bugForm.value.reporter_id || null
+      proposer: bugForm.value.proposer || null
     })
     editing.value = false
     await loadData()

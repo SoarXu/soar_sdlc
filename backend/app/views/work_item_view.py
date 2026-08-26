@@ -1,6 +1,20 @@
 from datetime import datetime
+from typing import Annotated
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, BeforeValidator, Field
+
+
+def _normalize_optional_text(value):
+    if value is None:
+        return None
+    normalized = str(value).strip()
+    return normalized or None
+
+
+ProposerText = Annotated[
+    str | None,
+    BeforeValidator(_normalize_optional_text),
+]
 
 
 class WorkItemRead(BaseModel):

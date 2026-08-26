@@ -3,6 +3,7 @@ from datetime import datetime
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.views.task_view import LinkedTaskSummary
+from app.views.work_item_view import ProposerText
 
 
 class TestCaseBase(BaseModel):
@@ -68,7 +69,7 @@ class BugFromTestCaseRequest(BaseModel):
     bug_type: str | None = None
     severity: str = "3"
     priority: str = "3"
-    reporter_id: int | None = None
+    proposer: ProposerText = None
     reproduce_steps: str | None = None
     expected_result: str | None = None
     actual_result: str | None = None

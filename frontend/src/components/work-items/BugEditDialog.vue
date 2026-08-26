@@ -34,9 +34,7 @@
           </el-select>
         </el-form-item>
         <el-form-item label="提出人">
-          <el-select v-model="form.reporter_id" clearable filterable placeholder="请选择提出人">
-            <el-option v-for="user in users" :key="user.id" :label="user.full_name || user.username" :value="user.id" />
-          </el-select>
+          <el-input v-model="form.proposer" clearable placeholder="请输入提出人" />
         </el-form-item>
       </div>
       <div class="form-grid">
@@ -73,7 +71,6 @@ import { fetchRequirements } from '../../api/requirements'
 import { fetchTasks } from '../../api/tasks'
 import { fetchTestCases } from '../../api/testCases'
 import { fetchTestRuns } from '../../api/testRuns'
-import { fetchUsers } from '../../api/users'
 import { showActionError } from '../../utils/actionFeedback'
 import { bugIterationOptions, includeSelectedIterationOption } from '../../utils/bugIterations'
 import RequirementPriorityBadge from '../RequirementPriorityBadge.vue'
@@ -96,7 +93,6 @@ const requirements = ref([])
 const tasks = ref([])
 const testCases = ref([])
 const testRuns = ref([])
-const users = ref([])
 const iterations = ref([])
 const form = reactive({})
 const priorityOptions = ['1', '2', '3', '4', '5']
@@ -117,16 +113,14 @@ async function load() {
       fetchTasks(),
       fetchTestCases(),
       fetchTestRuns(),
-      fetchUsers(),
       fetchIterations()
     ])
-    const [itemResponse, projectResponse, requirementResponse, taskResponse, caseResponse, runResponse, userResponse, iterationResponse] = responses
+    const [itemResponse, projectResponse, requirementResponse, taskResponse, caseResponse, runResponse, iterationResponse] = responses
     projects.value = projectResponse.data || []
     requirements.value = requirementResponse.data || []
     tasks.value = taskResponse.data || []
     testCases.value = caseResponse.data || []
     testRuns.value = runResponse.data || []
-    users.value = userResponse.data || []
     iterations.value = iterationResponse.data || []
     const item = itemResponse.data || {}
     Object.assign(form, {
@@ -139,7 +133,7 @@ async function load() {
       title: item.title || '',
       severity: item.severity || '3',
       priority: item.priority || '3',
-      reporter_id: item.reporter_id || null,
+      proposer: item.proposer || '',
       reproduce_steps: item.reproduce_steps || '',
       expected_result: item.expected_result || '',
       actual_result: item.actual_result || ''
@@ -166,7 +160,7 @@ async function save() {
       task_id: form.task_id || null,
       test_case_id: form.test_case_id || null,
       test_run_id: form.test_run_id || null,
-      reporter_id: form.reporter_id || null
+      proposer: form.proposer || null
     })
     visible.value = false
     ElMessage.success('保存成功')

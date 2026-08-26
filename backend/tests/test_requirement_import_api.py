@@ -258,6 +258,82 @@ def test_requirement_import_preview_rejects_invalid_type(client: TestClient):
     assert any("类型必须是" in message for message in data["errors"][0]["messages"])
 
 
+def test_requirement_import_preview_accepts_unregistered_proposer_text(client: TestClient):
+    project_name = f"导入外部提出人-{uuid4().hex[:8]}"
+    client.post("/api/v1/projects", json={"name": project_name}).raise_for_status()
+
+    response = client.post(
+        "/api/v1/requirements/import/preview",
+        files={
+            "file": _xlsx(
+                [
+                    ["项目名称", "需求标题", "提出人"],
+                    [project_name, "外部提出需求", "客户代表 张三"],
+                ]
+            )
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["valid_count"] == 1
+    assert response.json()["error_count"] == 0
+
+
+def test_requirement_import_commit_preserves_proposer_text(client: TestClient):
+    project_name = f"导入提出人落库-{uuid4().hex[:8]}"
+    client.post("/api/v1/projects", json={"name": project_name}).raise_for_status()
+
+    response = client.post(
+        "/api/v1/requirements/import/commit",
+        data={"duplicate_strategy": "create_duplicate"},
+        files={
+            "file": _xlsx(
+                [
+                    ["项目名称", "需求标题", "提出人"],
+                    [project_name, "保留提出人文本", "供应商接口人 A-17"],
+                ]
+            )
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["created_count"] == 1
+    created = next(
+        item
+        for item in client.get("/api/v1/requirements").json()
+        if item["title"] == "保留提出人文本"
+    )
+    assert created["proposer"] == "供应商接口人 A-17"
+
+
+def test_requirement_import_commit_preserves_long_proposer_text_without_validation(client: TestClient):
+    project_name = f"导入长提出人-{uuid4().hex[:8]}"
+    proposer = "外部提出人-" + ("A" * 300)
+    client.post("/api/v1/projects", json={"name": project_name}).raise_for_status()
+
+    response = client.post(
+        "/api/v1/requirements/import/commit",
+        data={"duplicate_strategy": "create_duplicate"},
+        files={
+            "file": _xlsx(
+                [
+                    ["项目名称", "需求标题", "提出人"],
+                    [project_name, "长提出人文本", proposer],
+                ]
+            )
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["created_count"] == 1
+    created = next(
+        item
+        for item in client.get("/api/v1/requirements").json()
+        if item["title"] == "长提出人文本"
+    )
+    assert created["proposer"] == proposer
+
+
 def test_requirement_import_commit_creates_new_requirements(client: TestClient):
     project_name = f"导入新增项目-{uuid4().hex[:8]}"
     project = client.post("/api/v1/projects", json={"name": project_name}).json()
@@ -442,8 +518,8 @@ def test_import_update_refresh_rejects_requirement_without_prelocked_iteration(m
 
 def test_import_batch_locks_existing_iterations_once_in_sorted_order(monkeypatch):
     rows = [
-        SimpleNamespace(project_id=1, iteration_id=9, title="Later iteration", requirement_type=None, priority="3", owner_id=None, proposer_id=None, review_status="not_required", description=None, acceptance_criteria=None),
-        SimpleNamespace(project_id=1, iteration_id=3, title="Earlier iteration", requirement_type=None, priority="3", owner_id=None, proposer_id=None, review_status="not_required", description=None, acceptance_criteria=None),
+        SimpleNamespace(project_id=1, iteration_id=9, title="Later iteration", requirement_type=None, priority="3", owner_id=None, proposer=None, review_status="not_required", description=None, acceptance_criteria=None),
+        SimpleNamespace(project_id=1, iteration_id=3, title="Earlier iteration", requirement_type=None, priority="3", owner_id=None, proposer=None, review_status="not_required", description=None, acceptance_criteria=None),
     ]
     existing = iter([SimpleNamespace(id=11, iteration_id=9), SimpleNamespace(id=12, iteration_id=3)])
     events = []

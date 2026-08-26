@@ -218,8 +218,6 @@ def _workbench_item_union(active_iteration_ids: set[int]):
         Requirement.create_time.label("create_time"),
         Requirement.update_time.label("update_time"),
         Requirement.creator_id.label("creator_id"),
-        Requirement.proposer_id.label("proposer_id"),
-        literal(None).label("reporter_id"),
         Requirement.id.label("requirement_id"),
         literal(None).label("task_id"),
         literal(None).label("bug_type"),
@@ -239,8 +237,6 @@ def _workbench_item_union(active_iteration_ids: set[int]):
             Task.create_time.label("create_time"),
             Task.update_time.label("update_time"),
             Task.creator_id.label("creator_id"),
-            literal(None).label("proposer_id"),
-            literal(None).label("reporter_id"),
             Task.requirement_id.label("requirement_id"),
             Task.id.label("task_id"),
             literal(None).label("bug_type"),
@@ -263,8 +259,6 @@ def _workbench_item_union(active_iteration_ids: set[int]):
         Bug.create_time.label("create_time"),
         Bug.update_time.label("update_time"),
         Bug.creator_id.label("creator_id"),
-        literal(None).label("proposer_id"),
-        Bug.reporter_id.label("reporter_id"),
         Bug.requirement_id.label("requirement_id"),
         Bug.task_id.label("task_id"),
         Bug.bug_type.label("bug_type"),
@@ -374,8 +368,6 @@ def _workbench_page_item(row) -> WorkbenchItem:
         create_time=_datetime_value(row["create_time"]),
         update_time=_datetime_value(row["update_time"]),
         creator_id=row["creator_id"],
-        proposer_id=row["proposer_id"],
-        reporter_id=row["reporter_id"],
         requirement_id=row["requirement_id"],
         task_id=row["task_id"],
         bug_type=row["bug_type"],
@@ -524,9 +516,11 @@ def _created_by_me_items(
         return []
     items = [
         _requirement_item(item, projects, iteration_names)
-        for item in db.query(Requirement).filter(Requirement.deleted == 0).all()
-        if (item.creator_id == user_id or item.proposer_id == user_id)
-        and item.iteration_id in active_iteration_ids
+        for item in db.query(Requirement).filter(
+            Requirement.deleted == 0,
+            Requirement.creator_id == user_id,
+        ).all()
+        if item.iteration_id in active_iteration_ids
         and _in_project_scope(item.project_id, scoped_project_ids)
     ]
     items.extend(
@@ -536,9 +530,8 @@ def _created_by_me_items(
     )
     items.extend(
         _bug_item(item, projects, iteration_names)
-        for item in db.query(Bug).filter(Bug.deleted == 0).all()
-        if (item.creator_id == user_id or item.reporter_id == user_id)
-        and item.iteration_id in active_iteration_ids
+        for item in db.query(Bug).filter(Bug.deleted == 0, Bug.creator_id == user_id).all()
+        if item.iteration_id in active_iteration_ids
         and _in_project_scope(item.project_id, scoped_project_ids)
     )
     return _dedup_and_sort_workbench_items(items)
@@ -899,7 +892,6 @@ def _requirement_item(item: Requirement, projects: dict[int, Project], iteration
         create_time=_datetime_value(item.create_time),
         update_time=_datetime_value(item.update_time),
         creator_id=item.creator_id,
-        proposer_id=item.proposer_id,
         requirement_id=item.id,
     )
 
@@ -971,7 +963,6 @@ def _bug_item(item: Bug, projects: dict[int, Project], iteration_names: dict[int
         create_time=_datetime_value(item.create_time),
         update_time=_datetime_value(item.update_time),
         creator_id=item.creator_id,
-        reporter_id=item.reporter_id,
         requirement_id=item.requirement_id,
         task_id=item.task_id,
         test_case_id=item.test_case_id,

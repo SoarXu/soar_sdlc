@@ -183,6 +183,37 @@ def _ensure_column(engine: Engine, table: str, col: str, ddl: str, index_ddl: st
                 conn.execute(text(index_ddl))
 
 
+def _ensure_work_item_proposer_text(
+    engine: Engine,
+    table: str,
+    legacy_column: str,
+) -> None:
+    inspector = inspect(engine)
+    table_names = set(inspector.get_table_names())
+    if table not in table_names:
+        return
+    columns = {column["name"] for column in inspector.get_columns(table)}
+    if "proposer" not in columns:
+        with engine.begin() as connection:
+            connection.execute(
+                text(
+                    f"ALTER TABLE {table} ADD COLUMN proposer TEXT NULL "
+                    "COMMENT '提出人' AFTER owner_id"
+                )
+            )
+    if legacy_column in columns and "users" in table_names:
+        with engine.begin() as connection:
+            connection.execute(
+                text(
+                    f"UPDATE {table} AS item "
+                    f"LEFT JOIN users AS account ON account.id = item.{legacy_column} "
+                    "SET item.proposer = COALESCE(NULLIF(TRIM(account.full_name), ''), account.username) "
+                    f"WHERE item.{legacy_column} IS NOT NULL "
+                    "AND (item.proposer IS NULL OR TRIM(item.proposer) = '')"
+                )
+            )
+
+
 def _ensure_varchar_length(engine: Engine, table: str, col: str, minimum_length: int, ddl: str) -> None:
     inspector = inspect(engine)
     if table not in inspector.get_table_names():
@@ -584,8 +615,9 @@ def ensure_runtime_schema(engine: Engine) -> None:
     _ensure_column(engine, "requirements", "source_project_id",
                    "ALTER TABLE requirements ADD COLUMN source_project_id BIGINT UNSIGNED NULL COMMENT '来源项目 ID' AFTER project_id",
                    "CREATE INDEX idx_requirements_source_project ON requirements (source_project_id)")
+    _ensure_work_item_proposer_text(engine, "requirements", "proposer_id")
     _ensure_column(engine, "requirements", "workflow_definition_id",
-                   "ALTER TABLE requirements ADD COLUMN workflow_definition_id BIGINT UNSIGNED NULL COMMENT 'workflow definition id' AFTER proposer_id",
+                   "ALTER TABLE requirements ADD COLUMN workflow_definition_id BIGINT UNSIGNED NULL COMMENT 'workflow definition id' AFTER proposer",
                    "CREATE INDEX ix_requirements_workflow_definition_id ON requirements (workflow_definition_id)")
     _ensure_column(engine, "requirements", "current_state_id",
                    "ALTER TABLE requirements ADD COLUMN current_state_id BIGINT UNSIGNED NULL COMMENT 'current workflow state id' AFTER workflow_definition_id",
@@ -615,8 +647,9 @@ def ensure_runtime_schema(engine: Engine) -> None:
     _ensure_column(engine, "bugs", "source_project_id",
                    "ALTER TABLE bugs ADD COLUMN source_project_id BIGINT UNSIGNED NULL COMMENT '来源项目 ID' AFTER project_id",
                    "CREATE INDEX idx_bugs_source_project ON bugs (source_project_id)")
+    _ensure_work_item_proposer_text(engine, "bugs", "reporter_id")
     _ensure_column(engine, "bugs", "workflow_definition_id",
-                   "ALTER TABLE bugs ADD COLUMN workflow_definition_id BIGINT UNSIGNED NULL COMMENT 'workflow definition id' AFTER reporter_id",
+                   "ALTER TABLE bugs ADD COLUMN workflow_definition_id BIGINT UNSIGNED NULL COMMENT 'workflow definition id' AFTER proposer",
                    "CREATE INDEX ix_bugs_workflow_definition_id ON bugs (workflow_definition_id)")
     _ensure_column(engine, "bugs", "current_state_id",
                    "ALTER TABLE bugs ADD COLUMN current_state_id BIGINT UNSIGNED NULL COMMENT 'current workflow state id' AFTER workflow_definition_id",

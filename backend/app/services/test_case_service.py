@@ -13,6 +13,7 @@ from app.services.iteration_service import ensure_iteration_assignment_mutable
 from app.services.iteration_assignment_service import resolve_work_item_iteration
 from app.services.project_team_service import default_tester_id
 from app.services.task_service import linked_task_summaries
+from app.services.user_service import user_display_name
 from app.services.work_item_iteration_history_service import move_work_item_to_iteration
 from app.services.workflow_state_service import initial_work_item_workflow_values
 from app.services.project_permission_service import visible_project_ids
@@ -181,7 +182,7 @@ def create_bug_from_test_case(
         severity=payload.severity,
         priority=payload.priority,
         owner_id=requirement.owner_id if requirement else None,
-        reporter_id=payload.reporter_id or latest_execution.executor_id,
+        proposer=payload.proposer or user_display_name(db, latest_execution.executor_id),
         reproduce_steps=payload.reproduce_steps or _build_reproduce_steps(test_case, latest_execution),
         expected_result=payload.expected_result or test_case.expected_result,
         actual_result=payload.actual_result or _build_actual_result(latest_execution),

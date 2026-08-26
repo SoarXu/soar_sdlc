@@ -44,7 +44,7 @@ class ParsedRequirementRow:
     requirement_type: str | None
     priority: str
     owner_id: int | None
-    proposer_id: int | None
+    proposer: str | None
     review_status: str
     description: str | None
     acceptance_criteria: str | None
@@ -144,7 +144,7 @@ def commit_requirement_import(
             requirement_type=row.requirement_type,
             priority=row.priority,
             owner_id=row.owner_id,
-            proposer_id=row.proposer_id,
+            proposer=row.proposer,
             **workflow_values,
             review_status=row.review_status,
             lifecycle_phase=project_lifecycle_phase(db, row.project_id),
@@ -213,7 +213,7 @@ def _parse_requirement_row(
 
     project = scoped_project or (_resolve_project(db, project_name, "项目名称", messages) if project_name else None)
     iteration = _resolve_iteration(db, project, iteration_name, messages) if project and iteration_name else None
-    proposer = _resolve_user(db, values.get("提出人", ""), "提出人", messages)
+    proposer = values.get("提出人") or None
     requirement_type = values.get("类型") or None
     if requirement_type and requirement_type not in REQUIREMENT_TYPE_VALUES:
         messages.append(f"类型必须是 {'、'.join(REQUIREMENT_TYPE_VALUES)}")
@@ -232,7 +232,7 @@ def _parse_requirement_row(
             requirement_type=requirement_type,
             priority=priority,
             owner_id=None,
-            proposer_id=proposer.id if proposer else None,
+            proposer=proposer,
             review_status="not_required",
             description=values.get("需求描述") or None,
             acceptance_criteria=values.get("验收标准") or None,
@@ -282,27 +282,6 @@ def _resolve_project_id(db: Session, project_id: int) -> Project:
     if not project:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="项目不存在")
     return project
-
-
-def _resolve_user(db: Session, value: str, field: str, messages: list[str]) -> User | None:
-    if not value:
-        return None
-    matches = (
-        db.query(User)
-        .filter(
-            User.deleted == 0,
-            User.is_active.is_(True),
-            (User.full_name == value) | (User.username == value),
-        )
-        .all()
-    )
-    if not matches:
-        messages.append(f"{field}不存在：{value}")
-        return None
-    if len(matches) > 1:
-        messages.append(f"{field}不唯一：{value}")
-        return None
-    return matches[0]
 
 
 def _duplicate_rows(db: Session, rows: list[ParsedRequirementRow]) -> list[dict]:
@@ -366,7 +345,7 @@ def _apply_row_to_requirement(
     requirement.priority = row.priority
     if row.owner_id is not None:
         requirement.owner_id = row.owner_id
-    requirement.proposer_id = row.proposer_id
+    requirement.proposer = row.proposer
     requirement.review_status = row.review_status
     requirement.description = row.description
     requirement.acceptance_criteria = row.acceptance_criteria

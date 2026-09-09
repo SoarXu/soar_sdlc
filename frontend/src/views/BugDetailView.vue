@@ -296,7 +296,7 @@ function executionResultLabel(value) { return optionLabel(executionResultOptions
 function formatDateTime(value) { return value ? new Date(value).toLocaleString('zh-CN', { hour12: false }) : '-' }
 function goBack() {
   if (route.query.from === 'dashboard') {
-    router.push({ name: 'dashboard' })
+    router.push({ name: 'dashboard', query: { ...route.query } })
     return
   }
   if (route.query.from === 'project' && bug.value.project_id) {

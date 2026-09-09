@@ -27,7 +27,7 @@
         :default-active="activeMenuIndex"
         class="side-menu"
       >
-        <el-menu-item index="/">
+        <el-menu-item :index="workbenchTarget">
           <el-icon><Grid /></el-icon>
           <span>工作台</span>
         </el-menu-item>
@@ -69,7 +69,7 @@
 </template>
 
 <script setup>
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
   ArrowDown,
@@ -86,6 +86,7 @@ import {
 import { fetchUsers } from '../api/users'
 import { useAuthStore } from '../stores/auth'
 import { activeAdminMenuIndex } from '../utils/adminModules'
+import { saveWorkbenchQuery, workbenchMenuTarget } from '../utils/workbenchSidebarState'
 
 const route = useRoute()
 const router = useRouter()
@@ -93,7 +94,22 @@ const authStore = useAuthStore()
 const currentUsername = computed(() => localStorage.getItem('current_username') || '')
 const currentFullName = ref(cachedFullNameForCurrentUser())
 const currentDisplayName = computed(() => currentFullName.value || currentUsername.value || '未登录')
-const activeMenuIndex = computed(() => activeAdminMenuIndex(route.path) || route.path)
+const workbenchTarget = ref(workbenchMenuTarget())
+const activeMenuIndex = computed(() => {
+  if (route.path === '/' || route.path === '/dashboard') return workbenchTarget.value
+  return activeAdminMenuIndex(route.path) || route.path
+})
+
+watch(
+  () => [route.path, route.query],
+  ([path, query]) => {
+    if (path === '/' || path === '/dashboard') {
+      saveWorkbenchQuery(query)
+      workbenchTarget.value = workbenchMenuTarget()
+    }
+  },
+  { immediate: true, deep: true }
+)
 
 function handleUserCommand(command) {
   if (command === 'logout') {

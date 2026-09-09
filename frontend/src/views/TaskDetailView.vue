@@ -278,7 +278,7 @@ function taskFieldLabel(field) {
 
 function goBackToProjectTasks() {
   if (route.query.from === 'dashboard') {
-    router.push({ name: 'dashboard' })
+    router.push({ name: 'dashboard', query: { ...route.query } })
     return
   }
   if (route.query.from === 'iteration' && route.query.iterationId) {

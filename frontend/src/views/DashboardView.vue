@@ -247,8 +247,8 @@
 </template>
 
 <script setup>
-import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
-import { useRouter } from 'vue-router'
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 
 import { fetchWorkbenchItems } from '../api/dashboard'
@@ -280,8 +280,10 @@ import { DEFAULT_BUG_TYPE_KEY } from '../utils/bugTypeOptions'
 import { useBugTypes } from '../utils/useBugTypes'
 import { canSelectForBatchAssignment } from '../utils/batchAssignmentSelection'
 import { safeExecutionCellHtml, testCaseExecutionRows } from '../utils/testCaseRichText'
+import { parseWorkbenchRouteState, serializeWorkbenchRouteState } from '../utils/workbenchRouteState'
 
 const router = useRouter()
+const route = useRoute()
 const loading = ref(false)
 const saving = ref(false)
 const workbenchData = ref({})
@@ -299,6 +301,7 @@ const priorityFilter = ref([])
 const handlerFilter = ref([])
 const currentPage = ref(1)
 const pageSize = ref(20)
+const restoringRouteState = ref(true)
 const selectedCase = ref(null)
 const caseExecutionVisible = ref(false)
 const caseBugVisible = ref(false)
@@ -418,6 +421,7 @@ function resetWorkbenchPagination() {
 function handleWorkbenchCurrentPageChange(page) {
   clearWorkbenchSelection()
   currentPage.value = page
+  syncWorkbenchRoute()
   void loadWorkbench()
 }
 
@@ -425,6 +429,7 @@ function handleWorkbenchPageSizeChange(size) {
   clearWorkbenchSelection()
   pageSize.value = size
   currentPage.value = 1
+  syncWorkbenchRoute()
   void loadWorkbench()
 }
 
@@ -446,11 +451,20 @@ function openWorkItemDetail(item) {
 }
 
 function detailLink(item) {
-  if (item.object_type === 'requirement') return { name: 'requirement-detail', params: { id: item.id }, query: { from: 'dashboard' } }
-  if (item.object_type === 'task') return { name: 'task-detail', params: { id: item.id }, query: { from: 'dashboard' } }
-  if (item.object_type === 'test_case') return { name: 'test-case-detail', params: { id: item.id }, query: { from: 'dashboard' } }
-  if (item.object_type === 'test_run') return { name: 'tests', query: { run_id: item.id, from: 'dashboard' } }
-  return { name: 'bug-detail', params: { id: item.id }, query: { from: 'dashboard' } }
+  const query = { ...workbenchRouteQuery(), from: 'dashboard' }
+  if (item.object_type === 'requirement') return { name: 'requirement-detail', params: { id: item.id }, query }
+  if (item.object_type === 'task') return { name: 'task-detail', params: { id: item.id }, query }
+  if (item.object_type === 'test_case') return { name: 'test-case-detail', params: { id: item.id }, query }
+  if (item.object_type === 'test_run') return { name: 'tests', query: { ...query, run_id: item.id } }
+  return { name: 'bug-detail', params: { id: item.id }, query }
+}
+
+function workbenchRouteQuery() {
+  return serializeWorkbenchRouteState({ keyword: keywordFilter.value, projectIds: projectFilter.value, iterationIds: iterationFilter.value, types: typeFilter.value, stateIds: stateFilter.value, priorities: priorityFilter.value, handlerIds: handlerFilter.value, page: currentPage.value, pageSize: pageSize.value })
+}
+
+function syncWorkbenchRoute() {
+  void router.replace({ query: workbenchRouteQuery() })
 }
 
 function defaultExecutionTime() {
@@ -612,7 +626,49 @@ function scheduleWorkbenchReload() {
   }, 250)
 }
 
-onMounted(loadWorkbench)
+function applyWorkbenchRouteState(state) {
+  keywordFilter.value = state.keyword
+  projectFilter.value = state.projectIds
+  iterationFilter.value = state.iterationIds
+  typeFilter.value = state.types
+  stateFilter.value = state.stateIds
+  priorityFilter.value = state.priorities
+  handlerFilter.value = state.handlerIds
+  currentPage.value = state.page
+  pageSize.value = state.pageSize
+}
+
+function isSameWorkbenchRouteState(state) {
+  return JSON.stringify(state) === JSON.stringify({
+    keyword: keywordFilter.value,
+    projectIds: projectFilter.value,
+    iterationIds: iterationFilter.value,
+    types: typeFilter.value,
+    stateIds: stateFilter.value,
+    priorities: priorityFilter.value,
+    handlerIds: handlerFilter.value,
+    page: currentPage.value,
+    pageSize: pageSize.value
+  })
+}
+
+onMounted(async () => {
+  applyWorkbenchRouteState(parseWorkbenchRouteState(route.query))
+  await nextTick()
+  restoringRouteState.value = false
+  void loadWorkbench()
+})
+
+watch(() => route.query, async (query) => {
+  if (restoringRouteState.value) return
+  const state = parseWorkbenchRouteState(query)
+  if (isSameWorkbenchRouteState(state)) return
+  restoringRouteState.value = true
+  applyWorkbenchRouteState(state)
+  await nextTick()
+  restoringRouteState.value = false
+  void loadWorkbench()
+}, { deep: true })
 watch([
   keywordFilter,
   projectFilter,
@@ -622,9 +678,18 @@ watch([
   priorityFilter,
   handlerFilter
 ], () => {
+  if (restoringRouteState.value) return
   resetWorkbenchPagination()
+  syncWorkbenchRoute()
   scheduleWorkbenchReload()
 }, { deep: true })
+
+watch([currentPage, pageSize], () => syncWorkbenchRoute())
+
+onBeforeUnmount(() => {
+  if (filterReloadTimer) clearTimeout(filterReloadTimer)
+  filterReloadTimer = null
+})
 </script>
 
 <style scoped>

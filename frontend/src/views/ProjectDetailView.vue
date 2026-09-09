@@ -138,7 +138,7 @@
           <el-table-column type="selection" width="48" :selectable="(row) => canSelectProjectWorkItemForBatchAssignment('requirement', row)" />
           <el-table-column prop="id" label="ID" width="80" />
           <el-table-column label="需求标题" min-width="180" show-overflow-tooltip>
-            <template #default="{ row }"><router-link class="table-link" :to="`/requirements/${row.id}`">{{ row.title }}</router-link></template>
+            <template #default="{ row }"><router-link class="table-link" :to="{ name: 'requirement-detail', params: { id: row.id }, query: { ...route.query, from: 'project', tab: 'requirements' } }">{{ row.title }}</router-link></template>
           </el-table-column>
           <el-table-column label="迭代" width="180"><template #default="{ row }">{{ requirementIterationLabel(requirementIterationDisplayOptions.find((item) => item.id === row.iteration_id)) }}</template></el-table-column>
           <el-table-column label="当前处理人" width="130"><template #default="{ row }">{{ userLabel(users, row.owner_id) }}</template></el-table-column>
@@ -204,7 +204,7 @@
           <el-table-column type="selection" width="48" :selectable="(row) => canSelectProjectWorkItemForBatchAssignment('task', row)" />
           <el-table-column prop="id" label="ID" width="80" />
           <el-table-column label="任务标题" min-width="180" show-overflow-tooltip>
-            <template #default="{ row }"><router-link class="table-link" :to="`/tasks/${row.id}`">{{ row.title }}</router-link></template>
+            <template #default="{ row }"><router-link class="table-link" :to="{ name: 'task-detail', params: { id: row.id }, query: { ...route.query, from: 'project', tab: 'tasks' } }">{{ row.title }}</router-link></template>
           </el-table-column>
           <el-table-column label="需求" width="180"><template #default="{ row }">{{ labelById(projectRequirementOptions, row.requirement_id, 'title') }}</template></el-table-column>
           <el-table-column label="任务分支" width="120"><template #default="{ row }">{{ taskBranchLabel(row.task_type) }}</template></el-table-column>
@@ -266,7 +266,7 @@
             </div>
             <el-table :data="pagedProjectTestCases" stripe width="100%">
               <el-table-column prop="id" label="ID" width="80" />
-              <el-table-column label="用例标题" min-width="180" show-overflow-tooltip><template #default="{ row }"><router-link class="table-link" :to="{ name: 'test-case-detail', params: { id: row.id }, query: { from: 'project' } }">{{ row.title }}</router-link></template></el-table-column>
+              <el-table-column label="用例标题" min-width="180" show-overflow-tooltip><template #default="{ row }"><router-link class="table-link" :to="{ name: 'test-case-detail', params: { id: row.id }, query: { ...route.query, from: 'project', tab: 'tests' } }">{{ row.title }}</router-link></template></el-table-column>
               <el-table-column label="需求" width="180"><template #default="{ row }">{{ testCaseRequirementLabel(row.requirement_id) }}</template></el-table-column>
               <el-table-column label="测试人" width="140"><template #default="{ row }">{{ userLabel(users, row.default_tester_id) }}</template></el-table-column>
               <el-table-column label="最近执行时间" width="170"><template #default="{ row }">{{ formatDateTime(row.last_execute_time) }}</template></el-table-column>
@@ -324,7 +324,7 @@
         <el-table ref="projectBugTable" :data="pagedProjectBugs" stripe width="100%" @selection-change="(rows) => onProjectWorkItemSelectionChange('bug', rows)">
           <el-table-column type="selection" width="48" :selectable="(row) => canSelectProjectWorkItemForBatchAssignment('bug', row)" />
           <el-table-column prop="id" label="ID" width="80" />
-          <el-table-column label="Bug 标题" min-width="180" show-overflow-tooltip><template #default="{ row }"><router-link class="table-link" :to="{ name: 'bug-detail', params: { id: row.id }, query: { from: 'project' } }">{{ row.title }}</router-link></template></el-table-column>
+          <el-table-column label="Bug 标题" min-width="180" show-overflow-tooltip><template #default="{ row }"><router-link class="table-link" :to="{ name: 'bug-detail', params: { id: row.id }, query: { ...route.query, from: 'project', tab: 'bugs' } }">{{ row.title }}</router-link></template></el-table-column>
           <el-table-column label="需求" width="180"><template #default="{ row }">{{ labelById(projectRequirementOptions, row.requirement_id, 'title') }}</template></el-table-column>
           <el-table-column label="任务" width="180"><template #default="{ row }">{{ labelById(projectTaskOptions, row.task_id, 'title') }}</template></el-table-column>
               <el-table-column label="当前处理人" width="140"><template #default="{ row }">{{ userLabel(users, row.owner_id) }}</template></el-table-column>
@@ -749,6 +749,7 @@ import { DEFAULT_BUG_TYPE_KEY } from '../utils/bugTypeOptions'
 import { useBugTypes } from '../utils/useBugTypes'
 import { canSelectForBatchAssignment } from '../utils/batchAssignmentSelection'
 import { deliveryIterations, requirementIterationLabel, requirementIterationOptions } from '../utils/requirementIterations'
+import { parseProjectDetailRouteState, projectDetailRouteQuery } from '../utils/projectDetailRouteState'
 
 const route = useRoute()
 const router = useRouter()
@@ -757,7 +758,7 @@ const loading = ref(false)
 const saving = ref(false)
 const activeTab = ref(normalizeProjectTab(route.query.tab))
 const settingsTab = ref(normalizeSettingsTab(route.query.settingsTab))
-const testTab = ref('cases')
+const testTab = ref(parseProjectDetailRouteState(route.query).testTab)
 const project = ref({})
 const projects = ref([])
 const programs = ref([])
@@ -815,6 +816,39 @@ const projectListPagination = reactive({
   testRuns: { currentPage: 1, pageSize: 10 },
   bugs: { currentPage: 1, pageSize: 10 }
 })
+
+function restoreProjectListRouteState(query) {
+  const state = parseProjectDetailRouteState(query)
+  testTab.value = state.testTab
+  for (const key of ['requirements', 'tasks', 'testCases', 'testRuns', 'bugs']) {
+    projectListFilters[key].keyword = state[key].keyword
+    if ('iteration_id' in projectListFilters[key]) projectListFilters[key].iteration_id = state[key].iteration_id
+    if ('unfinished_work_items' in projectListFilters[key]) projectListFilters[key].unfinished_work_items = state[key].unfinished_work_items
+    projectListPagination[key].currentPage = state[key].page
+    projectListPagination[key].pageSize = state[key].pageSize
+  }
+  return state
+}
+
+function currentProjectListRouteState() {
+  return {
+    testTab: testTab.value,
+    ...Object.fromEntries(['requirements', 'tasks', 'testCases', 'testRuns', 'bugs'].map((key) => [key, {
+      keyword: projectListFilters[key].keyword,
+      iteration_id: projectListFilters[key].iteration_id ?? null,
+      unfinished_work_items: projectListFilters[key].unfinished_work_items || false,
+      page: projectListPagination[key].currentPage,
+      pageSize: projectListPagination[key].pageSize
+    }]))
+  }
+}
+
+function syncProjectListRouteState() {
+  router.replace({ name: 'project-detail', params: { id: projectId.value }, query: {
+    ...route.query,
+    ...projectDetailRouteQuery(currentProjectListRouteState())
+  } })
+}
 
 const iterationDialogVisible = ref(false)
 const editingIterationCanAdminister = ref(false)
@@ -1069,28 +1103,34 @@ function applyProjectPage(key, response, targetRef) {
   return false
 }
 async function loadProjectIterationsPage() {
+  syncProjectListRouteState()
   if (applyProjectPage('iterations', await fetchProjectIterations(projectId.value, projectListParams('iterations')), projectIterationRows)) await loadProjectIterationsPage()
   await loadProjectWorkflowTransitions('iteration', projectIterations.value)
 }
 async function loadProjectRequirementsPage() {
+  syncProjectListRouteState()
   clearProjectWorkItemSelection('requirement')
   if (applyProjectPage('requirements', await fetchProjectRequirements(projectId.value, projectListParams('requirements')), projectRequirementRows)) return loadProjectRequirementsPage()
   closeReasonByRequirement.value = await loadCloseReasonMap(projectRequirements.value, fetchRequirementStatusOperations)
   await loadProjectWorkflowTransitions('requirement', projectRequirements.value)
 }
 async function loadProjectTasksPage() {
+  syncProjectListRouteState()
   clearProjectWorkItemSelection('task')
   if (applyProjectPage('tasks', await fetchProjectTasks(projectId.value, projectListParams('tasks')), projectTaskRows)) return loadProjectTasksPage()
   closeReasonByTask.value = await loadCloseReasonMap(projectTasks.value, fetchTaskStatusOperations)
   await loadProjectWorkflowTransitions('task', projectTasks.value)
 }
 async function loadProjectTestCasesPage() {
+  syncProjectListRouteState()
   if (applyProjectPage('testCases', await fetchProjectTestCases(projectId.value, projectListParams('testCases')), projectTestCaseRows)) await loadProjectTestCasesPage()
 }
 async function loadProjectTestRunsPage() {
+  syncProjectListRouteState()
   if (applyProjectPage('testRuns', await fetchProjectTestRuns(projectId.value, projectListParams('testRuns')), projectTestRunRows)) await loadProjectTestRunsPage()
 }
 async function loadProjectBugsPage() {
+  syncProjectListRouteState()
   clearProjectWorkItemSelection('bug')
   if (applyProjectPage('bugs', await fetchProjectBugs(projectId.value, projectListParams('bugs')), projectBugRows)) await loadProjectBugsPage()
   await loadProjectWorkflowTransitions('bug', projectBugs.value)
@@ -1119,6 +1159,7 @@ async function refreshActiveProjectList() {
 function resetProjectListSearch(key) {
   const pager = projectListPagination[key]
   pager.currentPage = 1
+  syncProjectListRouteState()
   loadProjectListPage(key)
 }
 function normalizeRequirementPriority(value) { return legacyRequirementPriorityValues[value] || value || '3' }
@@ -1703,7 +1744,10 @@ async function removeCase(id) { try { await deleteTestCase(id); await refreshAft
 async function removeRun(id) { try { await deleteTestRun(id); await refreshAfterMutation() } catch (error) { showActionError(error, '测试单删除失败') } }
 async function removeBug(id) { try { await deleteBug(id); await refreshAfterMutation() } catch (error) { showActionError(error, 'Bug 删除失败') } }
 
-onMounted(loadData)
+onMounted(() => {
+  restoreProjectListRouteState(route.query)
+  loadData()
+})
 watch(() => route.query.tab, async (value) => {
   clearProjectWorkItemSelection()
   activeTab.value = normalizeProjectTab(value)
@@ -1713,8 +1757,16 @@ watch(() => route.query.settingsTab, (value) => {
   settingsTab.value = normalizeSettingsTab(value)
 })
 watch(testTab, async () => {
+  syncProjectListRouteState()
   if (activeTab.value === 'tests') await refreshActiveProjectList()
 })
+watch(() => route.query, async (query) => {
+  const next = parseProjectDetailRouteState(query)
+  const current = currentProjectListRouteState()
+  if (JSON.stringify(next) === JSON.stringify(current)) return
+  restoreProjectListRouteState(query)
+  await refreshActiveProjectList()
+}, { deep: true })
 
 async function openNextCaseAfterExecution(currentId, rows) {
   const index = rows.findIndex((item) => item.id === currentId)

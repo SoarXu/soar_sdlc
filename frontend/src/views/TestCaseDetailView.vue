@@ -175,7 +175,7 @@ function goBack() {
     return
   }
   if (route.query.from === 'project' && testCase.value.project_id) {
-    router.push({ name: 'project-detail', params: { id: testCase.value.project_id }, query: { tab: 'tests' } })
+    router.push({ name: 'project-detail', params: { id: testCase.value.project_id }, query: { ...route.query, tab: 'tests' } })
     return
   }
   router.push({ name: 'tests' })

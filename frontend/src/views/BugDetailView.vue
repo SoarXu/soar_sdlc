@@ -300,7 +300,7 @@ function goBack() {
     return
   }
   if (route.query.from === 'project' && bug.value.project_id) {
-    router.push({ name: 'project-detail', params: { id: bug.value.project_id }, query: { tab: 'bugs' } })
+    router.push({ name: 'project-detail', params: { id: bug.value.project_id }, query: { ...route.query, tab: 'bugs' } })
     return
   }
   if (route.query.from === 'iteration' && route.query.iterationId) {

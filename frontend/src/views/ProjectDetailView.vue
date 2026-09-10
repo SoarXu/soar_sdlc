@@ -749,7 +749,7 @@ import { DEFAULT_BUG_TYPE_KEY } from '../utils/bugTypeOptions'
 import { useBugTypes } from '../utils/useBugTypes'
 import { canSelectForBatchAssignment } from '../utils/batchAssignmentSelection'
 import { deliveryIterations, requirementIterationLabel, requirementIterationOptions } from '../utils/requirementIterations'
-import { parseProjectDetailRouteState, projectDetailRouteQuery } from '../utils/projectDetailRouteState'
+import { LIST_KEYS, parseProjectDetailRouteState, projectDetailRouteQuery } from '../utils/projectDetailRouteState'
 
 const route = useRoute()
 const router = useRouter()
@@ -844,8 +844,17 @@ function currentProjectListRouteState() {
 }
 
 function syncProjectListRouteState() {
+  const query = { ...route.query }
+  for (const key of LIST_KEYS) {
+    delete query[`${key}_keyword`]
+    delete query[`${key}_iteration_id`]
+    delete query[`${key}_unfinished_work_items`]
+    delete query[`${key}_page`]
+    delete query[`${key}_page_size`]
+  }
+  delete query.test_tab
   router.replace({ name: 'project-detail', params: { id: projectId.value }, query: {
-    ...route.query,
+    ...query,
     ...projectDetailRouteQuery(currentProjectListRouteState())
   } })
 }

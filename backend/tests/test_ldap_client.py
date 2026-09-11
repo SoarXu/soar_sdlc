@@ -55,6 +55,39 @@ def test_search_users_maps_whitelisted_ad_attributes_and_paged_cookie():
     assert result.next_cursor == "bmV4dA"
 
 
+def test_search_users_maps_empty_ldap_attribute_lists_to_none():
+    from app.services.ldap_client import LdapClient
+
+    connection = SimpleNamespace(
+        entries=[_entry(
+            sAMAccountName=["alice"],
+            employeeID=[],
+            displayName=[],
+            mail=[],
+            mobile=[],
+            department=[],
+            objectGUID=[],
+            userAccountControl=[],
+        )],
+        result={},
+    )
+    connection.search = lambda **_kwargs: True
+
+    result = LdapClient(connection_factory=lambda *_args: connection).search_users(_config(), "secret")
+
+    assert result.items == [{
+        "username": "alice",
+        "employee_no": None,
+        "full_name": None,
+        "email": None,
+        "mobile": None,
+        "department": None,
+        "external_id": None,
+        "dn": None,
+        "enabled": True,
+    }]
+
+
 def test_search_users_accepts_runtime_scope_and_disabled_account_option():
     from app.services.ldap_client import LdapClient
 

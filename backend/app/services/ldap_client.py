@@ -216,7 +216,9 @@ class LdapClient:
 
     @staticmethod
     def _one(value):
-        return value[0] if isinstance(value, (list, tuple)) and value else value
+        if isinstance(value, (list, tuple)):
+            return value[0] if value else None
+        return value
 
     @classmethod
     def _text(cls, value) -> str | None:

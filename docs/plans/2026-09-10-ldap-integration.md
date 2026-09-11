@@ -201,3 +201,20 @@
 7. 再次运行前后端目标测试，确认通过。
 8. 运行前端全量测试、后端 LDAP 目标测试和生产构建，确认无回归。
 9. 交付检查点：仅在主上明确确认后提交本任务文件。
+
+### Task 10: 禁止绑定前预读 LDAP 架构
+
+**Files:**
+- Modify: `backend/app/services/ldap_client.py`
+- Modify: `backend/app/services/ldap_auth_service.py`
+- Test: `backend/tests/test_ldap_client.py`
+- Test: `backend/tests/test_ldap_auth.py`
+
+**Steps:**
+
+1. 在目录连接和用户登录测试中新增失败断言，要求 `Server(...)` 使用 `get_info=NONE`。
+2. 运行两个目标测试，确认当前 `get_info=ALL` 导致断言失败。
+3. 将两个客户端统一改为 `get_info=NONE`，保留证书校验、超时、StartTLS/LDAPS 和显式字段查询行为。
+4. 运行后端 LDAP 全量测试，确认无回归。
+5. 使用真实 AD 域控执行 StartTLS、绑定和分页查询验收，确保不在绑定前触发匿名架构读取。
+6. 交付检查点：仅在主上明确确认后提交本任务文件。

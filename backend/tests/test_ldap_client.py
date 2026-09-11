@@ -1,6 +1,7 @@
 from types import SimpleNamespace
 
 import pytest
+from ldap3 import NONE
 from ldap3.core.exceptions import (
     LDAPBindError,
     LDAPInsufficientAccessRightsResult,
@@ -126,6 +127,7 @@ def test_ldaps_connection_requires_certificate_and_applies_timeouts(monkeypatch)
 
     assert calls["tls"]["validate"] == module.ssl.CERT_REQUIRED
     assert calls["server"][1]["connect_timeout"] == 5
+    assert calls["server"][1]["get_info"] == NONE
     assert calls["connection"][1]["receive_timeout"] == 5
     assert calls["connection"][1]["auto_bind"] is True
 

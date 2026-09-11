@@ -3,6 +3,7 @@ from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
+from ldap3 import NONE
 from jose import jwt
 
 from app.controllers import auth_controller
@@ -245,6 +246,7 @@ def test_ldaps_authentication_uses_user_dn_password_and_tls_settings(monkeypatch
     assert captured["server"][0] == "dc.example.com"
     assert captured["server"][1]["use_ssl"] is True
     assert captured["server"][1]["connect_timeout"] == 9
+    assert captured["server"][1]["get_info"] == NONE
     assert captured["connection"][1]["user"] == "CN=User,DC=example,DC=com"
     assert captured["connection"][1]["password"] == "submitted-secret"
     assert captured["connection"][1]["auto_bind"] is True

@@ -5,7 +5,7 @@ import uuid
 from dataclasses import dataclass
 from typing import Callable
 
-from ldap3 import ALL, Connection, Server, Tls
+from ldap3 import NONE, Connection, Server, Tls
 from ldap3.core.exceptions import (
     LDAPBindError as Ldap3BindError,
     LDAPCertificateError,
@@ -154,7 +154,7 @@ class LdapClient:
             use_ssl=config.protocol == "ldaps",
             tls=tls,
             connect_timeout=config.connect_timeout,
-            get_info=ALL,
+            get_info=NONE,
         )
         connection = Connection(
             server,

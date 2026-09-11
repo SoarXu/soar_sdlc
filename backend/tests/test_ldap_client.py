@@ -32,7 +32,7 @@ def test_search_users_maps_whitelisted_ad_attributes_and_paged_cookie():
                 secretAttribute=["must-not-leak"],
             )
         ],
-        result={"controls": {"1.2.840.113556.1.4.319": {"value": {"cookie": b"next"}}}},
+        result={"controls": {"1.2.840.113556.1.4.319": {"value": {"cookie": b"next", "size": 327}}}},
     )
     connection.search = lambda **_kwargs: True
     client = LdapClient(connection_factory=lambda _config, _password: connection)
@@ -53,6 +53,18 @@ def test_search_users_maps_whitelisted_ad_attributes_and_paged_cookie():
         }
     ]
     assert result.next_cursor == "bmV4dA"
+    assert result.total == 327
+
+
+def test_search_users_returns_unknown_total_when_directory_omits_estimate():
+    from app.services.ldap_client import LdapClient
+
+    connection = SimpleNamespace(entries=[], result={"controls": {"1.2.840.113556.1.4.319": {"value": {"cookie": b""}}}})
+    connection.search = lambda **_kwargs: True
+
+    result = LdapClient(connection_factory=lambda *_args: connection).search_users(_config(), "secret")
+
+    assert result.total is None
 
 
 def test_search_users_maps_empty_ldap_attribute_lists_to_none():

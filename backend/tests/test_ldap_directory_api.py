@@ -43,7 +43,7 @@ def test_directory_users_returns_only_mapped_fields(client, monkeypatch):
         "email": "alice@example.com", "mobile": None, "department": "R&D",
         "external_id": "guid-1", "dn": "CN=Alice,DC=example,DC=com", "enabled": True,
         "sync_status": "unlinked", "matched_user": None, "conflict_reason": None,
-    }], "page_size": 20, "next_cursor": None}
+    }], "page_size": 20, "next_cursor": None, "total": None}
 
 
 def test_directory_users_passes_runtime_query_scope_without_saving_config(client, monkeypatch):

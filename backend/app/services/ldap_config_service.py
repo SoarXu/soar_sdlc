@@ -99,6 +99,7 @@ def directory_users(
         "items": [match_directory_user(db, item) for item in result.items],
         "page_size": page_size,
         "next_cursor": result.next_cursor,
+        "total": result.total,
     }
 
 

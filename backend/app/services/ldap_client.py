@@ -28,6 +28,7 @@ PAGED_RESULTS_OID = "1.2.840.113556.1.4.319"
 class LdapSearchResult:
     items: list[dict]
     next_cursor: str | None
+    total: int | None = None
 
 
 class LdapClient:
@@ -72,6 +73,7 @@ class LdapClient:
             return LdapSearchResult(
                 items=[self._map_entry(entry, config) for entry in connection.entries],
                 next_cursor=self._encode_cursor(self._cookie(connection.result)),
+                total=self._total(connection.result),
             )
         except (LdapQueryError, LdapPermissionError, LdapNetworkError, LdapTlsError, LdapBindError):
             raise
@@ -236,6 +238,15 @@ class LdapClient:
     @staticmethod
     def _cookie(result: dict) -> bytes | None:
         return result.get("controls", {}).get(PAGED_RESULTS_OID, {}).get("value", {}).get("cookie") or None
+
+    @staticmethod
+    def _total(result: dict) -> int | None:
+        value = result.get("controls", {}).get(PAGED_RESULTS_OID, {}).get("value", {}).get("size")
+        try:
+            total = int(value)
+        except (TypeError, ValueError):
+            return None
+        return total if total >= 0 else None
 
     @staticmethod
     def _encode_cursor(cookie: bytes | None) -> str | None:

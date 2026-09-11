@@ -118,6 +118,7 @@ class LdapDirectoryPage(BaseModel):
     items: list[LdapDirectoryUser]
     page_size: int
     next_cursor: str | None
+    total: int | None = None
 
 
 class LdapTestResult(BaseModel):

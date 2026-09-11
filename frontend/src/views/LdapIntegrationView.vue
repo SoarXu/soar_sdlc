@@ -61,7 +61,7 @@
             <el-table-column prop="department" label="部门" min-width="110" show-overflow-tooltip />
             <el-table-column prop="email" label="邮箱" min-width="150" show-overflow-tooltip />
             <el-table-column label="SDLC 匹配" min-width="130"><template #default="{ row }"><span v-if="row.matched_user">{{ row.matched_user.full_name }} / {{ row.matched_user.username }}</span><span v-else class="muted">-</span></template></el-table-column>
-            <el-table-column label="状态" width="104"><template #default="{ row }"><el-tooltip :content="row.conflict_reason || statusMap[row.sync_status].label" :disabled="!row.conflict_reason"><el-tag :type="statusMap[row.sync_status].type" effect="plain">{{ statusMap[row.sync_status].label }}</el-tag></el-tooltip></template></el-table-column>
+            <el-table-column label="状态" width="120"><template #default="{ row }"><el-tooltip :content="row.conflict_reason || statusMap[row.sync_status].label" :disabled="!row.conflict_reason"><el-tag :type="statusMap[row.sync_status].type" effect="plain">{{ statusMap[row.sync_status].label }}</el-tag></el-tooltip></template></el-table-column>
           </el-table>
           <div class="cursor-pagination"><el-button :icon="ArrowLeft" :disabled="directoryLoading || !cursorStack.length" @click="previousPage">上一页</el-button><span>第 {{ cursorStack.length + 1 }} 页</span><el-button :disabled="directoryLoading || !nextCursor" @click="nextPage">下一页<el-icon class="el-icon--right"><ArrowRight /></el-icon></el-button></div>
         </template>

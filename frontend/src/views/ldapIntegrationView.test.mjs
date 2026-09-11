@@ -76,6 +76,11 @@ test('directory table covers selection identity matching and all statuses', () =
   assert.match(view, /!\['conflict', 'ad_disabled'\]\.includes\(row\.sync_status\)/)
 })
 
+test('status column accommodates the fixed-width status tag without ellipsis', () => {
+  assert.match(view, /<el-table-column label="状态" width="120">/)
+  assert.match(view, /\.directory-panel :deep\(\.el-tag\) \{ width: 82px;/)
+})
+
 test('sync decisions confirm suggested binding and refresh after completion', () => {
   assert.match(view, /sync_status === 'unlinked'.*decision: 'create'/s)
   assert.match(view, /sync_status === 'linked'.*decision: 'update'/s)

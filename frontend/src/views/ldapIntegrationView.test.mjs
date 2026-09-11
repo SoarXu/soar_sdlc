@@ -99,12 +99,11 @@ test('cursor pagination maintains a back stack and resets on search', () => {
   assert.match(view, /nextCursor\.value/)
 })
 
-test('directory pagination displays total records and total pages', () => {
-  assert.match(view, /const directoryTotal = ref\(null\)/)
-  assert.match(view, /const directoryPageCount = computed\(\(\) =>/)
-  assert.match(view, /共 \{\{ directoryTotal === null \? '总数未知' : directoryTotal \}\} 条/)
-  assert.match(view, /第 \{\{ cursorStack\.length \+ 1 \}\} \/ \{\{ directoryPageCount === null \? '\?' : directoryPageCount \}\} 页/)
-  assert.match(view, /directoryTotal\.value = data\.total == null \? null : Number\(data\.total\)/)
+test('directory pagination omits unavailable total counts', () => {
+  assert.doesNotMatch(view, /directoryTotal/)
+  assert.doesNotMatch(view, /directoryPageCount/)
+  assert.doesNotMatch(view, /总数未知/)
+  assert.match(view, /第 \{\{ cursorStack\.length \+ 1 \}\} 页/)
 })
 
 test('page provides bound-user sync and paged safe history UI', () => {

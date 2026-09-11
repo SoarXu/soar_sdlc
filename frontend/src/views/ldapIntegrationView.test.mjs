@@ -63,9 +63,10 @@ test('desktop keeps LDAP scrolling inside each panel and restores page flow on n
 
 test('directory table covers selection identity matching and all statuses', () => {
   assert.match(view, /type="selection"/)
-  for (const label of ['姓名', '账号', '工号', '部门', '邮箱', 'SDLC 匹配', '状态']) {
+  for (const label of ['姓名', '账号', '工号', '部门', '邮箱', '同步状态']) {
     assert.match(view, new RegExp(`label="${label}"`))
   }
+  assert.doesNotMatch(view, /label="SDLC 匹配"/)
   for (const pair of [
     ['unlinked', '未同步'], ['match_suggested', '可绑定'], ['linked', '已同步'],
     ['conflict', '冲突'], ['ad_disabled', 'AD 已禁用'],
@@ -76,8 +77,15 @@ test('directory table covers selection identity matching and all statuses', () =
   assert.match(view, /!\['conflict', 'ad_disabled'\]\.includes\(row\.sync_status\)/)
 })
 
+test('sync status column preserves suggested match and tooltip details', () => {
+  assert.match(view, /row\.sync_status === 'match_suggested' && row\.matched_user/)
+  assert.match(view, /class="matched-user"/)
+  assert.match(view, /statusTooltip\(row\)/)
+  assert.match(view, /已关联：/)
+})
+
 test('status column accommodates the fixed-width status tag without ellipsis', () => {
-  assert.match(view, /<el-table-column label="状态" width="120">/)
+  assert.match(view, /<el-table-column label="同步状态" min-width="160">/)
   assert.match(view, /\.directory-panel :deep\(\.el-tag\) \{ width: 82px;/)
 })
 

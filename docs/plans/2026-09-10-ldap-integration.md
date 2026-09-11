@@ -261,3 +261,17 @@
 3. 将状态列宽度增加到 `120px`，保留标签固定宽度和其他表格列布局。
 4. 运行 LDAP 页面测试、前端全量测试和生产构建。
 5. 交付检查点：仅在主上明确确认后提交本任务文件。
+
+### Task 14: 合并 SDLC 匹配与同步状态列
+
+**Files:**
+- Modify: `frontend/src/views/LdapIntegrationView.vue`
+- Test: `frontend/src/views/ldapIntegrationView.test.mjs`
+
+**Steps:**
+
+1. 新增失败测试，要求删除独立的“SDLC 匹配”列并保留一列“同步状态”。
+2. 在“可绑定”状态下显示目标 SDLC 用户，并为已同步和冲突状态提供悬浮信息。
+3. 调整合并列布局，保持用户表格紧凑且信息完整。
+4. 运行 LDAP 页面测试、前端全量测试和生产构建。
+5. 交付检查点：仅在主上明确确认后提交本任务文件。

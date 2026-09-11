@@ -11,7 +11,9 @@ class Settings(BaseSettings):
     app_env: str = "local"
     secret_key: str = Field(default="change-me-in-production")
     git_platform_encryption_key: str = ""
+    integration_encryption_key: str = ""
     access_token_expire_minutes: int = 1440
+    ldap_access_token_expire_minutes: int = Field(default=480, ge=1, le=480)
     database_url: str = "mysql+pymysql://root:root123@localhost:3306/intellective_bio_sdlc?charset=utf8mb4"
     backend_cors_origins: str = "http://localhost:5173,http://127.0.0.1:5173"
     slow_api_request_ms: int = 1000

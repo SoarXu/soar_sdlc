@@ -267,6 +267,8 @@ def enforce_test_user_whitelist():
 
 
 TRACKED_TABLES = [
+    "ldap_sync_items",
+    "ldap_sync_runs",
     "workflow_migration_logs",
     "work_item_components",
     "business_component_transition_routes",

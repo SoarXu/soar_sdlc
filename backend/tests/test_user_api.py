@@ -1,7 +1,9 @@
 from fastapi.testclient import TestClient
+import pytest
 from sqlalchemy import text
 from uuid import uuid4
 
+from app.core.security import create_access_token
 from app.db.session import SessionLocal
 from app.services.role_service import seed_default_roles
 from app.services.user_service import seed_default_users
@@ -157,6 +159,172 @@ def test_admin_can_reset_password_and_force_password_change_again(client: TestCl
     )
     assert login_response.status_code == 200
     assert login_response.json()["must_change_password"] is True
+
+
+def test_admin_can_create_and_edit_user_employee_number(client: TestClient):
+    username = f"employee_{uuid4().hex[:8]}"
+    created = client.post(
+        "/api/v1/users",
+        json={
+            "username": username,
+            "full_name": "Employee Before",
+            "employee_no": "  E-1001  ",
+        },
+    )
+
+    assert created.status_code == 201
+    assert created.json()["user"]["employee_no"] == "E-1001"
+    assert created.json()["user"]["auth_source"] == "local"
+
+    user_id = created.json()["user"]["id"]
+    updated = client.patch(
+        f"/api/v1/users/{user_id}",
+        json={
+            "full_name": "Employee After",
+            "employee_no": "  ",
+            "email": "employee@example.com",
+            "mobile": "13800000000",
+            "department": "R&D",
+        },
+    )
+
+    assert updated.status_code == 200
+    assert updated.json()["full_name"] == "Employee After"
+    assert updated.json()["employee_no"] is None
+    assert updated.json()["email"] == "employee@example.com"
+    assert updated.json()["department"] == "R&D"
+
+
+def test_duplicate_employee_number_returns_stable_conflict(client: TestClient):
+    suffix = uuid4().hex[:8]
+    first = client.post(
+        "/api/v1/users",
+        json={"username": f"first_{suffix}", "full_name": "First Employee", "employee_no": f"E-{suffix}"},
+    )
+    second = client.post(
+        "/api/v1/users",
+        json={"username": f"second_{suffix}", "full_name": "Second Employee"},
+    )
+
+    response = client.patch(
+        f"/api/v1/users/{second.json()['user']['id']}",
+        json={"employee_no": f"  E-{suffix}  "},
+    )
+
+    assert first.status_code == 201
+    assert second.status_code == 201
+    assert response.status_code == 409
+    assert response.json()["detail"] == {
+        "code": "EMPLOYEE_NO_ALREADY_EXISTS",
+        "message": "工号已被其他用户使用",
+    }
+
+
+def test_non_admin_cannot_edit_user_profile(client: TestClient):
+    target = next(user for user in client.get("/api/v1/users").json() if user["username"] == "bob")
+
+    response = client.patch(
+        f"/api/v1/users/{target['id']}",
+        json={"employee_no": "E-NOT-ALLOWED"},
+        headers={"Authorization": f"Bearer {create_access_token('bob')}"},
+    )
+
+    assert response.status_code == 403
+
+
+def test_admin_cannot_choose_auth_source_when_creating_user(client: TestClient):
+    response = client.post(
+        "/api/v1/users",
+        json={
+            "username": f"forged_ldap_{uuid4().hex[:8]}",
+            "full_name": "Forged LDAP User",
+            "auth_source": "ldap",
+        },
+    )
+
+    assert response.status_code == 422
+
+
+def test_duplicate_employee_number_on_create_returns_stable_conflict(client: TestClient):
+    suffix = uuid4().hex[:8]
+    employee_no = f"E-{suffix}"
+    first = client.post(
+        "/api/v1/users",
+        json={"username": f"create_first_{suffix}", "full_name": "First Employee", "employee_no": employee_no},
+    )
+
+    response = client.post(
+        "/api/v1/users",
+        json={"username": f"create_second_{suffix}", "full_name": "Second Employee", "employee_no": employee_no},
+    )
+
+    assert first.status_code == 201
+    assert response.status_code == 409
+    assert response.json()["detail"] == {
+        "code": "EMPLOYEE_NO_ALREADY_EXISTS",
+        "message": "工号已被其他用户使用",
+    }
+
+
+@pytest.mark.parametrize(
+    ("state_update", "state_name"),
+    [({"is_active": 0}, "inactive"), ({"deleted": 1}, "deleted")],
+)
+def test_employee_number_can_be_reused_after_user_becomes_invalid(
+    client: TestClient,
+    state_update: dict[str, int],
+    state_name: str,
+):
+    suffix = uuid4().hex[:8]
+    employee_no = f"E-{suffix}"
+    first = client.post(
+        "/api/v1/users",
+        json={"username": f"old_{state_name}_{suffix}", "full_name": "Former Employee", "employee_no": employee_no},
+    )
+    user_id = first.json()["user"]["id"]
+    assignment = ", ".join(f"{column}=:{column}" for column in state_update)
+    db = SessionLocal()
+    try:
+        db.execute(text(f"update users set {assignment} where id=:user_id"), {**state_update, "user_id": user_id})
+        db.commit()
+    finally:
+        db.close()
+
+    response = client.post(
+        "/api/v1/users",
+        json={"username": f"new_{state_name}_{suffix}", "full_name": "Replacement Employee", "employee_no": employee_no},
+    )
+
+    assert response.status_code == 201
+    assert response.json()["user"]["employee_no"] == employee_no
+
+
+def test_employee_number_longer_than_64_characters_is_rejected(client: TestClient):
+    response = client.post(
+        "/api/v1/users",
+        json={
+            "username": f"long_employee_{uuid4().hex[:8]}",
+            "full_name": "Long Employee Number",
+            "employee_no": "E" * 65,
+        },
+    )
+
+    assert response.status_code == 422
+
+
+def test_users_list_requires_authentication(client: TestClient):
+    response = client.get("/api/v1/users", headers={"X-Test-No-Auth": "1"})
+
+    assert response.status_code == 401
+
+
+def test_authenticated_non_admin_can_list_users(client: TestClient):
+    response = client.get(
+        "/api/v1/users",
+        headers={"Authorization": f"Bearer {create_access_token('bob')}"},
+    )
+
+    assert response.status_code == 200
 
 
 def _delete_users_by_username(usernames: list[str]) -> None:

@@ -20,14 +20,23 @@
           <el-table v-loading="loading" :data="users" stripe>
             <el-table-column prop="full_name" label="姓名" min-width="140" />
             <el-table-column prop="username" label="账号" min-width="140" />
+            <el-table-column prop="employee_no" label="工号" min-width="120" />
             <el-table-column prop="department" label="部门" min-width="160" />
+            <el-table-column label="认证来源" width="110">
+              <template #default="{ row }">{{ row.auth_source === 'ldap' ? 'AD 用户' : '本地' }}</template>
+            </el-table-column>
             <el-table-column label="系统管理员" width="130">
               <template #default="{ row }">
                 <el-switch :model-value="row.is_system_admin" :disabled="!isSystemAdmin || row.id === currentUserId" @change="setSystemAdmin(row, $event)" />
               </template>
             </el-table-column>
             <el-table-column label="首次改密" width="110"><template #default="{ row }">{{ row.must_change_password ? '是' : '否' }}</template></el-table-column>
-            <el-table-column v-if="isSystemAdmin" label="操作" width="120" fixed="right"><template #default="{ row }"><el-button link type="primary" @click="resetPassword(row)">重置密码</el-button></template></el-table-column>
+            <el-table-column v-if="isSystemAdmin" label="操作" width="160" fixed="right">
+              <template #default="{ row }">
+                <el-button link type="primary" @click="openEditUser(row)">编辑</el-button>
+                <el-button v-if="row.auth_source !== 'ldap'" link type="primary" @click="resetPassword(row)">重置密码</el-button>
+              </template>
+            </el-table-column>
           </el-table>
         </el-card>
       </el-tab-pane>
@@ -60,18 +69,20 @@
       <template #footer><el-button @click="roleDialogVisible = false">取消</el-button><el-button type="primary" :loading="saving" @click="submitRole">保存</el-button></template>
     </el-dialog>
 
-    <el-dialog v-model="userDialogVisible" title="新增用户" width="620px">
+    <el-dialog v-model="userDialogVisible" :title="editingUserId ? '编辑用户' : '新增用户'" width="620px">
       <el-form label-position="top">
         <div class="form-grid">
-          <el-form-item label="账号" required><el-input v-model="userForm.username" /></el-form-item>
+          <el-form-item label="账号" required><el-input v-model="userForm.username" :disabled="Boolean(editingUserId)" /></el-form-item>
           <el-form-item label="姓名" required><el-input v-model="userForm.full_name" /></el-form-item>
+          <el-form-item label="工号"><el-input v-model="userForm.employee_no" maxlength="64" /></el-form-item>
           <el-form-item label="邮箱"><el-input v-model="userForm.email" /></el-form-item>
           <el-form-item label="手机号"><el-input v-model="userForm.mobile" /></el-form-item>
+          <el-form-item label="认证来源"><el-input :model-value="userForm.auth_source === 'ldap' ? 'AD 用户' : '本地'" disabled /></el-form-item>
         </div>
         <el-form-item label="部门"><el-input v-model="userForm.department" /></el-form-item>
-        <el-form-item label="系统管理员"><el-switch v-model="userForm.is_system_admin" /></el-form-item>
+        <el-form-item v-if="!editingUserId" label="系统管理员"><el-switch v-model="userForm.is_system_admin" /></el-form-item>
       </el-form>
-      <template #footer><el-button @click="userDialogVisible = false">取消</el-button><el-button type="primary" :loading="saving" @click="submitUser">创建用户</el-button></template>
+      <template #footer><el-button @click="userDialogVisible = false">取消</el-button><el-button type="primary" :loading="saving" @click="submitUser">{{ editingUserId ? '保存' : '创建用户' }}</el-button></template>
     </el-dialog>
 
     <el-dialog v-model="passwordDialogVisible" title="一次性初始密码" width="520px" :close-on-click-modal="false" @closed="loadData">
@@ -88,7 +99,7 @@ import { ElMessage } from 'element-plus'
 import { useRouter } from 'vue-router'
 
 import { createRole, deleteRole, fetchRoles, updateRole } from '../api/roles'
-import { createUser, fetchUsers, resetUserPassword, setUserSystemAdmin } from '../api/users'
+import { createUser, fetchUsers, resetUserPassword, setUserSystemAdmin, updateUser } from '../api/users'
 import { actionErrorMessage } from '../utils/permissions'
 
 const router = useRouter()
@@ -101,15 +112,17 @@ const roleDialogVisible = ref(false)
 const userDialogVisible = ref(false)
 const passwordDialogVisible = ref(false)
 const editingRoleId = ref(null)
+const editingUserId = ref(null)
 const oneTimePassword = ref('')
 const roleForm = reactive({ role_name: '', description: '', enabled: true })
-const userForm = reactive({ username: '', full_name: '', email: '', mobile: '', department: '', is_system_admin: false })
+const userForm = reactive({ username: '', full_name: '', employee_no: '', email: '', mobile: '', department: '', auth_source: 'local', is_system_admin: false })
 const currentUserId = computed(() => Number(localStorage.getItem('current_user_id') || 0))
 const currentUser = computed(() => users.value.find((user) => user.id === currentUserId.value))
 const isSystemAdmin = computed(() => Boolean(currentUser.value?.is_system_admin))
 
 function backToAdmin() { router.push('/admin') }
-function openCreateUser() { Object.assign(userForm, { username: '', full_name: '', email: '', mobile: '', department: '', is_system_admin: false }); userDialogVisible.value = true }
+function openCreateUser() { editingUserId.value = null; Object.assign(userForm, { username: '', full_name: '', employee_no: '', email: '', mobile: '', department: '', auth_source: 'local', is_system_admin: false }); userDialogVisible.value = true }
+function openEditUser(row) { editingUserId.value = row.id; Object.assign(userForm, { username: row.username, full_name: row.full_name, employee_no: row.employee_no || '', email: row.email || '', mobile: row.mobile || '', department: row.department || '', auth_source: row.auth_source || 'local', is_system_admin: row.is_system_admin }); userDialogVisible.value = true }
 function openCreateRole() { editingRoleId.value = null; Object.assign(roleForm, { role_name: '', description: '', enabled: true }); roleDialogVisible.value = true }
 function openEditRole(row) { editingRoleId.value = row.id; Object.assign(roleForm, { role_name: row.role_name, description: row.description || '', enabled: row.enabled }); roleDialogVisible.value = true }
 
@@ -128,8 +141,15 @@ async function submitUser() {
   if (!userForm.username.trim() || !userForm.full_name.trim()) return ElMessage.warning('请填写账号和姓名')
   saving.value = true
   try {
-    const { data } = await createUser({ ...userForm })
-    upsertUser(data.user); oneTimePassword.value = data.initial_password; userDialogVisible.value = false; passwordDialogVisible.value = true
+    if (editingUserId.value) {
+      const { username, auth_source, is_system_admin, ...profile } = userForm
+      const { data } = await updateUser(editingUserId.value, profile)
+      upsertUser(data); userDialogVisible.value = false; ElMessage.success('用户信息已更新')
+    } else {
+      const { auth_source, ...newUser } = userForm
+      const { data } = await createUser(newUser)
+      upsertUser(data.user); oneTimePassword.value = data.initial_password; userDialogVisible.value = false; passwordDialogVisible.value = true
+    }
     await loadData()
   } catch (error) { ElMessage.error(actionErrorMessage(error)) } finally { saving.value = false }
 }

@@ -17,6 +17,9 @@ _ASCII_TOKEN = re.compile(r"[A-Za-z][A-Za-z0-9_]*")
 # no error-code-to-copy dictionary: it only renders the message in this contract.
 _LEGACY_PHRASES = {
     "Incorrect username or password": "用户名或密码错误",
+    "Directory service temporarily unavailable": "目录服务暂时不可用",
+    "LDAP user password is managed by directory service": "目录用户密码由目录服务管理",
+    "LDAP 同步任务正在运行": "LDAP 同步任务正在运行",
     "Not authenticated": "请先登录",
     "System administrator role required": "需要系统管理员权限",
     "Iteration not found": "未找到迭代",
@@ -213,6 +216,10 @@ def _to_chinese_message(message: str) -> str:
 
 
 def _legacy_error_code(message: str) -> str:
+    if message == "Directory service temporarily unavailable":
+        return "LDAP_DIRECTORY_UNAVAILABLE"
+    if message == "LDAP user password is managed by directory service":
+        return "LDAP_PASSWORD_MANAGED_EXTERNALLY"
     if message == "项目集名称已存在":
         return "PROGRAM_NAME_ALREADY_EXISTS"
     if message == "项目名称已存在":

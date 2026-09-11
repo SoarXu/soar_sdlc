@@ -15,6 +15,8 @@ from app.models.field_registry import CustomFieldValue, FormFieldRegistry, FormL
 from app.models.integration_mapping import ExternalIntegrationMapping
 from app.models.iteration import Iteration, IterationProject
 from app.models.iteration_completion_snapshot import IterationCompletionSnapshot
+from app.models.ldap_integration import LdapIntegrationConfig
+from app.models.ldap_sync import LdapSyncItem, LdapSyncRun
 from app.models.notification import Notification, NotificationChannelConfig, NotificationDeliveryLog
 from app.models.object_watch import ObjectWatch
 from app.models.project import Project
@@ -51,6 +53,7 @@ __all__ = [
     "Iteration",
     "IterationCompletionSnapshot",
     "IterationProject",
+    "LdapIntegrationConfig",
     "Notification",
     "NotificationChannelConfig",
     "NotificationDeliveryLog",

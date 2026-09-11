@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 
 from app.models.role import Role, RoleCapability
 from app.models.user import User
+from app.services.local_admin_service import ensure_local_admin_remains
 from app.views.role_view import RoleCreate, RoleUpdate
 
 
@@ -78,6 +79,8 @@ def set_user_system_admin(db: Session, user_id: int, is_system_admin: bool) -> U
     user = db.query(User).filter(User.id == user_id, User.deleted == 0).first()
     if not user:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+    if not is_system_admin:
+        ensure_local_admin_remains(db, user)
     user.is_system_admin = is_system_admin
     db.commit()
     db.refresh(user)

@@ -8,6 +8,10 @@ export function createUser(data) {
   return http.post('/users', data)
 }
 
+export function updateUser(userId, data) {
+  return http.patch(`/users/${userId}`, data)
+}
+
 export function setUserSystemAdmin(userId, isSystemAdmin) {
   return http.put(`/users/${userId}/system-admin`, { is_system_admin: isSystemAdmin })
 }

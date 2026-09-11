@@ -19,8 +19,10 @@ def get_password_hash(password: str) -> str:
     return pwd_context.hash(password)
 
 
-def create_access_token(subject: str) -> str:
-    expires_delta = timedelta(minutes=settings.access_token_expire_minutes)
+def create_access_token(subject: str, expires_minutes: int | None = None) -> str:
+    expires_delta = timedelta(
+        minutes=settings.access_token_expire_minutes if expires_minutes is None else expires_minutes
+    )
     expire = datetime.now(timezone.utc) + expires_delta
     payload = {"sub": subject, "exp": expire}
     return jwt.encode(payload, settings.secret_key, algorithm=ALGORITHM)
@@ -34,8 +36,26 @@ def decrypt_secret(value: str) -> str:
     return _secret_fernet().decrypt(value.encode("utf-8")).decode("utf-8")
 
 
+def encrypt_integration_secret(value: str) -> str:
+    return _integration_fernet().encrypt(value.encode("utf-8")).decode("utf-8")
+
+
+def decrypt_integration_secret(value: str) -> str:
+    return _integration_fernet().decrypt(value.encode("utf-8")).decode("utf-8")
+
+
+def _integration_fernet() -> Fernet:
+    key = settings.integration_encryption_key.strip() or settings.git_platform_encryption_key.strip()
+    if not key:
+        raise SecretConfigurationError("INTEGRATION_ENCRYPTION_KEY must be configured before storing integration secrets")
+    try:
+        return Fernet(key.encode("utf-8"))
+    except ValueError as error:
+        raise SecretConfigurationError("INTEGRATION_ENCRYPTION_KEY is not a valid Fernet key") from error
+
+
 def _secret_fernet() -> Fernet:
-    key = settings.git_platform_encryption_key.strip()
+    key = settings.git_platform_encryption_key.strip() or settings.integration_encryption_key.strip()
     if not key:
         raise SecretConfigurationError("GIT_PLATFORM_ENCRYPTION_KEY must be configured before storing Git tokens")
     try:

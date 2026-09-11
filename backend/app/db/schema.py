@@ -171,6 +171,156 @@ def _ensure_program_name_uniqueness_schema(engine: Engine) -> None:
         )
 
 
+def _ensure_ldap_user_identity_schema(engine: Engine) -> None:
+    if not _is_mysql_family(engine) or "users" not in inspect(engine).get_table_names():
+        return
+    _ensure_column(engine, "users", "employee_no", "ALTER TABLE users ADD COLUMN employee_no VARCHAR(64) NULL")
+    _ensure_column(engine, "users", "auth_source", "ALTER TABLE users ADD COLUMN auth_source VARCHAR(16) NOT NULL DEFAULT 'local'")
+    _ensure_column(engine, "users", "ldap_external_id", "ALTER TABLE users ADD COLUMN ldap_external_id VARCHAR(255) NULL")
+    _ensure_column(engine, "users", "ldap_dn", "ALTER TABLE users ADD COLUMN ldap_dn VARCHAR(512) NULL")
+    _ensure_column(engine, "users", "ldap_last_synced_at", "ALTER TABLE users ADD COLUMN ldap_last_synced_at DATETIME NULL")
+
+    inspector = inspect(engine)
+    columns = {column["name"] for column in inspector.get_columns("users")}
+    indexes = inspector.get_indexes("users")
+    with engine.begin() as connection:
+        for index in indexes:
+            if index.get("unique") and index.get("column_names") == ["employee_no"]:
+                index_name = str(index["name"]).replace("`", "``")
+                connection.execute(text(f"DROP INDEX `{index_name}` ON users"))
+        if "active_employee_no" not in columns:
+            connection.execute(
+                text(
+                    "ALTER TABLE users ADD COLUMN active_employee_no VARCHAR(64) "
+                    "GENERATED ALWAYS AS (CASE WHEN deleted = 0 AND is_active = 1 "
+                    "AND employee_no IS NOT NULL AND TRIM(employee_no) <> '' "
+                    "THEN employee_no ELSE NULL END) STORED"
+                )
+            )
+        if not any(index.get("name") == "uq_users_active_employee_no" for index in indexes):
+            connection.execute(text("CREATE UNIQUE INDEX uq_users_active_employee_no ON users (active_employee_no)"))
+        if not any(index.get("unique") and index.get("column_names") == ["ldap_external_id"] for index in indexes):
+            connection.execute(text("CREATE UNIQUE INDEX uq_users_ldap_external_id ON users (ldap_external_id)"))
+        connection.execute(text("UPDATE users SET auth_source = 'local' WHERE auth_source IS NULL OR auth_source = ''"))
+
+
+def _ensure_ldap_integration_schema(engine: Engine) -> None:
+    if not _is_mysql_family(engine):
+        return
+    if "ldap_integration_config" in inspect(engine).get_table_names():
+        column_definitions = {
+            "enabled": "TINYINT(1) NOT NULL DEFAULT 0",
+            "protocol": "VARCHAR(8) NOT NULL DEFAULT 'ldaps'",
+            "host": "VARCHAR(255) NOT NULL DEFAULT ''",
+            "port": "INT NOT NULL DEFAULT 636",
+            "connect_timeout": "INT NOT NULL DEFAULT 5",
+            "base_dn": "VARCHAR(512) NOT NULL DEFAULT ''",
+            "bind_username": "VARCHAR(512) NOT NULL DEFAULT ''",
+            "bind_password_encrypted": "TEXT NULL",
+            "user_base_dn": "VARCHAR(512) NULL",
+            "user_filter": "VARCHAR(1000) NOT NULL DEFAULT '(&(objectCategory=person)(objectClass=user))'",
+            "exclude_disabled": "TINYINT(1) NOT NULL DEFAULT 1",
+            "page_size": "INT NOT NULL DEFAULT 50",
+            "username_attribute": "VARCHAR(64) NOT NULL DEFAULT 'sAMAccountName'",
+            "employee_no_attribute": "VARCHAR(64) NOT NULL DEFAULT 'employeeID'",
+            "full_name_attribute": "VARCHAR(64) NOT NULL DEFAULT 'displayName'",
+            "email_attribute": "VARCHAR(64) NOT NULL DEFAULT 'mail'",
+            "mobile_attribute": "VARCHAR(64) NOT NULL DEFAULT 'mobile'",
+            "department_attribute": "VARCHAR(64) NOT NULL DEFAULT 'department'",
+            "external_id_attribute": "VARCHAR(64) NOT NULL DEFAULT 'objectGUID'",
+            "tested_fingerprint": "VARCHAR(64) NULL",
+            "tested_at": "DATETIME NULL",
+            "create_time": "DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP",
+            "update_time": "DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP",
+        }
+        for column_name, definition in column_definitions.items():
+            _ensure_column(
+                engine,
+                "ldap_integration_config",
+                column_name,
+                f"ALTER TABLE ldap_integration_config ADD COLUMN {column_name} {definition}",
+            )
+        constraints = inspect(engine).get_check_constraints("ldap_integration_config")
+        if not any(item.get("name") == "ck_ldap_integration_config_singleton" for item in constraints):
+            with engine.begin() as connection:
+                connection.execute(text(
+                    "ALTER TABLE ldap_integration_config MODIFY COLUMN id BIGINT NOT NULL"
+                ))
+                connection.execute(text(
+                    "ALTER TABLE ldap_integration_config ADD CONSTRAINT "
+                    "ck_ldap_integration_config_singleton CHECK (id = 1)"
+                ))
+        return
+    with engine.begin() as connection:
+        connection.execute(text(
+            "CREATE TABLE ldap_integration_config ("
+            "id BIGINT NOT NULL PRIMARY KEY, enabled TINYINT(1) NOT NULL DEFAULT 0, "
+            "protocol VARCHAR(8) NOT NULL DEFAULT 'ldaps', host VARCHAR(255) NOT NULL, "
+            "port INT NOT NULL DEFAULT 636, connect_timeout INT NOT NULL DEFAULT 5, "
+            "base_dn VARCHAR(512) NOT NULL, bind_username VARCHAR(512) NOT NULL, "
+            "bind_password_encrypted TEXT NOT NULL, user_base_dn VARCHAR(512) NULL, "
+            "user_filter VARCHAR(1000) NOT NULL, exclude_disabled TINYINT(1) NOT NULL DEFAULT 1, "
+            "page_size INT NOT NULL DEFAULT 50, username_attribute VARCHAR(64) NOT NULL DEFAULT 'sAMAccountName', "
+            "employee_no_attribute VARCHAR(64) NOT NULL DEFAULT 'employeeID', "
+            "full_name_attribute VARCHAR(64) NOT NULL DEFAULT 'displayName', email_attribute VARCHAR(64) NOT NULL DEFAULT 'mail', "
+            "mobile_attribute VARCHAR(64) NOT NULL DEFAULT 'mobile', department_attribute VARCHAR(64) NOT NULL DEFAULT 'department', "
+            "external_id_attribute VARCHAR(64) NOT NULL DEFAULT 'objectGUID', tested_fingerprint VARCHAR(64) NULL, "
+            "tested_at DATETIME NULL, create_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, "
+            "update_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP, "
+            "CONSTRAINT ck_ldap_integration_config_singleton CHECK (id = 1)"
+            ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='LDAP integration configuration'"
+        ))
+
+
+def _ensure_ldap_sync_audit_schema(engine: Engine) -> None:
+    if not _is_mysql_family(engine):
+        return
+    tables = set(inspect(engine).get_table_names())
+    with engine.begin() as connection:
+        if "ldap_sync_runs" not in tables:
+            connection.execute(text(
+                "CREATE TABLE ldap_sync_runs ("
+                "id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY, initiated_by_user_id BIGINT NULL, "
+                "status VARCHAR(24) NOT NULL DEFAULT 'running', total_count INT NOT NULL DEFAULT 0, "
+                "created_count INT NOT NULL DEFAULT 0, bound_count INT NOT NULL DEFAULT 0, "
+                "updated_count INT NOT NULL DEFAULT 0, skipped_count INT NOT NULL DEFAULT 0, "
+                "failed_count INT NOT NULL DEFAULT 0, started_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, "
+                "completed_at DATETIME NULL, CONSTRAINT fk_ldap_sync_runs_user "
+                "FOREIGN KEY (initiated_by_user_id) REFERENCES users(id) ON DELETE SET NULL"
+                ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4"
+            ))
+        if "ldap_sync_items" not in tables:
+            connection.execute(text(
+                "CREATE TABLE ldap_sync_items ("
+                "id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY, run_id BIGINT NOT NULL, "
+                "external_id VARCHAR(255) NOT NULL, decision VARCHAR(16) NOT NULL, "
+                "status VARCHAR(16) NOT NULL, user_id BIGINT NULL, message VARCHAR(500) NULL, "
+                "create_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, "
+                "INDEX ix_ldap_sync_items_run_id (run_id), "
+                "CONSTRAINT fk_ldap_sync_items_run FOREIGN KEY (run_id) REFERENCES ldap_sync_runs(id) ON DELETE CASCADE, "
+                "CONSTRAINT fk_ldap_sync_items_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL"
+                ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4"
+            ))
+
+    run_columns = {
+        "initiated_by_user_id": "BIGINT NULL", "status": "VARCHAR(24) NOT NULL DEFAULT 'running'",
+        "total_count": "INT NOT NULL DEFAULT 0", "created_count": "INT NOT NULL DEFAULT 0",
+        "bound_count": "INT NOT NULL DEFAULT 0", "updated_count": "INT NOT NULL DEFAULT 0",
+        "skipped_count": "INT NOT NULL DEFAULT 0", "failed_count": "INT NOT NULL DEFAULT 0",
+        "started_at": "DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP", "completed_at": "DATETIME NULL",
+    }
+    item_columns = {
+        "run_id": "BIGINT NOT NULL", "external_id": "VARCHAR(255) NOT NULL",
+        "decision": "VARCHAR(16) NOT NULL", "status": "VARCHAR(16) NOT NULL",
+        "user_id": "BIGINT NULL", "message": "VARCHAR(500) NULL",
+        "create_time": "DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP",
+    }
+    for column_name, definition in run_columns.items():
+        _ensure_column(engine, "ldap_sync_runs", column_name, f"ALTER TABLE ldap_sync_runs ADD COLUMN {column_name} {definition}")
+    for column_name, definition in item_columns.items():
+        _ensure_column(engine, "ldap_sync_items", column_name, f"ALTER TABLE ldap_sync_items ADD COLUMN {column_name} {definition}")
+
+
 def _ensure_column(engine: Engine, table: str, col: str, ddl: str, index_ddl: str | None = None) -> None:
     inspector = inspect(engine)
     if table not in inspector.get_table_names():
@@ -319,6 +469,9 @@ def _history_open_lookup_index_exists(indexes: list[dict], canonical_name: str =
 def ensure_runtime_schema(engine: Engine) -> None:
     _validate_final_workflow_schema(engine)
     _ensure_program_name_uniqueness_schema(engine)
+    _ensure_ldap_user_identity_schema(engine)
+    _ensure_ldap_integration_schema(engine)
+    _ensure_ldap_sync_audit_schema(engine)
     inspector0 = inspect(engine)
     if "status_operation_log" in inspector0.get_table_names():
         _ensure_column(

@@ -54,6 +54,24 @@ def test_search_users_maps_whitelisted_ad_attributes_and_paged_cookie():
     assert result.next_cursor == "bmV4dA"
 
 
+def test_search_users_accepts_runtime_scope_and_disabled_account_option():
+    from app.services.ldap_client import LdapClient
+
+    calls = []
+    connection = SimpleNamespace(entries=[], result={})
+    connection.search = lambda **kwargs: calls.append(kwargs) or True
+
+    LdapClient(connection_factory=lambda *_args: connection).search_users(
+        _config(),
+        "secret",
+        user_base_dn="OU=Contractors,DC=example,DC=com",
+        exclude_disabled=False,
+    )
+
+    assert calls[0]["search_base"] == "OU=Contractors,DC=example,DC=com"
+    assert calls[0]["search_filter"] == "(&(&(objectCategory=person)(objectClass=user)))"
+
+
 def test_search_users_rejects_unsafe_query_without_contacting_directory():
     from app.services.ldap_client import LdapClient, LdapQueryError
 

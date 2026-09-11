@@ -13,8 +13,8 @@ test('LDAP API follows the saved-config directory and sync contracts', () => {
   assert.match(api, /fetchLdapSyncRuns\(params\).*http\.get\('\/admin\/ldap\/sync-runs', \{ params \}\)/)
 })
 
-test('page exposes four configuration groups and all AD default mappings', () => {
-  for (const title of ['连接设置', '查询账号', '用户查询', '字段映射']) assert.match(view, new RegExp(title))
+test('page exposes three connection configuration groups and all AD default mappings', () => {
+  for (const title of ['连接设置', '查询账号', '字段映射']) assert.match(view, new RegExp(title))
   for (const value of ['sAMAccountName', 'employeeID', 'displayName', 'mail', 'mobile', 'department', 'objectGUID']) {
     assert.match(view, new RegExp(value))
   }
@@ -24,9 +24,30 @@ test('page exposes four configuration groups and all AD default mappings', () =>
   assert.match(view, /修改连接身份后需重新输入绑定密码/)
 })
 
+test('AD user filter stays internal instead of being administrator-configurable', () => {
+  assert.doesNotMatch(view, /label="用户筛选器"/)
+  assert.doesNotMatch(view, /user_filter:\s*\[\{ required:/)
+  assert.match(view, /user_filter: '\(&\(objectCategory=person\)\(objectClass=user\)\)'/)
+})
+
+test('directory query controls live above the AD list and apply without saving config', () => {
+  assert.doesNotMatch(view, /<h3>用户查询<\/h3>/)
+  const controls = view.indexOf('class="directory-query-controls"')
+  const table = view.indexOf('<el-table ref="directoryTableRef"')
+  assert.ok(controls > view.indexOf('class="directory-heading"'))
+  assert.ok(table > controls)
+  for (const label of ['用户 Base DN', '排除禁用账号', '每页数量']) assert.match(view, new RegExp(label))
+  assert.match(view, /const directoryQuery = reactive/)
+  assert.match(view, /user_base_dn: appliedDirectoryQuery\.user_base_dn/)
+  assert.match(view, /exclude_disabled: appliedDirectoryQuery\.exclude_disabled/)
+})
+
 test('page uses stable responsive workbench layout and ready empty state', () => {
   assert.match(view, /class="ldap-workbench"/)
   assert.match(view, /grid-template-columns:\s*minmax\(0,\s*44fr\) minmax\(0,\s*56fr\)/)
+  assert.match(view, /class="page-action-column page-action-right"/)
+  assert.match(view, /\.ldap-page \.page-actions \{[^}]*grid-template-columns:\s*minmax\(0,\s*44fr\) minmax\(0,\s*56fr\)/)
+  assert.match(view, /\.page-action-right \{[^}]*justify-content:\s*space-between/)
   assert.match(view, /@media \(max-width: 900px\)/)
   assert.match(view, /v-if="!directoryReady"/)
   assert.match(view, /保存并测试配置后可查询目录用户/)

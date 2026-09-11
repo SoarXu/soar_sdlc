@@ -34,10 +34,19 @@ def directory_users(
     q: str | None = Query(default=None, max_length=100),
     cursor: str | None = Query(default=None, max_length=2048),
     page_size: int = Query(default=50, ge=1, le=200),
+    user_base_dn: str | None = Query(default=None, max_length=512),
+    exclude_disabled: bool | None = Query(default=None),
     db: Session = Depends(get_db),
     _admin=Depends(require_system_admin),
 ):
-    return ldap_config_service.directory_users(db, q, cursor, page_size)
+    return ldap_config_service.directory_users(
+        db,
+        q,
+        cursor,
+        page_size,
+        user_base_dn=user_base_dn,
+        exclude_disabled=exclude_disabled,
+    )
 
 
 @router.post("/sync", response_model=LdapSyncResponse)

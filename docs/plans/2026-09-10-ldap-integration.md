@@ -178,3 +178,26 @@
 6. 检查日志和 API 响应，确认不存在绑定密码、用户密码或加密密文。
 7. 检查 `git diff`，确保不包含工作区内与 LDAP 无关的既有改动。
 8. 根据当时 Git 分支、主分支、远程和上游状态向主上提供实际可用的交付选项，未经明确确认不提交、推送、合并或创建 PR。
+
+### Task 9: 简化用户查询配置
+
+**Files:**
+- Modify: `backend/app/controllers/ldap_controller.py`
+- Modify: `backend/app/services/ldap_config_service.py`
+- Modify: `backend/app/services/ldap_client.py`
+- Modify: `frontend/src/views/LdapIntegrationView.vue`
+- Test: `backend/tests/test_ldap_client.py`
+- Test: `backend/tests/test_ldap_directory_api.py`
+- Test: `frontend/src/views/ldapIntegrationView.test.mjs`
+
+**Steps:**
+
+1. 新增失败测试，确认页面不再呈现“用户筛选器”，查询范围控件位于右侧列表上方，并且目录接口接受临时查询范围和禁用账号条件。
+2. 运行后端目录查询目标测试与 `cd frontend; node --test src/views/ldapIntegrationView.test.mjs`，确认测试失败。
+3. 移除左侧“用户查询”配置组及筛选器校验，保留固定 `(&(objectCategory=person)(objectClass=user))` 作为内部配置值。
+4. 扩展目录查询接口，允许本次请求覆盖用户 Base DN 和排除禁用账号选项，但不修改已保存配置及测试指纹。
+5. 在右侧列表上方增加查询范围控件；点击“查询”应用草稿条件，刷新和翻页沿用最近一次已应用条件。
+6. 将页头操作区设置为与内容区一致的双栏网格，使“同步历史”左边缘与 AD 用户面板左边界对齐，并为窄屏提供自适应布局。
+7. 再次运行前后端目标测试，确认通过。
+8. 运行前端全量测试、后端 LDAP 目标测试和生产构建，确认无回归。
+9. 交付检查点：仅在主上明确确认后提交本任务文件。

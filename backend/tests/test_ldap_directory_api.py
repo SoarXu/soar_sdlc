@@ -46,6 +46,32 @@ def test_directory_users_returns_only_mapped_fields(client, monkeypatch):
     }], "page_size": 20, "next_cursor": None}
 
 
+def test_directory_users_passes_runtime_query_scope_without_saving_config(client, monkeypatch):
+    settings.__dict__["integration_encryption_key"] = Fernet.generate_key().decode()
+    assert client.put("/api/v1/admin/ldap", json=_payload()).status_code == 200
+    _mark_config_ready()
+    calls = []
+
+    def fake_search(*_args, **kwargs):
+        calls.append(kwargs)
+        return LdapSearchResult(items=[], next_cursor=None)
+
+    monkeypatch.setattr("app.services.ldap_config_service.ldap_client.search_users", fake_search)
+    response = client.get(
+        "/api/v1/admin/ldap/directory-users",
+        params={
+            "user_base_dn": "OU=Contractors,DC=example,DC=com",
+            "exclude_disabled": False,
+            "page_size": 30,
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    assert calls[0]["user_base_dn"] == "OU=Contractors,DC=example,DC=com"
+    assert calls[0]["exclude_disabled"] is False
+    assert calls[0]["page_size"] == 30
+
+
 def test_non_admin_cannot_read_ldap_config(client):
     from app.core.security import create_access_token
 

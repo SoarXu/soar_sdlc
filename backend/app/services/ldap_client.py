@@ -44,6 +44,8 @@ class LdapClient:
         query: str | None = None,
         cursor: str | None = None,
         page_size: int | None = None,
+        user_base_dn: str | None = None,
+        exclude_disabled: bool | None = None,
     ) -> LdapSearchResult:
         if query and any(char in query for char in "()*\\\x00"):
             raise LdapQueryError("搜索关键字包含非法字符")
@@ -51,9 +53,14 @@ class LdapClient:
         connection = None
         try:
             connection = self._connection_factory(config, password)
+            search_base = (
+                config.user_base_dn or config.base_dn
+                if user_base_dn is None
+                else user_base_dn.strip() or config.base_dn
+            )
             ok = connection.search(
-                search_base=config.user_base_dn or config.base_dn,
-                search_filter=self._search_filter(config, query),
+                search_base=search_base,
+                search_filter=self._search_filter(config, query, exclude_disabled),
                 attributes=self._attributes(config),
                 paged_size=page_size or config.page_size,
                 paged_cookie=cookie,
@@ -175,9 +182,9 @@ class LdapClient:
         ]))
 
     @staticmethod
-    def _search_filter(config, query: str | None) -> str:
+    def _search_filter(config, query: str | None, exclude_disabled: bool | None = None) -> str:
         clauses = [config.user_filter]
-        if config.exclude_disabled:
+        if config.exclude_disabled if exclude_disabled is None else exclude_disabled:
             clauses.append("(!(userAccountControl:1.2.840.113556.1.4.803:=2))")
         if query:
             value = escape_filter_chars(query.strip())

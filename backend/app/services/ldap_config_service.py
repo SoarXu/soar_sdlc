@@ -72,10 +72,25 @@ def test_config(db: Session) -> dict:
     return {"success": True, "message": "LDAP 连接及用户查询测试成功", "sampled_users": count, "tested_at": config.tested_at}
 
 
-def directory_users(db: Session, query: str | None, cursor: str | None, page_size: int) -> dict:
+def directory_users(
+    db: Session,
+    query: str | None,
+    cursor: str | None,
+    page_size: int,
+    user_base_dn: str | None = None,
+    exclude_disabled: bool | None = None,
+) -> dict:
     config = require_ready_config(db)
     try:
-        result = ldap_client.search_users(config, _password(config), query=query, cursor=cursor, page_size=page_size)
+        result = ldap_client.search_users(
+            config,
+            _password(config),
+            query=query,
+            cursor=cursor,
+            page_size=page_size,
+            user_base_dn=user_base_dn,
+            exclude_disabled=exclude_disabled,
+        )
     except LdapQueryError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
     except LdapConnectionError as error:

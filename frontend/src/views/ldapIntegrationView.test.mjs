@@ -53,6 +53,14 @@ test('page uses stable responsive workbench layout and ready empty state', () =>
   assert.match(view, /保存并测试配置后可查询目录用户/)
 })
 
+test('desktop keeps LDAP scrolling inside each panel and restores page flow on narrow screens', () => {
+  assert.match(view, /\.ldap-page \{[^}]*height:\s*100%[^}]*overflow:\s*hidden/)
+  assert.match(view, /\.ldap-workbench \{[^}]*height:\s*100%[^}]*min-height:\s*0/)
+  assert.match(view, /\.config-panel \{[^}]*overflow-y:\s*auto/)
+  assert.match(view, /<el-table[^>]*height="100%"/)
+  assert.match(view, /@media \(max-width: 900px\)[\s\S]*?\.ldap-page \{[^}]*height:\s*auto[^}]*overflow:\s*visible/)
+})
+
 test('directory table covers selection identity matching and all statuses', () => {
   assert.match(view, /type="selection"/)
   for (const label of ['姓名', '账号', '工号', '部门', '邮箱', 'SDLC 匹配', '状态']) {

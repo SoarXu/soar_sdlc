@@ -1,8 +1,9 @@
 <template>
   <div v-if="selectedRows.length" class="batch-assignment-bar">
     <span class="batch-assignment-count">已选 {{ selectedRows.length }} 项</span>
-    <el-button type="primary" :disabled="!candidateUsers.length || submitting" @click="dialogVisible = true">指派给</el-button>
-    <span v-if="!candidateUsers.length" class="batch-assignment-hint">所选记录没有共同可指派人员</span>
+    <el-button v-if="canAssign" type="primary" :disabled="submitting || claimSubmitting" @click="dialogVisible = true">指派给</el-button>
+    <el-button v-if="canClaim" type="success" :loading="claimSubmitting" :disabled="submitting || claimSubmitting" @click="claim">认领</el-button>
+    <span v-if="!canAssign && !canClaim" class="batch-assignment-hint">所选记录没有可执行的批量操作</span>
 
     <el-dialog v-model="dialogVisible" title="批量指派" width="460px" append-to-body :close-on-click-modal="!submitting">
       <el-form label-position="top">
@@ -25,12 +26,15 @@
 
 <script setup>
 import { computed, ref, watch } from 'vue'
-import { ElMessage } from 'element-plus'
-import { executeWorkflowBulkAssignment } from '../api/workflowRuntime'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import { executeWorkflowBulkAssignment, executeWorkflowBulkClaim } from '../api/workflowRuntime'
 import {
+  canBatchAssignRows,
+  canBatchClaimRows,
   eligibleAssigneeIds,
   isBatchAssignmentReasonRequired,
-  toBatchAssignmentItems
+  toBatchAssignmentItems,
+  toBatchClaimItems
 } from '../utils/batchAssignmentSelection'
 
 const props = defineProps({
@@ -45,8 +49,11 @@ const dialogVisible = ref(false)
 const nextOwnerId = ref(null)
 const delegateReason = ref('')
 const submitting = ref(false)
+const claimSubmitting = ref(false)
 const candidateUserIds = computed(() => eligibleAssigneeIds(props.selectedRows))
 const candidateUsers = computed(() => props.users.filter((user) => candidateUserIds.value.includes(user.id)))
+const canAssign = computed(() => canBatchAssignRows(props.selectedRows) && candidateUsers.value.length > 0)
+const canClaim = computed(() => canBatchClaimRows(props.selectedRows))
 const reasonRequired = computed(() => isBatchAssignmentReasonRequired(props.selectedRows))
 
 watch(() => props.selectedRows, (rows) => {
@@ -78,6 +85,32 @@ async function submit() {
     emit('error', error)
   } finally {
     submitting.value = false
+  }
+}
+
+async function claim() {
+  try {
+    await ElMessageBox.confirm(`确认认领已选 ${props.selectedRows.length} 项吗？`, '批量认领', {
+      type: 'warning',
+      confirmButtonText: '确认认领',
+      cancelButtonText: '取消'
+    })
+  } catch {
+    return
+  }
+  claimSubmitting.value = true
+  try {
+    const { data } = await executeWorkflowBulkClaim({
+      object_type: props.objectType,
+      project_id: props.projectId,
+      items: toBatchClaimItems(props.selectedRows)
+    })
+    ElMessage.success(`已认领 ${data.completed_count} 项`)
+    emit('completed', data)
+  } catch (error) {
+    emit('error', error)
+  } finally {
+    claimSubmitting.value = false
   }
 }
 </script>

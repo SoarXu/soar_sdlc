@@ -62,6 +62,8 @@ from app.views.status_operation_view import StatusOperationCreate
 from app.views.workflow_runtime_view import (
     WorkflowBulkAssignmentRead,
     WorkflowBulkAssignmentRequest,
+    WorkflowBulkClaimRead,
+    WorkflowBulkClaimRequest,
     WorkflowTransitionActionRead,
     WorkflowTransitionBatchRead,
     WorkflowTransitionBatchRequest,
@@ -317,6 +319,52 @@ def execute_bulk_assignment(
         object_type=payload.object_type,
         project_id=payload.project_id,
         next_owner_id=payload.next_owner_id,
+        completed_count=len(results),
+        completed_item_ids=[result.id for result in results],
+    )
+
+
+def execute_bulk_claim(
+    db: Session,
+    payload: WorkflowBulkClaimRequest,
+    actor: User | None,
+) -> WorkflowBulkClaimRead:
+    ensure_authenticated(actor)
+    ensure_default_workflow_templates(db)
+    if payload.object_type not in {"requirement", "task", "bug"}:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unsupported bulk claim object type")
+    if len({item.id for item in payload.items}) != len(payload.items):
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Duplicate bulk claim item")
+
+    prepared: list[tuple[object, WorkflowTransitionExecuteRequest]] = []
+    for batch_item in payload.items:
+        item = _get_item(db, payload.object_type, batch_item.id)
+        if _project_id_for_item(db, payload.object_type, item) != payload.project_id:
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Bulk claim items must belong to one project")
+        transition, _ = _get_executable_transition(db, payload.object_type, item, batch_item.transition_id)
+        _ensure_supported_runtime_configuration(transition)
+        if transition.action_key != "claim":
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Bulk claim requires claim transitions")
+        request = WorkflowTransitionExecuteRequest(transition_id=batch_item.transition_id)
+        _ensure_can_execute(db, payload.object_type, item, transition, actor, request)
+        metadata = _bulk_claim_metadata(db, item, transition, actor)
+        if not metadata["supported"]:
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Workflow transition does not support bulk claim")
+        prepared.append((item, request))
+
+    try:
+        results = [
+            _execute_transition(db, payload.object_type, item, request, actor, commit=False)
+            for item, request in prepared
+        ]
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    return WorkflowBulkClaimRead(
+        object_type=payload.object_type,
+        project_id=payload.project_id,
+        claimant_id=actor.id,
         completed_count=len(results),
         completed_item_ids=[result.id for result in results],
     )
@@ -1089,7 +1137,34 @@ def _transition_read(db: Session, item, transition: WorkflowTransition, actor: U
         form_config=form_config,
         eligible_assignee_ids=eligible_assignee_ids,
         bulk_assignment=_bulk_assignment_metadata(db, item, transition, actor),
+        bulk_claim=_bulk_claim_metadata(db, item, transition, actor),
     )
+
+
+def _bulk_claim_metadata(
+    db: Session,
+    item,
+    transition: WorkflowTransition,
+    actor: User | None,
+) -> dict[str, bool]:
+    project_id = _project_id_for_item(db, _object_type_for_item(item), item)
+    project = (
+        cached_runtime_value(
+            db,
+            "projects",
+            project_id,
+            lambda: db.query(Project).filter(Project.id == project_id, Project.deleted == 0).first(),
+        )
+        if project_id else None
+    )
+    return {
+        "supported": bool(
+            actor
+            and transition.action_key == "claim"
+            and project
+            and not is_terminal_state(project)
+        )
+    }
 
 
 def _transition_enters_execution(db: Session, transition: WorkflowTransition) -> bool:

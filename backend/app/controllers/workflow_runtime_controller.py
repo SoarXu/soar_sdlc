@@ -8,6 +8,8 @@ from app.services import workflow_runtime_service
 from app.views.workflow_runtime_view import (
     WorkflowBulkAssignmentRead,
     WorkflowBulkAssignmentRequest,
+    WorkflowBulkClaimRead,
+    WorkflowBulkClaimRequest,
     WorkflowTransitionActionRead,
     WorkflowTransitionBatchRead,
     WorkflowTransitionBatchRequest,
@@ -45,6 +47,15 @@ def post_runtime_bulk_assignment(
     current_user: User | None = Depends(get_optional_current_user),
 ):
     return workflow_runtime_service.execute_bulk_assignment(db, payload, current_user)
+
+
+@router.post("/claims/batch", response_model=WorkflowBulkClaimRead)
+def post_runtime_bulk_claim(
+    payload: WorkflowBulkClaimRequest,
+    db: Session = Depends(get_db),
+    current_user: User | None = Depends(get_optional_current_user),
+):
+    return workflow_runtime_service.execute_bulk_claim(db, payload, current_user)
 
 
 @router.post("/{object_type}/{object_id}/transition", response_model=WorkflowTransitionExecuteRead)

@@ -2,13 +2,24 @@ export function batchAssignmentTransition(row) {
   return (row?.transitions || []).find((transition) => transition?.bulk_assignment?.supported) || null
 }
 
+export function batchClaimTransition(row) {
+  return (row?.transitions || []).find((transition) => transition?.bulk_claim?.supported) || null
+}
+
 export function canSelectForBatchAssignment(row, selectedRows = []) {
-  const transition = batchAssignmentTransition(row)
-  if (!transition) return false
+  if (!batchAssignmentTransition(row) && !batchClaimTransition(row)) return false
   const selectedObjectType = selectedRows[0]?.object_type
   if (selectedObjectType && row.object_type && row.object_type !== selectedObjectType) return false
   const selectedProjectId = selectedRows[0]?.project_id
   return selectedProjectId === undefined || selectedProjectId === null || row.project_id === selectedProjectId
+}
+
+export function canBatchAssignRows(rows = []) {
+  return rows.length > 0 && rows.every((row) => Boolean(batchAssignmentTransition(row)))
+}
+
+export function canBatchClaimRows(rows = []) {
+  return rows.length > 0 && rows.every((row) => Boolean(batchClaimTransition(row)))
 }
 
 export function eligibleAssigneeIds(rows = []) {
@@ -25,4 +36,8 @@ export function isBatchAssignmentReasonRequired(rows = []) {
 
 export function toBatchAssignmentItems(rows = []) {
   return rows.map((row) => ({ id: row.id, transition_id: batchAssignmentTransition(row)?.transition_id }))
+}
+
+export function toBatchClaimItems(rows = []) {
+  return rows.map((row) => ({ id: row.id, transition_id: batchClaimTransition(row)?.transition_id }))
 }

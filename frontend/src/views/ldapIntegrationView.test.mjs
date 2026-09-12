@@ -155,3 +155,9 @@ test('configuration actions are mutually exclusive and binding cancel is handled
   assert.match(view, /if \(configBusy\.value\) return; configBusy\.value = true; saving\.value = true; try \{ await formRef\.value\.validate\(\)/)
   assert.match(view, /if \(configBusy\.value\) return; configBusy\.value = true; testing\.value = true; try \{ await formRef\.value\.validate\(\)/)
 })
+
+test('ready LDAP config automatically loads the first directory page on entry', () => {
+  assert.match(view, /async function initializePage\(\) \{ await loadConfig\(\); if \(directoryReady\.value\) await loadDirectory\(\{ reset: true \}\) \}/)
+  assert.match(view, /onMounted\(initializePage\)/)
+  assert.doesNotMatch(view, /onMounted\(loadConfig\)/)
+})

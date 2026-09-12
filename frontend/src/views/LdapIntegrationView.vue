@@ -123,7 +123,8 @@ async function syncSelected() { try { const items = []; for (const row of select
 async function syncBoundUsers() { syncingBound.value = true; try { const { data } = await syncBoundLdapUsers(); ElMessage.success(`已同步 ${data.summary.updated} 位用户，失败 ${data.summary.failed}`); if (directoryReady.value) await loadDirectory({ reset: true }) } catch (error) { ElMessage.error(actionErrorMessage(error)) } finally { syncingBound.value = false } }
 async function openHistory() { historyVisible.value = true; historyPage.value = 1; await loadHistory() }
 async function loadHistory() { historyLoading.value = true; try { const { data } = await fetchLdapSyncRuns({ page: historyPage.value, page_size: historyPageSize }); syncRuns.value = data.items || []; historyTotal.value = data.total || 0 } catch (error) { ElMessage.error(actionErrorMessage(error)) } finally { historyLoading.value = false } }
-onMounted(loadConfig)
+async function initializePage() { await loadConfig(); if (directoryReady.value) await loadDirectory({ reset: true }) }
+onMounted(initializePage)
 </script>
 
 <style scoped>

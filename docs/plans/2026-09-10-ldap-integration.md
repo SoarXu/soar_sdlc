@@ -275,3 +275,17 @@
 3. 调整合并列布局，保持用户表格紧凑且信息完整。
 4. 运行 LDAP 页面测试、前端全量测试和生产构建。
 5. 交付检查点：仅在主上明确确认后提交本任务文件。
+
+### Task 15: 进入页面后自动加载 AD 用户
+
+**Files:**
+- Modify: `frontend/src/views/LdapIntegrationView.vue`
+- Test: `frontend/src/views/ldapIntegrationView.test.mjs`
+
+**Steps:**
+
+1. 新增失败测试，要求页面初始化加载配置后，在目录可用时自动查询第一页。
+2. 增加初始化函数，等待配置加载完成并检查已保存配置的启用和验证状态。
+3. 仅在目录可用时调用 `loadDirectory({ reset: true })`，未配置或未验证时不发起目录请求。
+4. 运行 LDAP 页面测试、前端全量测试和生产构建。
+5. 交付检查点：仅在主上明确确认后提交本任务文件。

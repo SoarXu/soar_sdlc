@@ -104,6 +104,8 @@ assert.doesNotMatch(dashboardPageSource, /paginateWorkbenchItems\(filteredListIt
   assert.match(dashboardSource, /const activeIterationItems = computed\(\(\) => workbenchPage\.value\.items/)
   assert.match(dashboardSource, /const pagedListPage = computed\(\(\) => \(\{[\s\S]*?total: Number\(workbenchPage\.value\.total/)
   assert.match(dashboardSource, /const pagedListItems = computed\(\(\) => pagedListPage\.value\.items\)/)
+  assert.match(dashboardSource, /const expandedStateIds = computed\(\(\) => stateFilter\.value\.flatMap/)
+  assert.match(dashboardSource, /state_ids: expandedStateIds\.value/)
   assert.match(dashboardSource, /<el-table[^>]*:data="pagedListItems"/)
   assert.match(dashboardSource, /<el-tag>\{\{ pagedListPage\.total \}\} 项<\/el-tag>/, '工作台表头应显示服务端返回的总数')
   assert.match(dashboardSource, /<el-pagination[\s\S]*?v-model:current-page="currentPage"/)

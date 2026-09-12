@@ -335,6 +335,10 @@ const priorityLevelOptions = [
 
 const activeIterationItems = computed(() => workbenchPage.value.items || [])
 const filterOptions = computed(() => workbenchPage.value.filter_options || {})
+const expandedStateIds = computed(() => stateFilter.value.flatMap((value) => {
+  const option = (filterOptions.value.statuses || []).find((item) => item.value === value)
+  return option?.state_ids || [value]
+}))
 const filteredListItems = computed(() => activeIterationItems.value)
 const pagedListPage = computed(() => ({
   items: activeIterationItems.value,
@@ -598,7 +602,7 @@ async function loadWorkbench() {
         project_ids: projectFilter.value,
         iteration_ids: iterationFilter.value,
         object_types: typeFilter.value,
-        state_ids: stateFilter.value,
+        state_ids: expandedStateIds.value,
         priorities: priorityFilter.value,
         handler_ids: handlerFilter.value
       }),

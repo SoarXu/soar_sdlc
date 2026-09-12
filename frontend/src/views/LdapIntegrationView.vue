@@ -60,12 +60,21 @@
             <el-table-column prop="employee_no" label="工号" min-width="92" show-overflow-tooltip />
             <el-table-column prop="department" label="部门" min-width="110" show-overflow-tooltip />
             <el-table-column prop="email" label="邮箱" min-width="150" show-overflow-tooltip />
-            <el-table-column label="同步状态" min-width="160"><template #default="{ row }"><div class="sync-status-cell"><el-tooltip :content="statusTooltip(row)" :disabled="!statusTooltip(row)"><el-tag :type="statusMap[row.sync_status].type" effect="plain">{{ statusMap[row.sync_status].label }}</el-tag></el-tooltip><span v-if="row.sync_status === 'match_suggested' && row.matched_user" class="matched-user">{{ row.matched_user.full_name }} / {{ row.matched_user.username }}</span></div></template></el-table-column>
+            <el-table-column label="同步状态" min-width="220"><template #default="{ row }"><div class="sync-status-cell"><el-tooltip :content="statusTooltip(row)" :disabled="!statusTooltip(row)"><el-tag :type="statusMap[row.sync_status].type" effect="plain">{{ statusMap[row.sync_status].label }}</el-tag></el-tooltip><span v-if="row.sync_status === 'match_suggested' && row.matched_user" class="matched-user">{{ row.matched_user.full_name }} / {{ row.matched_user.username }}</span><el-button v-if="['unlinked', 'match_suggested'].includes(row.sync_status)" link type="primary" size="small" @click="openBindDialog(row)">绑定 SDLC 用户</el-button></div></template></el-table-column>
           </el-table>
           <div class="cursor-pagination"><el-button :icon="ArrowLeft" :disabled="directoryLoading || !cursorStack.length" @click="previousPage">上一页</el-button><span>第 {{ cursorStack.length + 1 }} 页</span><el-button :disabled="directoryLoading || !nextCursor" @click="nextPage">下一页<el-icon class="el-icon--right"><ArrowRight /></el-icon></el-button></div>
         </template>
       </section>
     </div>
+
+    <el-dialog v-model="bindDialogVisible" title="绑定 SDLC 用户" width="min(560px, 92vw)" @closed="resetBindDialog">
+      <div class="bind-directory-user">AD 用户：{{ bindSource?.full_name || '-' }} / {{ bindSource?.username || '-' }}</div>
+      <el-input v-model="bindUserKeyword" clearable placeholder="搜索姓名、账号或工号" />
+      <el-radio-group v-model="bindTargetId" class="bind-user-list" v-loading="bindLoading">
+        <el-radio v-for="user in filteredBindUsers" :key="user.id" :label="user.id"><span>{{ user.full_name }} / {{ user.username }}</span><small>{{ user.employee_no || '无工号' }} · {{ user.auth_source === 'ldap' ? 'AD 用户' : '本地用户' }}</small></el-radio>
+      </el-radio-group>
+      <template #footer><el-button @click="bindDialogVisible = false">取消</el-button><el-button type="primary" :loading="binding" :disabled="!bindTargetId" @click="confirmBind">确认绑定</el-button></template>
+    </el-dialog>
 
     <el-drawer v-model="historyVisible" title="同步历史" size="min(620px, 92vw)"><el-table v-loading="historyLoading" :data="syncRuns"><el-table-column prop="started_at" label="执行时间" min-width="168" /><el-table-column prop="status" label="状态" width="110" /><el-table-column prop="total_count" label="总数" width="72" /><el-table-column prop="failed_count" label="失败" width="72" /><el-table-column prop="error_summary" label="错误摘要" min-width="180" show-overflow-tooltip /></el-table><el-pagination v-model:current-page="historyPage" :page-size="historyPageSize" :total="historyTotal" layout="prev, pager, next" @current-change="loadHistory" /></el-drawer>
   </section>
@@ -76,7 +85,7 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { ArrowLeft, ArrowRight, Clock, Refresh, Search, Upload } from '@element-plus/icons-vue'
 import { useRouter } from 'vue-router'
-import { fetchLdapConfig, fetchLdapDirectoryUsers, fetchLdapSyncRuns, saveLdapConfig, syncBoundLdapUsers, syncLdapUsers, testLdapConnection } from '../api/ldap'
+import { fetchLdapBindUsers, fetchLdapConfig, fetchLdapDirectoryUsers, fetchLdapSyncRuns, saveLdapConfig, syncBoundLdapUsers, syncLdapUsers, testLdapConnection } from '../api/ldap'
 import { actionErrorMessage } from '../utils/permissions'
 
 const router = useRouter()
@@ -89,6 +98,7 @@ const directoryQuery = reactive(defaultDirectoryQuery())
 const appliedDirectoryQuery = reactive(defaultDirectoryQuery())
 const currentCursor = ref(null); const nextCursor = ref(null); const cursorStack = ref([])
 const historyVisible = ref(false); const historyLoading = ref(false); const syncRuns = ref([]); const historyPage = ref(1); const historyPageSize = 20; const historyTotal = ref(0)
+const bindDialogVisible = ref(false); const bindLoading = ref(false); const binding = ref(false); const bindUsers = ref([]); const bindUserKeyword = ref(''); const bindTargetId = ref(null); const bindSource = ref(null)
 const savedIdentity = ref(null)
 const savedConfiguration = ref(null)
 const persistedEnabled = ref(false)
@@ -100,6 +110,7 @@ const statusMap = { unlinked: { label: '未同步', type: 'info' }, match_sugges
 const directoryReady = computed(() => Boolean(persistedEnabled.value && form.configuration_tested))
 const connectionIdentityChanged = computed(() => Boolean(savedIdentity.value && savedIdentity.value !== identityKey() && !form.bind_password))
 const configurationChanged = computed(() => savedConfiguration.value !== configurationKey())
+const filteredBindUsers = computed(() => { const keywordValue = bindUserKeyword.value.trim().toLowerCase(); if (!keywordValue) return bindUsers.value; return bindUsers.value.filter(user => [user.full_name, user.username, user.employee_no].some(value => String(value || '').toLowerCase().includes(keywordValue))) })
 
 function defaultForm() { return { enabled: false, protocol: 'ldaps', host: '', port: 636, connect_timeout: 5, base_dn: '', bind_username: '', bind_password: '', has_bind_password: false, user_base_dn: '', user_filter: '(&(objectCategory=person)(objectClass=user))', exclude_disabled: true, page_size: 50, username_attribute: 'sAMAccountName', employee_no_attribute: 'employeeID', full_name_attribute: 'displayName', email_attribute: 'mail', mobile_attribute: 'mobile', department_attribute: 'department', external_id_attribute: 'objectGUID', configuration_tested: false } }
 function defaultDirectoryQuery() { return { user_base_dn: '', exclude_disabled: true, page_size: 50 } }
@@ -109,6 +120,9 @@ function configurationKey() { const value = payload(); delete value.enabled; del
 function handleProtocolChange(value) { if (value === 'ldaps' && form.port === 389) form.port = 636; else if (value === 'ldap' && form.port === 636) form.port = 389 }
 function selectableDirectoryUser(row) { return Boolean(row.external_id) && !['conflict', 'ad_disabled'].includes(row.sync_status) }
 function statusTooltip(row) { if (row.conflict_reason) return row.conflict_reason; if (row.sync_status === 'linked' && row.matched_user) return `已关联：${row.matched_user.full_name} / ${row.matched_user.username}`; return '' }
+async function openBindDialog(row) { bindSource.value = row; bindTargetId.value = row.matched_user?.id || null; bindUserKeyword.value = ''; bindDialogVisible.value = true; bindLoading.value = true; try { bindUsers.value = (await fetchLdapBindUsers()).data || [] } catch (error) { bindDialogVisible.value = false; ElMessage.error(actionErrorMessage(error)) } finally { bindLoading.value = false } }
+function resetBindDialog() { bindSource.value = null; bindTargetId.value = null; bindUserKeyword.value = ''; bindUsers.value = [] }
+async function confirmBind() { if (!bindSource.value || !bindTargetId.value || binding.value) return; binding.value = true; try { const { data } = await syncLdapUsers([{ external_id: bindSource.value.external_id, decision: 'bind', user_id: bindTargetId.value }]); const item = data.items?.[0]; if (item?.status === 'failed') throw new Error(item.message || '绑定失败'); ElMessage.success('LDAP 用户绑定成功'); bindDialogVisible.value = false; await loadDirectory({ reset: true }) } catch (error) { ElMessage.error(error?.message || actionErrorMessage(error)) } finally { binding.value = false } }
 
 async function loadConfig() { loading.value = true; try { const data = (await fetchLdapConfig()).data; Object.assign(form, defaultForm(), data || {}, { bind_password: '' }); const queryDefaults = { user_base_dn: form.user_base_dn || '', exclude_disabled: form.exclude_disabled, page_size: form.page_size }; Object.assign(directoryQuery, queryDefaults); Object.assign(appliedDirectoryQuery, queryDefaults); savedIdentity.value = data ? identityKey() : null; savedConfiguration.value = data ? configurationKey() : null; persistedEnabled.value = Boolean(data?.enabled) } catch (error) { ElMessage.error(actionErrorMessage(error)) } finally { loading.value = false } }
 async function persistConfig(enabled = form.enabled) { const request = { ...payload(), enabled }; const { data } = await saveLdapConfig(request); Object.assign(form, data, { bind_password: '' }); savedIdentity.value = identityKey(); savedConfiguration.value = configurationKey(); persistedEnabled.value = Boolean(data.enabled); return data }
@@ -140,5 +154,5 @@ onMounted(initializePage)
 @media (max-width: 900px) { .ldap-page { display: block; height: auto; overflow: visible; }.ldap-workbench,.config-panel,.directory-panel { height: auto; }.config-panel { overflow-y: visible; }.directory-panel :deep(.el-table) { flex: none; height: 590px !important; }.directory-panel :deep(.el-empty) { flex: none; } }
 @media (max-width: 600px) { .ldap-page .page-actions { grid-template-columns: 1fr; }.page-action-right { flex-wrap: wrap; gap: 8px; }.form-grid,.mapping-grid { grid-template-columns: 1fr; }.span-2 { grid-column: auto; }.directory-query-controls { grid-template-columns: 1fr 1fr; }.directory-query-base { grid-column: 1 / -1; }.directory-toolbar { grid-template-columns: 1fr auto; }.directory-toolbar .el-button:last-child { display: none; }.page-head { align-items: flex-start; flex-direction: column; } }
 @media (max-width: 600px) { .directory-panel :deep(.el-table) { height: 440px !important; } }
-.sync-status-cell { display: flex; align-items: center; gap: 8px; min-width: 0; }.matched-user { min-width: 0; overflow: hidden; color: var(--el-text-color-secondary); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.sync-status-cell { display: flex; align-items: center; gap: 8px; min-width: 0; }.matched-user { min-width: 0; overflow: hidden; color: var(--el-text-color-secondary); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }.bind-directory-user { margin-bottom: 14px; color: var(--el-text-color-regular); }.bind-user-list { display: grid; max-height: 300px; margin-top: 14px; overflow-y: auto; }.bind-user-list :deep(.el-radio) { display: flex; align-items: flex-start; min-height: 42px; margin-right: 0; }.bind-user-list small { display: block; margin-top: 3px; color: var(--el-text-color-secondary); font-size: 12px; }
 </style>

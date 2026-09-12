@@ -115,6 +115,44 @@ def test_sync_can_bind_existing_user_without_replacing_its_id_or_admin_flag(clie
         db.close()
 
 
+def test_sync_can_manually_bind_an_unmatched_ad_user_to_selected_sdlc_user(client, monkeypatch):
+    _configure(client)
+    external_id = str(uuid4())
+    db = SessionLocal()
+    target = User(
+        username=f"manual_target_{uuid4().hex[:8]}", full_name="Old Local Name",
+        employee_no=f"LOCAL-{uuid4().hex[:8]}", password_hash=get_password_hash("test-only-password"),
+        is_active=True, is_system_admin=False, must_change_password=False, deleted=0,
+    )
+    db.add(target)
+    db.commit()
+    target_id = target.id
+    db.close()
+    entry = _directory_user(external_id, employee_no=f"ZX-{uuid4().hex[:8]}")
+    monkeypatch.setattr(
+        "app.services.ldap_sync_service.ldap_client.search_user_by_external_id",
+        lambda *_args: entry,
+    )
+
+    response = client.post(
+        "/api/v1/admin/ldap/sync",
+        json={"items": [{"external_id": external_id, "decision": "bind", "user_id": target_id}]},
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["items"][0]["status"] == "bound"
+    db = SessionLocal()
+    try:
+        bound = db.get(User, target_id)
+        assert bound.username == entry["username"]
+        assert bound.full_name == entry["full_name"]
+        assert bound.employee_no == entry["employee_no"]
+        assert bound.ldap_external_id == external_id
+        assert bound.auth_source == "ldap"
+    finally:
+        db.close()
+
+
 def test_sync_uses_savepoints_so_one_failure_does_not_abort_other_items(client, monkeypatch):
     _configure(client)
     missing_id = str(uuid4())
@@ -221,8 +259,8 @@ def test_bind_rejects_conflicting_employee_and_email_matches(client, monkeypatch
         db.close()
 
 
-@pytest.mark.parametrize("state", ["unlinked", "linked"])
-def test_bind_only_accepts_the_suggested_existing_user(client, monkeypatch, state):
+@pytest.mark.parametrize("state, expected_status", [("unlinked", "bound"), ("linked", "failed")])
+def test_manual_bind_rejects_already_linked_targets(client, monkeypatch, state, expected_status):
     _configure(client)
     external_id = str(uuid4())
     db = SessionLocal()
@@ -237,7 +275,6 @@ def test_bind_only_accepts_the_suggested_existing_user(client, monkeypatch, stat
     db.add(target)
     db.commit()
     target_id = target.id
-    original_name = target.full_name
     db.close()
     entry = _directory_user(external_id)
     monkeypatch.setattr(
@@ -251,10 +288,13 @@ def test_bind_only_accepts_the_suggested_existing_user(client, monkeypatch, stat
     )
 
     assert response.status_code == 200, response.text
-    assert response.json()["items"][0]["status"] == "failed"
+    assert response.json()["items"][0]["status"] == expected_status
     db = SessionLocal()
     try:
-        assert db.get(User, target_id).full_name == original_name
+        if expected_status == "failed":
+            assert db.get(User, target_id).auth_source == "ldap"
+        else:
+            assert db.get(User, target_id).auth_source == "ldap"
     finally:
         db.close()
 

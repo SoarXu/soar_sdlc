@@ -316,14 +316,15 @@ def _apply_decision(db: Session, entry: dict, decision: str, user_id: int | None
     if decision == "bind":
         if not entry.get("enabled", True):
             raise SyncItemError("AD_USER_DISABLED", "AD 用户已禁用，不能绑定")
-        if match["sync_status"] != "match_suggested":
-            code = "MATCH_CONFLICT" if match["sync_status"] == "conflict" else "BIND_NOT_SUGGESTED"
-            raise SyncItemError(code, "只有唯一匹配建议的 AD 用户才能绑定")
-        if not matched or matched["id"] != user_id:
-            raise SyncItemError("BIND_TARGET_MISMATCH", "绑定目标与匹配建议不一致")
+        if match["sync_status"] == "conflict":
+            raise SyncItemError("MATCH_CONFLICT", "AD 用户存在多个匹配结果，不能直接绑定")
+        if match["sync_status"] in {"linked", "ad_disabled"}:
+            raise SyncItemError("ALREADY_LINKED", "AD 用户已经绑定 SDLC 用户")
+        if match["sync_status"] == "match_suggested" and (not matched or matched["id"] != user_id):
+            raise SyncItemError("BIND_TARGET_MISMATCH", "绑定目标与系统建议不一致，请先处理匹配冲突")
         user = (
             db.query(User)
-            .filter(User.id == user_id, User.deleted == 0)
+            .filter(User.id == user_id, User.deleted == 0, User.is_active.is_(True))
             .with_for_update()
             .first()
         )

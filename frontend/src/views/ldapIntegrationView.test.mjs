@@ -11,6 +11,7 @@ test('LDAP API follows the saved-config directory and sync contracts', () => {
   assert.match(api, /syncLdapUsers\(items\).*http\.post\('\/admin\/ldap\/sync', \{ items \}, \{ timeout: 900000 \}\)/)
   assert.match(api, /syncBoundLdapUsers\(\).*http\.post\('\/admin\/ldap\/sync-bound-users', null, \{ timeout: 900000 \}\)/)
   assert.match(api, /fetchLdapSyncRuns\(params\).*http\.get\('\/admin\/ldap\/sync-runs', \{ params \}\)/)
+  assert.match(api, /fetchLdapBindUsers\(\).*http\.get\('\/admin\/ldap\/bind-users'\)/)
 })
 
 test('page exposes three connection configuration groups and all AD default mappings', () => {
@@ -84,8 +85,17 @@ test('sync status column preserves suggested match and tooltip details', () => {
   assert.match(view, /已关联：/)
 })
 
+test('directory rows provide manual SDLC binding flow', () => {
+  assert.match(view, /绑定 SDLC 用户/)
+  assert.match(view, /fetchLdapBindUsers/)
+  assert.match(view, /bindDialogVisible/)
+  assert.match(view, /bindUserKeyword/)
+  assert.match(view, /decision: 'bind'.*user_id: bindTargetId/s)
+  assert.match(view, /await loadDirectory\(\{ reset: true \}\)/)
+})
+
 test('status column accommodates the fixed-width status tag without ellipsis', () => {
-  assert.match(view, /<el-table-column label="同步状态" min-width="160">/)
+  assert.match(view, /<el-table-column label="同步状态" min-width="220">/)
   assert.match(view, /\.directory-panel :deep\(\.el-tag\) \{ width: 82px;/)
 })
 

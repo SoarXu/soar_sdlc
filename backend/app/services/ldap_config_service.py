@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.core.security import SecretConfigurationError, decrypt_integration_secret, encrypt_integration_secret
 from app.models.ldap_integration import LdapIntegrationConfig
+from app.models.user import User
 from app.services.ldap_client import LdapConnectionError, LdapQueryError, ldap_client
 from app.services.ldap_sync_service import match_directory_user
 
@@ -101,6 +102,31 @@ def directory_users(
         "next_cursor": result.next_cursor,
         "total": result.total,
     }
+
+
+def bind_users(db: Session) -> list[dict]:
+    users = (
+        db.query(User)
+        .filter(User.deleted == 0, User.is_active.is_(True), User.auth_source == "local")
+        .order_by(User.full_name.asc(), User.username.asc())
+        .all()
+    )
+    return [
+        {
+            "id": user.id,
+            "username": user.username,
+            "full_name": user.full_name,
+            "email": user.email,
+            "mobile": user.mobile,
+            "department": user.department,
+            "employee_no": user.employee_no,
+            "auth_source": user.auth_source,
+            "is_active": user.is_active,
+            "must_change_password": user.must_change_password,
+            "is_system_admin": user.is_system_admin,
+        }
+        for user in users
+    ]
 
 
 def _get_config(db: Session):

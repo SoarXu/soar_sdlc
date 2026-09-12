@@ -9,6 +9,7 @@ from app.views.ldap_view import (
     LdapConfigRead, LdapConfigWrite, LdapDirectoryPage, LdapSyncRequest,
     LdapSyncResponse, LdapSyncRunPage, LdapTestResult,
 )
+from app.views.user_view import UserRead
 
 
 router = APIRouter()
@@ -47,6 +48,11 @@ def directory_users(
         user_base_dn=user_base_dn,
         exclude_disabled=exclude_disabled,
     )
+
+
+@router.get("/bind-users", response_model=list[UserRead])
+def bind_users(db: Session = Depends(get_db), _admin=Depends(require_system_admin)):
+    return ldap_config_service.bind_users(db)
 
 
 @router.post("/sync", response_model=LdapSyncResponse)

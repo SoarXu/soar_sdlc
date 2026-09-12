@@ -82,6 +82,12 @@ def test_non_admin_cannot_read_ldap_config(client):
     assert response.status_code == 403
 
 
+def test_bind_users_returns_only_active_local_users(client):
+    response = client.get("/api/v1/admin/ldap/bind-users")
+    assert response.status_code == 200, response.text
+    assert all(item["auth_source"] == "local" and item["is_active"] for item in response.json())
+
+
 def test_directory_users_rejects_invalid_cursor(client):
     settings.__dict__["integration_encryption_key"] = Fernet.generate_key().decode()
     assert client.put("/api/v1/admin/ldap", json=_payload()).status_code == 200

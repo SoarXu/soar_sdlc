@@ -72,13 +72,10 @@
     <el-dialog v-model="versionVisible" title="系统信息" width="420px" append-to-body class="version-dialog">
       <el-descriptions :column="1" border size="small">
         <el-descriptions-item label="前端版本">{{ frontendVersion }}</el-descriptions-item>
-        <el-descriptions-item label="后端版本">{{ backendVersion?.app_version || '后端不可用' }}</el-descriptions-item>
+        <el-descriptions-item label="后端版本">{{ backendVersion?.app_version || '版本信息无法获取' }}</el-descriptions-item>
         <el-descriptions-item label="发布状态">
           <el-tag :type="versionStatus === '一致' ? 'success' : 'warning'" size="small">{{ versionLoading ? '检查中' : versionStatus }}</el-tag>
         </el-descriptions-item>
-        <el-descriptions-item label="前端提交">{{ frontendCommit || '本地运行' }}</el-descriptions-item>
-        <el-descriptions-item label="后端提交">{{ backendVersion?.git_commit || '本地运行' }}</el-descriptions-item>
-        <el-descriptions-item label="数据库版本">{{ backendVersion?.database_revision || '不可用' }}</el-descriptions-item>
       </el-descriptions>
       <template #footer>
         <el-button :loading="versionLoading" @click="loadVersionInfo">刷新</el-button>
@@ -119,11 +116,10 @@ const currentFullName = ref(cachedFullNameForCurrentUser())
 const currentDisplayName = computed(() => currentFullName.value || currentUsername.value || '未登录')
 const workbenchTarget = ref(workbenchMenuTarget())
 const frontendVersion = import.meta.env.VITE_APP_VERSION || '1.0.0'
-const frontendCommit = import.meta.env.VITE_GIT_COMMIT || ''
 const versionVisible = ref(false)
 const versionLoading = ref(false)
 const backendVersion = ref(null)
-const versionStatus = computed(() => releaseStatus({ version: frontendVersion, commit: frontendCommit }, backendVersion.value))
+const versionStatus = computed(() => releaseStatus(frontendVersion, backendVersion.value))
 const activeMenuIndex = computed(() => {
   if (route.path === '/' || route.path === '/dashboard') return workbenchTarget.value
   return activeAdminMenuIndex(route.path) || route.path

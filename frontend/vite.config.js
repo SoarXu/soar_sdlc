@@ -1,6 +1,10 @@
 import { defineConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
 
+if (process.env.VITE_RELEASE_BUILD === '1' && (!process.env.VITE_APP_VERSION || !process.env.VITE_GIT_COMMIT)) {
+  throw new Error('Release build requires VITE_APP_VERSION and VITE_GIT_COMMIT')
+}
+
 export default defineConfig({
   plugins: [vue()],
   server: {

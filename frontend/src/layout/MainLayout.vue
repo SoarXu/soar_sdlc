@@ -60,11 +60,31 @@
           <span>后台管理</span>
         </el-menu-item>
       </el-menu>
+      <button class="sidebar-version" type="button" title="系统信息" @click="openVersionInfo">
+        <el-icon><InfoFilled /></el-icon>
+        <span>v{{ frontendVersion }}</span>
+      </button>
     </aside>
 
     <main class="main" :class="{ 'main-workbench': route.path === '/' || route.path === '/dashboard' }">
       <router-view />
     </main>
+    <el-dialog v-model="versionVisible" title="系统信息" width="420px" append-to-body class="version-dialog">
+      <el-descriptions :column="1" border size="small">
+        <el-descriptions-item label="前端版本">{{ frontendVersion }}</el-descriptions-item>
+        <el-descriptions-item label="后端版本">{{ backendVersion?.app_version || '后端不可用' }}</el-descriptions-item>
+        <el-descriptions-item label="发布状态">
+          <el-tag :type="versionStatus === '一致' ? 'success' : 'warning'" size="small">{{ versionLoading ? '检查中' : versionStatus }}</el-tag>
+        </el-descriptions-item>
+        <el-descriptions-item label="前端提交">{{ frontendCommit || '本地运行' }}</el-descriptions-item>
+        <el-descriptions-item label="后端提交">{{ backendVersion?.git_commit || '本地运行' }}</el-descriptions-item>
+        <el-descriptions-item label="数据库版本">{{ backendVersion?.database_revision || '不可用' }}</el-descriptions-item>
+      </el-descriptions>
+      <template #footer>
+        <el-button :loading="versionLoading" @click="loadVersionInfo">刷新</el-button>
+        <el-button @click="versionVisible = false">关闭</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -78,15 +98,18 @@ import {
   Folder,
   FolderOpened,
   Grid,
+  InfoFilled,
   Setting,
   Timer,
   Warning
 } from '@element-plus/icons-vue'
 
 import { fetchUsers } from '../api/users'
+import { fetchVersionInfo } from '../api/version'
 import { useAuthStore } from '../stores/auth'
 import { activeAdminMenuIndex } from '../utils/adminModules'
 import { saveWorkbenchQuery, workbenchMenuTarget } from '../utils/workbenchSidebarState'
+import { releaseStatus } from '../utils/versionStatus'
 
 const route = useRoute()
 const router = useRouter()
@@ -95,6 +118,12 @@ const currentUsername = computed(() => localStorage.getItem('current_username') 
 const currentFullName = ref(cachedFullNameForCurrentUser())
 const currentDisplayName = computed(() => currentFullName.value || currentUsername.value || '未登录')
 const workbenchTarget = ref(workbenchMenuTarget())
+const frontendVersion = import.meta.env.VITE_APP_VERSION || '1.0.0'
+const frontendCommit = import.meta.env.VITE_GIT_COMMIT || ''
+const versionVisible = ref(false)
+const versionLoading = ref(false)
+const backendVersion = ref(null)
+const versionStatus = computed(() => releaseStatus({ version: frontendVersion, commit: frontendCommit }, backendVersion.value))
 const activeMenuIndex = computed(() => {
   if (route.path === '/' || route.path === '/dashboard') return workbenchTarget.value
   return activeAdminMenuIndex(route.path) || route.path
@@ -115,6 +144,24 @@ function handleUserCommand(command) {
   if (command === 'logout') {
     authStore.logout()
     router.push('/login')
+  }
+}
+
+function openVersionInfo() {
+  versionVisible.value = true
+  void loadVersionInfo()
+}
+
+async function loadVersionInfo() {
+  versionLoading.value = true
+  backendVersion.value = null
+  try {
+    const { data } = await fetchVersionInfo()
+    backendVersion.value = data
+  } catch {
+    backendVersion.value = null
+  } finally {
+    versionLoading.value = false
   }
 }
 

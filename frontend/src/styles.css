@@ -107,12 +107,34 @@ body {
 }
 
 .sidebar {
+  display: flex;
+  flex-direction: column;
   grid-column: 1;
   grid-row: 2;
   padding: 8px 6px;
   overflow: auto;
   background: linear-gradient(180deg, #0b4f8a, #063b6d);
   border-right: 6px solid #052f57;
+}
+
+.sidebar-version {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  align-self: flex-start;
+  margin: auto 0 4px 8px;
+  padding: 4px 2px;
+  color: #cfe1ef;
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  font: inherit;
+  font-size: 11px;
+}
+
+.sidebar-version:hover,
+.sidebar-version:focus-visible {
+  color: #fff;
 }
 
 .current-project {
@@ -1535,6 +1557,8 @@ body {
   }
 
   .sidebar {
+    flex-direction: row;
+    align-items: center;
     grid-column: 1;
     grid-row: 2;
     padding: 6px 8px;
@@ -1542,6 +1566,13 @@ body {
     overflow-y: hidden;
     border-right: 0;
     border-bottom: 4px solid #052f57;
+  }
+
+  .sidebar-version {
+    flex: 0 0 auto;
+    align-self: center;
+    margin: 0 0 0 auto;
+    padding: 4px 6px;
   }
 
   .side-menu.el-menu {

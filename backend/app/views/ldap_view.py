@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 
 class LdapConfigWrite(BaseModel):
     enabled: bool = False
-    protocol: Literal["ldap", "ldaps"] = "ldaps"
+    protocol: Literal["plain", "ldap", "ldaps"] = "ldaps"
     host: str = Field(min_length=1, max_length=255)
     port: int = Field(ge=1, le=65535)
     connect_timeout: int = Field(default=5, ge=1, le=30)

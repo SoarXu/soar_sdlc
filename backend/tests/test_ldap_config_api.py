@@ -53,6 +53,16 @@ def test_admin_can_save_and_read_masked_ldap_config(client):
     assert Fernet(key.encode()).decrypt(encrypted.encode()).decode() == "bind-secret"
 
 
+def test_admin_can_save_plain_ldap_config(client):
+    settings.__dict__["integration_encryption_key"] = Fernet.generate_key().decode()
+
+    saved = client.put("/api/v1/admin/ldap", json=_payload(protocol="plain", port=389))
+
+    assert saved.status_code == 200, saved.text
+    assert saved.json()["protocol"] == "plain"
+    assert saved.json()["port"] == 389
+
+
 def test_edit_with_blank_password_keeps_existing_secret(client):
     settings.__dict__["integration_encryption_key"] = Fernet.generate_key().decode()
     assert client.put("/api/v1/admin/ldap", json=_payload()).status_code == 200

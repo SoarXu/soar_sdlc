@@ -177,7 +177,7 @@ def test_ldaps_connection_requires_certificate_and_applies_timeouts(monkeypatch)
     assert calls["connection"][1]["auto_bind"] is True
 
 
-def test_plain_ldap_opens_starttls_then_binds(monkeypatch):
+def test_starttls_ldap_opens_upgrades_then_binds(monkeypatch):
     import app.services.ldap_client as module
 
     calls = []
@@ -208,6 +208,40 @@ def test_plain_ldap_opens_starttls_then_binds(monkeypatch):
 
     assert [name for name, _ in calls] == ["tls", "connection", "open", "start_tls", "bind"]
     assert calls[0][1]["validate"] == module.ssl.CERT_REQUIRED
+    assert calls[1][1]["auto_bind"] is False
+
+
+def test_unencrypted_ldap_opens_then_binds_without_tls(monkeypatch):
+    import app.services.ldap_client as module
+
+    calls = []
+
+    class Connection:
+        def __init__(self, *_args, **kwargs):
+            calls.append(("connection", kwargs))
+
+        def open(self):
+            calls.append(("open", {}))
+            return True
+
+        def start_tls(self):
+            raise AssertionError("plain LDAP must not start TLS")
+
+        def bind(self):
+            calls.append(("bind", {}))
+            return True
+
+    monkeypatch.setattr(module, "Tls", lambda **_kwargs: (_ for _ in ()).throw(AssertionError("plain LDAP must not create TLS settings")))
+    monkeypatch.setattr(module, "Server", lambda *args, **kwargs: calls.append(("server", kwargs)) or "server")
+    monkeypatch.setattr(module, "Connection", Connection)
+    config = _config()
+    config.protocol = "plain"
+    config.port = 389
+
+    module.LdapClient._create_connection(config, "secret")
+
+    assert [name for name, _ in calls] == ["server", "connection", "open", "bind"]
+    assert calls[0][1]["use_ssl"] is False
     assert calls[1][1]["auto_bind"] is False
 
 

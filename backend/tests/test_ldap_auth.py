@@ -222,6 +222,42 @@ def test_starttls_authentication_opens_upgrades_then_binds(monkeypatch):
     assert calls == ["open", "start_tls", "bind"]
 
 
+def test_unencrypted_ldap_authentication_opens_then_binds_without_tls(monkeypatch):
+    captured = {}
+    calls = []
+
+    class FakeConnection:
+        def open(self):
+            calls.append("open")
+            return True
+
+        def start_tls(self):
+            raise AssertionError("plain LDAP must not start TLS")
+
+        def bind(self):
+            calls.append("bind")
+            return True
+
+    def server_factory(host, **kwargs):
+        captured["server"] = (host, kwargs)
+        return object()
+
+    def connection_factory(server, **kwargs):
+        captured["connection"] = (server, kwargs)
+        return FakeConnection()
+
+    monkeypatch.setattr(ldap_auth_service, "Tls", lambda **_kwargs: (_ for _ in ()).throw(AssertionError("plain LDAP must not create TLS settings")))
+    monkeypatch.setattr(ldap_auth_service, "Server", server_factory)
+    monkeypatch.setattr(ldap_auth_service, "Connection", connection_factory)
+    config = SimpleNamespace(protocol="plain", host="dc.example.com", port=389, connect_timeout=7)
+
+    LdapUserAuthenticator._create_connection(config, "CN=User,DC=example,DC=com", "secret")
+
+    assert calls == ["open", "bind"]
+    assert captured["server"][1]["use_ssl"] is False
+    assert captured["connection"][1]["auto_bind"] is False
+
+
 def test_ldaps_authentication_uses_user_dn_password_and_tls_settings(monkeypatch):
     captured = {}
 

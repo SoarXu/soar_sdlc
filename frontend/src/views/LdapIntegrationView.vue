@@ -104,7 +104,7 @@ const savedConfiguration = ref(null)
 const persistedEnabled = ref(false)
 let directoryRequestId = 0
 const form = reactive(defaultForm())
-const protocolOptions = [{ label: 'LDAP + StartTLS', value: 'ldap' }, { label: 'LDAPS', value: 'ldaps' }]
+const protocolOptions = [{ label: 'LDAP（不加密）', value: 'plain' }, { label: 'LDAP + StartTLS', value: 'ldap' }, { label: 'LDAPS', value: 'ldaps' }]
 const rules = { host: [{ required: true, message: '请输入服务器地址', trigger: 'blur' }], port: [{ required: true, message: '请输入端口', trigger: 'change' }], base_dn: [{ required: true, message: '请输入 Base DN', trigger: 'blur' }], bind_username: [{ required: true, message: '请输入绑定账号', trigger: 'blur' }] }
 const statusMap = { unlinked: { label: '未同步', type: 'info' }, match_suggested: { label: '可绑定', type: 'warning' }, linked: { label: '已同步', type: 'success' }, conflict: { label: '冲突', type: 'danger' }, ad_disabled: { label: 'AD 已禁用', type: 'info' } }
 const directoryReady = computed(() => Boolean(persistedEnabled.value && form.configuration_tested))
@@ -117,7 +117,7 @@ function defaultDirectoryQuery() { return { user_base_dn: '', exclude_disabled: 
 function identityKey() { return [form.protocol, form.host.trim(), form.port, form.bind_username.trim()].join('|') }
 function payload() { const value = { ...form }; delete value.has_bind_password; delete value.configuration_tested; delete value.tested_at; if (!value.bind_password) delete value.bind_password; value.user_base_dn = value.user_base_dn?.trim() || null; value.user_filter = '(&(objectCategory=person)(objectClass=user))'; return value }
 function configurationKey() { const value = payload(); delete value.enabled; delete value.bind_password; return JSON.stringify(value) }
-function handleProtocolChange(value) { if (value === 'ldaps' && form.port === 389) form.port = 636; else if (value === 'ldap' && form.port === 636) form.port = 389 }
+function handleProtocolChange(value) { if (value === 'ldaps' && form.port === 389) form.port = 636; else if (['plain', 'ldap'].includes(value) && form.port === 636) form.port = 389 }
 function selectableDirectoryUser(row) { return Boolean(row.external_id) && !['conflict', 'ad_disabled'].includes(row.sync_status) }
 function statusTooltip(row) { if (row.conflict_reason) return row.conflict_reason; if (row.sync_status === 'linked' && row.matched_user) return `已关联：${row.matched_user.full_name} / ${row.matched_user.username}`; return '' }
 async function openBindDialog(row) { bindSource.value = row; bindTargetId.value = row.matched_user?.id || null; bindUserKeyword.value = ''; bindDialogVisible.value = true; bindLoading.value = true; try { bindUsers.value = (await fetchLdapBindUsers()).data || [] } catch (error) { bindDialogVisible.value = false; ElMessage.error(actionErrorMessage(error)) } finally { bindLoading.value = false } }

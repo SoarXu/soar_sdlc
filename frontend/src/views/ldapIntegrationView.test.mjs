@@ -25,6 +25,14 @@ test('page exposes three connection configuration groups and all AD default mapp
   assert.match(view, /修改连接身份后需重新输入绑定密码/)
 })
 
+test('page exposes explicit plain StartTLS and LDAPS protocol choices with conventional ports', () => {
+  assert.match(view, /label: 'LDAP（不加密）', value: 'plain'/)
+  assert.match(view, /label: 'LDAP \+ StartTLS', value: 'ldap'/)
+  assert.match(view, /label: 'LDAPS', value: 'ldaps'/)
+  assert.match(view, /\['plain', 'ldap'\]\.includes\(value\).*form\.port === 636.*form\.port = 389/)
+  assert.match(view, /value === 'ldaps'.*form\.port === 389.*form\.port = 636/)
+})
+
 test('AD user filter stays internal instead of being administrator-configurable', () => {
   assert.doesNotMatch(view, /label="用户筛选器"/)
   assert.doesNotMatch(view, /user_filter:\s*\[\{ required:/)

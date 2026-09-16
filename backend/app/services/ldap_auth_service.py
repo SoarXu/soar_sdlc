@@ -51,7 +51,7 @@ class LdapUserAuthenticator:
 
     @staticmethod
     def _create_connection(config, user_dn: str, password: str):
-        tls = Tls(validate=ssl.CERT_REQUIRED)
+        tls = None if config.protocol == "plain" else Tls(validate=ssl.CERT_REQUIRED)
         server = Server(
             config.host,
             port=config.port,
@@ -68,10 +68,10 @@ class LdapUserAuthenticator:
             receive_timeout=config.connect_timeout,
             raise_exceptions=True,
         )
-        if config.protocol == "ldap":
+        if config.protocol in {"plain", "ldap"}:
             if connection.open() is False:
                 raise LdapDirectoryUnavailable()
-            if connection.start_tls() is False:
+            if config.protocol == "ldap" and connection.start_tls() is False:
                 raise LdapDirectoryUnavailable()
             if connection.bind() is False:
                 raise LdapCredentialsRejected()

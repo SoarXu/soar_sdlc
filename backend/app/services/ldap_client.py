@@ -149,7 +149,7 @@ class LdapClient:
 
     @staticmethod
     def _create_connection(config, password: str):
-        tls = Tls(validate=ssl.CERT_REQUIRED)
+        tls = None if config.protocol == "plain" else Tls(validate=ssl.CERT_REQUIRED)
         server = Server(
             config.host,
             port=config.port,
@@ -166,10 +166,10 @@ class LdapClient:
             receive_timeout=config.connect_timeout,
             raise_exceptions=True,
         )
-        if config.protocol == "ldap":
+        if config.protocol in {"plain", "ldap"}:
             if connection.open() is False:
                 raise LdapNetworkError("LDAP 服务器不可达")
-            if connection.start_tls() is False:
+            if config.protocol == "ldap" and connection.start_tls() is False:
                 raise LdapTlsError("LDAP TLS 安全连接失败")
             if connection.bind() is False:
                 raise LdapBindError("LDAP 绑定认证失败")

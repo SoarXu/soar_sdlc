@@ -1,7 +1,10 @@
 import assert from 'node:assert/strict'
 
 import {
+  batchClaimTransition,
   batchAssignmentTransition,
+  canBatchClaimRows,
+  canBatchAssignRows,
   canSelectForBatchAssignment,
   eligibleAssigneeIds,
   isBatchAssignmentReasonRequired,
@@ -20,6 +23,11 @@ const assignToOne = {
   transition_id: 32,
   bulk_assignment: { supported: true, requires_delegate_reason: true, eligible_assignee_ids: [5, 8] }
 }
+const claim = {
+  transition_id: 33,
+  action_key: 'claim',
+  bulk_claim: { supported: true }
+}
 
 const first = row(101, 10, assignToTwo)
 const second = row(102, 10, assignToOne)
@@ -27,14 +35,20 @@ const otherProject = row(103, 11, assignToTwo)
 const unsupported = row(104, 10, { transition_id: 33, bulk_assignment: { supported: false, eligible_assignee_ids: [] } })
 const requirement = { ...first, object_type: 'requirement' }
 const task = { ...second, object_type: 'task' }
+const claimOnly = { ...row(105, 10, claim), object_type: 'requirement' }
 
 assert.equal(batchAssignmentTransition(first), assignToTwo)
+assert.equal(batchClaimTransition(claimOnly), claim)
 assert.equal(batchAssignmentTransition(unsupported), null)
 assert.equal(canSelectForBatchAssignment(first, []), true)
 assert.equal(canSelectForBatchAssignment(second, [first]), true)
 assert.equal(canSelectForBatchAssignment(otherProject, [first]), false)
 assert.equal(canSelectForBatchAssignment(task, [requirement]), false)
 assert.equal(canSelectForBatchAssignment(unsupported, []), false)
+assert.equal(canSelectForBatchAssignment(claimOnly, []), true)
+assert.equal(canBatchAssignRows([first, second]), true)
+assert.equal(canBatchAssignRows([claimOnly]), false)
+assert.equal(canBatchClaimRows([claimOnly]), true)
 assert.deepEqual(eligibleAssigneeIds([first, second]), [5])
 assert.equal(isBatchAssignmentReasonRequired([first, second]), true)
 assert.deepEqual(toBatchAssignmentItems([first, second]), [

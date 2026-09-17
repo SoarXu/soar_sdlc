@@ -62,6 +62,8 @@ normalized.diagram_config.waypoints[0].x = 999
 assert.equal(source.diagram_config.waypoints[0].x, 120)
 
 assert.deepEqual(unsupportedWorkflowConfigSections(source), [])
+const taskDescendantsGate = { ...source, validator_config: { type: 'task_descendants_terminal_gate' } }
+assert.deepEqual(unsupportedWorkflowConfigSections(taskDescendantsGate), [])
 const systemAction = { ...source, trigger_config: { type: 'system_action' } }
 assert.deepEqual(unsupportedWorkflowConfigSections(systemAction), [])
 assert.deepEqual(

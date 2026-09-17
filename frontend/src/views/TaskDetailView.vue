@@ -278,11 +278,15 @@ function taskFieldLabel(field) {
 
 function goBackToProjectTasks() {
   if (route.query.from === 'dashboard') {
-    router.push({ name: 'dashboard' })
+    router.push({ name: 'dashboard', query: { ...route.query } })
     return
   }
   if (route.query.from === 'iteration' && route.query.iterationId) {
     router.push({ name: 'iteration-detail', params: { id: route.query.iterationId }, query: { tab: route.query.tab || 'tasks' } })
+    return
+  }
+  if (route.query.from === 'project' && task.value.project_id) {
+    router.push({ name: 'project-detail', params: { id: task.value.project_id }, query: { ...route.query, tab: 'tasks' } })
     return
   }
   if (task.value.project_id) {

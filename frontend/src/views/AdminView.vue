@@ -19,6 +19,7 @@
           <div class="admin-entry-icon">
             <el-icon v-if="module.key === 'roles'"><UserFilled /></el-icon>
             <el-icon v-else-if="module.key === 'workflow'"><Connection /></el-icon>
+            <el-icon v-else-if="module.key === 'ldap'"><Key /></el-icon>
             <el-icon v-else><Setting /></el-icon>
           </div>
           <div>
@@ -32,7 +33,7 @@
 </template>
 
 <script setup>
-import { Connection, Setting, UserFilled } from '@element-plus/icons-vue'
+import { Connection, Key, Setting, UserFilled } from '@element-plus/icons-vue'
 import { useRouter } from 'vue-router'
 
 import { adminModules } from '../utils/adminModules'

@@ -1,7 +1,11 @@
 from fastapi.testclient import TestClient
 import logging
+from fastapi import HTTPException
+import pytest
 
 from app.core.config import settings
+from app.core.config import Settings
+from app.db.session import get_db
 
 
 def test_health_endpoint_returns_ok(client: TestClient):
@@ -9,6 +13,24 @@ def test_health_endpoint_returns_ok(client: TestClient):
 
     assert response.status_code == 200
     assert response.json() == {"status": "ok"}
+
+
+def test_version_endpoint_reports_only_runtime_version_without_database(client: TestClient):
+    def unavailable_db():
+        raise HTTPException(status_code=503, detail="test database unavailable")
+
+    client.app.dependency_overrides[get_db] = unavailable_db
+    try:
+        response = client.get("/api/v1/version")
+        assert response.status_code == 200
+        assert response.json() == {"app_version": "1.0.0", "environment": "local"}
+    finally:
+        client.app.dependency_overrides.pop(get_db, None)
+
+
+def test_production_settings_require_release_build_metadata():
+    with pytest.raises(ValueError, match="release metadata"):
+        Settings(app_env="production", app_version="1.0.0", git_commit="")
 
 
 def test_slow_api_warning_contains_only_sanitized_metrics(client: TestClient, caplog, monkeypatch):

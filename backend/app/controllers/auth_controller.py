@@ -2,9 +2,11 @@ from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlalchemy.orm import Session
 
 from app.core.auth_dependencies import get_current_user
+from app.core.config import settings
 from app.core.security import create_access_token
 from app.db.session import get_db
 from app.models.user import User
+from app.services.ldap_auth_service import LdapDirectoryUnavailable
 from app.services.user_service import authenticate_user, change_password
 from app.views.auth_view import ChangePasswordRequest, LoginRequest, TokenResponse
 
@@ -14,14 +16,23 @@ router = APIRouter()
 
 @router.post("/login", response_model=TokenResponse)
 def login(payload: LoginRequest, db: Session = Depends(get_db)):
-    user = authenticate_user(db, payload.username, payload.password)
+    try:
+        user = authenticate_user(db, payload.username, payload.password)
+    except LdapDirectoryUnavailable as error:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Directory service temporarily unavailable",
+        ) from error
     if not user:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect username or password",
         )
     return TokenResponse(
-        access_token=create_access_token(user.username),
+        access_token=create_access_token(
+            user.username,
+            expires_minutes=(settings.ldap_access_token_expire_minutes if user.auth_source == "ldap" else None),
+        ),
         user_id=user.id,
         username=user.username,
         full_name=user.full_name,

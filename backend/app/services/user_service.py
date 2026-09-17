@@ -1,13 +1,16 @@
 import secrets
 import string
+from datetime import datetime, timezone
 
 from fastapi import HTTPException, status
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.security import get_password_hash, verify_password
 from app.models.user import User
+from app.services.ldap_auth_service import authenticate_ldap_user
 from app.views.auth_view import RegisterRequest
-from app.views.user_view import UserCreate
+from app.views.user_view import UserCreate, UserUpdate
 
 
 PASSWORD_SYMBOLS = "!@#$%^&*()-_=+"
@@ -64,9 +67,17 @@ def seed_default_users(db: Session) -> list[User]:
     return db.query(User).filter(User.deleted == 0, User.is_active.is_(True)).order_by(User.id.asc()).all()
 
 
-def authenticate_user(db: Session, username: str, password: str) -> User | None:
+def authenticate_user(db: Session, username: str, password: str, ldap_authenticator=None) -> User | None:
     user = db.query(User).filter(User.username == username, User.deleted == 0, User.is_active.is_(True)).first()
-    if not user or not _password_matches(user.password_hash, password):
+    if not user:
+        return None
+    if user.auth_source == "ldap":
+        if not authenticate_ldap_user(db, user, password, authenticator=ldap_authenticator):
+            return None
+        user.last_login_time = datetime.now(timezone.utc).replace(tzinfo=None)
+        db.commit()
+        db.refresh(user)
+    elif not _password_matches(user.password_hash, password):
         return None
     return user
 
@@ -84,6 +95,8 @@ def list_users(db: Session, user_id: int | None = None) -> list[dict]:
             "email": user.email,
             "mobile": user.mobile,
             "department": user.department,
+            "employee_no": user.employee_no,
+            "auth_source": user.auth_source,
             "is_active": user.is_active,
             "must_change_password": user.must_change_password,
             "is_system_admin": user.is_system_admin,
@@ -140,6 +153,8 @@ def create_managed_user(db: Session, payload: UserCreate) -> tuple[User, str]:
         raise ValueError("Full name is required")
     if db.query(User).filter(User.username == username, User.deleted == 0).first():
         raise LookupError("Username already exists")
+    employee_no = _normalize_employee_no(payload.employee_no)
+    _ensure_employee_no_available(db, employee_no)
     initial_password = generate_initial_password()
     user = User(
         username=username,
@@ -148,19 +163,52 @@ def create_managed_user(db: Session, payload: UserCreate) -> tuple[User, str]:
         mobile=payload.mobile,
         password_hash=get_password_hash(initial_password),
         department=payload.department,
+        employee_no=employee_no,
+        auth_source="local",
         is_active=True,
         must_change_password=True,
     )
     db.add(user)
-    db.flush()
-    user.is_system_admin = payload.is_system_admin
-    db.commit()
+    try:
+        db.flush()
+        user.is_system_admin = payload.is_system_admin
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        if _is_employee_no_conflict(exc):
+            raise _employee_no_conflict() from exc
+        raise
     db.refresh(user)
     return user, initial_password
 
 
+def update_managed_user(db: Session, user_id: int, payload: UserUpdate) -> User:
+    user = _get_active_user(db, user_id)
+    changes = payload.model_dump(exclude_unset=True)
+    if "full_name" in changes:
+        full_name = (changes["full_name"] or "").strip()
+        if not full_name:
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Full name is required")
+        changes["full_name"] = full_name
+    if "employee_no" in changes:
+        changes["employee_no"] = _normalize_employee_no(changes["employee_no"])
+        _ensure_employee_no_available(db, changes["employee_no"], exclude_user_id=user.id)
+    for field, value in changes.items():
+        setattr(user, field, value)
+    try:
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        if _is_employee_no_conflict(exc):
+            raise _employee_no_conflict() from exc
+        raise
+    db.refresh(user)
+    return user
+
+
 def reset_user_password(db: Session, user_id: int) -> tuple[User, str]:
     user = _get_active_user(db, user_id)
+    _require_local_password_user(user)
     initial_password = generate_initial_password()
     user.password_hash = get_password_hash(initial_password)
     user.must_change_password = True
@@ -170,6 +218,7 @@ def reset_user_password(db: Session, user_id: int) -> tuple[User, str]:
 
 
 def change_password(db: Session, user: User, current_password: str, new_password: str) -> None:
+    _require_local_password_user(user)
     if not _password_matches(user.password_hash, current_password):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Current password is incorrect")
     if len(new_password) < 8:
@@ -205,6 +254,41 @@ def _get_active_user(db: Session, user_id: int) -> User:
     if not user:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
     return user
+
+
+def _require_local_password_user(user: User) -> None:
+    if user.auth_source == "ldap":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="LDAP user password is managed by directory service",
+        )
+
+
+def _normalize_employee_no(employee_no: str | None) -> str | None:
+    normalized = employee_no.strip() if employee_no else ""
+    return normalized or None
+
+
+def _ensure_employee_no_available(db: Session, employee_no: str | None, exclude_user_id: int | None = None) -> None:
+    if employee_no is None:
+        return
+    query = db.query(User).filter(User.employee_no == employee_no, User.deleted == 0, User.is_active.is_(True))
+    if exclude_user_id is not None:
+        query = query.filter(User.id != exclude_user_id)
+    if query.first():
+        raise _employee_no_conflict()
+
+
+def _employee_no_conflict() -> HTTPException:
+    return HTTPException(
+        status_code=status.HTTP_409_CONFLICT,
+        detail={"code": "EMPLOYEE_NO_ALREADY_EXISTS", "message": "工号已被其他用户使用"},
+    )
+
+
+def _is_employee_no_conflict(exc: IntegrityError) -> bool:
+    message = str(exc).lower()
+    return "uq_users_active_employee_no" in message or "active_employee_no" in message
 
 
 def _password_matches(password_hash: str, password: str) -> bool:

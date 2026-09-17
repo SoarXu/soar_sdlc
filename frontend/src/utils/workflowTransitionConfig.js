@@ -1,6 +1,7 @@
 const VALIDATOR_TYPES = new Set([
   'bug_close_gate',
   'requirement_terminal_gate',
+  'task_descendants_terminal_gate',
   'iteration_terminal_gate',
   'project_close_gate'
 ])

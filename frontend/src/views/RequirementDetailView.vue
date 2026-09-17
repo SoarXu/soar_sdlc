@@ -385,11 +385,15 @@ function requirementFieldLabel(field) {
 }
 function goBackToProjectRequirements() {
   if (route.query.from === 'dashboard') {
-    router.push({ name: 'dashboard' })
+    router.push({ name: 'dashboard', query: { ...route.query } })
     return
   }
   if (route.query.from === 'iteration' && route.query.iterationId) {
     router.push({ name: 'iteration-detail', params: { id: route.query.iterationId }, query: { tab: route.query.tab || 'requirements' } })
+    return
+  }
+  if (route.query.from === 'project' && requirement.value.project_id) {
+    router.push({ name: 'project-detail', params: { id: requirement.value.project_id }, query: { ...route.query, tab: 'requirements' } })
     return
   }
   if (requirement.value.project_id) {

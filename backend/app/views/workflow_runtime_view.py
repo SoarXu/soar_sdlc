@@ -14,6 +14,10 @@ class WorkflowBulkAssignmentMetadata(BaseModel):
     eligible_assignee_ids: list[int] = Field(default_factory=list)
 
 
+class WorkflowBulkClaimMetadata(BaseModel):
+    supported: bool = False
+
+
 class WorkflowTransitionActionRead(BaseModel):
     transition_id: int
     action_key: str
@@ -32,6 +36,7 @@ class WorkflowTransitionActionRead(BaseModel):
     form_config: dict[str, Any] = Field(default_factory=dict)
     eligible_assignee_ids: list[int] = Field(default_factory=list)
     bulk_assignment: WorkflowBulkAssignmentMetadata = Field(default_factory=WorkflowBulkAssignmentMetadata)
+    bulk_claim: WorkflowBulkClaimMetadata = Field(default_factory=WorkflowBulkClaimMetadata)
 
 
 class WorkflowTransitionExecuteRequest(BaseModel):
@@ -84,6 +89,27 @@ class WorkflowBulkAssignmentRead(BaseModel):
     object_type: str
     project_id: int
     next_owner_id: int
+    completed_count: int
+    completed_item_ids: list[int] = Field(default_factory=list)
+
+
+class WorkflowBulkClaimItem(BaseModel):
+    id: int
+    transition_id: int
+
+
+class WorkflowBulkClaimRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    object_type: str
+    project_id: int
+    items: list[WorkflowBulkClaimItem] = Field(min_length=1)
+
+
+class WorkflowBulkClaimRead(BaseModel):
+    object_type: str
+    project_id: int
+    claimant_id: int
     completed_count: int
     completed_item_ids: list[int] = Field(default_factory=list)
 

@@ -306,10 +306,23 @@ def _workbench_filter_options(db: Session, query) -> dict[str, list[dict]]:
                 .order_by(label.asc(), value.asc())
             ).mappings().all()
         ]
+    status_rows = db.execute(
+        select(items.c.current_state_id.label("value"), items.c.status_name.label("label"))
+        .where(items.c.current_state_id.is_not(None), items.c.status_name.is_not(None))
+        .distinct()
+        .order_by(items.c.status_name.asc(), items.c.current_state_id.asc())
+    ).mappings().all()
+    grouped_statuses = {}
+    for row in status_rows:
+        grouped_statuses.setdefault(row["label"], []).append(row["value"])
+    statuses = [
+        {"value": state_ids[0], "label": label, "state_ids": state_ids}
+        for label, state_ids in grouped_statuses.items()
+    ]
     return {
         "projects": distinct_options(items.c.project_id, items.c.project_name),
         "iterations": distinct_options(items.c.iteration_id, items.c.iteration_name),
-        "statuses": distinct_options(items.c.current_state_id, items.c.status_name),
+        "statuses": statuses,
         "priorities": distinct_options(items.c.priority, items.c.priority),
         "handlers": distinct_options(items.c.owner_id, select(User.full_name).where(User.id == items.c.owner_id).scalar_subquery()),
     }

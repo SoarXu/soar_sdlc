@@ -11,6 +11,7 @@ import DevopsView from '../views/DevopsView.vue'
 import IterationsView from '../views/IterationsView.vue'
 import IterationDetailView from '../views/IterationDetailView.vue'
 import LoginView from '../views/LoginView.vue'
+import LdapIntegrationView from '../views/LdapIntegrationView.vue'
 import ProgramsView from '../views/ProgramsView.vue'
 import ProjectDetailView from '../views/ProjectDetailView.vue'
 import ProjectsView from '../views/ProjectsView.vue'
@@ -57,7 +58,8 @@ const routes = [
       { path: 'devops', name: 'devops', component: DevopsView },
       { path: 'roles', name: 'roles', component: RolesView },
       { path: 'workflow', name: 'workflow', component: WorkflowView },
-      { path: 'exception-rules', name: 'exception-rules', component: ExceptionRulesView }
+      { path: 'exception-rules', name: 'exception-rules', component: ExceptionRulesView },
+      { path: 'admin/ldap', name: 'ldap-integration', component: LdapIntegrationView }
     ]
   }
 ]

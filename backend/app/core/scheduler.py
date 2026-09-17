@@ -1,4 +1,5 @@
 import asyncio
+import logging
 from collections.abc import Callable
 from contextlib import asynccontextmanager
 from datetime import datetime, time, timedelta
@@ -7,9 +8,11 @@ from typing import Any
 from fastapi import FastAPI
 
 from app.jobs.iteration_jobs import run_auto_start_due_iterations
+from app.jobs.ldap_jobs import run_weekly_ldap_sync
 
 
 JobFunc = Callable[[], Any]
+logger = logging.getLogger("app.scheduler")
 
 
 def scheduled_jobs() -> list[dict[str, Any]]:
@@ -19,7 +22,14 @@ def scheduled_jobs() -> list[dict[str, Any]]:
             "hour": 3,
             "minute": 0,
             "func": run_auto_start_due_iterations,
-        }
+        },
+        {
+            "name": "weekly_ldap_user_sync",
+            "weekday": 6,
+            "hour": 2,
+            "minute": 0,
+            "func": run_weekly_ldap_sync,
+        },
     ]
 
 
@@ -38,15 +48,29 @@ async def scheduler_lifespan(app: FastAPI):
 
 async def _run_daily_job(job: dict[str, Any]) -> None:
     while True:
-        await asyncio.sleep(_seconds_until(job["hour"], job["minute"]))
-        result = job["func"]()
-        if asyncio.iscoroutine(result):
-            await result
+        await asyncio.sleep(_seconds_until(job["hour"], job["minute"], weekday=job.get("weekday")))
+        try:
+            result = await asyncio.to_thread(job["func"])
+            if asyncio.iscoroutine(result):
+                await result
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.error("scheduled_job_failed", extra={"job_name": job["name"]})
 
 
-def _seconds_until(hour: int, minute: int, now: datetime | None = None) -> float:
+def _seconds_until(
+    hour: int,
+    minute: int,
+    now: datetime | None = None,
+    weekday: int | None = None,
+) -> float:
     current = now or datetime.now()
     target = datetime.combine(current.date(), time(hour=hour, minute=minute))
-    if target <= current:
+    if weekday is not None:
+        target += timedelta(days=(weekday - current.weekday()) % 7)
+        if target <= current:
+            target += timedelta(days=7)
+    elif target <= current:
         target += timedelta(days=1)
     return (target - current).total_seconds()

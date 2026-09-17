@@ -1321,6 +1321,65 @@ def test_bulk_assignment_exposes_metadata_and_assigns_all_items_atomically(clien
         assert history[-1]["next_owner_id"] == target_id
 
 
+def test_claim_transition_exposes_bulk_claim_metadata(client: TestClient):
+    _, project_id = _create_project_with_requirement_workflow(client)
+    member_id, member_token = _create_user("Bulk Claim Member", "developer")
+    _add_project_member(project_id, member_id, "developer")
+    requirement = client.post(
+        "/api/v1/requirements",
+        json={
+            "project_id": project_id,
+            "iteration_id": _project_iteration_id(client, project_id),
+            "title": f"Bulk Claim Requirement {uuid4().hex[:8]}",
+        },
+    ).json()
+
+    response = client.get(
+        f"/api/v1/workflow-runtime/requirement/{requirement['id']}/transitions",
+        headers={"Authorization": f"Bearer {member_token}"},
+    )
+
+    assert response.status_code == 200, response.text
+    claim = next(item for item in response.json() if item["action_key"] == "claim")
+    assert claim["bulk_claim"] == {"supported": True}
+
+
+def test_bulk_claim_assigns_selected_requirements_to_current_user(client: TestClient):
+    _, project_id = _create_project_with_requirement_workflow(client)
+    member_id, member_token = _create_user("Bulk Claim Executor", "developer")
+    _add_project_member(project_id, member_id, "developer")
+    iteration_id = _project_iteration_id(client, project_id)
+    requirements = [
+        client.post(
+            "/api/v1/requirements",
+            json={"project_id": project_id, "iteration_id": iteration_id, "title": f"Bulk Claim {uuid4().hex[:8]}"},
+        ).json()
+        for _ in range(2)
+    ]
+    transitions = client.get(
+        f"/api/v1/workflow-runtime/requirement/{requirements[0]['id']}/transitions",
+        headers={"Authorization": f"Bearer {member_token}"},
+    )
+    claim = next(item for item in transitions.json() if item["action_key"] == "claim")
+
+    response = client.post(
+        "/api/v1/workflow-runtime/claims/batch",
+        json={
+            "object_type": "requirement",
+            "project_id": project_id,
+            "items": [{"id": item["id"], "transition_id": claim["transition_id"]} for item in requirements],
+        },
+        headers={"Authorization": f"Bearer {member_token}"},
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["completed_count"] == 2
+    assert response.json()["claimant_id"] == member_id
+    for item in requirements:
+        loaded = client.get(f"/api/v1/requirements/{item['id']}").json()
+        assert loaded["owner_id"] == member_id
+
+
 def test_default_explicit_owner_assignment_exposes_bulk_metadata(client: TestClient):
     project = client.post("/api/v1/projects", json={"name": f"Bulk Default Project {uuid4().hex[:8]}"}).json()
     manager_id, manager_token = _create_user("Bulk Default Manager", "project_owner")

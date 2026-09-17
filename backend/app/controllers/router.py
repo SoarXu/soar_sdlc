@@ -11,6 +11,7 @@ from app.controllers import (
     exception_rule_controller,
     health_controller,
     iteration_controller,
+    ldap_controller,
     notification_controller,
     object_watch_controller,
     program_controller,
@@ -33,6 +34,7 @@ api_router = APIRouter()
 api_router.include_router(health_controller.router, tags=["health"])
 api_router.include_router(auth_controller.router, prefix="/auth", tags=["auth"])
 api_router.include_router(user_controller.router, prefix="/users", tags=["users"])
+api_router.include_router(ldap_controller.router, prefix="/admin/ldap", tags=["ldap"])
 api_router.include_router(role_controller.router, prefix="/roles", tags=["roles"])
 api_router.include_router(
     assignee_rule_config_controller.router,

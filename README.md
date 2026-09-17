@@ -66,6 +66,18 @@ http://127.0.0.1:5173
 
 开发环境中，`frontend/vite.config.js` 会把 `/api` 代理到 `http://127.0.0.1:8000`。
 
+## LDAP/AD 集成
+
+运行数据库迁移后，可在“后台管理 > LDAP 集成”中配置 AD 域、查询员工并同步到用户目录：
+
+```bash
+cd backend
+alembic upgrade head
+python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+```
+
+将生成值配置为 `INTEGRATION_ENCRYPTION_KEY`，用于加密 LDAP 绑定密码。生产环境必须让后端运行主机信任 AD 域控制器的 TLS 证书；LDAP 端口 389 使用 StartTLS，LDAPS 通常使用 636，系统不允许明文绑定。
+
 ## 已预置内容
 
 - 后端健康检查：`GET /api/v1/health`

@@ -19,6 +19,13 @@ export const adminModules = [
     description: '配置工作台异常识别阈值与适用范围。',
     navGroupPath: '/admin',
     path: '/exception-rules'
+  },
+  {
+    key: 'ldap',
+    title: 'LDAP 集成',
+    description: '配置目录服务连接与用户属性映射。',
+    navGroupPath: '/admin',
+    path: '/admin/ldap'
   }
 ]
 

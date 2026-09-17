@@ -1,18 +1,18 @@
 from fastapi import APIRouter, Depends, status
 from sqlalchemy.orm import Session
 
-from app.core.auth_dependencies import require_system_admin
+from app.core.auth_dependencies import get_current_user, require_system_admin
 from app.db.session import get_db
 from app.services.role_service import set_user_system_admin
-from app.services.user_service import create_managed_user, list_users, reset_user_password
-from app.views.user_view import UserCreate, UserPasswordResponse, UserRead, UserSystemAdminUpdate
+from app.services.user_service import create_managed_user, list_users, reset_user_password, update_managed_user
+from app.views.user_view import UserCreate, UserPasswordResponse, UserRead, UserSystemAdminUpdate, UserUpdate
 
 
 router = APIRouter()
 
 
 @router.get("", response_model=list[UserRead])
-def get_users(db: Session = Depends(get_db)):
+def get_users(db: Session = Depends(get_db), _current_user=Depends(get_current_user)):
     return list_users(db)
 
 
@@ -34,6 +34,17 @@ def put_user_system_admin(
     _admin=Depends(require_system_admin),
 ):
     user = set_user_system_admin(db, user_id, payload.is_system_admin)
+    return list_users(db, user_id=user.id)[0]
+
+
+@router.patch("/{user_id}", response_model=UserRead)
+def patch_user(
+    user_id: int,
+    payload: UserUpdate,
+    db: Session = Depends(get_db),
+    _admin=Depends(require_system_admin),
+):
+    user = update_managed_user(db, user_id, payload)
     return list_users(db, user_id=user.id)[0]
 
 

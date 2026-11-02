@@ -749,6 +749,7 @@ import { DEFAULT_BUG_TYPE_KEY } from '../utils/bugTypeOptions'
 import { useBugTypes } from '../utils/useBugTypes'
 import { canSelectForBatchAssignment } from '../utils/batchAssignmentSelection'
 import { deliveryIterations, requirementIterationLabel, requirementIterationOptions } from '../utils/requirementIterations'
+import { requirementEditPayload } from '../utils/requirementEditPayload'
 import { LIST_KEYS, parseProjectDetailRouteState, projectDetailRouteQuery } from '../utils/projectDetailRouteState'
 
 const route = useRoute()
@@ -1615,7 +1616,7 @@ async function submitRequirement() {
     const { status: _status, primary_component_id, ...formData } = requirementForm
     const payload = { ...formData, project_id: projectId.value, iteration_id: requirementForm.iteration_id, owner_id: requirementForm.owner_id || null, proposer: requirementForm.proposer || null }
     if (!editingRequirementId.value) payload.primary_component_id = primary_component_id || null
-    if (editingRequirementId.value) await updateRequirement(editingRequirementId.value, payload)
+    if (editingRequirementId.value) await updateRequirement(editingRequirementId.value, requirementEditPayload(requirementForm, projectId.value))
     else await createRequirement(payload)
     requirementDialogVisible.value = false
     await refreshAfterMutation()

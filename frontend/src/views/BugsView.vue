@@ -70,7 +70,7 @@
           <el-form-item label="来源测试单"><el-select v-model="form.test_run_id" clearable filterable placeholder="请选择测试单"><el-option v-for="run in testRuns" :key="run.id" :label="run.name" :value="run.id" /></el-select></el-form-item>
           <el-form-item label="所属迭代" required><el-select v-model="form.iteration_id" clearable filterable placeholder="请选择规划中或进行中的迭代"><el-option v-for="iteration in editableIterationDisplayOptions" :key="iteration.id" :label="iteration.name" :value="iteration.id" :disabled="iteration.disabled" /></el-select></el-form-item>
           <el-form-item v-if="!editingId" label="当前处理人"><el-select v-model="form.owner_id" clearable filterable placeholder="请选择当前处理人"><el-option v-for="user in users" :key="user.id" :label="user.full_name" :value="user.id" /></el-select></el-form-item>
-          <el-form-item label="提出人"><el-input v-model="form.proposer" clearable placeholder="请输入提出人" /></el-form-item>
+          <el-form-item label="提出人"><LdapProposerSelect v-model="form.proposer" /></el-form-item>
         </div>
         <div class="form-grid">
           <el-form-item label="严重程度"><el-select v-model="form.severity"><el-option v-for="option in priorityLevelOptions" :key="option.value" :label="option.label" :value="option.value"><RequirementPriorityBadge :value="option.value" /></el-option></el-select></el-form-item>
@@ -108,6 +108,7 @@ import WorkflowActionButtons from '../components/WorkflowActionButtons.vue'
 import BatchAssignmentBar from '../components/BatchAssignmentBar.vue'
 import BugEditDialog from '../components/work-items/BugEditDialog.vue'
 import BusinessComponentSelect from '../components/work-items/BusinessComponentSelect.vue'
+import LdapProposerSelect from '../components/work-items/LdapProposerSelect.vue'
 import { showActionError } from '../utils/actionFeedback'
 import { labelById, userLabel } from '../utils/referenceLabels'
 import { bugIterationOptions, includeSelectedIterationOption } from '../utils/bugIterations'

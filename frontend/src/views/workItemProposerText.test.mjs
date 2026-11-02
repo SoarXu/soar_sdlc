@@ -26,7 +26,7 @@ const allSources = [...new Set([...requirementSources, ...bugSources])]
 
 for (const formSource of allSources) {
   assert.doesNotMatch(formSource, /proposer_id|reporter_id/)
-  assert.match(formSource, /label="提出人"[\s\S]{0,120}<el-input[^>]+v-model="[^\"]+\.proposer"/)
+  assert.match(formSource, /label="提出人"[\s\S]{0,160}<LdapProposerSelect[^>]+v-model="[^\"]+\.proposer"/)
 }
 
 assert.match(requirementSources[3], /\{\{ requirement\.proposer \|\| '-' \}\}/)

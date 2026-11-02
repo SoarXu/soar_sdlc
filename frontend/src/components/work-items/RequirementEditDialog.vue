@@ -19,7 +19,7 @@
           </el-select>
         </el-form-item>
         <el-form-item label="提出人">
-          <el-input v-model="form.proposer" clearable placeholder="请输入提出人" />
+          <LdapProposerSelect v-model="form.proposer" />
         </el-form-item>
       </div>
       <div class="form-grid">
@@ -57,6 +57,7 @@ import { fetchRequirement, updateRequirement } from '../../api/requirements'
 import { showActionError } from '../../utils/actionFeedback'
 import { requirementIterationLabel, requirementIterationOptions } from '../../utils/requirementIterations'
 import RequirementPriorityBadge from '../RequirementPriorityBadge.vue'
+import LdapProposerSelect from './LdapProposerSelect.vue'
 
 const props = defineProps({
   modelValue: { type: Boolean, default: false },

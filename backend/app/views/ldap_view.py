@@ -121,6 +121,12 @@ class LdapDirectoryPage(BaseModel):
     total: int | None = None
 
 
+class LdapProposerOption(BaseModel):
+    username: str
+    full_name: str
+    employee_no: str | None = None
+
+
 class LdapTestResult(BaseModel):
     success: bool
     message: str

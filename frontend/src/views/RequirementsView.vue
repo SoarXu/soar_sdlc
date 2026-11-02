@@ -84,7 +84,7 @@
             </el-select>
           </el-form-item>
           <el-form-item label="提出人">
-            <el-input v-model="form.proposer" clearable placeholder="请输入提出人" />
+            <LdapProposerSelect v-model="form.proposer" />
           </el-form-item>
         </div>
         <div class="form-grid">
@@ -202,6 +202,7 @@ import WorkflowActionButtons from '../components/WorkflowActionButtons.vue'
 import BatchAssignmentBar from '../components/BatchAssignmentBar.vue'
 import RequirementEditDialog from '../components/work-items/RequirementEditDialog.vue'
 import BusinessComponentSelect from '../components/work-items/BusinessComponentSelect.vue'
+import LdapProposerSelect from '../components/work-items/LdapProposerSelect.vue'
 import { showActionError } from '../utils/actionFeedback'
 import { loadCloseReasonMap } from '../utils/closeReasonTooltip'
 import { canCreateWorkItem, canDeleteWorkItem, canExecuteWorkItem, currentUserFromStorage } from '../utils/permissions'

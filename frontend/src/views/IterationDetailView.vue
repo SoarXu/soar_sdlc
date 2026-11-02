@@ -265,7 +265,7 @@
         <el-form-item label="需求标题" required><el-input v-model="requirementForm.title" /></el-form-item>
         <div class="form-grid">
           <el-form-item label="提出人">
-            <el-input v-model="requirementForm.proposer" clearable placeholder="请输入提出人" />
+            <LdapProposerSelect v-model="requirementForm.proposer" />
           </el-form-item>
           <el-form-item label="类型">
             <el-select v-model="requirementForm.requirement_type">
@@ -409,6 +409,7 @@ import { fetchUsers } from '../api/users'
 import { fetchWorkflowTransitionsBatch } from '../api/workflowRuntime'
 import { workflowActionColumnWidth } from '../utils/workflowActionColumn'
 import RequirementPriorityBadge from '../components/RequirementPriorityBadge.vue'
+import LdapProposerSelect from '../components/work-items/LdapProposerSelect.vue'
 import RichTextPasteEditor from '../components/RichTextPasteEditor.vue'
 import WorkflowActionButtons from '../components/WorkflowActionButtons.vue'
 import { loadCloseReasonMap } from '../utils/closeReasonTooltip'

@@ -104,6 +104,31 @@ def directory_users(
     }
 
 
+def proposer_options(db: Session, query: str | None) -> list[dict]:
+    config = require_ready_config(db)
+    try:
+        result = ldap_client.search_users(
+            config,
+            _password(config),
+            query=query.strip() if query else None,
+            page_size=50,
+            exclude_disabled=True,
+        )
+    except LdapQueryError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    except LdapConnectionError as error:
+        raise HTTPException(status_code=502, detail=str(error)) from error
+    return [
+        {
+            "username": item["username"],
+            "full_name": item.get("full_name") or item["username"],
+            "employee_no": item.get("employee_no"),
+        }
+        for item in result.items
+        if item.get("enabled", True) and item.get("username")
+    ]
+
+
 def bind_users(db: Session) -> list[dict]:
     users = (
         db.query(User)

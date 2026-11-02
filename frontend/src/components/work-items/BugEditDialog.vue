@@ -34,7 +34,7 @@
           </el-select>
         </el-form-item>
         <el-form-item label="提出人">
-          <el-input v-model="form.proposer" clearable placeholder="请输入提出人" />
+          <LdapProposerSelect v-model="form.proposer" />
         </el-form-item>
       </div>
       <div class="form-grid">
@@ -74,6 +74,7 @@ import { fetchTestRuns } from '../../api/testRuns'
 import { showActionError } from '../../utils/actionFeedback'
 import { bugIterationOptions, includeSelectedIterationOption } from '../../utils/bugIterations'
 import RequirementPriorityBadge from '../RequirementPriorityBadge.vue'
+import LdapProposerSelect from './LdapProposerSelect.vue'
 import RichTextPasteEditor from '../RichTextPasteEditor.vue'
 
 const props = defineProps({

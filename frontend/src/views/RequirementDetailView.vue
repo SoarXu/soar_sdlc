@@ -26,7 +26,7 @@
         <el-form-item label="需求标题" required><el-input v-model="requirementForm.title" /></el-form-item>
         <div class="form-grid">
           <el-form-item label="迭代" required><el-select v-model="requirementForm.iteration_id" filterable><el-option v-for="iteration in requirementSelectableIterations" :key="iteration.id" :label="requirementIterationLabel(iteration)" :value="iteration.id" /></el-select></el-form-item>
-          <el-form-item label="提出人"><el-input v-model="requirementForm.proposer" clearable placeholder="请输入提出人" /></el-form-item>
+          <el-form-item label="提出人"><LdapProposerSelect v-model="requirementForm.proposer" /></el-form-item>
           <el-form-item label="类型"><el-select v-model="requirementForm.requirement_type"><el-option v-for="option in requirementTypeOptions" :key="option" :label="option" :value="option" /></el-select></el-form-item>
           <el-form-item label="优先级"><el-select v-model="requirementForm.priority"><el-option v-for="option in requirementPriorityOptions" :key="option.value" :label="option.label" :value="option.value"><RequirementPriorityBadge :value="option.value" /></el-option></el-select></el-form-item>
         </div>
@@ -230,6 +230,7 @@ import { fetchUsers } from '../api/users'
 import CommitRecordsPanel from '../components/CommitRecordsPanel.vue'
 import LinkedTaskCreateButton from '../components/LinkedTaskCreateButton.vue'
 import RequirementPriorityBadge from '../components/RequirementPriorityBadge.vue'
+import LdapProposerSelect from '../components/work-items/LdapProposerSelect.vue'
 import RichTextPasteEditor from '../components/RichTextPasteEditor.vue'
 import WatchToggleButton from '../components/WatchToggleButton.vue'
 import WorkItemCommentPanel from '../components/WorkItemCommentPanel.vue'

@@ -30,7 +30,7 @@
           <el-form-item label="关联需求"><el-select v-model="bugForm.requirement_id" clearable filterable><el-option v-for="requirement in requirements" :key="requirement.id" :label="requirement.title" :value="requirement.id" /></el-select></el-form-item>
           <el-form-item label="关联任务"><el-select v-model="bugForm.task_id" clearable filterable><el-option v-for="task in tasks" :key="task.id" :label="task.title" :value="task.id" /></el-select></el-form-item>
           <el-form-item label="来源用例"><el-select v-model="bugForm.test_case_id" clearable filterable><el-option v-for="item in testCases" :key="item.id" :label="item.title" :value="item.id" /></el-select></el-form-item>
-          <el-form-item label="提出人"><el-input v-model="bugForm.proposer" clearable placeholder="请输入提出人" /></el-form-item>
+          <el-form-item label="提出人"><LdapProposerSelect v-model="bugForm.proposer" /></el-form-item>
           <el-form-item label="Bug 类型"><el-select v-model="bugForm.bug_type"><el-option v-for="option in bugTypeOptions" :key="option.value" :label="option.label" :value="option.value" /></el-select></el-form-item>
           <el-form-item label="严重程度"><el-select v-model="bugForm.severity"><el-option v-for="option in priorityLevelOptions" :key="option.value" :label="option.label" :value="option.value"><RequirementPriorityBadge :value="option.value" /></el-option></el-select></el-form-item>
           <el-form-item label="优先级"><el-select v-model="bugForm.priority"><el-option v-for="option in priorityLevelOptions" :key="option.value" :label="option.label" :value="option.value"><RequirementPriorityBadge :value="option.value" /></el-option></el-select></el-form-item>
@@ -219,6 +219,7 @@ import { fetchUsers } from '../api/users'
 import CommitRecordsPanel from '../components/CommitRecordsPanel.vue'
 import LinkedTaskCreateButton from '../components/LinkedTaskCreateButton.vue'
 import RequirementPriorityBadge from '../components/RequirementPriorityBadge.vue'
+import LdapProposerSelect from '../components/work-items/LdapProposerSelect.vue'
 import RichTextPasteEditor from '../components/RichTextPasteEditor.vue'
 import WatchToggleButton from '../components/WatchToggleButton.vue'
 import WorkItemCommentPanel from '../components/WorkItemCommentPanel.vue'

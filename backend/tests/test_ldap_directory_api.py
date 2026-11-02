@@ -158,3 +158,36 @@ def test_non_admin_cannot_mutate_test_or_query_ldap(client, method, path, kwargs
 def test_anonymous_cannot_access_ldap_admin_endpoints(client, method, path, kwargs):
     response = getattr(client, method)(path, headers={"X-Test-No-Auth": "1"}, **kwargs)
     assert response.status_code == 401
+
+
+def test_project_user_can_search_ad_proposers_without_admin_fields(client, monkeypatch):
+    from app.core.security import create_access_token
+
+    settings.__dict__["integration_encryption_key"] = Fernet.generate_key().decode()
+    assert client.put("/api/v1/admin/ldap", json=_payload()).status_code == 200
+    _mark_config_ready()
+    calls = []
+
+    def fake_search(*_args, **kwargs):
+        calls.append(kwargs)
+        return LdapSearchResult(items=[{
+            "username": "alice", "employee_no": "E001", "full_name": "Alice",
+            "email": "alice@example.com", "mobile": "123456789", "department": "R&D",
+            "external_id": "guid-1", "dn": "CN=Alice,DC=example,DC=com", "enabled": True,
+        }], next_cursor=None)
+
+    monkeypatch.setattr("app.services.ldap_config_service.ldap_client.search_users", fake_search)
+    response = client.get(
+        "/api/v1/directory/proposers?q=ali",
+        headers={"Authorization": f"Bearer {create_access_token('bob')}"},
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json() == [{"username": "alice", "employee_no": "E001", "full_name": "Alice"}]
+    assert calls[0]["query"] == "ali"
+    assert calls[0]["exclude_disabled"] is True
+
+
+def test_anonymous_cannot_search_ad_proposers(client):
+    response = client.get("/api/v1/directory/proposers", headers={"X-Test-No-Auth": "1"})
+    assert response.status_code == 401

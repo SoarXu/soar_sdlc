@@ -126,16 +126,17 @@
       </template>
 
       <template v-else-if="activeTab === 'requirements'">
-        <div class="project-tab-toolbar">
+        <div class="project-tab-toolbar project-work-item-toolbar">
           <el-input v-model="projectListFilters.requirements.keyword" clearable placeholder="搜索需求标题" class="project-tab-search" @keyup.enter="resetProjectListSearch('requirements')" @clear="resetProjectListSearch('requirements')" />
           <el-select v-model="projectListFilters.requirements.iteration_id" clearable placeholder="全部迭代" class="project-tab-filter" @change="resetProjectListSearch('requirements')">
             <el-option v-for="iteration in projectWorkItemIterationOptions" :key="iteration.id" :label="requirementIterationLabel(iteration)" :value="iteration.id" />
           </el-select>
+          <BatchDeleteButton :selected-rows="selectedProjectRequirements" label="需求" :delete-row="deleteRequirement" :can-delete="() => canDeleteProjectWorkItem('requirement')" @completed="onProjectBulkDeleteCompleted('requirement')" />
           <el-button v-if="canCreateCurrentWorkItem && !projectClosed" @click="openImportDialog">导入需求</el-button>
           <el-button v-if="canCreateCurrentWorkItem && !projectClosed" type="primary" @click="openRequirementCreate">新增需求</el-button>
         </div>
         <el-table ref="projectRequirementTable" :data="pagedProjectRequirements" stripe width="100%" @selection-change="(rows) => onProjectWorkItemSelectionChange('requirement', rows)">
-          <el-table-column type="selection" width="48" :selectable="(row) => canSelectProjectWorkItemForBatchAssignment('requirement', row)" />
+          <el-table-column type="selection" width="48" :selectable="(row) => canSelectProjectWorkItemForBatchAction('requirement', row)" />
           <el-table-column prop="id" label="ID" width="80" />
           <el-table-column label="需求标题" min-width="180" show-overflow-tooltip>
             <template #default="{ row }"><router-link class="table-link" :to="{ name: 'requirement-detail', params: { id: row.id }, query: { ...route.query, from: 'project', tab: 'requirements' } }">{{ row.title }}</router-link></template>
@@ -172,6 +173,7 @@
           </el-table-column>
         </el-table>
         <div class="table-pagination batch-assignment-pagination">
+          <div class="project-batch-actions">
           <BatchAssignmentBar
             object-type="requirement"
             :project-id="projectId"
@@ -180,6 +182,7 @@
             @completed="onProjectWorkItemBatchAssignmentCompleted('requirement')"
             @error="onProjectWorkItemBatchAssignmentError"
           />
+          </div>
           <el-pagination
             v-model:current-page="projectListPagination.requirements.currentPage"
             v-model:page-size="projectListPagination.requirements.pageSize"
@@ -193,15 +196,16 @@
       </template>
 
       <template v-else-if="activeTab === 'tasks'">
-        <div class="project-tab-toolbar">
+        <div class="project-tab-toolbar project-work-item-toolbar">
           <el-input v-model="projectListFilters.tasks.keyword" clearable placeholder="搜索任务标题" class="project-tab-search" @keyup.enter="resetProjectListSearch('tasks')" @clear="resetProjectListSearch('tasks')" />
           <el-select v-model="projectListFilters.tasks.iteration_id" clearable placeholder="全部迭代" class="project-tab-filter" @change="resetProjectListSearch('tasks')">
             <el-option v-for="iteration in projectWorkItemIterationOptions" :key="iteration.id" :label="requirementIterationLabel(iteration)" :value="iteration.id" />
           </el-select>
+          <BatchDeleteButton :selected-rows="selectedProjectTasks" label="任务" :delete-row="deleteTask" :can-delete="() => canDeleteProjectWorkItem('task')" @completed="onProjectBulkDeleteCompleted('task')" />
           <el-button v-if="canCreateCurrentWorkItem && !projectClosed" type="primary" @click="openTaskCreate">新增任务</el-button>
         </div>
         <el-table ref="projectTaskTable" :data="pagedProjectTasks" stripe width="100%" @selection-change="(rows) => onProjectWorkItemSelectionChange('task', rows)">
-          <el-table-column type="selection" width="48" :selectable="(row) => canSelectProjectWorkItemForBatchAssignment('task', row)" />
+          <el-table-column type="selection" width="48" :selectable="(row) => canSelectProjectWorkItemForBatchAction('task', row)" />
           <el-table-column prop="id" label="ID" width="80" />
           <el-table-column label="任务标题" min-width="180" show-overflow-tooltip>
             <template #default="{ row }"><router-link class="table-link" :to="{ name: 'task-detail', params: { id: row.id }, query: { ...route.query, from: 'project', tab: 'tasks' } }">{{ row.title }}</router-link></template>
@@ -237,6 +241,7 @@
           </el-table-column>
         </el-table>
         <div class="table-pagination batch-assignment-pagination">
+          <div class="project-batch-actions">
           <BatchAssignmentBar
             object-type="task"
             :project-id="projectId"
@@ -245,6 +250,7 @@
             @completed="onProjectWorkItemBatchAssignmentCompleted('task')"
             @error="onProjectWorkItemBatchAssignmentError"
           />
+          </div>
           <el-pagination
             v-model:current-page="projectListPagination.tasks.currentPage"
             v-model:page-size="projectListPagination.tasks.pageSize"
@@ -262,9 +268,11 @@
           <el-tab-pane label="测试用例" name="cases">
             <div class="project-tab-toolbar">
               <el-input v-model="projectListFilters.testCases.keyword" clearable placeholder="搜索用例标题" class="project-tab-search" @keyup.enter="resetProjectListSearch('testCases')" @clear="resetProjectListSearch('testCases')" />
+              <BatchDeleteButton :selected-rows="selectedProjectTestCases" label="测试用例" :delete-row="deleteTestCase" :can-delete="() => canDeleteProjectWorkItem('test_case')" @completed="onProjectBulkDeleteCompleted('test_case')" />
               <el-button v-if="canManageCurrentTestCase" type="primary" @click="openCaseCreate">新增用例</el-button>
             </div>
-            <el-table :data="pagedProjectTestCases" stripe width="100%">
+            <el-table ref="projectTestCaseTable" :data="pagedProjectTestCases" stripe width="100%" @selection-change="(rows) => onProjectWorkItemSelectionChange('test_case', rows)">
+              <el-table-column type="selection" width="48" :selectable="() => canDeleteProjectWorkItem('test_case')" />
               <el-table-column prop="id" label="ID" width="80" />
               <el-table-column label="用例标题" min-width="180" show-overflow-tooltip><template #default="{ row }"><router-link class="table-link" :to="{ name: 'test-case-detail', params: { id: row.id }, query: { ...route.query, from: 'project', tab: 'tests' } }">{{ row.title }}</router-link></template></el-table-column>
               <el-table-column label="需求" width="180"><template #default="{ row }">{{ testCaseRequirementLabel(row.requirement_id) }}</template></el-table-column>
@@ -314,15 +322,16 @@
       </template>
 
       <template v-else-if="activeTab === 'bugs'">
-        <div class="project-tab-toolbar">
+        <div class="project-tab-toolbar project-work-item-toolbar">
           <el-input v-model="projectListFilters.bugs.keyword" clearable placeholder="搜索 Bug 标题/类型" class="project-tab-search" @keyup.enter="resetProjectListSearch('bugs')" @clear="resetProjectListSearch('bugs')" />
           <el-select v-model="projectListFilters.bugs.iteration_id" clearable placeholder="全部迭代" class="project-tab-filter" @change="resetProjectListSearch('bugs')">
             <el-option v-for="iteration in projectWorkItemIterationOptions" :key="iteration.id" :label="requirementIterationLabel(iteration)" :value="iteration.id" />
           </el-select>
+          <BatchDeleteButton :selected-rows="selectedProjectBugs" label="Bug" :delete-row="deleteBug" :can-delete="() => canDeleteProjectWorkItem('bug')" @completed="onProjectBulkDeleteCompleted('bug')" />
           <el-button v-if="canCreateCurrentWorkItem" type="primary" @click="openBugCreate">新增 Bug</el-button>
         </div>
         <el-table ref="projectBugTable" :data="pagedProjectBugs" stripe width="100%" @selection-change="(rows) => onProjectWorkItemSelectionChange('bug', rows)">
-          <el-table-column type="selection" width="48" :selectable="(row) => canSelectProjectWorkItemForBatchAssignment('bug', row)" />
+          <el-table-column type="selection" width="48" :selectable="(row) => canSelectProjectWorkItemForBatchAction('bug', row)" />
           <el-table-column prop="id" label="ID" width="80" />
           <el-table-column label="Bug 标题" min-width="180" show-overflow-tooltip><template #default="{ row }"><router-link class="table-link" :to="{ name: 'bug-detail', params: { id: row.id }, query: { ...route.query, from: 'project', tab: 'bugs' } }">{{ row.title }}</router-link></template></el-table-column>
           <el-table-column label="需求" width="180"><template #default="{ row }">{{ labelById(projectRequirementOptions, row.requirement_id, 'title') }}</template></el-table-column>
@@ -351,6 +360,7 @@
           </el-table-column>
         </el-table>
         <div class="table-pagination batch-assignment-pagination">
+          <div class="project-batch-actions">
           <BatchAssignmentBar
             object-type="bug"
             :project-id="projectId"
@@ -359,6 +369,7 @@
             @completed="onProjectWorkItemBatchAssignmentCompleted('bug')"
             @error="onProjectWorkItemBatchAssignmentError"
           />
+          </div>
           <el-pagination
             v-model:current-page="projectListPagination.bugs.currentPage"
             v-model:page-size="projectListPagination.bugs.pageSize"
@@ -736,6 +747,7 @@ import RichTextPasteEditor from '../components/RichTextPasteEditor.vue'
 import { displayedTestCaseSteps, safeExecutionCellHtml, testCaseAuthoringPayload, testCaseExecutionRows } from '../utils/testCaseRichText'
 import WorkflowActionButtons from '../components/WorkflowActionButtons.vue'
 import BatchAssignmentBar from '../components/BatchAssignmentBar.vue'
+import BatchDeleteButton from '../components/BatchDeleteButton.vue'
 import BusinessComponentSelect from '../components/work-items/BusinessComponentSelect.vue'
 import LdapProposerSelect from '../components/work-items/LdapProposerSelect.vue'
 import ProjectWorkPoolBand from '../components/ProjectWorkPoolBand.vue'
@@ -789,9 +801,11 @@ const projectWorkflowTransitions = ref({})
 const projectRequirementTable = ref(null)
 const projectTaskTable = ref(null)
 const projectBugTable = ref(null)
+const projectTestCaseTable = ref(null)
 const selectedProjectRequirements = ref([])
 const selectedProjectTasks = ref([])
 const selectedProjectBugs = ref([])
+const selectedProjectTestCases = ref([])
 const expandedHistoryKeys = ref(new Set())
 const projectPageSizes = [10, 20, 50, 100]
 const projectListTotals = reactive({
@@ -1134,6 +1148,7 @@ async function loadProjectTasksPage() {
 }
 async function loadProjectTestCasesPage() {
   syncProjectListRouteState()
+  clearProjectWorkItemSelection('test_case')
   if (applyProjectPage('testCases', await fetchProjectTestCases(projectId.value, projectListParams('testCases')), projectTestCaseRows)) await loadProjectTestCasesPage()
 }
 async function loadProjectTestRunsPage() {
@@ -1182,6 +1197,7 @@ function projectWorkItemSelectionRef(objectType) {
   return {
     requirement: selectedProjectRequirements,
     task: selectedProjectTasks,
+    test_case: selectedProjectTestCases,
     bug: selectedProjectBugs
   }[objectType]
 }
@@ -1189,21 +1205,24 @@ function projectWorkItemTableRef(objectType) {
   return {
     requirement: projectRequirementTable,
     task: projectTaskTable,
+    test_case: projectTestCaseTable,
     bug: projectBugTable
   }[objectType]
 }
 function projectWorkItemBatchRow(objectType, row) {
   return { ...row, transitions: projectWorkflowTransitionsFor(objectType, row.id) }
 }
-function canSelectProjectWorkItemForBatchAssignment(objectType, row) {
-  const listKey = { requirement: 'requirements', task: 'tasks', bug: 'bugs' }[objectType]
-  return canSelectForBatchAssignment(projectWorkItemBatchRow(objectType, row), projectWorkItemSelectionRef(objectType).value)
+function canDeleteProjectWorkItem(objectType) {
+  return objectType === 'test_case' ? canManageCurrentTestCase.value : canDeleteCurrentWorkItem.value
+}
+function canSelectProjectWorkItemForBatchAction(objectType, row) {
+  return canDeleteProjectWorkItem(objectType) || canSelectForBatchAssignment(projectWorkItemBatchRow(objectType, row), projectWorkItemSelectionRef(objectType).value)
 }
 function onProjectWorkItemSelectionChange(objectType, rows) {
   projectWorkItemSelectionRef(objectType).value = rows.map((row) => projectWorkItemBatchRow(objectType, row))
 }
 function clearProjectWorkItemSelection(objectType) {
-  const objectTypes = objectType ? [objectType] : ['requirement', 'task', 'bug']
+  const objectTypes = objectType ? [objectType] : ['requirement', 'task', 'test_case', 'bug']
   objectTypes.forEach((type) => {
     projectWorkItemSelectionRef(type).value = []
     projectWorkItemTableRef(type).value?.clearSelection()
@@ -1214,6 +1233,10 @@ async function onProjectWorkItemBatchAssignmentCompleted(objectType) {
   await loadProjectListPage({ requirement: 'requirements', task: 'tasks', bug: 'bugs' }[objectType])
 }
 function onProjectWorkItemBatchAssignmentError(error) { showActionError(error, '批量指派失败') }
+async function onProjectBulkDeleteCompleted(objectType) {
+  clearProjectWorkItemSelection(objectType)
+  await refreshAfterMutation()
+}
 async function openWorkPoolItems(objectType = 'requirement') {
   const listKey = { requirement: 'requirements', task: 'tasks', bug: 'bugs' }[objectType]
   if (!listKey) return
@@ -1768,6 +1791,7 @@ watch(() => route.query.settingsTab, (value) => {
   settingsTab.value = normalizeSettingsTab(value)
 })
 watch(testTab, async () => {
+  clearProjectWorkItemSelection('test_case')
   syncProjectListRouteState()
   if (activeTab.value === 'tests') await refreshActiveProjectList()
 })
@@ -1806,6 +1830,25 @@ function buildActualText(execution) {
 </script>
 
 <style scoped>
+.project-work-item-toolbar {
+  justify-content: flex-start;
+}
+
+.project-work-item-toolbar .project-tab-search {
+  margin-right: 0;
+}
+
+.project-work-item-toolbar .project-tab-filter {
+  margin-right: auto;
+}
+
+.project-batch-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
 .project-settings-tabs {
   display: flex;
   gap: 4px;

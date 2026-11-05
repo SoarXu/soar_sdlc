@@ -89,18 +89,9 @@
           <el-form-item label="用例类型"><el-select v-model="caseForm.case_type"><el-option v-for="option in caseTypeOptions" :key="option.value" :label="option.label" :value="option.value" /></el-select></el-form-item>
         </div>
         <div class="form-grid"><el-form-item label="适用范围"><el-select v-model="caseForm.test_scopes" multiple><el-option v-for="option in testScopeOptions" :key="option.value" :label="option.label" :value="option.value" /></el-select></el-form-item></div>
-        <el-form-item label="前置条件"><el-input v-model="caseForm.precondition" type="textarea" :rows="2" /></el-form-item>
-        <el-form-item label="用例步骤">
-          <div class="case-steps-editor">
-            <el-table :data="caseForm.steps_json" border>
-              <el-table-column label="步骤" min-width="260"><template #default="{ row, $index }"><el-input v-model="row.step" :placeholder="`步骤 ${$index + 1}`" /></template></el-table-column>
-              <el-table-column label="预期" min-width="260"><template #default="{ row }"><el-input v-model="row.expected" placeholder="预期结果" /></template></el-table-column>
-              <el-table-column label="操作" width="90"><template #default="{ $index }"><el-button link type="danger" :disabled="caseForm.steps_json.length === 1" @click="removeCaseStep($index)">删除</el-button></template></el-table-column>
-            </el-table>
-            <el-button class="case-step-add" @click="addCaseStep">增加步骤</el-button>
-          </div>
-        </el-form-item>
-        <el-form-item label="预期结果"><el-input v-model="caseForm.expected_result" type="textarea" :rows="2" /></el-form-item>
+        <el-form-item label="前置条件"><RichTextPasteEditor v-model="caseForm.precondition" /></el-form-item>
+        <el-form-item label="用例步骤"><RichTextPasteEditor v-model="caseForm.steps_content" /></el-form-item>
+        <el-form-item label="预期结果"><RichTextPasteEditor v-model="caseForm.expected_result" /></el-form-item>
       </el-form>
       <template #footer><el-button @click="caseDialogVisible = false">取消</el-button><el-button type="primary" :loading="saving" @click="submitCase">保存</el-button></template>
     </el-dialog>
@@ -199,7 +190,7 @@ import { labelById, userLabel } from '../utils/referenceLabels'
 import { usePagination } from '../utils/usePagination'
 import { DEFAULT_BUG_TYPE_KEY } from '../utils/bugTypeOptions'
 import { useBugTypes } from '../utils/useBugTypes'
-import { safeExecutionCellHtml, testCaseExecutionRows } from '../utils/testCaseRichText'
+import { displayedTestCaseSteps, safeExecutionCellHtml, testCaseAuthoringPayload, testCaseExecutionRows } from '../utils/testCaseRichText'
 
 const activeTab = ref('cases'), saving = ref(false), loading = ref(false)
 const testCases = ref([]), testRuns = ref([]), testRunCases = ref([]), projects = ref([]), requirements = ref([]), iterations = ref([]), users = ref([])
@@ -271,7 +262,7 @@ const priorityLevelOptions = [
   { label: '④ 低', value: '4' },
   { label: '⑤ 最低', value: '5' }
 ]
-const caseForm = reactive({ project_id: null, requirement_id: null, title: '', case_type: 'functional', test_scope: 'functional_test', test_scopes: ['functional_test'], default_tester_id: null, precondition: '', steps_json: [{ step: '', expected: '' }], expected_result: '' })
+const caseForm = reactive({ project_id: null, requirement_id: null, title: '', case_type: 'functional', test_scope: 'functional_test', test_scopes: ['functional_test'], default_tester_id: null, precondition: '', steps_content: '', expected_result: '' })
 const caseExecutionForm = reactive({ execute_time: '', steps_result_json: [] })
 const caseBugForm = reactive({ title: '', bug_type: DEFAULT_BUG_TYPE_KEY, severity: '3', priority: '3', reproduce_steps: '', actual_result: '' })
 const runForm = reactive({ project_id: null, iteration_id: null, name: '', test_owner_id: null, status: 'planning', remark: '' })
@@ -291,10 +282,6 @@ function requirementLabel(requirementId) {
   if (!requirementId) return '-'
   return requirements.value.find((item) => item.id === requirementId)?.title || '-'
 }
-function normalizeCaseSteps(value) { return Array.isArray(value) && value.length ? value.map((item) => ({ step: item.step || '', expected: item.expected || '' })) : [{ step: '', expected: '' }] }
-function addCaseStep() { caseForm.steps_json.push({ step: '', expected: '' }) }
-function removeCaseStep(index) { if (caseForm.steps_json.length > 1) caseForm.steps_json.splice(index, 1) }
-function cleanCaseSteps() { return caseForm.steps_json.filter((item) => item.step.trim() || item.expected.trim()) }
 const failedExecutionCount = computed(() => caseExecutionHistory.value.filter((item) => item.result === 'failed').length)
 function formatDateTime(value) { return value ? new Date(value).toLocaleString('zh-CN', { hour12: false }) : '-' }
 function executionResultLabel(value) { return executionResultOptions.find((option) => option.value === value)?.label || '-' }
@@ -305,8 +292,23 @@ function defaultExecutionTime() {
   const pad = (value) => String(value).padStart(2, '0')
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`
 }
-function openCaseCreate() { editingCaseId.value = null; Object.assign(caseForm, { project_id: null, requirement_id: null, title: '', case_type: 'functional', test_scope: 'functional_test', test_scopes: ['functional_test'], default_tester_id: null, precondition: '', steps_json: [{ step: '', expected: '' }], expected_result: '' }); caseDialogVisible.value = true }
-function openCaseEdit(row) { editingCaseId.value = row.id; Object.assign(caseForm, { ...row, case_type: row.case_type || 'functional', test_scope: row.test_scope || 'functional_test', test_scopes: row.test_scopes?.length ? row.test_scopes : [row.test_scope || 'functional_test'], precondition: row.precondition || '', steps_json: normalizeCaseSteps(row.steps_json), expected_result: row.expected_result || '' }); caseDialogVisible.value = true }
+function openCaseCreate() { editingCaseId.value = null; Object.assign(caseForm, { project_id: null, requirement_id: null, title: '', case_type: 'functional', test_scope: 'functional_test', test_scopes: ['functional_test'], default_tester_id: null, precondition: '', steps_content: '', expected_result: '' }); caseDialogVisible.value = true }
+function openCaseEdit(row) {
+  editingCaseId.value = row.id
+  Object.assign(caseForm, {
+    project_id: row.project_id || null,
+    requirement_id: row.requirement_id || null,
+    title: row.title || '',
+    case_type: row.case_type || 'functional',
+    test_scope: row.test_scope || 'functional_test',
+    test_scopes: row.test_scopes?.length ? row.test_scopes : [row.test_scope || 'functional_test'],
+    default_tester_id: row.default_tester_id || null,
+    precondition: row.precondition || '',
+    steps_content: displayedTestCaseSteps(row),
+    expected_result: row.expected_result || ''
+  })
+  caseDialogVisible.value = true
+}
 async function openCaseExecution(row) {
   selectedCase.value = row
   Object.assign(caseExecutionForm, {
@@ -356,7 +358,7 @@ async function loadProjectMembers() {
   projectMembersById.value = Object.fromEntries(entries)
 }
 async function loadRunCases() { testRunCases.value = (await fetchTestRunCases()).data }
-async function submitCase() { if (!caseForm.title.trim()) return ElMessage.warning('请填写用例标题'); saving.value = true; try { const payload = { ...caseForm, project_id: caseForm.project_id || null, requirement_id: caseForm.requirement_id || null, default_tester_id: caseForm.default_tester_id || null, steps_json: cleanCaseSteps() }; if (editingCaseId.value) await updateTestCase(editingCaseId.value, payload); else await createTestCase(payload); caseDialogVisible.value = false; await loadData() } catch (error) { showActionError(error, editingCaseId.value ? '用例保存失败' : '用例创建失败') } finally { saving.value = false } }
+async function submitCase() { if (!caseForm.title.trim()) return ElMessage.warning('请填写用例标题'); saving.value = true; try { const payload = { ...testCaseAuthoringPayload(caseForm), project_id: caseForm.project_id || null, requirement_id: caseForm.requirement_id || null, default_tester_id: caseForm.default_tester_id || null }; if (editingCaseId.value) await updateTestCase(editingCaseId.value, payload); else await createTestCase(payload); caseDialogVisible.value = false; await loadData() } catch (error) { showActionError(error, editingCaseId.value ? '用例保存失败' : '用例创建失败') } finally { saving.value = false } }
 async function submitCaseExecution() { saving.value = true; try { const currentId = selectedCase.value.id; await executeTestCase(currentId, { execute_time: caseExecutionForm.execute_time, steps_result_json: caseExecutionForm.steps_result_json }); await loadData(); ElMessage.success('用例执行结果已保存'); await openNextCaseAfterExecution(currentId, pagedTestCases.value) } catch (error) { showActionError(error, '用例执行结果保存失败') } finally { saving.value = false } }
 async function submitCaseBug() { if (!caseBugForm.title.trim()) return ElMessage.warning('请填写 Bug 标题'); saving.value = true; try { await createBugFromTestCase(bugSourceCase.value.id, { ...caseBugForm }); caseBugVisible.value = false; await loadData(); ElMessage.success('Bug 已提交') } catch (error) { showActionError(error, 'Bug 提交失败') } finally { saving.value = false } }
 async function submitRun() { if (!runForm.project_id || !runForm.name.trim()) return ElMessage.warning('请选择项目并填写测试单名称'); saving.value = true; try { const payload = { ...runForm, iteration_id: runForm.iteration_id || null, test_owner_id: runForm.test_owner_id || null }; if (editingRunId.value) await updateTestRun(editingRunId.value, payload); else await createTestRun(payload); runDialogVisible.value = false; await loadData() } catch (error) { showActionError(error, editingRunId.value ? '测试单保存失败' : '测试单创建失败') } finally { saving.value = false } }

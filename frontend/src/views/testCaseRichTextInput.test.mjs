@@ -4,8 +4,9 @@ import { readFile } from 'node:fs/promises'
 const normalize = (source) => source.replace(/\r\n/g, '\n')
 const projectDetail = normalize(await readFile(new URL('./ProjectDetailView.vue', import.meta.url), 'utf8'))
 const caseDetail = normalize(await readFile(new URL('./TestCaseDetailView.vue', import.meta.url), 'utf8'))
+const testsView = normalize(await readFile(new URL('./TestsView.vue', import.meta.url), 'utf8'))
 
-for (const [name, source] of [['project detail', projectDetail], ['test-case detail', caseDetail]]) {
+for (const [name, source] of [['project detail', projectDetail], ['test-case detail', caseDetail], ['test management', testsView]]) {
   assert.match(source, /<RichTextPasteEditor v-model="caseForm\.precondition"/u, `${name} must edit preconditions as rich text`)
   assert.match(source, /<RichTextPasteEditor v-model="caseForm\.steps_content"/u, `${name} must edit the whole case procedure as rich text`)
   assert.match(source, /<RichTextPasteEditor v-model="caseForm\.expected_result"/u, `${name} must edit the overall expected result as rich text`)
@@ -19,6 +20,8 @@ assert.match(caseDetail, /v-html="safeTestCaseHtml\(testCase\.expected_result\)"
 
 assert.match(projectDetail, /testCaseAuthoringPayload\(caseForm\)/u)
 assert.match(caseDetail, /testCaseAuthoringPayload\(caseForm\)/u)
+assert.match(testsView, /testCaseAuthoringPayload\(caseForm\)/u)
+assert.match(testsView, /steps_content: displayedTestCaseSteps\(row\)/u, '旧步骤应转换后编辑，不能覆盖已有富文本步骤')
 
 for (const relativePath of ['./ProjectDetailView.vue', './DashboardView.vue', './IterationDetailView.vue', './BugDetailView.vue', './TestsView.vue', './RequirementDetailView.vue']) {
   const source = normalize(await readFile(new URL(relativePath, import.meta.url), 'utf8'))

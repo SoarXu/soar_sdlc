@@ -5,7 +5,7 @@
         <h1>测试管理</h1>
         <p>维护测试用例库和测试单，关联项目、需求、迭代、人员和用例均以名称展示。</p>
       </div>
-      <div class="page-actions"><el-button v-if="canManageAnyTestAsset" @click="openRunCreate">新增测试单</el-button><el-button v-if="canManageAnyTestAsset" type="primary" @click="openCaseCreate">新增用例</el-button></div>
+      <div class="page-actions"><el-button v-if="canManageAnyTestAsset" @click="openRunCreate">新增测试单</el-button><el-button v-if="canManageAnyTestAsset" @click="openTestCaseImport">导入用例</el-button><el-button v-if="canManageAnyTestAsset" type="primary" @click="openCaseCreate">新增用例</el-button></div>
     </div>
 
     <el-tabs v-model="activeTab">
@@ -169,10 +169,12 @@
       </el-form>
       <template #footer><el-button @click="executionDialogVisible = false">取消</el-button><el-button type="primary" :loading="saving" @click="submitExecution">保存</el-button></template>
     </el-dialog>
+    <TestCaseImportDialog ref="testCaseImportDialog" :projects="importableProjects" :requirements="requirements" :iterations="iterations" @completed="loadData" />
   </section>
 </template>
 
 <script setup>
+import TestCaseImportDialog from '../components/TestCaseImportDialog.vue'
 import RichTextPasteEditor from '../components/RichTextPasteEditor.vue'
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
@@ -269,6 +271,9 @@ const runForm = reactive({ project_id: null, iteration_id: null, name: '', test_
 const selectForm = reactive({ test_case_ids: [], tester_id: null })
 const executionForm = reactive({ run_case_id: null, result: 'passed', remark: '', bug_title: '' })
 const currentUser = computed(() => currentUserFromStorage(users.value))
+const testCaseImportDialog = ref(null)
+const importableProjects = computed(() => projects.value.filter(project => canManageTestCase(project, currentUser.value, membersForProject(project.id))))
+function openTestCaseImport() { testCaseImportDialog.value.open(importableProjects.value.find(project => project.id === caseFilters.projectId)?.id || null) }
 const canManageAnyTestAsset = computed(() => projects.value.some((project) => canManageTestCase(project, currentUser.value, membersForProject(project.id))))
 
 function runCaseLabel(item) { return `${labelById(testRuns.value, item.test_run_id, 'name')} / ${labelById(testCases.value, item.test_case_id, 'title')} / ${item.result}` }

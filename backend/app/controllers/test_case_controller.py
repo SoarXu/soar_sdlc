@@ -1,9 +1,16 @@
-from fastapi import APIRouter, Depends, Response, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Response, UploadFile, status
 from sqlalchemy.orm import Session
 
 from app.core.auth_dependencies import get_optional_current_user
 from app.db.session import get_db
 from app.models.user import User
+from app.services.test_case_import_service import (
+    MAX_FILE_BYTES,
+    build_test_case_import_template,
+    commit_test_case_import,
+    inspect_test_case_import,
+    parse_import_options,
+)
 from app.services.project_permission_service import (
     ensure_test_case_execute_permission,
     ensure_test_case_manage_permission,
@@ -46,6 +53,60 @@ def post_test_case(
 ):
     ensure_test_case_manage_permission(db, payload.project_id, current_user)
     return create_test_case(db, payload)
+
+
+@router.get('/import/template')
+def download_test_case_import_template(
+    project_id: int,
+    db: Session = Depends(get_db),
+    current_user: User | None = Depends(get_optional_current_user),
+):
+    content = build_test_case_import_template(db, project_id, current_user)
+    return Response(
+        content=content,
+        media_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        headers={'Content-Disposition': 'attachment; filename=test-case-import-template.xlsx'},
+    )
+
+
+async def _import_content(file):
+    content = await file.read(MAX_FILE_BYTES + 1)
+    if len(content) > MAX_FILE_BYTES:
+        raise HTTPException(422, '文件不能超过10MB')
+    return content
+
+
+@router.post('/import/preview')
+async def preview_test_case_import_file(
+    project_id: int = Form(..., gt=0),
+    default_requirement_id: int | None = Form(None, gt=0),
+    requirement_overrides: str = Form('{}', max_length=200000),
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    current_user: User | None = Depends(get_optional_current_user),
+):
+    ensure_test_case_manage_permission(db, project_id, current_user)
+    return inspect_test_case_import(
+        db, project_id, current_user, await _import_content(file), file.filename or '',
+        default_requirement_id, parse_import_options(requirement_overrides),
+    )
+
+
+@router.post('/import/commit')
+async def commit_test_case_import_file(
+    project_id: int = Form(..., gt=0),
+    default_requirement_id: int | None = Form(None, gt=0),
+    requirement_overrides: str = Form('{}', max_length=200000),
+    duplicate_strategy: str = Form('skip'),
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    current_user: User | None = Depends(get_optional_current_user),
+):
+    ensure_test_case_manage_permission(db, project_id, current_user)
+    return commit_test_case_import(
+        db, project_id, current_user, await _import_content(file), file.filename or '',
+        default_requirement_id, parse_import_options(requirement_overrides), duplicate_strategy,
+    )
 
 
 @router.get("/{test_case_id}", response_model=TestCaseRead)

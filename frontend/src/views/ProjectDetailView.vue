@@ -152,7 +152,7 @@
               <span v-else>{{ row.status_name || '-' }}</span>
             </template>
           </el-table-column>
-          <el-table-column label="操作" width="360" fixed="right">
+          <el-table-column label="操作" width="440" fixed="right">
             <template #default="{ row }">
               <div class="table-actions">
               <WorkflowActionButtons
@@ -167,6 +167,7 @@
               />
               <el-button v-if="canCreateCurrentWorkItem && !projectClosed" link type="success" @click="openGenerate(row)">生成任务</el-button>
               <el-button v-if="canManageCurrentTestCase && !projectClosed" link type="success" @click="openCaseCreateForRequirement(row)">建用例</el-button>
+              <el-button v-if="canManageCurrentTestCase && !projectClosed" link type="primary" @click="testCaseImportDialog.open(projectId, row.id)">导入用例</el-button>
               <el-popconfirm v-if="canDeleteCurrentWorkItem && !projectClosed" title="确认删除该需求？" @confirm="removeRequirement(row.id)"><template #reference><el-button link type="danger">删除</el-button></template></el-popconfirm>
               </div>
             </template>
@@ -269,6 +270,7 @@
             <div class="project-tab-toolbar">
               <el-input v-model="projectListFilters.testCases.keyword" clearable placeholder="搜索用例标题" class="project-tab-search" @keyup.enter="resetProjectListSearch('testCases')" @clear="resetProjectListSearch('testCases')" />
               <BatchDeleteButton :selected-rows="selectedProjectTestCases" label="测试用例" :delete-row="deleteTestCase" :can-delete="() => canDeleteProjectWorkItem('test_case')" @completed="onProjectBulkDeleteCompleted('test_case')" />
+              <el-button v-if="canManageCurrentTestCase" @click="testCaseImportDialog.open(projectId)">导入用例</el-button>
               <el-button v-if="canManageCurrentTestCase" type="primary" @click="openCaseCreate">新增用例</el-button>
             </div>
             <el-table ref="projectTestCaseTable" :data="pagedProjectTestCases" stripe width="100%" @selection-change="(rows) => onProjectWorkItemSelectionChange('test_case', rows)">
@@ -692,6 +694,7 @@
         </el-button>
       </template>
     </el-dialog>
+    <TestCaseImportDialog ref="testCaseImportDialog" :projects="[project]" :requirements="projectRequirementOptions" :iterations="iterations" lock-project @completed="refreshAfterMutation" />
   </section>
 </template>
 
@@ -747,6 +750,7 @@ import RichTextPasteEditor from '../components/RichTextPasteEditor.vue'
 import { displayedTestCaseSteps, safeExecutionCellHtml, testCaseAuthoringPayload, testCaseExecutionRows } from '../utils/testCaseRichText'
 import WorkflowActionButtons from '../components/WorkflowActionButtons.vue'
 import BatchAssignmentBar from '../components/BatchAssignmentBar.vue'
+import TestCaseImportDialog from '../components/TestCaseImportDialog.vue'
 import BatchDeleteButton from '../components/BatchDeleteButton.vue'
 import BusinessComponentSelect from '../components/work-items/BusinessComponentSelect.vue'
 import LdapProposerSelect from '../components/work-items/LdapProposerSelect.vue'
@@ -773,6 +777,7 @@ const saving = ref(false)
 const activeTab = ref(normalizeProjectTab(route.query.tab))
 const settingsTab = ref(normalizeSettingsTab(route.query.settingsTab))
 const testTab = ref(parseProjectDetailRouteState(route.query).testTab)
+const testCaseImportDialog = ref(null)
 const project = ref({})
 const projects = ref([])
 const programs = ref([])

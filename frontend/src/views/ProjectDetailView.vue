@@ -132,6 +132,7 @@
             <el-option v-for="iteration in projectWorkItemIterationOptions" :key="iteration.id" :label="requirementIterationLabel(iteration)" :value="iteration.id" />
           </el-select>
           <BatchDeleteButton :selected-rows="selectedProjectRequirements" label="需求" :delete-row="deleteRequirement" :can-delete="() => canDeleteProjectWorkItem('requirement')" @completed="onProjectBulkDeleteCompleted('requirement')" />
+          <el-button :loading="exportingRequirements" @click="downloadCurrentRequirements">导出需求</el-button>
           <el-button v-if="canCreateCurrentWorkItem && !projectClosed" @click="openImportDialog">导入需求</el-button>
           <el-button v-if="canCreateCurrentWorkItem && !projectClosed" type="primary" @click="openRequirementCreate">新增需求</el-button>
         </div>
@@ -639,61 +640,7 @@
 
     
 
-    <el-dialog v-model="importVisible" title="导入需求" width="720px">
-      <div class="import-template-action">
-        <span>请先下载固定模板，填写后上传 Excel 文件。</span>
-        <el-button link type="primary" @click="downloadImportTemplate">下载模板</el-button>
-      </div>
-      <el-upload
-        :auto-upload="false"
-        :limit="1"
-        accept=".xlsx"
-        :on-change="onImportFileChange"
-        :on-remove="clearImportFile"
-      >
-        <el-button>选择 Excel 文件</el-button>
-      </el-upload>
-
-      <div v-if="importPreview" class="import-preview">
-        <p class="import-preview-summary">
-          有效 {{ importPreview.valid_count }} 行，失败 {{ importPreview.error_count }} 行，重复 {{ importPreview.duplicate_count }} 行
-        </p>
-        <el-table v-if="importPreview.errors.length" :data="importPreview.errors" size="small" border>
-          <el-table-column prop="row_number" label="行号" width="80" />
-          <el-table-column label="错误">
-            <template #default="{ row }">{{ row.messages.join('；') }}</template>
-          </el-table-column>
-        </el-table>
-        <template v-if="importPreview.duplicates.length">
-          <div class="import-strategy">
-            <el-radio-group v-model="duplicateStrategy">
-              <el-radio label="update_existing">更新已有需求</el-radio>
-              <el-radio label="create_duplicate">重复创建</el-radio>
-            </el-radio-group>
-          </div>
-          <el-table :data="importPreview.duplicates" size="small" border>
-            <el-table-column prop="row_number" label="行号" width="80" />
-            <el-table-column prop="project_name" label="项目" min-width="140" />
-            <el-table-column prop="title" label="需求标题" min-width="160" />
-            <el-table-column prop="existing_requirement_id" label="已有ID" width="90" />
-            <el-table-column prop="existing_requirement_title" label="已有需求" min-width="160" />
-          </el-table>
-        </template>
-      </div>
-
-      <template #footer>
-        <el-button @click="importVisible = false">取消</el-button>
-        <el-button type="primary" :loading="saving" @click="submitImportPreview">预检</el-button>
-        <el-button
-          v-if="importPreview && !importPreview.error_count && importPreview.duplicate_count"
-          type="success"
-          :loading="saving"
-          @click="submitImportCommit()"
-        >
-          确认导入
-        </el-button>
-      </template>
-    </el-dialog>
+    <RequirementImportDialog ref="requirementImportDialog" @completed="refreshAfterMutation" />
     <TestCaseImportDialog ref="testCaseImportDialog" :projects="[project]" :requirements="projectRequirementOptions" :iterations="iterations" lock-project @completed="refreshAfterMutation" />
   </section>
 </template>
@@ -728,13 +675,11 @@ import {
   updateProject
 } from '../api/projects'
 import {
-  commitRequirementImport,
   createRequirement,
+  exportRequirements,
   deleteRequirement,
-  downloadRequirementImportTemplate,
   fetchRequirementStatusOperations,
   fetchRequirements,
-  previewRequirementImport,
   updateRequirement
 } from '../api/requirements'
 import { createTask, deleteTask, fetchTaskStatusOperations, fetchTasks, updateTask } from '../api/tasks'
@@ -751,6 +696,7 @@ import { displayedTestCaseSteps, safeExecutionCellHtml, testCaseAuthoringPayload
 import WorkflowActionButtons from '../components/WorkflowActionButtons.vue'
 import BatchAssignmentBar from '../components/BatchAssignmentBar.vue'
 import TestCaseImportDialog from '../components/TestCaseImportDialog.vue'
+import RequirementImportDialog from '../components/RequirementImportDialog.vue'
 import BatchDeleteButton from '../components/BatchDeleteButton.vue'
 import BusinessComponentSelect from '../components/work-items/BusinessComponentSelect.vue'
 import LdapProposerSelect from '../components/work-items/LdapProposerSelect.vue'
@@ -890,7 +836,8 @@ const caseExecutionVisible = ref(false)
 const caseBugVisible = ref(false)
 const runDialogVisible = ref(false)
 const bugDialogVisible = ref(false)
-const importVisible = ref(false)
+const requirementImportDialog = ref(null)
+const exportingRequirements = ref(false)
 const editingIterationId = ref(null), startingIterationId = ref(null), editingRequirementId = ref(null), editingTaskId = ref(null)
 const editingCaseId = ref(null), editingRunId = ref(null), editingBugId = ref(null)
 const selectedCase = ref(null)
@@ -1065,9 +1012,6 @@ const projectHistory = computed(() => {
 const failedExecutionCount = computed(() => caseExecutionHistory.value.filter((item) => item.result === 'failed').length)
 const iterationForm = reactive({ project_ids: [], name: '', owner_id: null, start_date: null, end_date: null, goal: '' })
 const requirementForm = reactive({ project_id: null, primary_component_id: null, iteration_id: null, title: '', requirement_type: '功能', priority: '3', owner_id: null, proposer: '', description: '', acceptance_criteria: '' })
-const importFile = ref(null)
-const importPreview = ref(null)
-const duplicateStrategy = ref('')
 const taskForm = reactive({ project_id: null, primary_component_id: null, requirement_id: null, title: '', task_type: 'standalone_operation', priority: 'medium', owner_id: null, due_date: null, description: '' })
 const caseForm = reactive({ project_id: null, requirement_id: null, title: '', case_type: 'functional', test_scope: 'functional_test', test_scopes: ['functional_test'], default_tester_id: null, precondition: '', steps_content: '', expected_result: '' })
 const caseExecutionForm = reactive({ execute_time: '', steps_result_json: [] })
@@ -1418,30 +1362,15 @@ function handleRequirementWorkflowCommand(row, { commandType }) {
 }
 function openGenerate(row) { editingTaskId.value = null; resetTaskForm(); Object.assign(taskForm, { requirement_id: row.id, title: row.title, task_type: 'requirement_implementation', owner_id: null }); taskDialogVisible.value = true }
 
-async function downloadImportTemplate() {
-  const response = await downloadRequirementImportTemplate(projectId.value)
-  const url = URL.createObjectURL(response.data)
-  const link = document.createElement('a')
-  link.href = url
-  link.download = '需求导入模板.xlsx'
-  link.click()
-  URL.revokeObjectURL(url)
-}
-function openImportDialog() {
-  importFile.value = null
-  importPreview.value = null
-  duplicateStrategy.value = ''
-  importVisible.value = true
-}
-function onImportFileChange(file) {
-  importFile.value = file.raw
-  importPreview.value = null
-  duplicateStrategy.value = ''
-}
-function clearImportFile() {
-  importFile.value = null
-  importPreview.value = null
-  duplicateStrategy.value = ''
+function openImportDialog() { requirementImportDialog.value?.open(projectId.value) }
+async function downloadCurrentRequirements() {
+  exportingRequirements.value = true
+  try {
+    const { data } = await exportRequirements(projectId.value)
+    const url = URL.createObjectURL(data), link = document.createElement('a')
+    link.href = url; link.download = `项目${projectId.value}-需求.xlsx`; link.click(); URL.revokeObjectURL(url)
+  } catch (error) { showActionError(error, '需求导出失败') }
+  finally { exportingRequirements.value = false }
 }
 function openTaskCreate() { editingTaskId.value = null; resetTaskForm(); taskDialogVisible.value = true }
 function openTaskEdit(row) {
@@ -1651,35 +1580,6 @@ async function submitRequirement() {
     await refreshAfterMutation()
   } catch (error) {
     showActionError(error, editingRequirementId.value ? '需求保存失败' : '需求创建失败')
-  } finally {
-    saving.value = false
-  }
-}
-async function submitImportPreview() {
-  if (!importFile.value) return ElMessage.warning('请选择 Excel 文件')
-  saving.value = true
-  try {
-    const { data } = await previewRequirementImport(importFile.value, projectId.value)
-    importPreview.value = data
-    if (data.error_count) return
-    if (!data.duplicate_count) await submitImportCommit('create_duplicate')
-  } catch (error) {
-    showActionError(error, '导入预检失败')
-  } finally {
-    saving.value = false
-  }
-}
-async function submitImportCommit(strategy = duplicateStrategy.value) {
-  if (!importFile.value) return ElMessage.warning('请选择 Excel 文件')
-  if (importPreview.value?.duplicate_count && !strategy) return ElMessage.warning('请选择重复处理方式')
-  saving.value = true
-  try {
-    const { data } = await commitRequirementImport(importFile.value, strategy || 'create_duplicate', projectId.value)
-    importVisible.value = false
-    await refreshAfterMutation()
-    ElMessage.success(`导入完成，新增 ${data.created_count} 条，更新 ${data.updated_count} 条`)
-  } catch (error) {
-    showActionError(error, '导入需求失败')
   } finally {
     saving.value = false
   }

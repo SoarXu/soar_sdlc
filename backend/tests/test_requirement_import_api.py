@@ -85,6 +85,13 @@ def _raw_xlsx(rows: list[list[str | None]]) -> tuple[str, bytes, str]:
     )
 
 
+def _commit_import(client, *, data, files):
+    preview = client.post('/api/v1/requirements/import/preview', data=data, files=files)
+    assert preview.status_code == 200, preview.text
+    return client.post('/api/v1/requirements/import/commit',
+                       data={**data, 'preview_token': preview.json()['preview_token']}, files=files)
+
+
 def test_requirement_import_template_downloads_excel(client: TestClient):
     response = client.get("/api/v1/requirements/import/template")
 
@@ -279,12 +286,11 @@ def test_requirement_import_preview_accepts_unregistered_proposer_text(client: T
     assert response.json()["error_count"] == 0
 
 
-def test_requirement_import_commit_preserves_proposer_text(client: TestClient):
+def test_requirement_import_commit_rejects_unmatched_proposer_text(client: TestClient):
     project_name = f"导入提出人落库-{uuid4().hex[:8]}"
     client.post("/api/v1/projects", json={"name": project_name}).raise_for_status()
 
-    response = client.post(
-        "/api/v1/requirements/import/commit",
+    response = _commit_import(client,
         data={"duplicate_strategy": "create_duplicate"},
         files={
             "file": _xlsx(
@@ -296,23 +302,16 @@ def test_requirement_import_commit_preserves_proposer_text(client: TestClient):
         },
     )
 
-    assert response.status_code == 200
-    assert response.json()["created_count"] == 1
-    created = next(
-        item
-        for item in client.get("/api/v1/requirements").json()
-        if item["title"] == "保留提出人文本"
-    )
-    assert created["proposer"] == "供应商接口人 A-17"
+    assert response.status_code == 422
+    assert not any(item['title'] == '保留提出人文本' for item in client.get('/api/v1/requirements').json())
 
 
-def test_requirement_import_commit_preserves_long_proposer_text_without_validation(client: TestClient):
+def test_requirement_import_commit_rejects_unmatched_long_proposer_text(client: TestClient):
     project_name = f"导入长提出人-{uuid4().hex[:8]}"
     proposer = "外部提出人-" + ("A" * 300)
     client.post("/api/v1/projects", json={"name": project_name}).raise_for_status()
 
-    response = client.post(
-        "/api/v1/requirements/import/commit",
+    response = _commit_import(client,
         data={"duplicate_strategy": "create_duplicate"},
         files={
             "file": _xlsx(
@@ -324,22 +323,15 @@ def test_requirement_import_commit_preserves_long_proposer_text_without_validati
         },
     )
 
-    assert response.status_code == 200
-    assert response.json()["created_count"] == 1
-    created = next(
-        item
-        for item in client.get("/api/v1/requirements").json()
-        if item["title"] == "长提出人文本"
-    )
-    assert created["proposer"] == proposer
+    assert response.status_code == 422
+    assert not any(item['title'] == '长提出人文本' for item in client.get('/api/v1/requirements').json())
 
 
 def test_requirement_import_commit_creates_new_requirements(client: TestClient):
     project_name = f"导入新增项目-{uuid4().hex[:8]}"
     project = client.post("/api/v1/projects", json={"name": project_name}).json()
 
-    response = client.post(
-        "/api/v1/requirements/import/commit",
+    response = _commit_import(client,
         data={"duplicate_strategy": "create_duplicate"},
         files={"file": _xlsx([["项目名称", "需求标题", "优先级"], [project_name, "新需求", "2"]])},
     )
@@ -358,8 +350,7 @@ def test_project_scoped_requirement_import_creates_rows_in_current_project(clien
     scoped_project = client.post("/api/v1/projects", json={"name": f"Scoped Import-{uuid4().hex[:8]}"}).json()
     other_project = client.post("/api/v1/projects", json={"name": f"Other Import-{uuid4().hex[:8]}"}).json()
 
-    response = client.post(
-        "/api/v1/requirements/import/commit",
+    response = _commit_import(client,
         data={"duplicate_strategy": "create_duplicate", "project_id": str(scoped_project["id"])},
         files={
             "file": _xlsx(
@@ -390,8 +381,7 @@ def test_requirement_import_commit_updates_duplicate_requirement(client: TestCli
         json={"project_id": project["id"], "title": "重复需求", "priority": "3"},
     ).json()
 
-    response = client.post(
-        "/api/v1/requirements/import/commit",
+    response = _commit_import(client,
         data={"duplicate_strategy": "update_existing"},
         files={"file": _xlsx([["项目名称", "需求标题", "优先级"], [project_name, "重复需求", "1"]])},
     )
@@ -416,8 +406,7 @@ def test_requirement_import_update_preserves_active_iteration_history(client: Te
         json={"project_id": project["id"], "iteration_id": iteration["id"], "title": "Imported planned requirement"},
     ).json()
 
-    response = client.post(
-        "/api/v1/requirements/import/commit",
+    response = _commit_import(client,
         data={"duplicate_strategy": "update_existing"},
         files={"file": _xlsx([REQUIREMENT_IMPORT_COLUMNS, [project_name, "Imported planned requirement"]])},
     )
@@ -459,8 +448,7 @@ def test_requirement_import_update_rejects_terminal_iteration(client: TestClient
     finally:
         db.close()
 
-    response = client.post(
-        "/api/v1/requirements/import/commit",
+    response = _commit_import(client,
         data={"duplicate_strategy": "update_existing"},
         files={"file": _xlsx([REQUIREMENT_IMPORT_COLUMNS, [project_name, "Terminal imported requirement"]])},
     )
@@ -521,7 +509,8 @@ def test_import_batch_locks_existing_iterations_once_in_sorted_order(monkeypatch
         SimpleNamespace(project_id=1, iteration_id=9, title="Later iteration", requirement_type=None, priority="3", owner_id=None, proposer=None, review_status="not_required", description=None, acceptance_criteria=None),
         SimpleNamespace(project_id=1, iteration_id=3, title="Earlier iteration", requirement_type=None, priority="3", owner_id=None, proposer=None, review_status="not_required", description=None, acceptance_criteria=None),
     ]
-    existing = iter([SimpleNamespace(id=11, iteration_id=9), SimpleNamespace(id=12, iteration_id=3)])
+    existing = [SimpleNamespace(id=11, iteration_id=9), SimpleNamespace(id=12, iteration_id=3)]
+    records = [{'action': 'update', 'proposer_status': 'empty'} for _ in rows]
     events = []
 
     class SessionSpy:
@@ -530,7 +519,8 @@ def test_import_batch_locks_existing_iterations_once_in_sorted_order(monkeypatch
 
     monkeypatch.setattr(requirement_import_service, "_parse_requirement_rows", lambda *args: (rows, []))
     monkeypatch.setattr(requirement_import_service, "_ensure_rows_create_permission", lambda *args: None)
-    monkeypatch.setattr(requirement_import_service, "_find_existing_requirement", lambda *args: next(existing))
+    monkeypatch.setattr(requirement_import_service, '_prepare_import', lambda *args: (rows, [], existing, records))
+    monkeypatch.setattr(requirement_import_service, '_lock_requirement_for_import_update', lambda db, item_id, iterations: next(item for item in existing if item.id == item_id))
     monkeypatch.setattr(
         requirement_import_service,
         "lock_iterations_for_mutation",
@@ -578,8 +568,7 @@ def test_import_update_membership_change_does_not_persist_earlier_batch_row(clie
         ),
     )
 
-    response = client.post(
-        "/api/v1/requirements/import/commit",
+    response = _commit_import(client,
         data={"duplicate_strategy": "update_existing"},
         files={
             "file": _xlsx(
@@ -594,7 +583,7 @@ def test_import_update_membership_change_does_not_persist_earlier_batch_row(clie
 
     assert response.status_code == 409
     assert response.json()["detail"]["code"] == "ITERATION_STATE_CONFLICT"
-    assert find_calls == 2
+    assert find_calls == 4
     db = SessionLocal()
     try:
         assert not db.query(Requirement).filter(
@@ -619,11 +608,12 @@ def test_requirement_import_commit_keeps_created_requirement_unassigned(client: 
         owner_id = owner.id
     finally:
         db.close()
+    tester_role_id = next(role['id'] for role in client.get('/api/v1/roles').json() if role['role_name'] == '测试')
     config = client.post(
         "/api/v1/assignee-rule-configs",
         json={
             "name": f"导入负责人规则-{uuid4().hex[:8]}",
-            "requirement_owner_roles": "tester",
+            "requirement_owner_role_ids": [tester_role_id],
             "creation_mode": "template",
             "template_source": {"source_type": "system", "source_id": "system-standard"},
         },
@@ -636,11 +626,10 @@ def test_requirement_import_commit_keeps_created_requirement_unassigned(client: 
     ).json()
     client.put(
         f"/api/v1/projects/{project['id']}/members",
-        json=[{"user_id": owner_id, "project_role": "tester", "sort_order": 0}],
+        json=[{"user_id": owner_id, "role_id": tester_role_id, "sort_order": 0}],
     )
 
-    response = client.post(
-        "/api/v1/requirements/import/commit",
+    response = _commit_import(client,
         data={"duplicate_strategy": "create_duplicate"},
         files={"file": _xlsx([["项目名称", "需求标题", "优先级"], [project_name, "工作流负责人需求", "2"]])},
     )
@@ -674,11 +663,12 @@ def test_requirement_import_update_preserves_existing_current_handler(client: Te
         new_owner_id = new_owner.id
     finally:
         db.close()
+    tester_role_id = next(role['id'] for role in client.get('/api/v1/roles').json() if role['role_name'] == '测试')
     config = client.post(
         "/api/v1/assignee-rule-configs",
         json={
             "name": f"导入更新负责人规则-{uuid4().hex[:8]}",
-            "requirement_owner_roles": "tester",
+            "requirement_owner_role_ids": [tester_role_id],
             "creation_mode": "template",
             "template_source": {"source_type": "system", "source_id": "system-standard"},
         },
@@ -691,15 +681,14 @@ def test_requirement_import_update_preserves_existing_current_handler(client: Te
     ).json()
     client.put(
         f"/api/v1/projects/{project['id']}/members",
-        json=[{"user_id": new_owner_id, "project_role": "tester", "sort_order": 0}],
+        json=[{"user_id": new_owner_id, "role_id": tester_role_id, "sort_order": 0}],
     )
     existing = client.post(
         "/api/v1/requirements",
         json={"project_id": project["id"], "title": "重复工作流负责人需求", "owner_id": old_owner_id},
     ).json()
 
-    response = client.post(
-        "/api/v1/requirements/import/commit",
+    response = _commit_import(client,
         data={"duplicate_strategy": "update_existing"},
         files={"file": _xlsx([["项目名称", "需求标题", "优先级"], [project_name, "重复工作流负责人需求", "1"]])},
     )
@@ -713,8 +702,7 @@ def test_requirement_import_new_row_enters_real_iteration_and_opens_history(clie
     project_name = f"Import pool-{uuid4().hex[:8]}"
     project = client.post("/api/v1/projects", json={"name": project_name}).json()
 
-    response = client.post(
-        "/api/v1/requirements/import/commit",
+    response = _commit_import(client,
         data={"duplicate_strategy": "create_duplicate"},
         files={"file": _xlsx([REQUIREMENT_IMPORT_COLUMNS, [project_name, "Imported into pool"]])},
     )
@@ -747,8 +735,7 @@ def test_requirement_import_duplicate_keeps_delivery_iteration(client: TestClien
         json={"project_id": project["id"], "iteration_id": iteration["id"], "title": "Preserved import row"},
     ).json()
 
-    response = client.post(
-        "/api/v1/requirements/import/commit",
+    response = _commit_import(client,
         data={"duplicate_strategy": "update_existing"},
         files={"file": _xlsx([REQUIREMENT_IMPORT_COLUMNS, [project_name, "Preserved import row"]])},
     )

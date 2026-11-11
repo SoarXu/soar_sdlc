@@ -90,10 +90,22 @@ class RequirementImportPreviewRead(BaseModel):
     duplicate_count: int
     errors: list[RequirementImportError] = []
     duplicates: list[RequirementImportDuplicate] = []
+    rows: list[dict] = Field(default_factory=list)
+    unresolved_count: int = 0
+    preview_token: str
+
+
+class RequirementImportDecision(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+
+    row_number: int = Field(ge=2)
+    proposer_external_id: str | None = Field(default=None, min_length=1, max_length=255)
+    skip: bool = False
 
 
 class RequirementImportCommitRead(BaseModel):
     created_count: int
     updated_count: int
     error_count: int
+    skipped_count: int = 0
     errors: list[RequirementImportError] = []

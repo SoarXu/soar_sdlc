@@ -28,7 +28,7 @@
       </el-table>
       <p class="import-footnote">展开行查看变更。空提出人更新时保留原值；空描述、类型或验收标准会清空对应字段。工作流状态、评审状态和当前处理人保持原值。</p>
     </template>
-    <template #footer><el-button :disabled="saving" @click="visible = false">取消</el-button><el-button type="primary" :loading="saving" @click="runPreview">预检 / 刷新对比</el-button><el-button type="success" :disabled="!ready" :loading="saving" @click="commit">确认导入</el-button></template>
+    <template #footer><el-button :disabled="saving" @click="visible = false">取消</el-button><el-button type="primary" :loading="saving" @click="runPreview">预检</el-button><el-button type="success" :disabled="!ready" :loading="saving" @click="commit">确认导入</el-button></template>
   </el-dialog>
 </template>
 

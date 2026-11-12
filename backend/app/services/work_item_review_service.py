@@ -10,8 +10,8 @@ from app.models.requirement import Requirement
 from app.models.task import Task
 from app.models.user import User
 from app.models.workflow_definition import WorkflowTransition
-from app.services.role_capability_service import role_ids_for_capabilities
 from app.services import workflow_runtime_service
+from app.services.default_workflow_template_service import reconcile_legacy_review_handler
 from app.views.workflow_runtime_view import WorkflowTransitionExecuteRequest
 
 
@@ -62,28 +62,41 @@ def submit_work_item_review(
     transition = _submit_review_transition(db, item)
     if not transition:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="当前状态不可提交评审")
-    reviewer_id = _development_lead_user_id(db, getattr(item, "project_id", None))
-    if reviewer_id is None:
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="未找到可用的研发负责人进行评审")
-    workflow_runtime_service._execute_transition(
-        db,
-        object_type,
-        item,
-        WorkflowTransitionExecuteRequest(transition_id=transition.id),
-        actor,
-        commit=False,
-        allow_system_action=True,
-    )
-    review_round = WorkItemReviewRound(
-        object_type=object_type,
-        object_id=object_id,
-        latest_commit_id=commit.id if commit else None,
-        reviewer_id=reviewer_id,
-        status="open",
-        active_key="open",
-    )
-    db.add(review_round)
-    db.flush()
+    # The workflow owns assignment, including component routing and fallback rules.
+    # Keep routing, reviewer validation, and round creation atomic even when a Git
+    # trigger catches the error and continues processing other linked work items.
+    with db.begin_nested():
+        reconcile_legacy_review_handler(db, transition, object_type)
+        workflow_runtime_service._execute_transition(
+            db,
+            object_type,
+            item,
+            WorkflowTransitionExecuteRequest(transition_id=transition.id),
+            actor,
+            commit=False,
+            allow_system_action=True,
+        )
+        reviewer = _active_project_reviewer(db, item)
+        if reviewer is None:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="工作流未分配到可用的评审人，请检查提交评审的处理人规则及项目成员配置",
+            )
+        if not _review_permissions_allowed(db, object_type, item, reviewer):
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="工作流分配的评审人无评审权限，请检查评审通过和评审驳回的角色配置",
+            )
+        review_round = WorkItemReviewRound(
+            object_type=object_type,
+            object_id=object_id,
+            latest_commit_id=commit.id if commit else None,
+            reviewer_id=reviewer.id,
+            status="open",
+            active_key="open",
+        )
+        db.add(review_round)
+        db.flush()
     return review_round
 
 
@@ -107,9 +120,9 @@ def decide_review_round(
     item = _get_item(db, review_round.object_type, review_round.object_id)
     if not item:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="未找到被评审的工作项")
-    if not _is_assigned_development_lead(db, item, review_round, actor):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="仅指定的开发主管可以进行代码评审")
     action_key = "approve_review" if decision == "approve" else "reject_review"
+    if not _can_review(db, review_round.object_type, item, actor, action_key=action_key):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="仅具有当前工作流对应评审权限的用户可以进行代码评审")
     transition = (
         db.query(WorkflowTransition)
         .filter(
@@ -151,10 +164,10 @@ def get_review_context(
         item = _get_item(db, object_type, object_id)
         if not item:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="未找到待评审的工作项")
-        if not _is_project_development_lead(db, item, actor):
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="仅开发主管可以查看代码评审")
         if not _has_review_decisions(db, item):
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="未找到待评审的工作项")
+        if not _can_review(db, object_type, item, actor):
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="仅具有当前工作流评审权限的用户可以查看代码评审")
         review_round = WorkItemReviewRound(
             object_type=object_type,
             object_id=object_id,
@@ -170,8 +183,8 @@ def get_review_context(
         item = _get_item(db, object_type, object_id)
         if not item:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="未找到被评审的工作项")
-        if not _is_assigned_development_lead(db, item, review_round, actor):
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="仅指定的开发主管可以查看代码评审")
+        if not _can_review(db, object_type, item, actor):
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="仅具有当前工作流评审权限的用户可以查看代码评审")
 
     commit = None
     if review_round.latest_commit_id:
@@ -192,15 +205,26 @@ def get_review_context(
 
 
 def list_open_review_rounds(db: Session, reviewer_id: int) -> list[WorkItemReviewRound]:
-    return (
+    actor = db.get(User, reviewer_id)
+    if not actor or actor.deleted or not actor.is_active:
+        return []
+    rounds = (
         db.query(WorkItemReviewRound)
         .filter(
-            WorkItemReviewRound.reviewer_id == reviewer_id,
             WorkItemReviewRound.status == "open",
         )
         .order_by(WorkItemReviewRound.update_time.desc(), WorkItemReviewRound.id.desc())
         .all()
     )
+    result = []
+    for review_round in rounds:
+        model = MODEL_BY_TYPE.get(review_round.object_type)
+        if model is None:
+            continue
+        item = db.query(model).filter(model.id == review_round.object_id, model.deleted == 0).first()
+        if item and _can_review(db, review_round.object_type, item, actor):
+            result.append(review_round)
+    return result
 
 
 def _get_item(db: Session, object_type: str, object_id: int):
@@ -256,44 +280,51 @@ def _transition_actor(db: Session, item) -> User | None:
     return db.query(User).filter(User.id == owner_id, User.deleted == 0, User.is_active.is_(True)).first()
 
 
-def _development_lead_user_id(db: Session, project_id: int | None = None) -> int | None:
-    if project_id:
-        role_ids = role_ids_for_capabilities(db, {"development_lead"})
-        if not role_ids:
-            return None
-        row = (
-            db.query(User.id)
-            .join(ProjectMember, ProjectMember.user_id == User.id)
-            .filter(
-                ProjectMember.project_id == project_id,
-                ProjectMember.role_id.in_(role_ids),
-                User.deleted == 0,
-                User.is_active.is_(True),
-            )
-            .order_by(User.id.asc())
-            .first()
-        )
-        if row:
-            return row.id
-    return None
-
-
-def _is_project_development_lead(db: Session, item, actor: User | None) -> bool:
-    if not actor:
-        return False
-    role_ids = role_ids_for_capabilities(db, {"development_lead"})
-    return bool(
-        role_ids
-        and db.query(ProjectMember.id).filter(
+def _active_project_reviewer(db: Session, item, reviewer_id: int | None = None) -> User | None:
+    return (
+        db.query(User)
+        .join(ProjectMember, ProjectMember.user_id == User.id)
+        .filter(
+            User.id == (reviewer_id if reviewer_id is not None else getattr(item, "owner_id", None)),
             ProjectMember.project_id == getattr(item, "project_id", None),
-            ProjectMember.user_id == actor.id,
-            ProjectMember.role_id.in_(role_ids),
-        ).first()
+            User.deleted == 0,
+            User.is_active.is_(True),
+        )
+        .first()
     )
 
 
-def _is_assigned_development_lead(db: Session, item, review_round: WorkItemReviewRound, actor: User | None) -> bool:
-    return bool(actor and actor.id == review_round.reviewer_id and _is_project_development_lead(db, item, actor))
+def _review_permissions_allowed(db: Session, object_type: str, item, actor: User) -> bool:
+    transitions = db.query(WorkflowTransition).filter(
+        WorkflowTransition.definition_id == item.workflow_definition_id,
+        WorkflowTransition.from_state_id == item.current_state_id,
+        WorkflowTransition.action_key.in_({"approve_review", "reject_review"}),
+        WorkflowTransition.enabled.is_(True),
+    ).all()
+    return (
+        {transition.action_key for transition in transitions} == {"approve_review", "reject_review"}
+        and all(workflow_runtime_service._can_see_transition(db, object_type, item, transition, actor)
+                for transition in transitions)
+    )
+
+
+def _can_review(
+    db: Session, object_type: str, item, actor: User | None, *, action_key: str | None = None,
+) -> bool:
+    # Assignment records who originally received the review, not who may act now.
+    # Use the same current identity/role and handler rules as workflow execution.
+    if not actor or actor.deleted or not actor.is_active:
+        return False
+    transitions = db.query(WorkflowTransition).filter(
+        WorkflowTransition.definition_id == item.workflow_definition_id,
+        WorkflowTransition.from_state_id == item.current_state_id,
+        WorkflowTransition.action_key.in_({action_key} if action_key else {"approve_review", "reject_review"}),
+        WorkflowTransition.enabled.is_(True),
+    ).all()
+    return any(
+        workflow_runtime_service._can_see_transition(db, object_type, item, transition, actor)
+        for transition in transitions
+    )
 
 
 def _has_review_decisions(db: Session, item) -> bool:

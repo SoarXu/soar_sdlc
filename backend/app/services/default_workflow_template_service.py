@@ -209,6 +209,37 @@ def _replace_transition_role_purpose(db: Session, transition_id: int, purpose: s
     )
 
 
+def reconcile_legacy_review_handler(db: Session, transition: WorkflowTransition, object_type: str) -> None:
+    """Move the old implicit default reviewer assignment into the workflow rule."""
+    rule = dict(transition.handler_rule or {})
+    if rule.get("target_type", "keep_current") != "keep_current" or rule.get("allow_manual_owner"):
+        return
+    if db.query(WorkflowTransitionRole.id).filter_by(transition_id=transition.id, purpose="target").first():
+        return
+    template_submit = next(item for item in graph_for_object_type(object_type).transitions
+                           if item.action_key == "submit_review")
+    _, default_role_ids = _template_role_values(db, template_submit.handler_rule.get("target_roles"))
+    if not default_role_ids:
+        return
+    decisions = db.query(WorkflowTransition).filter(
+        WorkflowTransition.definition_id == transition.definition_id,
+        WorkflowTransition.from_state_id == transition.to_state_id,
+        WorkflowTransition.action_key.in_({"approve_review", "reject_review"}),
+        WorkflowTransition.enabled.is_(True),
+    ).all()
+    if {item.action_key for item in decisions} != {"approve_review", "reject_review"}:
+        return
+    for decision in decisions:
+        role_ids = {row.role_id for row in db.query(WorkflowTransitionRole).filter_by(
+            transition_id=decision.id, purpose="allowed",
+        ).all()}
+        if decision.allowed_roles or role_ids != set(default_role_ids):
+            return
+    transition.handler_rule = {**rule, "target_type": "project_role"}
+    _replace_transition_role_purpose(db, transition.id, "target", default_role_ids)
+    db.flush()
+
+
 def reconcile_review_subgraph(db: Session, definition: WorkflowDefinition) -> None:
     """Append the Git review gate to a recognized default graph without replacing it."""
     specification = {
@@ -918,7 +949,8 @@ def _requirement_graph() -> WorkflowGraphSave:
                 "提交评审",
                 "in_processing",
                 "pending_review",
-                target_type="keep_current",
+                target_type="project_role",
+                target_roles="development_lead",
                 handler_scope="current_handler",
                 ui_config={"list_display": "primary", "list_priority": 5, "requires_owner": True},
             ),
@@ -1075,7 +1107,8 @@ def _task_graph() -> WorkflowGraphSave:
                 "提交评审",
                 "in_processing",
                 "pending_review",
-                target_type="keep_current",
+                target_type="project_role",
+                target_roles="development_lead",
                 handler_scope="current_handler",
                 ui_config={"list_display": "primary", "list_priority": 5, "requires_owner": True},
             ),
@@ -1270,7 +1303,8 @@ def _bug_graph() -> WorkflowGraphSave:
                 "提交评审",
                 "fixing",
                 "pending_review",
-                target_type="keep_current",
+                target_type="project_role",
+                target_roles="development_lead",
                 handler_scope="current_handler",
                 ui_config={"list_display": "primary", "list_priority": 5, "requires_owner": True},
             ),

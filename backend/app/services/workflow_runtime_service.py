@@ -398,7 +398,7 @@ def _execute_transition(
     if (transition.ui_config or {}).get("command_type"):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Non-status command must use its dedicated endpoint")
 
-    delegated = object_type != "project" and _is_delegated(db, item, actor)
+    delegated = object_type != "project" and _is_delegated(db, item, actor, transition=transition)
     delegated_owner = _owner_user(db, getattr(item, "owner_id", None)) if delegated else None
     original_owner_id = getattr(item, "owner_id", None)
     selected_values = _selected_values(request)
@@ -1244,7 +1244,7 @@ def _bulk_assignment_metadata(
         }
     return {
         "supported": True,
-        "requires_delegate_reason": _is_delegated(db, item, actor),
+        "requires_delegate_reason": _is_delegated(db, item, actor, transition=transition),
         "eligible_assignee_ids": _eligible_transition_assignee_ids(db, item, transition, handler_rule, component_route),
     }
 
@@ -1400,7 +1400,7 @@ def _ensure_can_execute(
         )
     if _is_system_action(transition) and not allow_system_action:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="System workflow transition cannot be executed manually")
-    delegated = object_type != "project" and _is_delegated(db, item, actor)
+    delegated = object_type != "project" and _is_delegated(db, item, actor, transition=transition)
     if not _matches_ownerless_visibility(object_type, item, transition):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Workflow transition not available for current handler state")
     if not inherit_parent_permission and not _handler_allowed(db, object_type, item, transition, actor):
@@ -1525,8 +1525,14 @@ def _is_bug_tester(db: Session, bug: Bug, actor_id: int) -> bool:
     return False
 
 
-def _is_delegated(db: Session, item, actor: User | None) -> bool:
+def _is_delegated(
+    db: Session, item, actor: User | None, *, transition: WorkflowTransition | None = None,
+) -> bool:
     if not actor:
+        return False
+    # These scopes authorize actors directly; management status does not turn
+    # their own permitted workflow action into acting on another user's behalf.
+    if transition and (transition.ui_config or {}).get("handler_scope") in {"allowed_identity", "project_member"}:
         return False
     owner_id = getattr(item, "owner_id", None)
     if owner_id is None:
@@ -2568,9 +2574,11 @@ def _resolve_handler_source(
             WorkflowTransitionRole.purpose == config.get("_role_purpose", "target"),
         ).all()]
         if role_ids:
-            member = db.query(ProjectMember).filter(
+            member = db.query(ProjectMember).join(User, User.id == ProjectMember.user_id).filter(
                 ProjectMember.project_id == project_id,
                 ProjectMember.role_id.in_(role_ids),
+                User.deleted == 0,
+                User.is_active.is_(True),
             ).order_by(ProjectMember.sort_order.asc(), ProjectMember.id.asc()).first()
             return (member.user_id if member else None), f"{source_type}:role_ids"
         return None, f"{source_type}:role_ids"

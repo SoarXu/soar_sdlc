@@ -16,6 +16,8 @@ def test_default_workflows_define_a_development_lead_review_gate():
         assert "pending_review" in state_refs
         assert states_by_ref["pending_review"].status_name == "Code Review"
         assert review_transitions["submit_review"].to_ref == "pending_review"
+        assert review_transitions["submit_review"].handler_rule["target_type"] == "project_role"
+        assert review_transitions["submit_review"].handler_rule["target_roles"] == "development_lead"
         assert review_transitions["approve_review"].from_ref == "pending_review"
         assert review_transitions["approve_review"].to_ref == successor
         assert review_transitions["reject_review"].from_ref == "pending_review"

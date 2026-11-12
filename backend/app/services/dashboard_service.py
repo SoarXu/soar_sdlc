@@ -4,7 +4,7 @@ from sqlalchemy import Integer, and_, case, cast, func, literal, or_, select, un
 from sqlalchemy.orm import Session
 
 from app.models.bug import Bug
-from app.models.devops import DevopsCodeReviewTask, DevopsCommit, DevopsCommitLink, WorkItemReviewRound
+from app.models.devops import DevopsCodeReviewTask, DevopsCommit, DevopsCommitLink
 from app.models.iteration import Iteration
 from app.models.object_watch import ObjectWatch
 from app.models.program import Program
@@ -19,6 +19,7 @@ from app.services.exception_center_service import list_exception_refs
 from app.services.project_permission_service import is_system_admin
 from app.services.role_capability_service import role_ids_for_capabilities
 from app.services.project_team_service import workbench_project_ids_for_user
+from app.services.work_item_review_service import list_open_review_rounds
 from app.services.workflow_state_query_service import (
     current_state_name,
     is_terminal_state,
@@ -855,12 +856,7 @@ def _review_tasks(db: Session) -> list[dict]:
 def _work_item_reviews(db: Session, user_id: int | None) -> list[dict]:
     if not user_id:
         return []
-    rounds = (
-        db.query(WorkItemReviewRound)
-        .filter(WorkItemReviewRound.reviewer_id == user_id, WorkItemReviewRound.status == "open")
-        .order_by(WorkItemReviewRound.update_time.desc(), WorkItemReviewRound.id.desc())
-        .all()
-    )
+    rounds = list_open_review_rounds(db, user_id)
     commit_ids = [item.latest_commit_id for item in rounds]
     commits = {
         item.id: item

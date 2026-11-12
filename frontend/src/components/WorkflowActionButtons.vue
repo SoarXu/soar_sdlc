@@ -364,6 +364,7 @@ function actionAllowsManualOwner(action) {
 
 function normalizeReviewActions(source) {
   const reviewApprove = source.find((action) => action.action_key === 'approve_review')
+    || source.find((action) => action.action_key === 'reject_review')
   if (!reviewApprove) return source
   return [
     ...source.filter((action) => !['approve_review', 'reject_review'].includes(action.action_key)),

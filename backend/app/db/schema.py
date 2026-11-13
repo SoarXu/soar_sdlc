@@ -466,8 +466,24 @@ def _history_open_lookup_index_exists(indexes: list[dict], canonical_name: str =
     )
 
 
+def _ensure_status_operation_action_capacity(engine: Engine) -> None:
+    if not _is_mysql_family(engine):
+        return
+    inspector = inspect(engine)
+    if "status_operation_log" not in inspector.get_table_names():
+        return
+    column = next(
+        (column for column in inspector.get_columns("status_operation_log") if column["name"] == "action"),
+        None,
+    )
+    if column is not None and (getattr(column["type"], "length", None) or 0) < 64:
+        with engine.begin() as connection:
+            connection.execute(text("ALTER TABLE status_operation_log MODIFY COLUMN action VARCHAR(64) NOT NULL"))
+
+
 def ensure_runtime_schema(engine: Engine) -> None:
     _validate_final_workflow_schema(engine)
+    _ensure_status_operation_action_capacity(engine)
     _ensure_program_name_uniqueness_schema(engine)
     _ensure_ldap_user_identity_schema(engine)
     _ensure_ldap_integration_schema(engine)

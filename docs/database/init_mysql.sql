@@ -452,7 +452,7 @@ CREATE TABLE IF NOT EXISTS status_operation_log (
   id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '记录 ID',
   object_type VARCHAR(64) NOT NULL COMMENT '对象类型：program、project',
   object_id BIGINT UNSIGNED NOT NULL COMMENT '对象 ID',
-  action VARCHAR(32) NOT NULL COMMENT '操作：start、suspend、close、activate',
+  action VARCHAR(64) NOT NULL COMMENT '工作流动作标识，含自定义动作',
   from_status VARCHAR(32) NULL COMMENT '操作前状态',
   to_status VARCHAR(32) NOT NULL COMMENT '操作后状态',
   reason VARCHAR(64) NULL COMMENT '关闭原因',

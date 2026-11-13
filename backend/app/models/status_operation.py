@@ -13,7 +13,7 @@ class StatusOperationLog(Base):
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     object_type: Mapped[str] = mapped_column(String(64))
     object_id: Mapped[int] = mapped_column(BigInteger)
-    action: Mapped[str] = mapped_column(String(32))
+    action: Mapped[str] = mapped_column(String(64))
     operation_kind: Mapped[str] = mapped_column(String(16), default="state", server_default=text("'state'"))
     workflow_definition_id: Mapped[int | None] = mapped_column(
         UnsignedBigInteger,

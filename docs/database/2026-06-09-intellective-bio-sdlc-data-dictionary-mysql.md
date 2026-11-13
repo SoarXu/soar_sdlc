@@ -556,7 +556,7 @@
 | id | BIGINT UNSIGNED | PK, AUTO_INCREMENT | 记录 ID |
 | object_type | VARCHAR(64) | NOT NULL | 对象类型：program、project、requirement |
 | object_id | BIGINT UNSIGNED | NOT NULL | 对象 ID |
-| action | VARCHAR(32) | NOT NULL | start、suspend、close、activate |
+| action | VARCHAR(64) | NOT NULL | 工作流动作标识，含自定义动作 |
 | from_status | VARCHAR(32) | NULL | 操作前状态 |
 | to_status | VARCHAR(32) | NOT NULL | 操作后状态 |
 | reason | VARCHAR(64) | NULL | 关闭原因 |
